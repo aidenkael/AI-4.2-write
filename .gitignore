@@ -1,0 +1,35 @@
+# 敏感文件
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+credentials.json
+secrets.json
+*.kdbx
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+*.tmp
+~$*
+
+# 依赖与缓存
+node_modules/
+venv/
+.venv/
+__pycache__/
+*.sqlite
+*.sqlite3
+*.db
+*.bak
+*.log
+
+# WorkBuddy 项目数据（非小说内容，不上传）
+.workbuddy/
