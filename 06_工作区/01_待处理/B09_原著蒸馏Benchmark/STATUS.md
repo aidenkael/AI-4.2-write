@@ -1,135 +1,71 @@
 # B09 Round 01 Status
 
-- 状态：`BLIND_JUDGING_COMPLETE_READY_FOR_HUMAN_PAIRWISE`
+- 状态：`HUMAN_MECHANISM_REVIEW_COMPLETE_READY_FOR_UNBLINDING`
 - 更新时间：2026-08-09
-- 当前阶段：正式 12 个双窗口 Runner、匿名化、两个独立 Blind Judge 与人工盲评包均已完成。下一步只做少量人工成对盲评；人工完成前继续保持 blind map 封闭，不揭盲、不宣布方法赢家。
+- 当前阶段：正式 Runner、匿名化、双 Blind Judge 与人工机制评审均已完成；blind map 仍未打开。下一步允许揭盲，并按能力维度分析 D0 / A / B / C 的真实贡献，不评单一总冠军。
 
 ## 已完成
 
-- [x] Benchmark 总设计
-- [x] B09 第一轮执行协议
-- [x] 3 样本 × 2 窗口冻结规则
+- [x] 3 作品 × 2 冻结窗口
 - [x] D0 / A / B / C 四 Runner 协议
-- [x] Evidence / Interpretation / Mechanism Card 统一合同
-- [x] 样本 SHA256 / 章节边界冻结器
-- [x] Runner 输出确定性检查器
-- [x] Blind Judge 协议
-- [x] Local Only / gitignore 保护
-- [x] Phase 1–2：样本筛选与冻结
-- [x] 单窗口 pilot 24 组完成并记录为无排名资格的工程 pilot
-- [x] Pilot 偏差审计：单窗口粒度 + 同会话串扰风险
-- [x] subagent 隔离失败后按协议停止
-- [x] `codex exec` 独立 OS 进程隔离探针 PASS
-- [x] CLI Preflight v2 PASS
-- [x] 专用最小 Benchmark CODEX_HOME
-- [x] 仓库外 cwd + `--ephemeral` + read-only
-- [x] stdin 双窗口 payload + stdout envelope
-- [x] 固定 `deepseek-v4-flash` + reasoning effort `high`
-- [x] 正式运行前随机冻结 12 组执行顺序
-- [x] 正式 12/12 双窗口独立 Runner 完成
-- [x] 正式 12/12 deterministic check PASS
+- [x] 正式 12/12 双窗口独立 Runner 完成，deterministic check 全 PASS
+- [x] CLI Preflight v2、专用最小 CODEX_HOME、独立 OS 进程、read-only、`--ephemeral`
 - [x] 三个 source SHA256 前后复验一致
-- [x] 正式 Runner 完整性审计 PASS
-- [x] Blind packet v2 附每个 sample 共用冻结 `_source/`
-- [x] 两个独立 Blind Judge 完成 J01–J12 + S1/S2 + sample 排序 + 跨作品稳定性
-- [x] Judge Evidence fidelity 回到冻结 `_source/` 核证
-- [x] `human_pairwise_packet.md` 完成，共 6 组 pair
-- [x] 匿名化脚本身份泄漏缺陷已修复：`check_report.json` 自动清理 Runner 身份与本地路径
-- [x] 双 Judge 与人工盲评包审计完成：`00_项目控制/B09_Round01_双Judge与人工盲评包审计.md`
+- [x] 正式 Runner 完整性审计
+- [x] Blind packet v2 + 冻结 `_source/`
+- [x] Judge-1 / Judge-2 独立盲审完成
+- [x] Evidence fidelity 回到冻结原文核证
+- [x] 匿名化脚本身份泄漏缺陷修复
+- [x] 人工评审范式由“强制二选一”修正为“能力发现、去重、改造、组合”
+- [x] P1–P6 机制层评审完成并保存 `human_mechanism_review.md`（Local Only）
+- [x] 项目权威 README 已写入“工作台建设原则”
+- [x] 人工机制评审完成审计：`00_项目控制/B09_Round01_人工机制评审完成审计.md`
 
-## 第一轮冻结样本
+## 人工评审证据边界
 
-### WN-A：《庆余年》
-- OPENING：span 1–6
-- MIDDLE：span 373–378
+- P1、P2、P4、P5、P6：有用户正式判断。
+- P3：无用户正式作答，仅有 Assistant 参考判断。
+- P3 不得计作用户偏好；若它对后续关键结论有决定性影响，再补人工判断。
+- 早期“如果只能留一个”的二选一答案仅保留为历史观察，不作为淘汰依据。
 
-### WN-B：《道诡异仙》
-- OPENING：span 1–6
-- MIDDLE：span 519–524
+## 当前优先追踪的能力候选
 
-### WL-A：《一九八四》
-- boundary mode：segment fallback
-- OPENING：segment 1–6
-- MIDDLE：segment 7–12
+- 可计算风险系统；
+- 外部约束改变表达形式；
+- 主动诱发式信息获取 / 反应测试；
+- 可逆证据与竞争性解释；
+- 能力—成本—后果系统（力量代价记账作为子机制）；
+- 有动机的信息交付 / 戏剧化说明；
+- 收益与历史债务绑定（需改造验证）。
 
-所有样本仍为 `coverage=sampled`，固定窗口不能外推成整书规律。
+重复或过窄机制优先合并、降级为子机制或舍弃，不按卡片数量扩张知识库。
 
-## 正式 Round 01 执行摘要
+## 当前下一动作：揭盲与来源贡献分析
 
-正式有效数据：
+现在允许 Controller 打开：
 
-`3 作品 × 4 Runner = 12 个独立双窗口运行`
+`_local_runs/round-01-formal/_controller/blind_map.json`
 
-环境：
+揭盲后必须建立“匿名 label → D0/A/B/C → 来源方法”的映射，并同时汇总：
 
-- `codex-cli 0.147.0-alpha.6.5`
-- `deepseek-v4-flash`
-- reasoning effort = `high`
-- 独立 OS 进程
-- `--ephemeral`
-- 专用最小 CODEX_HOME
-- 仓库外临时 cwd
-- read-only sandbox
-- stdin payload / stdout envelope
+1. 两个 Blind Judge 的维度判断；
+2. 用户正式 Human Review（P3 单独标记无用户判断）；
+3. Evidence fidelity 问题；
+4. 机制新增价值 / 重复度；
+5. 成本（token / 输出规模）仅作为独立维度，不以长文本自动判优。
 
-12/12 deterministic check PASS。
+## 揭盲后禁止的错误结论
 
-仅 WN-B-C 首次因 API 流式连接中断未形成输出；使用相同输入/提示和全新进程重试一次成功，作为基础设施 retry 留档，不计为方法失败。
+- 不按胜场数选一个 Skill；
+- 不因为某个 Runner 总体领先就整套采用；
+- 不把 GitHub 项目的原文、模板或受许可证约束实现直接拼入 AI-write；
+- 不把 Round 01 结果直接写入正式 `04_写作知识库`；
+- 不把 sampled 窗口结论外推为整本作品规律。
 
-## Blind Judge 摘要（仍匿名）
+## 下一状态
 
-- Judge-1 / Judge-2 均完成 12 个匿名方案；
-- S1 = 0；
-- Judge-1：S2 24 条；
-- Judge-2：S2 29 条；
-- WN-A / WN-B 的整体匿名排序两 Judge 完全一致；
-- WL-A 第二名、个别 Evidence fidelity 边界与压缩质量存在分歧；
-- 两 Judge 均建议按能力维度选冠军，不设一个单一总冠军。
+完成揭盲与来源贡献分析后：
 
-Judge-1 / Judge-2 使用同一 `deepseek-v4-flash`，属于独立上下文的重复评审而非异构模型评审；人工盲评承担最终异质纠偏。
+`ROUND01_UNBLINDED_CAPABILITY_MAP_READY`
 
-## 匿名化工具修复
-
-本轮执行时发现旧版匿名脚本复制的 `check_report.json` 中 `runner_dir` 可能泄露真实 Runner 路径。Controller 在 Judge 启动前已本地匿名化并复扫，未造成 Judge 身份泄漏。
-
-GitHub 当前 `b09_anonymize.py` 已永久修复：复制 `check_report.json` 时自动清理 Runner 身份与本地路径字段。
-
-## 当前下一动作：人工成对盲评
-
-本地文件：
-
-`06_工作区/01_待处理/B09_原著蒸馏Benchmark/_local_runs/round-01-formal/human_pairwise_packet.md`
-
-共 6 组 pair，每部作品 2 对。
-
-人工只需要回答：
-
-1. 哪个更能帮助原创设计？
-2. 哪个更像漂亮空话？
-3. 哪个机制最值得拿到新故事中测试？
-4. 如果只能保留一个，保留哪个？
-
-人工评审时仍不得：
-
-- 打开 `_controller/blind_map.json`；
-- 猜测或查询 D0/A/B/C 身份；
-- 查看 run metadata / token / 方法说明；
-- 因 Judge 排名直接照抄结论。
-
-建议由本地 Agent 只展示 `human_pairwise_packet.md` 的匿名内容，记录用户选择和一句理由，不揭盲。
-
-## 人工完成后的下一状态
-
-`HUMAN_PAIRWISE_COMPLETE_READY_FOR_UNBLINDING`
-
-届时才允许：
-
-1. 固化人工盲评结果；
-2. 打开 blind map；
-3. 揭盲 D0/A/B/C；
-4. 汇总 Judge + 人工结果；
-5. 选各能力维度冠军，不选单一总冠军；
-6. 判断哪些上游能力直接借鉴、二次改造、仅 Benchmark 或淘汰；
-7. 设计第二轮跨题材迁移 A/B 测试。
-
-只有迁移测试仍成立的机制，才进入 `04_写作知识库` 候选。
+随后从高价值能力中选择少量候选进入 Round 02 跨题材迁移验证。只有迁移后仍成立的能力，才进入正式知识库 / Skill 设计候选。
