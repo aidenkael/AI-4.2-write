@@ -43,7 +43,7 @@ import xml.etree.ElementTree as ET
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import index_builder  # noqa: E402
 
-SKILL_VERSION = "0.2.0"
+SKILL_VERSION = "0.2.1"
 RAW = "01_原始素材"
 SUPPORTED = {".epub", ".txt", ".pdf", ".zip", ".azw3", ".mobi"}
 SOURCE_PRIORITY = {".epub": 0, ".txt": 1, ".pdf": 2}
@@ -482,10 +482,38 @@ def choose_candidate(cands: list[Candidate]) -> tuple[Optional[Candidate], list[
             c.warnings.append(f"正文长度仅为最长来源的 {c.char_count / max_char:.0%}，可能不完整")
             if c.status == "PASS":
                 c.status = "REVIEW"
-    # 排序键：完整性(字符数降) > 准确性(替换字符升) > 章节数降 > 格式优先级升
-    usable.sort(key=lambda c: (-c.char_count, c.garbled, -c.chapter_count,
-                                SOURCE_PRIORITY.get(c.ext, 9)))
+    # 近邻选源修正（P1）：两个候选正文长度差 ≤ 2% 时，
+    # 若“较长来源”为 REVIEW 且 0 章节，而“另一来源”为 PASS 且有章节，
+    # 则优先选择 PASS + 有章节的来源（避免丢失分章、整体降级）。
+    preferred: Optional[Candidate] = None
+    longest = max(usable, key=lambda c: c.char_count)
+    for other in usable:
+        if other is longest:
+            continue
+        if longest.char_count and other.char_count:
+            ratio = other.char_count / longest.char_count
+            if ratio >= 0.98:  # 长度差 ≤ 2%
+                if (longest.status == "REVIEW" and longest.chapter_count == 0
+                        and other.status == "PASS" and other.chapter_count >= 1):
+                    preferred = other
+                    break
+
+    # 排序键：近邻修正优先 > 完整性(字符数降) > 准确性(替换字符升) >
+    #         章节数降 > 格式优先级升
+    usable.sort(key=lambda c: (
+        c is not preferred,           # 被修正选中的来源排最前
+        -c.char_count,
+        c.garbled,
+        -c.chapter_count,
+        SOURCE_PRIORITY.get(c.ext, 9),
+    ))
     selected = usable[0]
+    if preferred is not None:
+        # 修正说明写入选中候选 notes（出现在报告“单文件备注”，
+        # 且不进入 cross_warnings，因此不会触发整体 REVIEW 升级）。
+        selected.notes.append(
+            f"近邻选源修正（长度差≤2%）：较长来源 `{Path(longest.path).name}` 为 REVIEW/0章，"
+            f"改用更可信的 PASS+有章节来源 `{Path(selected.path).name}`")
     for peer in usable[1:]:
         if selected.char_count and peer.char_count:
             ratio = min(selected.char_count, peer.char_count) / max(selected.char_count, peer.char_count)
@@ -849,11 +877,18 @@ def main() -> int:
     results = []
     for g in targets:
         is_loose = "" in g["containers"]  # 含独立（非合集）来源
-        results.append(process_book(root, g["cat_dir"], g["work_name"], is_loose,
-                                    g["files"], g["book_id"], pandoc, args.force))
+        try:
+            results.append(process_book(root, g["cat_dir"], g["work_name"], is_loose,
+                                        g["files"], g["book_id"], pandoc, args.force))
+        except Exception as exc:  # 单书异常不应中断整个批次
+            msg = f"ERROR {g['work_name']}({g['book_id']}): {type(exc).__name__}: {exc}"
+            results.append(msg)
+            print(msg, file=sys.stderr)
     for r in results:
         print(r)
-    return 0 if all(not r.startswith("FAIL") for r in results) else 2
+    # FAIL / ERROR 均视为批次中存在失败项，退出码非 0
+    failed = any(r.startswith(("FAIL", "ERROR")) for r in results)
+    return 0 if not failed else 2
 
 
 if __name__ == "__main__":
