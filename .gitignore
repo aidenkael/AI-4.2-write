@@ -45,6 +45,10 @@ __pycache__/
 01_原始素材/**/*.azw3
 01_原始素材/**/*.mobi
 
+# B09 原著蒸馏 Benchmark 本地运行数据（含源路径、冻结范围、Runner 输出；不上传）
+06_工作区/01_待处理/B09_原著蒸馏Benchmark/_local_manifests/
+06_工作区/01_待处理/B09_原著蒸馏Benchmark/_local_runs/
+
 # 杂项：解压残留书签 + 内部移动日志（本地保留）
 *.url
 
