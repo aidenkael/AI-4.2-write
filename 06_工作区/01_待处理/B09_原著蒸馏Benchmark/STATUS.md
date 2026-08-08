@@ -2,7 +2,7 @@
 
 - 状态：`FORMAL_RUNNERS_COMPLETE_READY_FOR_BLINDING`
 - 更新时间：2026-08-09
-- 当前阶段：正式 Round 01 的 12 个双窗口 Runner 已通过实验完整性审计，允许进入匿名化与 Blind Judge；尚未匿名化、未 Judge、未揭盲、未比较赢家。
+- 当前阶段：正式 Round 01 的 12 个双窗口 Runner 已通过实验完整性审计；匿名化前已补齐 Evidence fidelity 核证条件，Blind Judge 必须同时看到匿名输出与该 sample 共用的冻结 OPENING/MIDDLE 原文窗口。
 
 ## 已完成
 
@@ -36,6 +36,8 @@
 - [x] 正式 12/12 deterministic check PASS
 - [x] 三个 source SHA256 运行前后复验一致
 - [x] 正式 Runner 实验完整性审计 PASS
+- [x] Blind packet v2：匿名包可附每个 sample 共用的冻结 `_source/OPENING.txt`、`MIDDLE.txt`、`manifest_info.json`
+- [x] Judge v2：J02 Evidence fidelity 必须回到冻结 `_source/` 核证，不得只检查 Evidence ID 形式
 
 ## 第一轮冻结样本
 
@@ -73,10 +75,7 @@
 
 `3 作品 × 4 Runner = 12 个独立运行`
 
-每个 Runner 一次同时处理该作品：
-
-- OPENING
-- MIDDLE
+每个 Runner 一次同时处理该作品 OPENING + MIDDLE。
 
 环境：
 
@@ -105,18 +104,39 @@
 2. 固定窗口可能截断自然场景；该问题属于 sampled Benchmark 的边界条件，Judge 应检查 Runner 是否诚实处理不确定性，而不是补充窗口外信息。
 3. Token / 输出成本存在方法差异，后续需要作为“能力收益 / 成本”单独比较，不能只比较文字质量。
 
-## 当前下一动作：匿名化与 Blind Judge
+## 当前下一动作：匿名化与 Blind Judge v2
 
-允许对：
+先同步 GitHub 最新，使用更新后的：
 
-`06_工作区/01_待处理/B09_原著蒸馏Benchmark/_local_runs/round-01-formal/`
-
-执行正式匿名化。
-
-随后启动两个彼此独立的 Judge，只允许读取：
-
+- `05_Skills与自动化/scripts/b09_anonymize.py`
 - `05_Skills与自动化/B09_原著蒸馏Benchmark/JUDGE.md`
-- 正式 `_blind/` 匿名包
+
+对正式目录执行匿名化时，必须显式提供冻结输入目录：
+
+```bash
+python "05_Skills与自动化/scripts/b09_anonymize.py" \
+  "06_工作区/01_待处理/B09_原著蒸馏Benchmark/_local_runs/round-01-formal" \
+  --source-inputs-dir "06_工作区/01_待处理/B09_原著蒸馏Benchmark/_local_runs/round-01-formal/_inputs"
+```
+
+匿名包中每个 sample 应包含：
+
+```text
+_blind/<sample>/
+├── _source/
+│   ├── OPENING.txt
+│   ├── MIDDLE.txt
+│   └── manifest_info.json
+├── <anonymous-label-1>/
+├── <anonymous-label-2>/
+├── <anonymous-label-3>/
+└── <anonymous-label-4>/
+```
+
+Judge 只允许读取：
+
+- 最新 `JUDGE.md`
+- 正式 `_blind/` 匿名包（包括共用 `_source/`）
 
 Judge 不得读取：
 
@@ -126,6 +146,9 @@ Judge 不得读取：
 - Runner Pack 身份说明
 - blind map
 - 另一个 Judge 的结果
+- `_source/` 之外的原著正文
+
+启动 Judge-1 / Judge-2 两个全新独立进程。如果使用同一模型，两者必须独立随机 sample 顺序和匿名 label 呈现顺序。
 
 Judge 完成后形成仍匿名的 `human_pairwise_packet.md`，人工只做少量高价值成对选择。
 
