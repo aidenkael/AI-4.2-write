@@ -1,7 +1,25 @@
 # B09 原著蒸馏 Benchmark — Blind Judge Protocol
 
 > Judge 不得读取 `_controller/blind_map.json`、Runner 身份、run_metadata 或其他参赛方案说明。
-> Judge 只看 `_blind/<sample>/<anonymous-label>/` 中的四个标准 Markdown 与程序检查报告。
+> Judge 只看 `_blind/<sample>/` 下的匿名 Runner 输出，以及该 sample 共用的 `_source/` 冻结输入包。
+
+## 0. Judge 可见输入边界
+
+每个 sample 的 `_source/` 包含同一份：
+
+- `OPENING.txt`
+- `MIDDLE.txt`
+- `manifest_info.json`
+
+这些冻结窗口只用于核验匿名方案是否忠实引用、是否曲解文本、是否把窗口外知识带入 Claim。
+
+硬性限制：
+
+- 只能使用 `_source/` 中的冻结窗口核证；
+- 不得搜索原著全文；
+- 不得根据自己记忆补充窗口外剧情；
+- 不得因为知道作品后续内容，就惩罚一个只对 sampled 窗口负责的 Runner；
+- 若窗口自然截断场景，只能检查 Runner 是否诚实处理不确定性。
 
 ## 1. Judge 的任务
 
@@ -33,14 +51,23 @@
 
 ### J02｜Evidence fidelity
 
-检查 Evidence Notes 是否主要是文本可支持的事实。
+必须把 Evidence Notes 与该 sample 的 `_source/OPENING.txt`、`_source/MIDDLE.txt` 对照。
+
+检查：
+
+- Evidence 所述事件、状态、台词或叙事信号是否确实出现在对应窗口；
+- 短证据是否与事实描述一致；
+- Evidence 是否把窗口外剧情、模型记忆或猜测伪装成文本事实；
+- Evidence ID 与后续 Claim 虽然形式上有关联，但实际语义是否支持该 Claim。
 
 重点找：
 
 - 把动机猜测写成事实；
 - 把读者感受写成事实；
 - 把作者意图写成事实；
-- 证据锚点与 Claim 实际无关。
+- 证据锚点与 Claim 实际无关；
+- 引用片段存在，但被过度解释；
+- 窗口中根本不存在的事实。
 
 ### J03｜Inference discipline
 
@@ -242,7 +269,20 @@ Judge 完成三个 sample 后，再额外判断：
 
 在揭盲之前不要猜测 Runner 身份。
 
-## 6. Judge 禁止事项
+## 6. 两个 Judge 的独立性
+
+Judge-1 与 Judge-2 必须使用两个全新、彼此不共享历史的独立进程/会话。
+
+若两者使用同一模型：
+
+- 两个 Judge 的 sample 顺序应独立随机；
+- 每个 sample 内四个匿名 label 的呈现顺序也应独立随机；
+- Judge-2 不得读取 Judge-1 结果；
+- 不因两份结果高度相似就自动视为“共识”，仍需人工检查争议项目。
+
+模型多样性不是本轮硬门槛；真正的人类盲评仍是主观创作价值的最终补充层。
+
+## 7. Judge 禁止事项
 
 - 不给“综合 9.3 分”；
 - 不因为格式整齐就默认更专业；
@@ -250,4 +290,4 @@ Judge 完成三个 sample 后，再额外判断：
 - 不因为和自己文学观点一致就忽略证据不足；
 - 不尝试识别 Runner 身份；
 - 不修改参赛输出；
-- 不读取原著 manifest 之外的范围补证据。
+- 不读取冻结 `_source/` 之外的原著范围补证据。
