@@ -1,8 +1,8 @@
 # B09 Round 01 Status
 
-- 状态：`PILOT_COMPLETE_FORMAL_RERUN_REQUIRED`
+- 状态：`CLI_PROCESS_PROBE_PASS_PREFLIGHT_V2_REQUIRED`
 - 更新时间：2026-08-09
-- 当前阶段：样本冻结完成；单窗口 pilot 已完成并通过结构检查，但因运行粒度与会话隔离偏差，不进入正式盲审。正式 Round 01 需要按原始协议重跑 12 个独立双窗口 Runner。
+- 当前阶段：样本冻结完成；单窗口 pilot 已完成但不进入正式评审；subagent 隔离失败后已改用 `codex exec` 独立 OS 进程，Probe-X / Probe-Y 隔离通过。正式 12 组运行前需完成 CLI Preflight v2，以排除仓库读取范围和全局 Skill/插件污染。
 
 ## 已完成
 
@@ -15,105 +15,95 @@
 - [x] Runner 输出确定性检查器
 - [x] 匿名化工具
 - [x] Blind Judge 协议
-- [x] 本地 Agent 完整执行任务
 - [x] 本地 manifest / run 目录加入 `.gitignore`
-- [x] Phase 1：检查本地来源并筛除明显污染样本
-- [x] Phase 2：冻结 WN-A / WN-B / WL-A 三个样本
-- [x] Controller sanity check：窗口、覆盖声明、非重叠与源文件保护通过
+- [x] Phase 1：筛选并检查本地来源
+- [x] Phase 2：冻结 WN-A / WN-B / WL-A
+- [x] Controller sanity check
 - [x] `06_工作区/SourcePrepare/` 加入 `.gitignore`
 - [x] Pilot：3 作品 × 2 单窗口 × 4 Runner = 24 组完成
 - [x] Pilot：24/24 deterministic structural check PASS
-- [x] Pilot 偏差审计完成
-- [x] 正式重跑决定已记录：`00_项目控制/B09_Round01_Pilot偏差与正式重跑决定.md`
+- [x] Pilot 偏差审计：单窗口粒度 + 同会话串扰风险
+- [x] 正式重跑决定记录
+- [x] subagent 隔离探针失败并按协议停止
+- [x] `codex exec` 独立 OS 进程隔离探针 PASS
+- [x] 固定 CLI：`codex-cli 0.147.0-alpha.6.5`
+- [x] 固定模型：`deepseek-v4-flash`
+- [x] 固定 reasoning effort：`high`
+- [x] CLI 隔离审核与正式运行放行条件已记录：`00_项目控制/B09_CLI隔离审核与正式运行放行条件.md`
 
 ## 第一轮冻结样本
 
 ### WN-A：《庆余年》
-
-- 类别：网络小说
 - 边界模式：chapter
 - 探测章节：750
 - OPENING：span 1–6
 - MIDDLE：span 373–378
 
 ### WN-B：《道诡异仙》
-
-- 类别：网络小说
 - 边界模式：chapter
 - 探测章节：1042
 - OPENING：span 1–6
 - MIDDLE：span 519–524
 
 ### WL-A：《一九八四》
-
-- 类别：世界文学
-- 来源：本地 SourcePrepare 派生干净文本；原始来源仍只读保留
 - 边界模式：segment fallback
 - 可用 segment：19
 - OPENING：segment 1–6
 - MIDDLE：segment 7–12
-- 说明：六段 MIDDLE 窗口中心接近全文 segment 9.5–10，不需要重新冻结。
+- 六段 MIDDLE 窗口中心接近全文 segment 9.5–10，不重新冻结。
 
-## Pilot 判定
+## Pilot 定位
 
-已完成的 24 组输出保留为：
+现有 24 组只作为工程 pilot：
 
-`round-01-pilot-single-window`
-
-用途：
-
-- 验证样本、冻结器、输出合同和结构检查器；
-- 观察单窗口方法行为；
-- 记录协议歧义和执行环境限制。
-
-禁止：
-
+- 验证样本、冻结器、合同、checker；
 - 不进入 Blind Judge；
 - 不用于方法排名；
-- 不用于人工赢家判断；
-- 不据此决定采用哪个上游 Skill。
+- 不用于最终 Skill 采用决策。
 
-### 无效性来源 1：运行粒度
+## CLI 隔离审核结论
 
-原始协议要求一个 Runner 对同一作品同时读取 OPENING + MIDDLE，再做跨窗口检查。Pilot 把两个窗口拆成独立运行，削弱了 A/B 的跨阶段验证能力。
+独立 OS 进程机制本身已通过 Probe，但不能仅依赖 `-C + workspace-write` 声称 Runner 只能读取 cwd。正式执行改为：
 
-### 无效性来源 2：会话隔离
+- 专用最小 Benchmark CODEX_HOME；
+- 仓库外空临时 cwd；
+- stdin 直接注入当前 Runner 方法 + 双窗口正文 + 必要 manifest；
+- 优先 read-only sandbox；
+- stdout 固定 envelope；
+- Controller 拆分 stdout 后写回 Local Only 正式目录；
+- 正式 12 组启动前随机冻结执行顺序。
 
-Pilot 因 subagent 消息投递失败，改为同一会话顺序执行。虽然文件层未互读其他 Runner 输出，但不能排除方法提示和前序推理在会话中的串扰。
+详见：
 
-## 下一动作：正式 Round 01 Runner
+`00_项目控制/B09_CLI隔离审核与正式运行放行条件.md`
 
-正式运行必须新建目录，例如：
+## 当前下一动作：Preflight v2
 
-`06_工作区/01_待处理/B09_原著蒸馏Benchmark/_local_runs/round-01-formal/`
+本地 Agent 同步 `main` 后执行：
 
-正式规模：
+`06_工作区/01_待处理/B09_原著蒸馏Benchmark/README_正式Round01重跑任务.md`
+
+先完成 Preflight v2：
+
+1. 建立专用最小 CODEX_HOME；
+2. 在仓库外空 cwd 启动 `codex exec --ephemeral`；
+3. 固定 `deepseek-v4-flash` + reasoning high；
+4. 优先 read-only；
+5. stdin 输入短测试；
+6. stdout 返回固定 envelope；
+7. 确认没有依赖仓库文件、全局写作 Skill、插件或历史会话。
+
+若 Preflight v2 PASS，可直接继续正式 12 组，无需再次等待 Controller。
+
+若 FAIL，立即停止并汇报，不自行扩大权限或回退共享会话。
+
+## 正式 Round 01 规模
 
 `3 作品 × 4 Runner = 12 个独立运行`
 
-每个运行一次同时读取该作品两个冻结窗口：
+每个 Runner 一次同时处理该作品 `OPENING + MIDDLE` 两个窗口。
 
-- OPENING
-- MIDDLE
-
-并只输出一套四文件合同 + metadata + check report。
-
-### 正式有效性硬门槛
-
-- 12 个 Runner 必须是独立新会话/独立 Agent 进程；
-- 如果 subagent 不可用，可使用 12 个顺序启动但完全独立的新进程/新会话；
-- 不允许再次降级到同一会话顺序扮演 D0/A/B/C；
-- 如果执行环境做不到真正隔离，停止并汇报，不运行正式结果；
-- 每次运行前核对 source SHA256；
-- 只读取当前 sample 的两个冻结窗口；
-- Runner 之间不得互读输出；
-- 不读取 Judge；
-- deterministic check 必须逐组执行；
-- pilot 输出不得覆盖或混入正式结果。
-
-## 当前阻塞
-
-需要本地执行环境提供真正独立的新 Agent 会话/进程。是否可自动实现必须先做一个隔离探针，不通过则停止。
+正式 Runner 启动前一次性随机生成并冻结 12 组执行顺序，以降低不可见服务端模型漂移造成的固定顺序偏差。
 
 ## 正式 12 组完成后的下一状态
 
