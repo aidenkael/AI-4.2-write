@@ -45,6 +45,10 @@ __pycache__/
 01_原始素材/**/*.azw3
 01_原始素材/**/*.mobi
 
+# 合集容器标记文件（Local Only，记录拆分单书的 book_id/SHA256/来源容器名）
+# 不上传 GitHub；仅本地供 index_builder / SourcePrepare 识别合集拆分本。
+01_原始素材/**/collection_manifest.json
+
 # SourcePrepare 与 Agent 的中间工作副本全部 Local Only。
 # 这里可能包含由第三方原著转换出的完整 Markdown，不能进入 GitHub。
 06_工作区/**

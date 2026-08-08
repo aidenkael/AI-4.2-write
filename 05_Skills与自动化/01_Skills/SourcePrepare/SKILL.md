@@ -1,6 +1,6 @@
 # SourcePrepare（SP）Skill
 
-版本：0.2.0
+版本：0.2.1
 
 ## 目标
 
@@ -32,9 +32,27 @@ SP 直接读取 `01_原始素材/<分类>/<作品>/` 下的全部源文件；不
 
 `06_其他参考资料/00_待核验/` 中的素材尚未分类，SP 不自动处理，需人工先归类。
 
+### 合集容器（一个目录含多部作品）
+
+“合集/套装”原著（如单作者作品合集）在物理上只占一个目录，但含多部逻辑作品。SP 通过
+`collection_manifest.json`（位于合集目录内，Local Only）识别其中的拆分单书，**不**把整个合集
+当成一部作品：
+
+- 合集目录内只有 manifest 列出的拆分单书会被登记为候选来源；原始合集 EPUB 等其余文件跳过。
+- 每本拆分单书在 `原始素材清单.csv` 的**「来源容器」列**写入合集名（如 `马伯庸作品合集`），
+  空值表示独立来源。
+- 作品身份由 **`book_id` + 中央索引**决定，而**不是文件夹名**。因此同一作品若同时存在于
+  旧目录（如 `01_网络小说/长安十二时辰/`）与合集拆分（`02_中文文学/马伯庸作品合集/长安十二时辰.epub`），
+  SP 会靠 `book_id` 归并为同一作品，并一起评估、交叉校验全部候选来源。
+- 拆分脚本：`05_Skills与自动化/01_Skills/SourcePrepare/scripts/epub_collection_split.py`。
+  详细目录规则见 [`目录规范.md`](../../../目录规范.md) 原则 4。
+
 ### 输出（06_工作区，Local Only，不传 GitHub）
 
 `06_工作区/SourcePrepare/<作品ID>_<作品>/`
+
+> `<作品ID>` 是中央索引里的稳定 `book_XXXX`，同一作品的不同来源（不同目录、不同格式、合集拆分本）
+> 都归到同一个 `<作品ID>`，不重复建目录。
 
 ```text
 <作品ID>_<作品>/
@@ -126,12 +144,17 @@ EPUB 是容器格式，ZIP 能打开 ≠ 正文完整。SP 对 EPUB 跑 14 项�
 
 ## 调用方式
 
-单书：
+单书（支持作品名 **或** 作品ID；作品ID 能跨目录定位同一作品的全部候选来源）：
 
 ```powershell
 python "05_Skills与自动化/01_Skills/SourcePrepare/scripts/source_prepare.py" `
   --root "E:\AI-Write" `
   --book "一九八四"
+
+# 也可直接传 book_id（例如合集拆分本 + 旧目录单本都会命中 book_0035）
+python "05_Skills与自动化/01_Skills/SourcePrepare/scripts/source_prepare.py" `
+  --root "E:\AI-Write" `
+  --book "book_0035"
 ```
 
 静态预览（不转换、不写索引）：
@@ -140,6 +163,9 @@ python "05_Skills与自动化/01_Skills/SourcePrepare/scripts/source_prepare.py"
 python "05_Skills与自动化/01_Skills/SourcePrepare/scripts/source_prepare.py" `
   --root "E:\AI-Write" --all --dry-run
 ```
+
+> `--dry-run` 输出会显示每部作品的 `id`、格式与 **来源容器**（合集名或“独立来源”），
+> 可据此确认合集拆分本与旧来源是否正确归并到同一 `book_id`。
 
 全部作品（需另行授权）：
 
@@ -157,6 +183,9 @@ python "05_Skills与自动化/01_Skills/SourcePrepare/scripts/source_prepare.py"
 回写 `00_项目控制/原始素材清单.csv` 与 `原始素材总索引.md` 中该作品的：
 
 `SourcePrepare状态 / SourcePrepare版本 / 标准MD字符数 / 识别章节数 / 最后检查时间 / 备注`。
+（`来源容器` 列在 `index_builder.discover()` 阶段写入，SP 运行时不修改。）
+
+> 索引 `原始素材清单.csv` 现共 22 列，新增「来源容器」列用于标记文件来自哪个合集。
 
 `05_现代专业资料` 的作品会被直接标记为 `NOT_APPLICABLE`，不进入 `06_工作区`。
 

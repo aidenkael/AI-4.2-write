@@ -44,6 +44,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import index_builder  # noqa: E402
 
 SKILL_VERSION = "0.2.0"
+RAW = "01_原始素材"
 SUPPORTED = {".epub", ".txt", ".pdf", ".zip", ".azw3", ".mobi"}
 SOURCE_PRIORITY = {".epub": 0, ".txt": 1, ".pdf": 2}
 
@@ -57,6 +58,8 @@ CAT_DIR_TO_LABEL = {d: index_builder.CATEGORY_LABEL[d] for d in CATEGORY_DIRS}
 NOT_APPLICABLE_CATEGORIES = {"05_现代专业资料"}
 # 待人工核验目录：SP 不自动处理
 SKIP_DIRS = {"00_待核验"}
+# 合集容器目录内标记文件（Local Only，不上传 GitHub）
+COLLECTION_MANIFEST = "collection_manifest.json"
 
 MIN_VISIBLE_CHARS = 5000
 CHAPTER_MIN = 3
@@ -496,30 +499,125 @@ def choose_candidate(cands: list[Candidate]) -> tuple[Optional[Candidate], list[
 # --------------------------------------------------------------------------- #
 # 作品扫描（直接扫根层，无 00_原始文件 依赖）
 # --------------------------------------------------------------------------- #
-def scan_works(root: Path) -> list[tuple[str, str, bool, list[Path]]]:
-    """返回 (分类目录名, 作品名, 是否松散文件, 源文件列表)。"""
-    raw = root / "01_原始素材"
-    out: list[tuple[str, str, bool, list[Path]]] = []
+def load_collection_manifests(root: Path) -> dict:
+    """扫描 01_原始素材 下所有含 collection_manifest.json 的“合集容器”目录。
+
+    返回 {容器目录Path: manifest字典}。合集目录只登记 manifest 中列出的拆分单书，
+    不入原始合集本身，也不把它当成“一个作品”。
+    """
+    raw = root / RAW
+    result: dict = {}
     for cat in CATEGORY_DIRS:
         cdir = raw / cat
         if not cdir.exists():
             continue
         for entry in sorted(cdir.iterdir()):
             if entry.is_dir():
+                mpath = entry / COLLECTION_MANIFEST
+                if mpath.exists():
+                    try:
+                        result[entry] = json.loads(mpath.read_text(encoding="utf-8"))
+                    except Exception:
+                        pass
+    return result
+
+
+@dataclass
+class CandidateRec:
+    cat_dir: str
+    work_name: str
+    source_container: str
+    path: Path
+    manifest_book_id: Optional[str] = None
+
+
+def collect_candidates(root: Path) -> list[CandidateRec]:
+    """收集所有候选源文件，且“合集容器”感知。
+
+    - 普通作品目录：目录内每个支持文件 = 一个候选（来源容器为空）。
+    - 合集容器目录（含 collection_manifest.json）：只登记 manifest 中列出的拆分单书，
+      来源容器 = 容器名；原始合集 EPUB 等其余文件跳过。
+    - 作品身份不直接由“文件夹名”决定；book ID 由索引 / manifest 解析（见 group_works）。
+    """
+    raw = root / RAW
+    collections = load_collection_manifests(root)
+    collection_dirs = set(collections.keys())
+    out: list[CandidateRec] = []
+    for cat in CATEGORY_DIRS:
+        cdir = raw / cat
+        if not cdir.exists():
+            continue
+        for entry in sorted(cdir.iterdir()):
+            if entry in collection_dirs:
+                man = collections[entry]
+                cname = man.get("container", entry.name)
+                cat_for_splits = man.get("category", cat)
+                for s in man.get("splits", []):
+                    fn = s.get("filename")
+                    p = entry / fn if fn else None
+                    if p and p.exists():
+                        out.append(CandidateRec(
+                            cat_dir=cat_for_splits,
+                            work_name=s.get("work_name", p.stem),
+                            source_container=cname,
+                            path=p,
+                            manifest_book_id=s.get("book_id")))
+                # 原始合集及其他文件不入索引
+                continue
+            if entry.is_dir():
                 if entry.name in SKIP_DIRS:
                     continue
-                files = [f for f in entry.iterdir()
-                         if f.is_file() and f.suffix.lower() in SUPPORTED]
-                if files:
-                    out.append((cat, entry.name, False, files))
+                for f in entry.iterdir():
+                    if f.is_file() and f.suffix.lower() in SUPPORTED:
+                        out.append(CandidateRec(cat_dir=cat, work_name=entry.name,
+                                                source_container="", path=f))
             elif entry.is_file() and entry.suffix.lower() in SUPPORTED:
-                out.append((cat, entry.stem, True, [entry]))
+                out.append(CandidateRec(cat_dir=cat, work_name=entry.stem,
+                                        source_container="", path=entry))
     return out
 
 
-def build_book_map(root: Path) -> dict[tuple[str, str], str]:
+def build_book_map(root: Path) -> tuple[dict[tuple[str, str], str], dict[str, str]]:
+    """CSV 索引：返回 ((分类label, 作品名)->作品ID, 仅作品名->作品ID)。
+
+    - 主键 (分类label, 作品名) 用于正常单本。
+    - 仅作品名 映射作为兜底：当作品因“分类平移 / 合集拆分”导致物理分类与
+      索引分类不一致时（如 长安十二时辰 旧 txt 在 网络小说、索引归类为 中文文学），
+      仍能靠作品名归并到同一 book_id。
+    作品身份最终以 book_id + 中央索引为准。
+    """
     rows = index_builder.load_csv(root)
-    return {(r["资料大类"], r["作品名"]): r["作品ID"] for r in rows}
+    by_key: dict[tuple[str, str], str] = {}
+    by_name: dict[str, str] = {}
+    for r in rows:
+        by_key.setdefault((r["资料大类"], r["作品名"]), r["作品ID"])
+        by_name.setdefault(r["作品名"], r["作品ID"])
+    return by_key, by_name
+
+
+def group_candidates(cands: list[CandidateRec], book_map: dict, name_map: dict) -> list[dict]:
+    """把候选源按作品身份聚类：manifest book_id > (分类label, 作品名) > 作品名。
+
+    合集拆分单书的 book_id 来自 manifest；普通作品来自 CSV 索引（优先按
+    分类+作品名，再按作品名兜底，兼容分类平移）。这样同一作品的不同物理来源
+    （例如 01_网络小说/长安十二时辰/ 与 02_中文文学/马伯庸作品合集/长安十二时辰.epub）
+    会归到同一 book_id，SourcePrepare 处理该作品时能看见并交叉校验全部候选来源。
+    """
+    groups: dict = {}
+    for c in cands:
+        cat_label = CAT_DIR_TO_LABEL.get(c.cat_dir, c.cat_dir)
+        bid = (c.manifest_book_id
+               or book_map.get((cat_label, c.work_name))
+               or name_map.get(c.work_name))
+        key = bid if bid else (cat_label, c.work_name)
+        g = groups.get(key)
+        if g is None:
+            g = {"cat_dir": c.cat_dir, "work_name": c.work_name,
+                 "book_id": bid, "files": [], "containers": set()}
+            groups[key] = g
+        g["files"].append(c.path)
+        g["containers"].add(c.source_container)
+    return list(groups.values())
 
 
 # --------------------------------------------------------------------------- #
@@ -688,25 +786,35 @@ def _cand_json(c: Candidate) -> dict:
 # --------------------------------------------------------------------------- #
 # 入口
 # --------------------------------------------------------------------------- #
-def locate(root: Path, name: Optional[str], all_books: bool, book_map: dict) -> list[tuple]:
-    works = scan_works(root)
-    enriched = []
-    for cat, wname, loose, files in works:
-        bid = book_map.get((CAT_DIR_TO_LABEL[cat], wname))
-        enriched.append((cat, wname, loose, files, bid))
+def locate(root: Path, name: Optional[str], all_books: bool, book_map: dict, name_map: dict) -> list[dict]:
+    """定位要处理的作品分组。支持按作品名 或 作品ID（如 book_0035）匹配。
+
+    不再假定“文件夹=作品”：候选来源来自 collect_candidates（合集感知），
+    再按 book_id/作品名 聚类（group_candidates）。因此同一作品即使来源
+    分散在多个物理目录，也能被一起选中。
+    """
+    cands = collect_candidates(root)
+    groups = group_candidates(cands, book_map, name_map)
     if all_books:
-        return enriched
+        return groups
     if not name:
-        raise SystemExit("必须指定 --book <作品名> 或 --all")
-    exact = [w for w in enriched if w[1] == name]
+        raise SystemExit("必须指定 --book <作品名 或 作品ID> 或 --all")
+    # 精确匹配：作品名 或 作品ID
+    exact = [g for g in groups
+             if g["work_name"] == name or (g["book_id"] and g["book_id"] == name)]
     if exact:
         return exact
-    partial = [w for w in enriched if name.lower() in w[1].lower()]
+    # 部分匹配（不区分大小写）
+    lname = name.lower()
+    partial = [g for g in groups
+               if lname in g["work_name"].lower()
+               or (g["book_id"] and lname in g["book_id"].lower())]
     if len(partial) == 1:
         return partial
     if not partial:
         raise SystemExit(f"未找到作品：{name}")
-    raise SystemExit("作品名匹配多个目录：" + ", ".join(w[1] for w in partial))
+    raise SystemExit("作品名匹配多个：" + "、".join(
+        f"{g['work_name']}({g['book_id']})" for g in partial))
 
 
 def main() -> int:
@@ -724,21 +832,25 @@ def main() -> int:
     if not (root / "01_原始素材").exists():
         raise SystemExit("项目根目录不正确：缺少 01_原始素材")
     pandoc = find_pandoc(root)
-    book_map = build_book_map(root)
-    targets = locate(root, args.book, args.all, book_map)
+    book_map, name_map = build_book_map(root)
+    targets = locate(root, args.book, args.all, book_map, name_map)
 
     if args.dry_run:
         print(f"[DRY-RUN] Pandoc: {pandoc or '未找到'}  目标作品数：{len(targets)}")
-        for cat, wname, loose, files, bid in targets:
-            label = CAT_DIR_TO_LABEL[cat]
-            na = " [NOT_APPLICABLE]" if cat in NOT_APPLICABLE_CATEGORIES else ""
-            fmts = ", ".join(sorted({f.suffix.lower() for f in files}))
-            print(f"  - {label}/{wname}  id={bid}  formats=[{fmts}]{na}")
+        for g in targets:
+            label = CAT_DIR_TO_LABEL.get(g["cat_dir"], g["cat_dir"])
+            na = " [NOT_APPLICABLE]" if g["cat_dir"] in NOT_APPLICABLE_CATEGORIES else ""
+            fmts = ", ".join(sorted({f.suffix.lower() for f in g["files"]}))
+            conts = "、".join(sorted(("独立来源" if not c else c) for c in g["containers"])) or "独立来源"
+            print(f"  - {label}/{g['work_name']}  id={g['book_id']}  "
+                  f"formats=[{fmts}]  来源容器=[{conts}]{na}")
         return 0
 
     results = []
-    for cat, wname, loose, files, bid in targets:
-        results.append(process_book(root, cat, wname, loose, files, bid, pandoc, args.force))
+    for g in targets:
+        is_loose = "" in g["containers"]  # 含独立（非合集）来源
+        results.append(process_book(root, g["cat_dir"], g["work_name"], is_loose,
+                                    g["files"], g["book_id"], pandoc, args.force))
     for r in results:
         print(r)
     return 0 if all(not r.startswith("FAIL") for r in results) else 2
