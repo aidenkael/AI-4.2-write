@@ -1,8 +1,8 @@
 # B09 Round 01 Status
 
-- 状态：`CLI_PROCESS_PROBE_PASS_PREFLIGHT_V2_REQUIRED`
+- 状态：`FORMAL_RUNNERS_COMPLETE_READY_FOR_BLINDING`
 - 更新时间：2026-08-09
-- 当前阶段：样本冻结完成；单窗口 pilot 已完成但不进入正式评审；subagent 隔离失败后已改用 `codex exec` 独立 OS 进程，Probe-X / Probe-Y 隔离通过。正式 12 组运行前需完成 CLI Preflight v2，以排除仓库读取范围和全局 Skill/插件污染。
+- 当前阶段：正式 Round 01 的 12 个双窗口 Runner 已通过实验完整性审计，允许进入匿名化与 Blind Judge；尚未匿名化、未 Judge、未揭盲、未比较赢家。
 
 ## 已完成
 
@@ -26,10 +26,16 @@
 - [x] 正式重跑决定记录
 - [x] subagent 隔离探针失败并按协议停止
 - [x] `codex exec` 独立 OS 进程隔离探针 PASS
-- [x] 固定 CLI：`codex-cli 0.147.0-alpha.6.5`
-- [x] 固定模型：`deepseek-v4-flash`
-- [x] 固定 reasoning effort：`high`
-- [x] CLI 隔离审核与正式运行放行条件已记录：`00_项目控制/B09_CLI隔离审核与正式运行放行条件.md`
+- [x] CLI Preflight v2 PASS
+- [x] 专用最小 Benchmark CODEX_HOME
+- [x] 仓库外空 cwd + `--ephemeral` + read-only sandbox
+- [x] stdin 双窗口 payload + stdout envelope
+- [x] 固定 `deepseek-v4-flash` + reasoning effort `high`
+- [x] 正式运行前随机冻结 12 组执行顺序
+- [x] 正式 12/12 双窗口独立 Runner 完成
+- [x] 正式 12/12 deterministic check PASS
+- [x] 三个 source SHA256 运行前后复验一致
+- [x] 正式 Runner 实验完整性审计 PASS
 
 ## 第一轮冻结样本
 
@@ -50,61 +56,87 @@
 - 可用 segment：19
 - OPENING：segment 1–6
 - MIDDLE：segment 7–12
-- 六段 MIDDLE 窗口中心接近全文 segment 9.5–10，不重新冻结。
+- 固定窗口存在自然场景截断风险；Judge 只能根据窗口内证据判断，不能自行补全窗口外正文。
 
 ## Pilot 定位
 
-现有 24 组只作为工程 pilot：
+现有 24 组单窗口同会话结果仍只作为工程 pilot：
 
 - 验证样本、冻结器、合同、checker；
 - 不进入 Blind Judge；
 - 不用于方法排名；
 - 不用于最终 Skill 采用决策。
 
-## CLI 隔离审核结论
+## 正式 Round 01 执行摘要
 
-独立 OS 进程机制本身已通过 Probe，但不能仅依赖 `-C + workspace-write` 声称 Runner 只能读取 cwd。正式执行改为：
-
-- 专用最小 Benchmark CODEX_HOME；
-- 仓库外空临时 cwd；
-- stdin 直接注入当前 Runner 方法 + 双窗口正文 + 必要 manifest；
-- 优先 read-only sandbox；
-- stdout 固定 envelope；
-- Controller 拆分 stdout 后写回 Local Only 正式目录；
-- 正式 12 组启动前随机冻结执行顺序。
-
-详见：
-
-`00_项目控制/B09_CLI隔离审核与正式运行放行条件.md`
-
-## 当前下一动作：Preflight v2
-
-本地 Agent 同步 `main` 后执行：
-
-`06_工作区/01_待处理/B09_原著蒸馏Benchmark/README_正式Round01重跑任务.md`
-
-先完成 Preflight v2：
-
-1. 建立专用最小 CODEX_HOME；
-2. 在仓库外空 cwd 启动 `codex exec --ephemeral`；
-3. 固定 `deepseek-v4-flash` + reasoning high；
-4. 优先 read-only；
-5. stdin 输入短测试；
-6. stdout 返回固定 envelope；
-7. 确认没有依赖仓库文件、全局写作 Skill、插件或历史会话。
-
-若 Preflight v2 PASS，可直接继续正式 12 组，无需再次等待 Controller。
-
-若 FAIL，立即停止并汇报，不自行扩大权限或回退共享会话。
-
-## 正式 Round 01 规模
+正式有效数据：
 
 `3 作品 × 4 Runner = 12 个独立运行`
 
-每个 Runner 一次同时处理该作品 `OPENING + MIDDLE` 两个窗口。
+每个 Runner 一次同时处理该作品：
 
-正式 Runner 启动前一次性随机生成并冻结 12 组执行顺序，以降低不可见服务端模型漂移造成的固定顺序偏差。
+- OPENING
+- MIDDLE
 
-## 正式 12 组完成后的下一状态
+环境：
 
-`FORMAL_RUNNERS_COMPLETE_READY_FOR_BLINDING`
+- `codex-cli 0.147.0-alpha.6.5`
+- `deepseek-v4-flash`
+- reasoning effort = `high`
+- 独立 OS 进程
+- `--ephemeral`
+- 专用最小 CODEX_HOME
+- 仓库外临时 cwd
+- read-only sandbox
+- stdin payload
+- stdout envelope
+
+12/12 deterministic check PASS。
+
+仅 `WN-B-C` 首次因 DeepSeek API 流式连接中断未形成输出；基础设施失败已单独留档，随后使用相同输入/提示、全新独立进程重试一次并 PASS，`retry_count=1`。
+
+正式 Runner 完整性审计：
+
+`00_项目控制/B09_Round01_正式Runner完整性审计.md`
+
+## 残余风险
+
+1. `models.json` 运行前后哈希一致只证明本地模型元数据未发生可观察变化，不能严格证明 DeepSeek 服务端同一模型 slug 的底层快照绝对不变；正式运行已通过预先随机顺序降低系统性偏差。
+2. 固定窗口可能截断自然场景；该问题属于 sampled Benchmark 的边界条件，Judge 应检查 Runner 是否诚实处理不确定性，而不是补充窗口外信息。
+3. Token / 输出成本存在方法差异，后续需要作为“能力收益 / 成本”单独比较，不能只比较文字质量。
+
+## 当前下一动作：匿名化与 Blind Judge
+
+允许对：
+
+`06_工作区/01_待处理/B09_原著蒸馏Benchmark/_local_runs/round-01-formal/`
+
+执行正式匿名化。
+
+随后启动两个彼此独立的 Judge，只允许读取：
+
+- `05_Skills与自动化/B09_原著蒸馏Benchmark/JUDGE.md`
+- 正式 `_blind/` 匿名包
+
+Judge 不得读取：
+
+- `run_metadata.json`
+- token / 执行顺序 / retry 信息
+- pilot 输出
+- Runner Pack 身份说明
+- blind map
+- 另一个 Judge 的结果
+
+Judge 完成后形成仍匿名的 `human_pairwise_packet.md`，人工只做少量高价值成对选择。
+
+人工完成前：
+
+- 不揭盲；
+- 不宣布总冠军；
+- 不决定正式采用哪个 Skill。
+
+## 下一状态
+
+匿名化 + 两个 Blind Judge + 人工盲评包完成后：
+
+`BLIND_JUDGING_COMPLETE_READY_FOR_HUMAN_PAIRWISE`
