@@ -1,6 +1,6 @@
 # B09 正式 Round 01 重跑任务
 
-> 当前前置状态：`PILOT_COMPLETE_FORMAL_RERUN_REQUIRED`
+> 当前前置状态：独立 OS 进程 Probe 已通过；正式运行前必须完成 CLI Preflight v2。
 > 目的：执行正式有效的 B09 Runner 数据；现有 24 组单窗口同会话结果只作为 pilot 保留。
 
 ## 0. 开始前
@@ -8,90 +8,159 @@
 先同步 GitHub `main`，然后读取：
 
 1. `00_项目控制/B09_Round01_Pilot偏差与正式重跑决定.md`
-2. `00_项目控制/B09_原著蒸馏Benchmark_执行协议_v0.1.md`
-3. `05_Skills与自动化/B09_原著蒸馏Benchmark/README.md`
-4. `06_工作区/01_待处理/B09_原著蒸馏Benchmark/STATUS.md`
-5. 三个 `_local_manifests/*.json`
+2. `00_项目控制/B09_CLI隔离审核与正式运行放行条件.md`
+3. `00_项目控制/B09_原著蒸馏Benchmark_执行协议_v0.1.md`
+4. `05_Skills与自动化/B09_原著蒸馏Benchmark/README.md`
+5. `06_工作区/01_待处理/B09_原著蒸馏Benchmark/STATUS.md`
+6. 三个 `_local_manifests/*.json`
 
 现有 pilot 输出不得删除、覆盖或进入 Judge。
 
-## 1. 先做隔离探针，不要直接跑 12 组
+## 1. 已确认的正式执行引擎
 
-目标：证明本环境可以启动“真正独立的新 Agent 会话/进程”。
+本轮采用本地 `codex exec` 独立 OS 进程，不再尝试当前失效的 subagent 消息投递。
 
-可接受方式：
+当前已验证条件：
 
-- subagent，且能确认每个子代理只收到自己的任务；
-- 本地 Codex/Claude/其他模型 CLI 的独立进程；
-- 自动化启动的多个全新 session，每个 session 没有前序 Runner 对话上下文。
+- CLI：`codex-cli 0.147.0-alpha.6.5`
+- 模型：`deepseek-v4-flash`
+- reasoning effort：`high`
+- 每次调用使用 `--ephemeral`
+- Probe-X / Probe-Y 独立 session，隔离通过
 
-不可接受：
+12 个正式 Runner 必须继续保持同一 CLI、同一 model slug、同一 reasoning effort。
 
-- 同一个聊天会话顺序扮演 D0/A/B/C；
-- 仅靠提示“忘记之前内容”；
-- 同一 Agent 上下文里隐藏前一结果但保留前一方法提示。
+## 2. Preflight v2：正式 12 组前最后一道门槛
 
-### 隔离探针
+严格执行 `00_项目控制/B09_CLI隔离审核与正式运行放行条件.md`。
 
-启动两个独立临时会话：Probe-X、Probe-Y。
+### 2.1 专用 Benchmark CODEX_HOME
 
-只给：
+优先创建本地专用、最小化 `CODEX_HOME`，只保留调用 `deepseek-v4-flash` 所需 provider/model/auth 配置。
 
-- Probe-X：随机字符串 `B09-X-<随机8位>`，要求只输出收到的字符串；
-- Probe-Y：另一个随机字符串 `B09-Y-<随机8位>`，要求只输出收到的字符串，并回答是否见过 X 的字符串。
+不得加载用户日常：
 
-判定：
+- 自定义 Skills；
+- 插件；
+- MCP（除非能证明模型调用必需）；
+- 历史会话；
+- 小说项目 Agent 指令；
+- 旧 Benchmark 输出。
 
-- 两个会话各自只返回自己的字符串；
-- Y 不知道 X；
-- Controller 能证明它们不是同一个持续会话。
+密钥不得输出到日志、prompt 或 Git。
 
-如果探针失败：
+### 2.2 仓库外空 cwd
 
-**立即停止。不要用同一会话回退，不要运行正式 12 组。汇报环境限制。**
+每个 Runner 使用系统 TEMP 下新的随机空目录作为 cwd，不把 AI-write 仓库作为 Runner 工作目录。
 
-如果探针通过，记录隔离方式到：
+Runner 不接收仓库根路径、原著绝对路径、pilot 路径或其他 Runner 路径。
 
-`_local_runs/round-01-formal/isolation_probe.json`
+### 2.3 stdin 输入
 
-至少包含：方式、命令/会话类型（不含密钥）、时间、pass=true、备注。
+Controller 根据 manifest 从本地只读源中提取两个冻结窗口，然后把下列内容拼成 stdin payload：
 
-## 2. 正式运行单元
+1. 当前 Runner 方法提示；
+2. 统一输出合同；
+3. manifest 必要元数据；
+4. OPENING 正文；
+5. MIDDLE 正文；
+6. 只依据本 payload 分析、不得调用文件系统补充资料的约束。
 
-正式 Round 01 一共只有 12 个运行：
+不要把大文本放进 Windows 命令行参数。
+
+### 2.4 stdout 输出
+
+优先使用 `-s read-only`，Runner 不写项目文件，完整结果输出 stdout。
+
+固定 envelope：
+
+```text
+===01_EVIDENCE_NOTES===
+...
+===02_INTERPRETATION===
+...
+===03_MECHANISM_CARDS===
+...
+===04_SELF_LIMITS===
+...
+```
+
+Controller 在进程退出后拆分 stdout，写回 Local Only 正式 Runner 目录，再运行 checker。
+
+### 2.5 Preflight v2 判定
+
+用短任务验证：
+
+- 专用 CODEX_HOME 可正常调用模型；
+- 仓库外空 cwd；
+- `--ephemeral`；
+- `deepseek-v4-flash`；
+- reasoning effort=`high`；
+- `read-only`；
+- stdin 成功；
+- stdout envelope 成功；
+- EXIT=0；
+- 无必须依赖仓库文件或全局 Skill/插件的迹象。
+
+若 PASS：无需再次向 Controller 暂停，可直接执行正式 12 组。
+
+若 FAIL：立即停止并汇报，不自行扩大权限或回到共享会话。
+
+## 3. 正式运行单元
+
+正式 Round 01 一共 12 个独立运行：
 
 - WN-A × D0/A/B/C
 - WN-B × D0/A/B/C
 - WL-A × D0/A/B/C
 
-每个运行一次同时读取同一作品的两个冻结窗口：
+每个运行一次同时读取同一作品：
 
 `OPENING + MIDDLE`
 
-不要把 OPENING 与 MIDDLE 拆成两个 Runner。
+不要拆成单窗口 Runner。
 
-每个运行必须能执行跨窗口判断：
+每个运行必须做跨窗口判断：
 
-- OPENING 发现的机制在 MIDDLE 是否仍存在；
+- OPENING 机制在 MIDDLE 是否仍存在；
 - 是否发生阶段漂移；
-- MIDDLE 是否提供反证或边界；
-- 哪些结论只能限定在某一窗口；
-- 哪些结论可以谨慎标记为“两窗口均支持”。
+- MIDDLE 是否形成反证/边界；
+- 哪些结论只适用于一个窗口；
+- 哪些结论可谨慎标为“两窗口均支持”。
 
-即使两个窗口都支持，也不得外推成整书规律。
+即使两窗口都支持，也不得外推成整书规律。
 
-## 3. 正式目录
+## 4. 正式运行顺序必须预先随机冻结
 
-新建：
+由于服务端不暴露精确模型快照、seed 不可固定，不允许固定按 `D0 → A → B → C` 的时间顺序执行。
+
+正式 Runner 启动前一次性生成 12 个 run id 的随机 permutation，保存到 Local Only `run_order.json`；生成后不得根据输出修改。
+
+记录：
+
+- permutation；
+- 生成时间；
+- 每组 started_at / finished_at；
+- CLI 版本；
+- model slug；
+- reasoning effort。
+
+若可读取本地模型目录中的 `deepseek-v4-flash` 元数据，则在正式运行前后分别保存元数据哈希；若变化，标记 `model_drift_risk=true`。
+
+## 5. 正式目录
+
+正式结果仍保存在：
 
 `06_工作区/01_待处理/B09_原著蒸馏Benchmark/_local_runs/round-01-formal/`
 
-结构：
+建议：
 
 ```text
 round-01-formal/
 ├── isolation_probe.json
+├── preflight_v2.json
 ├── run_conditions.json
+├── run_order.json
 ├── WN-A/
 │   ├── D0/
 │   ├── A/
@@ -101,7 +170,7 @@ round-01-formal/
 └── WL-A/
 ```
 
-每个 Runner 目录只有一套：
+每个 Runner 最终目录：
 
 ```text
 01_evidence_notes.md
@@ -112,31 +181,27 @@ run_metadata.json
 check_report.json
 ```
 
-不要建立 `OPENING/`、`MIDDLE/` 子目录。
+## 6. 输入公平性
 
-## 4. 输入公平性
+每个 sample 的四方法必须：
 
-每个 sample 的四种方法必须：
-
-- 使用同一模型；
-- 使用同一可获得的参数；
-- 使用同一 source manifest；
-- 同时读取完全相同的 OPENING + MIDDLE 字符范围；
-- 使用同一最大输出预算；
-- 除当前 Runner 方法提示外，不提供额外旧分析。
+- 同一 CLI / 模型 / reasoning effort；
+- 同一 source manifest；
+- 完全相同 OPENING + MIDDLE 范围；
+- 同一输出合同；
+- 同一可获得参数；
+- 不提供额外旧分析。
 
 运行前重新核对 source SHA256。
 
-如果模型名、temperature、seed、token usage 等运行时不暴露，记录 `unavailable`，不得估造。
+模型精确快照、temperature、seed 等若不暴露，记录 `unavailable`，不得估造。
 
-## 5. Runner 隔离
+## 7. Runner 隔离
 
-12 个运行分别启动 12 个独立新会话/进程。
+每个正式进程只收到：
 
-每个 Runner 只能收到：
-
-1. 当前 sample 的 manifest 必要元数据；
-2. 当前 sample 的 OPENING + MIDDLE 两个窗口；
+1. 当前 sample 必要 manifest 元数据；
+2. 当前 sample OPENING + MIDDLE；
 3. 统一输出合同；
 4. 当前 Runner 自己的方法提示。
 
@@ -145,25 +210,26 @@ check_report.json
 - 其他 Runner 方法提示；
 - 其他 Runner 输出；
 - pilot 输出；
-- Judge 协议结果；
+- Judge；
 - blind map；
-- 项目中已有的该书分析。
+- 项目既有该书分析；
+- 冻结窗口外正文。
 
-Controller 可以准备输入和收集落盘；Runner 不自行挑选范围。
+Runner 不自行选择或扩展原著范围。
 
-## 6. 输出与检查
+## 8. 输出与 deterministic check
 
-每个 Runner 完成后立即运行：
+Controller 拆分 stdout 后，对每组立即运行：
 
 `05_Skills与自动化/scripts/b09_check_outputs.py`
 
-并保存 `check_report.json`。
-
-结构失败允许只修：
+结构失败允许修正：
 
 - 格式；
 - 缺字段；
 - 错误 Evidence ID 引用。
+
+但修复必须由一个新的独立进程完成，只提供原输入 + 当前失败输出 + deterministic error，不提供其他 Runner 信息。
 
 不得因为检查失败：
 
@@ -171,49 +237,63 @@ Controller 可以准备输入和收集落盘；Runner 不自行挑选范围。
 - 扩大原文范围；
 - 读取其他 Runner；
 - 查看 Judge；
-- 重写评分标准。
+- 修改评分标准。
 
-保留首次失败记录与 retry count。
+保留首检报告与 retry count。
 
-## 7. metadata 必须增加的有效性字段
+## 9. metadata 有效性字段
 
-每个 `run_metadata.json` 除原字段外增加：
+每组至少记录：
 
 ```json
 {
   "formal_round": true,
   "input_windows": ["OPENING", "MIDDLE"],
   "independent_session": true,
-  "isolation_method": "<subagent/new_process/new_session>",
+  "isolation_method": "codex_exec_ephemeral_process",
+  "stdin_payload": true,
+  "repo_outside_cwd": true,
   "pilot_outputs_read": false,
   "other_runner_outputs_read": false,
-  "judge_outputs_read": false
+  "judge_outputs_read": false,
+  "model_snapshot": "unavailable_or_value",
+  "model_drift_risk": false
 }
 ```
 
-如果 `independent_session` 不能诚实写 `true`，该运行无效，停止正式 Round 01。
+无法诚实填写 `independent_session=true` 时，正式结果无效并停止。
 
-## 8. 完成后暂停
+## 10. 认证规则
 
-12/12 运行完成且 deterministic check 完成后，不匿名化、不 Judge、不揭盲。
+正式 12 组期间保持当前 DeepSeek API key 运行方式，不再切换 CLI 认证模式。
 
-先向 Controller 汇报：
+优先在专用 Benchmark CODEX_HOME 中完成认证，避免日常插件/Skill 环境污染实验。
 
-- isolation probe 是否 PASS；
-- 实际使用的隔离方式；
-- 12/12 是否全部独立新会话；
-- 每个运行是否同时读取 OPENING + MIDDLE；
-- 12 组 deterministic check PASS/FAIL；
-- 首次失败与 retry count；
-- source SHA256 是否一致；
-- 模型/参数可获得信息；
-- 输入窗口字符数、输出字符数；
-- Token/调用次数/耗时（运行时可得多少报多少）；
-- 是否发现方法协议在双窗口条件下仍有歧义；
-- Git/Local Only 是否安全。
+不要在 Benchmark 中恢复 ChatGPT CLI 登录；实验结束后再单独处理。
+
+## 11. 正式 12 组完成后暂停
+
+12/12 + deterministic check 完成后，不匿名化、不 Judge、不揭盲。
+
+向 Controller 汇报：
+
+- Preflight v2 PASS/FAIL；
+- 专用 CODEX_HOME 是否成功；
+- 12/12 是否独立进程；
+- 12 组是否同时读取双窗口；
+- 随机执行顺序；
+- deterministic PASS/FAIL；
+- 首次失败与 retry；
+- source SHA256；
+- CLI/model/参数；
+- 输入/输出规模；
+- tokens/耗时（可得多少报多少）；
+- 模型元数据前后是否变化；
+- 是否发生任何仓库/Local Only 风险；
+- 双窗口方法协议是否仍有歧义。
 
 不要报告哪个方法更好。
 
-只有 Controller 审计通过，才允许进入：
+Controller 审计通过后才进入：
 
 `FORMAL_RUNNERS_COMPLETE_READY_FOR_BLINDING`
