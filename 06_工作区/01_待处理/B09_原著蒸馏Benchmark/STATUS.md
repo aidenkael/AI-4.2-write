@@ -1,8 +1,8 @@
 # B09 Round 01 Status
 
-- 状态：`FORMAL_RUNNERS_COMPLETE_READY_FOR_BLINDING`
+- 状态：`BLIND_JUDGING_COMPLETE_READY_FOR_HUMAN_PAIRWISE`
 - 更新时间：2026-08-09
-- 当前阶段：正式 Round 01 的 12 个双窗口 Runner 已通过实验完整性审计；匿名化前已补齐 Evidence fidelity 核证条件，Blind Judge 必须同时看到匿名输出与该 sample 共用的冻结 OPENING/MIDDLE 原文窗口。
+- 当前阶段：正式 12 个双窗口 Runner、匿名化、两个独立 Blind Judge 与人工盲评包均已完成。下一步只做少量人工成对盲评；人工完成前继续保持 blind map 封闭，不揭盲、不宣布方法赢家。
 
 ## 已完成
 
@@ -13,69 +13,52 @@
 - [x] Evidence / Interpretation / Mechanism Card 统一合同
 - [x] 样本 SHA256 / 章节边界冻结器
 - [x] Runner 输出确定性检查器
-- [x] 匿名化工具
 - [x] Blind Judge 协议
-- [x] 本地 manifest / run 目录加入 `.gitignore`
-- [x] Phase 1：筛选并检查本地来源
-- [x] Phase 2：冻结 WN-A / WN-B / WL-A
-- [x] Controller sanity check
-- [x] `06_工作区/SourcePrepare/` 加入 `.gitignore`
-- [x] Pilot：3 作品 × 2 单窗口 × 4 Runner = 24 组完成
-- [x] Pilot：24/24 deterministic structural check PASS
+- [x] Local Only / gitignore 保护
+- [x] Phase 1–2：样本筛选与冻结
+- [x] 单窗口 pilot 24 组完成并记录为无排名资格的工程 pilot
 - [x] Pilot 偏差审计：单窗口粒度 + 同会话串扰风险
-- [x] 正式重跑决定记录
-- [x] subagent 隔离探针失败并按协议停止
+- [x] subagent 隔离失败后按协议停止
 - [x] `codex exec` 独立 OS 进程隔离探针 PASS
 - [x] CLI Preflight v2 PASS
 - [x] 专用最小 Benchmark CODEX_HOME
-- [x] 仓库外空 cwd + `--ephemeral` + read-only sandbox
+- [x] 仓库外 cwd + `--ephemeral` + read-only
 - [x] stdin 双窗口 payload + stdout envelope
 - [x] 固定 `deepseek-v4-flash` + reasoning effort `high`
 - [x] 正式运行前随机冻结 12 组执行顺序
 - [x] 正式 12/12 双窗口独立 Runner 完成
 - [x] 正式 12/12 deterministic check PASS
-- [x] 三个 source SHA256 运行前后复验一致
-- [x] 正式 Runner 实验完整性审计 PASS
-- [x] Blind packet v2：匿名包可附每个 sample 共用的冻结 `_source/OPENING.txt`、`MIDDLE.txt`、`manifest_info.json`
-- [x] Judge v2：J02 Evidence fidelity 必须回到冻结 `_source/` 核证，不得只检查 Evidence ID 形式
+- [x] 三个 source SHA256 前后复验一致
+- [x] 正式 Runner 完整性审计 PASS
+- [x] Blind packet v2 附每个 sample 共用冻结 `_source/`
+- [x] 两个独立 Blind Judge 完成 J01–J12 + S1/S2 + sample 排序 + 跨作品稳定性
+- [x] Judge Evidence fidelity 回到冻结 `_source/` 核证
+- [x] `human_pairwise_packet.md` 完成，共 6 组 pair
+- [x] 匿名化脚本身份泄漏缺陷已修复：`check_report.json` 自动清理 Runner 身份与本地路径
+- [x] 双 Judge 与人工盲评包审计完成：`00_项目控制/B09_Round01_双Judge与人工盲评包审计.md`
 
 ## 第一轮冻结样本
 
 ### WN-A：《庆余年》
-- 边界模式：chapter
-- 探测章节：750
 - OPENING：span 1–6
 - MIDDLE：span 373–378
 
 ### WN-B：《道诡异仙》
-- 边界模式：chapter
-- 探测章节：1042
 - OPENING：span 1–6
 - MIDDLE：span 519–524
 
 ### WL-A：《一九八四》
-- 边界模式：segment fallback
-- 可用 segment：19
+- boundary mode：segment fallback
 - OPENING：segment 1–6
 - MIDDLE：segment 7–12
-- 固定窗口存在自然场景截断风险；Judge 只能根据窗口内证据判断，不能自行补全窗口外正文。
 
-## Pilot 定位
-
-现有 24 组单窗口同会话结果仍只作为工程 pilot：
-
-- 验证样本、冻结器、合同、checker；
-- 不进入 Blind Judge；
-- 不用于方法排名；
-- 不用于最终 Skill 采用决策。
+所有样本仍为 `coverage=sampled`，固定窗口不能外推成整书规律。
 
 ## 正式 Round 01 执行摘要
 
 正式有效数据：
 
-`3 作品 × 4 Runner = 12 个独立运行`
-
-每个 Runner 一次同时处理该作品 OPENING + MIDDLE。
+`3 作品 × 4 Runner = 12 个独立双窗口运行`
 
 环境：
 
@@ -87,79 +70,66 @@
 - 专用最小 CODEX_HOME
 - 仓库外临时 cwd
 - read-only sandbox
-- stdin payload
-- stdout envelope
+- stdin payload / stdout envelope
 
 12/12 deterministic check PASS。
 
-仅 `WN-B-C` 首次因 DeepSeek API 流式连接中断未形成输出；基础设施失败已单独留档，随后使用相同输入/提示、全新独立进程重试一次并 PASS，`retry_count=1`。
+仅 WN-B-C 首次因 API 流式连接中断未形成输出；使用相同输入/提示和全新进程重试一次成功，作为基础设施 retry 留档，不计为方法失败。
 
-正式 Runner 完整性审计：
+## Blind Judge 摘要（仍匿名）
 
-`00_项目控制/B09_Round01_正式Runner完整性审计.md`
+- Judge-1 / Judge-2 均完成 12 个匿名方案；
+- S1 = 0；
+- Judge-1：S2 24 条；
+- Judge-2：S2 29 条；
+- WN-A / WN-B 的整体匿名排序两 Judge 完全一致；
+- WL-A 第二名、个别 Evidence fidelity 边界与压缩质量存在分歧；
+- 两 Judge 均建议按能力维度选冠军，不设一个单一总冠军。
 
-## 残余风险
+Judge-1 / Judge-2 使用同一 `deepseek-v4-flash`，属于独立上下文的重复评审而非异构模型评审；人工盲评承担最终异质纠偏。
 
-1. `models.json` 运行前后哈希一致只证明本地模型元数据未发生可观察变化，不能严格证明 DeepSeek 服务端同一模型 slug 的底层快照绝对不变；正式运行已通过预先随机顺序降低系统性偏差。
-2. 固定窗口可能截断自然场景；该问题属于 sampled Benchmark 的边界条件，Judge 应检查 Runner 是否诚实处理不确定性，而不是补充窗口外信息。
-3. Token / 输出成本存在方法差异，后续需要作为“能力收益 / 成本”单独比较，不能只比较文字质量。
+## 匿名化工具修复
 
-## 当前下一动作：匿名化与 Blind Judge v2
+本轮执行时发现旧版匿名脚本复制的 `check_report.json` 中 `runner_dir` 可能泄露真实 Runner 路径。Controller 在 Judge 启动前已本地匿名化并复扫，未造成 Judge 身份泄漏。
 
-先同步 GitHub 最新，使用更新后的：
+GitHub 当前 `b09_anonymize.py` 已永久修复：复制 `check_report.json` 时自动清理 Runner 身份与本地路径字段。
 
-- `05_Skills与自动化/scripts/b09_anonymize.py`
-- `05_Skills与自动化/B09_原著蒸馏Benchmark/JUDGE.md`
+## 当前下一动作：人工成对盲评
 
-对正式目录执行匿名化时，必须显式提供冻结输入目录：
+本地文件：
 
-```bash
-python "05_Skills与自动化/scripts/b09_anonymize.py" \
-  "06_工作区/01_待处理/B09_原著蒸馏Benchmark/_local_runs/round-01-formal" \
-  --source-inputs-dir "06_工作区/01_待处理/B09_原著蒸馏Benchmark/_local_runs/round-01-formal/_inputs"
-```
+`06_工作区/01_待处理/B09_原著蒸馏Benchmark/_local_runs/round-01-formal/human_pairwise_packet.md`
 
-匿名包中每个 sample 应包含：
+共 6 组 pair，每部作品 2 对。
 
-```text
-_blind/<sample>/
-├── _source/
-│   ├── OPENING.txt
-│   ├── MIDDLE.txt
-│   └── manifest_info.json
-├── <anonymous-label-1>/
-├── <anonymous-label-2>/
-├── <anonymous-label-3>/
-└── <anonymous-label-4>/
-```
+人工只需要回答：
 
-Judge 只允许读取：
+1. 哪个更能帮助原创设计？
+2. 哪个更像漂亮空话？
+3. 哪个机制最值得拿到新故事中测试？
+4. 如果只能保留一个，保留哪个？
 
-- 最新 `JUDGE.md`
-- 正式 `_blind/` 匿名包（包括共用 `_source/`）
+人工评审时仍不得：
 
-Judge 不得读取：
+- 打开 `_controller/blind_map.json`；
+- 猜测或查询 D0/A/B/C 身份；
+- 查看 run metadata / token / 方法说明；
+- 因 Judge 排名直接照抄结论。
 
-- `run_metadata.json`
-- token / 执行顺序 / retry 信息
-- pilot 输出
-- Runner Pack 身份说明
-- blind map
-- 另一个 Judge 的结果
-- `_source/` 之外的原著正文
+建议由本地 Agent 只展示 `human_pairwise_packet.md` 的匿名内容，记录用户选择和一句理由，不揭盲。
 
-启动 Judge-1 / Judge-2 两个全新独立进程。如果使用同一模型，两者必须独立随机 sample 顺序和匿名 label 呈现顺序。
+## 人工完成后的下一状态
 
-Judge 完成后形成仍匿名的 `human_pairwise_packet.md`，人工只做少量高价值成对选择。
+`HUMAN_PAIRWISE_COMPLETE_READY_FOR_UNBLINDING`
 
-人工完成前：
+届时才允许：
 
-- 不揭盲；
-- 不宣布总冠军；
-- 不决定正式采用哪个 Skill。
+1. 固化人工盲评结果；
+2. 打开 blind map；
+3. 揭盲 D0/A/B/C；
+4. 汇总 Judge + 人工结果；
+5. 选各能力维度冠军，不选单一总冠军；
+6. 判断哪些上游能力直接借鉴、二次改造、仅 Benchmark 或淘汰；
+7. 设计第二轮跨题材迁移 A/B 测试。
 
-## 下一状态
-
-匿名化 + 两个 Blind Judge + 人工盲评包完成后：
-
-`BLIND_JUDGING_COMPLETE_READY_FOR_HUMAN_PAIRWISE`
+只有迁移测试仍成立的机制，才进入 `04_写作知识库` 候选。
