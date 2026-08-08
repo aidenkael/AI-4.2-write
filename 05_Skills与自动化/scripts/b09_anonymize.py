@@ -3,8 +3,9 @@
 
 - 每个 sample 独立随机映射 Runner -> 匿名标签；
 - Judge 包不包含 run_metadata.json；
+- 正式盲审可附带每个 sample 的冻结 OPENING/MIDDLE 原文窗口，供 Judge 核验证据；
 - 真实映射只写 Controller 目录；
-- 所有输出应位于已 gitignore 的 _local_runs 下。
+- 所有输出与冻结窗口都应位于已 gitignore 的 _local_runs 下。
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ PUBLIC_FILES = (
     "04_self_limits.md",
     "check_report.json",
 )
+SOURCE_FILES = ("OPENING.txt", "MIDDLE.txt", "manifest_info.json")
 
 
 def random_label(used: set[str]) -> str:
@@ -47,20 +49,48 @@ def copy_public_files(src: Path, dst: Path) -> list[str]:
     return copied
 
 
+def copy_source_packet(inputs_dir: Path, sample: str, dst: Path) -> list[str]:
+    src = inputs_dir / sample
+    if not src.is_dir():
+        raise SystemExit(f"缺少 sample 冻结输入目录：{src}")
+    dst.mkdir(parents=True, exist_ok=False)
+    copied: list[str] = []
+    for filename in SOURCE_FILES:
+        path = src / filename
+        if not path.is_file():
+            raise SystemExit(f"缺少 Judge 核证所需冻结输入：{path}")
+        shutil.copy2(path, dst / filename)
+        copied.append(filename)
+    return copied
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="匿名化 B09 round 输出，供 Judge 盲审")
-    parser.add_argument("round_dir", help="例如 .../_local_runs/round-01")
+    parser.add_argument("round_dir", help="例如 .../_local_runs/round-01-formal")
     parser.add_argument(
         "--samples",
         nargs="+",
         default=("WN-A", "WN-B", "WL-A"),
         help="要匿名化的 sample id",
     )
+    parser.add_argument(
+        "--source-inputs-dir",
+        default=None,
+        help=(
+            "正式盲审时必须提供冻结输入目录，例如 round-01-formal/_inputs；"
+            "脚本会把每个 sample 的 OPENING.txt、MIDDLE.txt、manifest_info.json "
+            "复制到匿名包的 _source/，不包含整本原著。"
+        ),
+    )
     args = parser.parse_args()
 
     round_dir = Path(args.round_dir).resolve()
     if not round_dir.is_dir():
         raise SystemExit(f"round_dir 不存在：{round_dir}")
+
+    inputs_dir = Path(args.source_inputs_dir).resolve() if args.source_inputs_dir else None
+    if inputs_dir is not None and not inputs_dir.is_dir():
+        raise SystemExit(f"source inputs dir 不存在：{inputs_dir}")
 
     blind_dir = round_dir / "_blind"
     controller_dir = round_dir / "_controller"
@@ -80,6 +110,11 @@ def main() -> int:
         if not sample_dir.is_dir():
             raise SystemExit(f"缺少 sample 目录：{sample_dir}")
 
+        if inputs_dir is not None:
+            copied_source = copy_source_packet(inputs_dir, sample, blind_dir / sample / "_source")
+            if len(copied_source) != len(SOURCE_FILES):
+                raise SystemExit(f"冻结输入包不完整：{sample}")
+
         sample_map: dict[str, str] = {}
         for runner in RUNNERS:
             src = sample_dir / runner
@@ -97,7 +132,8 @@ def main() -> int:
     map_payload = {
         "benchmark": "B09_original_work_distillation",
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
-        "warning": "CONTROLLER ONLY — Judge 完成前不得打开或分享此映射。",
+        "warning": "CONTROLLER ONLY — Judge 与人工盲评完成前不得打开或分享此映射。",
+        "source_packet_included": inputs_dir is not None,
         "mapping": mapping,
     }
     (controller_dir / "blind_map.json").write_text(
@@ -108,13 +144,19 @@ def main() -> int:
     judge_readme = (
         "B09 Blind Packet\n"
         "Judge 只可读取本 _blind 目录。匿名标签每个 sample 独立随机生成。\n"
+        "每个 sample 的 _source/（若存在）是同一份冻结 OPENING/MIDDLE 原文窗口，"
+        "仅用于核验 Evidence；不得根据自身记忆补充窗口外正文。\n"
         "不要尝试根据文风猜 Runner 身份；只根据证据、推断克制、因果与迁移价值评审。\n"
     )
     (blind_dir / "README.txt").write_text(judge_readme, encoding="utf-8")
 
     print(f"Blind packet: {blind_dir}")
     print(f"Controller mapping: {controller_dir / 'blind_map.json'}")
-    print("Judge 完成前不要打开 blind_map.json。")
+    if inputs_dir is None:
+        print("WARNING: 未附冻结 source packet；仅适合不核验证据忠实度的旧流程。")
+    else:
+        print("Frozen source packet included for Evidence fidelity judging.")
+    print("Judge 与人工盲评完成前不要打开 blind_map.json。")
     return 0
 
 
