@@ -58,6 +58,10 @@ __pycache__/
 # B02 情绪传递 Benchmark 本地运行数据（Runner 输出、运行顺序、匿名映射；不上传）
 06_工作区/01_待处理/B02_情绪传递Benchmark/_local_runs/
 
+# B02 情绪传递 Benchmark 匿名映射与运行顺序（Local Only，作者评审前不公开）
+06_工作区/01_待处理/B02_情绪传递Benchmark/blind_map_presealed_r2a.json
+06_工作区/01_待处理/B02_情绪传递Benchmark/run_order_r2a.json
+
 # 杂项：解压残留书签 + 内部移动日志（本地保留）
 *.url
 
