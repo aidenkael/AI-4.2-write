@@ -52,6 +52,9 @@ __pycache__/
 06_工作区/01_待处理/B09_原著蒸馏Benchmark/_local_manifests/
 06_工作区/01_待处理/B09_原著蒸馏Benchmark/_local_runs/
 
+# B02 情绪传递 Benchmark 上游冻结副本（本地只读；含第三方仓库快照，不上传）
+06_工作区/01_待处理/B02_情绪传递Benchmark/_upstream_freeze/
+
 # 杂项：解压残留书签 + 内部移动日志（本地保留）
 *.url
 
