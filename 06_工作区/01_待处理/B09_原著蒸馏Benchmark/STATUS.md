@@ -1,8 +1,8 @@
 # B09 Round 01 Status
 
-- 状态：`HUMAN_MECHANISM_REVIEW_COMPLETE_READY_FOR_UNBLINDING`
+- 状态：`ROUND01_UNBLINDED_CAPABILITY_MAP_READY`
 - 更新时间：2026-08-09
-- 当前阶段：正式 Runner、匿名化、双 Blind Judge 与人工机制评审均已完成；blind map 仍未打开。下一步允许揭盲，并按能力维度分析 D0 / A / B / C 的真实贡献，不评单一总冠军。
+- 当前阶段：正式 Runner、匿名化、双 Blind Judge、人工机制评审、揭盲与来源贡献分析均已完成。Round 01 不选单一 Skill 冠军，已形成按能力吸收、改造、合并的来源贡献图；下一步是 Round 02 跨题材迁移验证设计。
 
 ## 已完成
 
@@ -19,53 +19,66 @@
 - [x] 人工评审范式由“强制二选一”修正为“能力发现、去重、改造、组合”
 - [x] P1–P6 机制层评审完成并保存 `human_mechanism_review.md`（Local Only）
 - [x] 项目权威 README 已写入“工作台建设原则”
-- [x] 人工机制评审完成审计：`00_项目控制/B09_Round01_人工机制评审完成审计.md`
+- [x] 人工机制评审完成审计
+- [x] 首次打开 blind map 并完成 D0 / A / B / C 揭盲映射
+- [x] 完成 Judge + Human Review + Evidence fidelity + 成本的来源贡献分析（Local Only）
+- [x] Round 01 揭盲能力图结论：`00_项目控制/B09_Round01_揭盲能力图结论.md`
+
+## 揭盲映射
+
+| Sample | D0 Baseline | A oh-story adapted | B ani-book evidence-first | C AI-write Candidate |
+| --- | --- | --- | --- | --- |
+| WL-A《一九八四》 | R-KT7U | R-3ZT8 | R-5D26 | R-3GQW |
+| WN-A《庆余年》 | R-FPX2 | R-GAWD | R-8YFS | R-GSK2 |
+| WN-B《道诡异仙》 | R-ANL8 | R-L443 | R-VN9C | R-4YW3 |
+
+## Round 01 当前核心能力候选
+
+优先进入 Round 02：
+
+1. 可计算风险系统；
+2. 外部约束改变表达形式；
+3. 主动诱发式信息获取 / 反应测试；
+4. 可逆证据与竞争性解释（必须阶段性结算）。
+
+这些仍只是迁移测试候选，尚未进入正式 `04_写作知识库`。
+
+## 方法贡献摘要
+
+- **D0 Baseline**：证明高价值发现不完全来自 Skill；必须长期保留最小基线以测量真实 Skill 增益。
+- **A / oh-story adapted**：网文追读、信息控制、钩子与反转强；需控制冗余和模板化。
+- **B / ani-book evidence-first**：fact / inference / hypothesis、confidence、counter-evidence 等证据纪律价值突出；需加强定位自动校验。
+- **C / AI-write Candidate**：Reader-causality、反证与迁移测试命题稳定；需压缩长输出和成对回声。
+
+不整体采用任何一个外部 Skill；按能力吸收并统一到 AI-write 自己的工作流。
 
 ## 人工评审证据边界
 
 - P1、P2、P4、P5、P6：有用户正式判断。
 - P3：无用户正式作答，仅有 Assistant 参考判断。
 - P3 不得计作用户偏好；若它对后续关键结论有决定性影响，再补人工判断。
-- 早期“如果只能留一个”的二选一答案仅保留为历史观察，不作为淘汰依据。
+- 早期强制二选一答案仅为历史观察，不作为淘汰依据。
 
-## 当前优先追踪的能力候选
+## 成本记录边界
 
-- 可计算风险系统；
-- 外部约束改变表达形式；
-- 主动诱发式信息获取 / 反应测试；
-- 可逆证据与竞争性解释；
-- 能力—成本—后果系统（力量代价记账作为子机制）；
-- 有动机的信息交付 / 戏剧化说明；
-- 收益与历史债务绑定（需改造验证）。
+揭盲汇报中的“单次运行 token 明细未留档”与正式 Runner 完成阶段曾报告的逐组 token / `run_metadata.json` 记录存在冲突。
 
-重复或过窄机制优先合并、降级为子机制或舍弃，不按卡片数量扩张知识库。
+本地复核前，不断言逐运行 token 已丢失。Round 02 必须把逐运行 token、时长、输出字符作为强制可复核字段。
 
-## 当前下一动作：揭盲与来源贡献分析
-
-现在允许 Controller 打开：
-
-`_local_runs/round-01-formal/_controller/blind_map.json`
-
-揭盲后必须建立“匿名 label → D0/A/B/C → 来源方法”的映射，并同时汇总：
-
-1. 两个 Blind Judge 的维度判断；
-2. 用户正式 Human Review（P3 单独标记无用户判断）；
-3. Evidence fidelity 问题；
-4. 机制新增价值 / 重复度；
-5. 成本（token / 输出规模）仅作为独立维度，不以长文本自动判优。
-
-## 揭盲后禁止的错误结论
+## Round 01 禁止外推
 
 - 不按胜场数选一个 Skill；
-- 不因为某个 Runner 总体领先就整套采用；
+- 不因为某 Runner 总体领先就整套采用；
 - 不把 GitHub 项目的原文、模板或受许可证约束实现直接拼入 AI-write；
-- 不把 Round 01 结果直接写入正式 `04_写作知识库`；
+- 不把 Round 01 机制直接写入正式知识库；
 - 不把 sampled 窗口结论外推为整本作品规律。
 
-## 下一状态
+## 当前下一动作：Round 02 设计
 
-完成揭盲与来源贡献分析后：
+Round 02 的目标是测试：
 
-`ROUND01_UNBLINDED_CAPABILITY_MAP_READY`
+> 这些从原著中蒸馏出的机制，离开原作和原题材后，能否仍然帮助作者完成原创设计、诊断与修订？
 
-随后从高价值能力中选择少量候选进入 Round 02 跨题材迁移验证。只有迁移后仍成立的能力，才进入正式知识库 / Skill 设计候选。
+优先从 4 个核心候选中选择少量、互相区分度高的原创任务进行跨题材迁移 A/B 测试。
+
+只有迁移后仍成立的能力，才进入 `04_写作知识库` 与正式 Skill 设计候选。
