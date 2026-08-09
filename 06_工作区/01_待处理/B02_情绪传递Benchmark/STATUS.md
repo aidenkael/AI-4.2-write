@@ -1,8 +1,8 @@
 # B02 情绪传递 Benchmark Status
 
-- 状态：`B02_G_ROUND2A_DESIGN_READY_FOR_CONTROLLER_REVIEW`
-- 更新时间：2026-08-09
-- 当前阶段：B02-G Round 2A 单机制隔离实验设计冻结，等待 Controller 复核。**未运行任何正式模型生成。**
+- 状态：`B02_G_ROUND2A_REVISED_READY_FOR_CONTROLLER_FINAL_REVIEW`
+- 更新时间：2026-08-10
+- 当前阶段：B02-G Round 2A 单机制隔离实验设计完成 Controller 复核修订（删除物件提示、固定 latent truth、删除成品台词、重新审计通过）。**未运行任何正式模型生成。**
 - Round1 evidence is exploratory; not production-ready and not sufficient for KB/Skill promotion.
 - 方法学限制（v0.2 记录）：作者评审存在 Controller 先行意见暴露（组3 不作为独立投票）；三任务匿名映射完全相同（A=G2/B=G1/C=D0）——Round2A 已通过 balanced permutation 与作者先评流程修正。
 
@@ -37,7 +37,9 @@
 - [x] 12-run 重复结构（2 tasks × 3 conditions × 2 repetitions）
 - [x] Balanced permutation 匿名映射冻结（D0/M1/M2 在 A/B/C 位置均衡分布）
 - [x] 评审隔离流程冻结（作者先评 → 封存 → Controller 后评）
-- [x] 机制泄露与内容污染审计通过（6 类检查项全部通过）
+- [x] 机制泄露与内容污染审计 v0.1 通过（6 类检查项）
+- [x] Controller 复核要求 v0.1 修订完成（删除 T4 物件提示、固定 T4/T5 latent truth、删除 T5 成品台词）
+- [x] 机制泄露与内容污染审计 v0.2 通过ﾈ8 类检查项全部通过）
 
 ## 揭盲后核心结论摘要（以 v0.2 为准）
 
@@ -52,11 +54,9 @@
 
 ## 当前下一动作
 
-等待 Controller 复核 Round2A 设计冻结材料并决定：
+等待 Controller 最终放行（READY_TO_RUN）。
 
-1. 是否放行正式运行（READY_TO_RUN）；
-2. 是否需要修改任务/注入/映射/流程；
-3. 以上均仅为建议，未执行。
+当前状态为 `REVISED_READY_FOR_CONTROLLER_FINAL_REVIEW`，不是 READY_TO_RUN。
 
 ## 禁止
 
