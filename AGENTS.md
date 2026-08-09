@@ -62,7 +62,7 @@ GitHub 上游是能力与工程经验来源，不应成为未来运行时必须�
 
 以下规则优先级高于任何自动化同步逻辑：
 
-1. **GitHub 不天然高于用户本地修改。** 本地工作树是权威状态来源；远程只是同步副本之一。
+1. **用户明确确认的意图是最终依据。** 本地工作树与远端发生未知差异时，任何一边都不得自动覆盖另一边；先 `fetch` + `compare`，再由用户/Controller 确认。
 2. **用户本地删除 / 移动 / 改名不得自动 restore。** 如果用户已从磁盘删除某个 tracked 文件，Agent 不得因为 GitHub 上仍存在就 `git checkout`、`git restore` 或 `git reset` 把它取回。
 3. **未知差异优先 `fetch` + `compare`。** 发现本地与远程不一致时，先 `git fetch origin` 再用 `git log` / `git diff` 对比，而不是直接 pull 覆盖。
 4. **pull 前先确认工作树。** 确认当前 branch、未提交修改、stash 状态；如果工作树不干净，先报告风险，不得强行 pull。
