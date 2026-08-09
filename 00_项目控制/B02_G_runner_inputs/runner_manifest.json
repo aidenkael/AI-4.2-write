@@ -1,0 +1,206 @@
+{
+  "benchmark": "B02-G",
+  "frozen_at": "2026-08-09",
+  "model": "deepseek-v4-flash",
+  "reasoning_effort": "high",
+  "heuristic_note": "est_tokens = CJK 字符数 + 非 CJK 字符数 x 0.4（仅估算，供成本参考）",
+  "base_tasks_file": "00_项目控制/B02_G_base_tasks_v0.1.md",
+  "injections": {
+    "G1": {
+      "source_repo": "worldwonderer/oh-story-claudecode",
+      "frozen_commit": "70a834e88d1103f494f45667bab4b31472a83b58",
+      "license": "MIT",
+      "injection_file": "00_项目控制/B02_G_runner_inputs/G1_injection.txt",
+      "injection_stats": {
+        "total_chars": 445,
+        "cjk_chars": 351,
+        "est_tokens": 389
+      },
+      "rules": [
+        {
+          "rule": "1 情绪不直接点名，用身体反应和行为表现；低强度过场情绪可直写",
+          "source_file": "skills/story-long-write/references/anti-ai-writing.md 规则2（情绪不用他感到/他觉得，用身体反应和行为表现）"
+        },
+        {
+          "rule": "2 动作→对话→情绪反应循环推进，连续纯心理描写不超过两段",
+          "source_file": "skills/story-long-write/references/anti-ai-writing.md 规则2"
+        },
+        {
+          "rule": "3 避免叠加式描写（发生层→感知层→反应层三段重复）",
+          "source_file": "skills/story-long-write/references/anti-ai-writing.md AI写作指纹·叠加式描写"
+        },
+        {
+          "rule": "4 关系与情绪重量用具体物件/数字/习惯承载",
+          "source_file": "skills/story-long-write/references/emotional-methods.md 第一斧·羁绊铺设"
+        },
+        {
+          "rule": "5 结尾余韵用安静细节（不解释/不回头/不流泪）",
+          "source_file": "skills/story-long-write/references/emotional-methods.md 第三斧·余韵钝痛"
+        },
+        {
+          "rule": "6 情绪转向必须有触发事件",
+          "source_file": "skills/story-long-write/references/emotional-methods.md 拉扯节奏原则"
+        },
+        {
+          "rule": "7 对话用回避/转移/话里有话承载潜台词",
+          "source_file": "skills/story-long-write/references/dialogue-mastery.md 潜台词与议程"
+        }
+      ]
+    },
+    "G2": {
+      "source_repo": "haowjy/creative-writing-skills",
+      "frozen_commit": "fd7a3ad9cd7697a0645ff6ff4bd5e809cf7673a3",
+      "license": "Apache-2.0",
+      "injection_file": "00_项目控制/B02_G_runner_inputs/G2_injection.txt",
+      "injection_stats": {
+        "total_chars": 507,
+        "cjk_chars": 415,
+        "est_tokens": 452
+      },
+      "rules": [
+        {
+          "rule": "1 压力下人物拖延/转移/防御/沉默/过度解释/玩笑/攻击，很少干净说出内心；对话可混乱",
+          "source_file": "skills/character-sim/SKILL.md Method"
+        },
+        {
+          "rule": "2 情绪/压力/亲密/愤怒/恐惧改变句子形状与长度",
+          "source_file": "skills/character-sim/SKILL.md Method"
+        },
+        {
+          "rule": "3 情绪峰值拉近心理距离；自由间接引语让叙述带人物词汇与判断",
+          "source_file": "skills/creative-writing-craft/resources/prose-writing.md Psychic Distance / Free Indirect Discourse"
+        },
+        {
+          "rule": "4 内心性通过行为/记忆/联想呈现，不用标签",
+          "source_file": "skills/creative-writing-craft/resources/prose-writing.md Interiority"
+        },
+        {
+          "rule": "5 非 POV 人物只写可观察行为",
+          "source_file": "skills/creative-writing-craft/resources/prose-writing.md Point of View"
+        },
+        {
+          "rule": "6 拒绝通用身体动作模板（握拳/发抖/回避目光/咬紧下巴）",
+          "source_file": "skills/writing-principles/resources/failure-modes.md Labeling emotions·stock-tells"
+        },
+        {
+          "rule": "7 不替读者解释情绪意义；关键时刻人物轻描淡写",
+          "source_file": "skills/writing-principles/resources/failure-modes.md Adding emotional commentary / Over-intensifying"
+        },
+        {
+          "rule": "8 关系变化通过场景互动发生，不用旁白",
+          "source_file": "skills/story-review/resources/prose-critique/character.md Relationship Dynamics"
+        }
+      ]
+    }
+  },
+  "runners": [
+    {
+      "id": "T1_D0",
+      "task": "T1",
+      "version": "D0",
+      "input_file": "00_项目控制/B02_G_runner_inputs/T1_D0.txt",
+      "injection": null,
+      "injection_total_chars": 0,
+      "injection_est_tokens": 0,
+      "injected_rules_count": 0,
+      "input_total_chars": 210,
+      "input_cjk_chars": 155
+    },
+    {
+      "id": "T1_G1",
+      "task": "T1",
+      "version": "G1",
+      "input_file": "00_项目控制/B02_G_runner_inputs/T1_G1.txt",
+      "injection": "00_项目控制/B02_G_runner_inputs/G1_injection.txt",
+      "injection_total_chars": 445,
+      "injection_est_tokens": 389,
+      "injected_rules_count": 7,
+      "input_total_chars": 657,
+      "input_cjk_chars": 506
+    },
+    {
+      "id": "T1_G2",
+      "task": "T1",
+      "version": "G2",
+      "input_file": "00_项目控制/B02_G_runner_inputs/T1_G2.txt",
+      "injection": "00_项目控制/B02_G_runner_inputs/G2_injection.txt",
+      "injection_total_chars": 507,
+      "injection_est_tokens": 452,
+      "injected_rules_count": 8,
+      "input_total_chars": 719,
+      "input_cjk_chars": 570
+    },
+    {
+      "id": "T2_D0",
+      "task": "T2",
+      "version": "D0",
+      "input_file": "00_项目控制/B02_G_runner_inputs/T2_D0.txt",
+      "injection": null,
+      "injection_total_chars": 0,
+      "injection_est_tokens": 0,
+      "injected_rules_count": 0,
+      "input_total_chars": 206,
+      "input_cjk_chars": 161
+    },
+    {
+      "id": "T2_G1",
+      "task": "T2",
+      "version": "G1",
+      "input_file": "00_项目控制/B02_G_runner_inputs/T2_G1.txt",
+      "injection": "00_项目控制/B02_G_runner_inputs/G1_injection.txt",
+      "injection_total_chars": 445,
+      "injection_est_tokens": 389,
+      "injected_rules_count": 7,
+      "input_total_chars": 653,
+      "input_cjk_chars": 512
+    },
+    {
+      "id": "T2_G2",
+      "task": "T2",
+      "version": "G2",
+      "input_file": "00_项目控制/B02_G_runner_inputs/T2_G2.txt",
+      "injection": "00_项目控制/B02_G_runner_inputs/G2_injection.txt",
+      "injection_total_chars": 507,
+      "injection_est_tokens": 452,
+      "injected_rules_count": 8,
+      "input_total_chars": 715,
+      "input_cjk_chars": 576
+    },
+    {
+      "id": "T3_D0",
+      "task": "T3",
+      "version": "D0",
+      "input_file": "00_项目控制/B02_G_runner_inputs/T3_D0.txt",
+      "injection": null,
+      "injection_total_chars": 0,
+      "injection_est_tokens": 0,
+      "injected_rules_count": 0,
+      "input_total_chars": 201,
+      "input_cjk_chars": 156
+    },
+    {
+      "id": "T3_G1",
+      "task": "T3",
+      "version": "G1",
+      "input_file": "00_项目控制/B02_G_runner_inputs/T3_G1.txt",
+      "injection": "00_项目控制/B02_G_runner_inputs/G1_injection.txt",
+      "injection_total_chars": 445,
+      "injection_est_tokens": 389,
+      "injected_rules_count": 7,
+      "input_total_chars": 648,
+      "input_cjk_chars": 507
+    },
+    {
+      "id": "T3_G2",
+      "task": "T3",
+      "version": "G2",
+      "input_file": "00_项目控制/B02_G_runner_inputs/T3_G2.txt",
+      "injection": "00_项目控制/B02_G_runner_inputs/G2_injection.txt",
+      "injection_total_chars": 507,
+      "injection_est_tokens": 452,
+      "injected_rules_count": 8,
+      "input_total_chars": 710,
+      "input_cjk_chars": 571
+    }
+  ]
+}
