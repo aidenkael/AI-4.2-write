@@ -1,8 +1,8 @@
 # B02 情绪传递 Benchmark Status
 
-- 状态：`B02_G_ROUND2A_AUTHOR_BLIND_REVIEW_SEALED`
+- 状态：`B02_G_ROUND2A_REVEALED_ANALYSIS_READY`
 - 更新时间：2026-08-10
-- 当前阶段：B02-G Round 2A 正式生成已全部完成（12/12 run）；**作者 G1–G4 盲评已完成并封存**（`author_blind_review_record_r2a_SEALED.md`）。**作者答案尚未向 Controller 暴露；mapping 尚未揭盲；Controller 尚未阅读正式正文。**
+- 当前阶段：B02-G Round 2A mapping 已正式揭盲。**作者盲评已封存；Controller 独立评审已完成；外部 AI 独立评审已完成；现在允许进行 condition 级结果分析。** 12 个正式 run 仍保持冻结，不得修改或重跑。
 - 封存 SHA256：`0f604478484b86d511246086311ff24a41533e6a375c2f1e62da2e3a149018c0`
 - Round1 evidence is exploratory; not production-ready and not sufficient for KB/Skill promotion.
 - 方法学限制（v0.2 记录）：作者评审存在 Controller 先行意见暴露（组3 不作为独立投票）；三任务匿名映射完全相同（A=G2/B=G1/C=D0）——Round2A 已通过 balanced permutation 与作者先评流程修正。
@@ -48,6 +48,9 @@
 - [x] 确定性检查完成（纯机械：12/12 输出存在非空、exit=0、输入 hash 未变、mapping seal 未变、run order 未变）
 - [x] 作者盲评包已生成（4 组 × 方案 A/B/C，Local Only，无泄露审计通过），空白评审模板 `author_blind_review_record_r2a.md` 已生成待作者填写
 - [x] 作者 G1–G4 盲评已完成并封存（`author_blind_review_record_r2a_SEALED.md`，SHA256 `0f604478…`），`author_blind_review_seal_r2a.json` 已生成
+- [x] Controller 独立评审已完成
+- [x] 外部 AI 独立评审已完成
+- [x] 正式揭盲完成（`B02_G_Round2A_正式揭盲_v0.1.md`），mapping SHA256 校验通过，状态转为 `B02_G_ROUND2A_REVEALED_ANALYSIS_READY`
 
 ## 揭盲后核心结论摘要（以 v0.2 为准）
 
@@ -62,11 +65,11 @@
 
 ## 当前下一动作
 
-下一步允许 Controller 独立阅读匿名正文（`_display/` 中的方案 A/B/C）并形成独立判断。
+现在允许进行 condition 级结果分析（作者票 / Controller 票 / 外部 AI 票的比较与汇总、condition 级成本比较、机制诊断）。
 
-**Controller 独立判断完成前，不得读取作者封存记录内容（`author_blind_review_record_r2a_SEALED.md`），也不得揭盲（`blind_map_presealed_r2a.json`）。**
+**12 个正式 run 仍保持冻结，不得修改或重跑。**
 
-当前状态为 `B02_G_ROUND2A_AUTHOR_BLIND_REVIEW_SEALED`：作者盲评已封存；作者答案尚未向 Controller 暴露；mapping 尚未揭盲；Controller 尚未阅读正文。只有 Controller 独立判断完成后，才允许揭盲、condition 级成本比较、机制诊断与 Round2A 结果分析。
+当前状态为 `B02_G_ROUND2A_REVEALED_ANALYSIS_READY`：mapping 已揭盲；三方评审均已完成；可以开始正式分析。
 
 ## 禁止
 
@@ -81,6 +84,7 @@
 - 不重跑 / 不补写 / 不修改任何已完成的正式 run（12 个 run 与冻结输入保持一致）；
 - 作者盲评封存前：不揭盲、不阅读任何正式正文、不做 A/B/C 评价、不报告 condition→A/B/C、不提供可通过统计特征推断身份的信息；
 - 作者盲评封存后、Controller 独立判断完成前：不读取作者封存记录内容、不揭盲；Controller 独立判断期间不得参考作者答案；
+- 揭盲后：不修改或重跑任何已完成的正式 run（12 个 run 保持冻结）；
 - 不测试 M1+M2 组合；
 - 不把"物件承重"写成必须规则；
 - 不建立"少写对话"等正式规则；
