@@ -12,9 +12,9 @@
       "license": "MIT",
       "injection_file": "00_项目控制/B02_G_runner_inputs/G1_injection.txt",
       "injection_stats": {
-        "total_chars": 445,
-        "cjk_chars": 351,
-        "est_tokens": 389
+        "total_chars": 382,
+        "cjk_chars": 300,
+        "est_tokens": 333
       },
       "rules": [
         {
@@ -30,12 +30,12 @@
           "source_file": "skills/story-long-write/references/anti-ai-writing.md AI写作指纹·叠加式描写"
         },
         {
-          "rule": "4 关系与情绪重量用具体物件/数字/习惯承载",
-          "source_file": "skills/story-long-write/references/emotional-methods.md 第一斧·羁绊铺设"
+          "rule": "4 关系与情绪的重量由人物化的、具体的细节承担，而不是抽象说明",
+          "source_file": "skills/story-long-write/references/emotional-methods.md 第一斧·羁绊铺设（去案例化）"
         },
         {
-          "rule": "5 结尾余韵用安静细节（不解释/不回头/不流泪）",
-          "source_file": "skills/story-long-write/references/emotional-methods.md 第三斧·余韵钝痛"
+          "rule": "5 不在结尾替读者总结情绪；让情节与人物行为本身留下余韵",
+          "source_file": "skills/story-long-write/references/emotional-methods.md 第三斧·余韵钝痛（去案例化）；另见 anti-ai-writing.md 章末总结体"
         },
         {
           "rule": "6 情绪转向必须有触发事件",
@@ -53,9 +53,9 @@
       "license": "Apache-2.0",
       "injection_file": "00_项目控制/B02_G_runner_inputs/G2_injection.txt",
       "injection_stats": {
-        "total_chars": 507,
-        "cjk_chars": 415,
-        "est_tokens": 452
+        "total_chars": 478,
+        "cjk_chars": 391,
+        "est_tokens": 426
       },
       "rules": [
         {
@@ -71,8 +71,8 @@
           "source_file": "skills/creative-writing-craft/resources/prose-writing.md Psychic Distance / Free Indirect Discourse"
         },
         {
-          "rule": "4 内心性通过行为/记忆/联想呈现，不用标签",
-          "source_file": "skills/creative-writing-craft/resources/prose-writing.md Interiority"
+          "rule": "4 人物内心可以通过行为、记忆、联想等显现，而不是直接贴情绪标签",
+          "source_file": "skills/creative-writing-craft/resources/prose-writing.md Interiority（去案例化）"
         },
         {
           "rule": "5 非 POV 人物只写可观察行为",
@@ -112,11 +112,11 @@
       "version": "G1",
       "input_file": "00_项目控制/B02_G_runner_inputs/T1_G1.txt",
       "injection": "00_项目控制/B02_G_runner_inputs/G1_injection.txt",
-      "injection_total_chars": 445,
-      "injection_est_tokens": 389,
+      "injection_total_chars": 382,
+      "injection_est_tokens": 333,
       "injected_rules_count": 7,
-      "input_total_chars": 657,
-      "input_cjk_chars": 506
+      "input_total_chars": 594,
+      "input_cjk_chars": 455
     },
     {
       "id": "T1_G2",
@@ -124,11 +124,11 @@
       "version": "G2",
       "input_file": "00_项目控制/B02_G_runner_inputs/T1_G2.txt",
       "injection": "00_项目控制/B02_G_runner_inputs/G2_injection.txt",
-      "injection_total_chars": 507,
-      "injection_est_tokens": 452,
+      "injection_total_chars": 478,
+      "injection_est_tokens": 426,
       "injected_rules_count": 8,
-      "input_total_chars": 719,
-      "input_cjk_chars": 570
+      "input_total_chars": 690,
+      "input_cjk_chars": 546
     },
     {
       "id": "T2_D0",
@@ -148,11 +148,11 @@
       "version": "G1",
       "input_file": "00_项目控制/B02_G_runner_inputs/T2_G1.txt",
       "injection": "00_项目控制/B02_G_runner_inputs/G1_injection.txt",
-      "injection_total_chars": 445,
-      "injection_est_tokens": 389,
+      "injection_total_chars": 382,
+      "injection_est_tokens": 333,
       "injected_rules_count": 7,
-      "input_total_chars": 653,
-      "input_cjk_chars": 512
+      "input_total_chars": 590,
+      "input_cjk_chars": 461
     },
     {
       "id": "T2_G2",
@@ -160,11 +160,11 @@
       "version": "G2",
       "input_file": "00_项目控制/B02_G_runner_inputs/T2_G2.txt",
       "injection": "00_项目控制/B02_G_runner_inputs/G2_injection.txt",
-      "injection_total_chars": 507,
-      "injection_est_tokens": 452,
+      "injection_total_chars": 478,
+      "injection_est_tokens": 426,
       "injected_rules_count": 8,
-      "input_total_chars": 715,
-      "input_cjk_chars": 576
+      "input_total_chars": 686,
+      "input_cjk_chars": 552
     },
     {
       "id": "T3_D0",
@@ -184,11 +184,11 @@
       "version": "G1",
       "input_file": "00_项目控制/B02_G_runner_inputs/T3_G1.txt",
       "injection": "00_项目控制/B02_G_runner_inputs/G1_injection.txt",
-      "injection_total_chars": 445,
-      "injection_est_tokens": 389,
+      "injection_total_chars": 382,
+      "injection_est_tokens": 333,
       "injected_rules_count": 7,
-      "input_total_chars": 648,
-      "input_cjk_chars": 507
+      "input_total_chars": 585,
+      "input_cjk_chars": 456
     },
     {
       "id": "T3_G2",
@@ -196,11 +196,12 @@
       "version": "G2",
       "input_file": "00_项目控制/B02_G_runner_inputs/T3_G2.txt",
       "injection": "00_项目控制/B02_G_runner_inputs/G2_injection.txt",
-      "injection_total_chars": 507,
-      "injection_est_tokens": 452,
+      "injection_total_chars": 478,
+      "injection_est_tokens": 426,
       "injected_rules_count": 8,
-      "input_total_chars": 710,
-      "input_cjk_chars": 571
+      "input_total_chars": 681,
+      "input_cjk_chars": 547
     }
-  ]
+  ],
+  "revision": "v0.2 去案例化修订 2026-08-09"
 }
