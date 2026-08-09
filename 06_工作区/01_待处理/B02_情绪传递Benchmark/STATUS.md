@@ -22,7 +22,7 @@
 - [x] `runner_manifest.json` 更新注入字符/token 成本与逐条来源
 - [x] `B02_G_Treatment内容提示污染审计_v0.1.md` 全部通过
 - [x] Controller 最终复核通过
-- [x] `00_项目控制/B02_G_Controller最终放行_v0.1.md`
+- [x] `06_工作区/01_待处理/B02_情绪传递Benchmark/00_控制/B02_G_Controller最终放行_v0.1.md`
 - [x] B02-G 第一轮 9-run 正式执行完成（3 任务 × D0/G1/G2）
 - [x] 确定性/格式检查完成（9/9 输出、无基础设施失败、无 retry、T1 无禁用情绪词、输入冻结未变）
 - [x] Controller-only 匿名映射（D0/G1/G2 → 方案A/B/C）已生成

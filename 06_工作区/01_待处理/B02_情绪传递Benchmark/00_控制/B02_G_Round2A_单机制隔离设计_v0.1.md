@@ -262,14 +262,14 @@ Round 2A 结果分析中允许以下分类（沿用 Round1 v0.2 体系）：
 
 ## 12. 冻结材料清单
 
-- `00_项目控制/B02_G_Round2A_单机制隔离设计_v0.1.md`（本文件）
-- `00_项目控制/B02_G_Round2A_base_tasks_v0.1.md`（两个中性 base task）
-- `00_项目控制/B02_G_Round2A_runner_inputs/M1_injection.txt`
-- `00_项目控制/B02_G_Round2A_runner_inputs/M2_injection.txt`
-- `00_项目控制/B02_G_Round2A_runner_inputs/T4_D0.txt` / `T4_M1.txt` / `T4_M2.txt`
-- `00_项目控制/B02_G_Round2A_runner_inputs/T5_D0.txt` / `T5_M1.txt` / `T5_M2.txt`
-- `00_项目控制/B02_G_Round2A_runner_inputs/runner_manifest_r2a.json`
-- `00_项目控制/B02_G_Round2A_机制泄露与内容污染审计_v0.2.md`（修订后重新审计）
+- `06_工作区/01_待处理/B02_情绪传递Benchmark/00_控制/B02_G_Round2A_单机制隔离设计_v0.1.md`（本文件）
+- `06_工作区/01_待处理/B02_情绪传递Benchmark/00_控制/B02_G_Round2A_base_tasks_v0.1.md`（两个中性 base task）
+- `06_工作区/01_待处理/B02_情绪传递Benchmark/00_控制/B02_G_Round2A_runner_inputs/M1_injection.txt`
+- `06_工作区/01_待处理/B02_情绪传递Benchmark/00_控制/B02_G_Round2A_runner_inputs/M2_injection.txt`
+- `06_工作区/01_待处理/B02_情绪传递Benchmark/00_控制/B02_G_Round2A_runner_inputs/T4_D0.txt` / `T4_M1.txt` / `T4_M2.txt`
+- `06_工作区/01_待处理/B02_情绪传递Benchmark/00_控制/B02_G_Round2A_runner_inputs/T5_D0.txt` / `T5_M1.txt` / `T5_M2.txt`
+- `06_工作区/01_待处理/B02_情绪传递Benchmark/00_控制/B02_G_Round2A_runner_inputs/runner_manifest_r2a.json`
+- `06_工作区/01_待处理/B02_情绪传递Benchmark/00_控制/B02_G_Round2A_机制泄露与内容污染审计_v0.2.md`（修订后重新审计）
 
 12 个正式 run 的两次重复不需要复制成 12 份完全相同的输入文件；manifest 中定义 repetition 即可。
 
