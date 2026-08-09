@@ -1,8 +1,8 @@
 # B02 情绪传递 Benchmark Status
 
-- 状态：`B02_G_READY_TO_RUN`
+- 状态：`B02_G_FORMAL_RUN_COMPLETE_READY_FOR_AUTHOR_BLIND_REVIEW`
 - 更新时间：2026-08-09
-- 当前阶段：上游冻结、候选分轨、base task、正式协议与 Runner 输入均已完成；Treatment 内容提示污染已完成去案例化修订并通过审计；Controller 最终复核通过，**正式放行 B02-G 第一轮 9-run**。当前尚未运行正式生成。
+- 当前阶段：B02-G 第一轮 9-run 已全部完成（9/9，全部 EXIT=0，无 retry）；确定性/格式检查完成；Controller-only 匿名映射与作者匿名评审包已生成。**尚未揭盲，等待作者盲评。**
 
 ## 已完成
 
@@ -21,18 +21,18 @@
 - [x] `B02_G_Treatment内容提示污染审计_v0.1.md` 全部通过
 - [x] Controller 最终复核通过
 - [x] `00_项目控制/B02_G_Controller最终放行_v0.1.md`
+- [x] B02-G 第一轮 9-run 正式执行完成（3 任务 × D0/G1/G2）
+- [x] 确定性/格式检查完成（9/9 输出、无基础设施失败、无 retry、T1 无禁用情绪词、输入冻结未变）
+- [x] Controller-only 匿名映射（D0/G1/G2 → 方案A/B/C）已生成
+- [x] 作者匿名评审包已生成（3 组 × 方案A/B/C）
 
 ## 当前下一动作
 
-正式执行 B02-G 第一轮：
+作者盲评：
 
-1. 运行前一次性随机冻结 9 个 run id 的 `run_order.json`（Local Only）；
-2. 按 `B02_G正式执行协议_v0.1.md` 执行 `3 任务 × 3 Runner = 9` 个独立运行；
-3. 每运行记录 token、耗时、字符数、exit code、retry_count；
-4. 允许的基础设施 retry 最多一次；若仍失败，停止并报告 Controller；
-5. 全部完成后做确定性/格式检查；
-6. 再生成每个任务 D0/G1/G2 → A/B/C 的 Controller-only 匿名映射与作者评审包；
-7. 作者评审完成前不得揭盲。
+1. 作者只看 3 组匿名方案（方案 A/B/C），回答五个问题（更愿意继续读/写、更自然、更像具体的人、最想保留的设计、最明显副作用）；
+2. 作者评审完成前不揭盲；
+3. 全部选择固定后，由 Controller 揭示 D0/G1/G2 → 方案A/B/C 映射并分析能力增量。
 
 ## 禁止
 
@@ -41,5 +41,6 @@
 - 不新增候选；
 - 不在看到结果后修改 Runner 并把补跑混入同一轮；
 - 不以输出更长或 token 更多判优；
+- 作者评审前不揭盲 D0/G1/G2；
 - 不把首轮结果直接写入 `04_写作知识库` 或生产 Skill；
 - 不修改 B09 Local Only 产物。
