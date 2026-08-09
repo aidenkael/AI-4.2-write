@@ -1,8 +1,8 @@
 # B02 情绪传递 Benchmark Status
 
-- 状态：`B02_G_ROUND2A_READY_TO_RUN`
+- 状态：`B02_G_ROUND2A_AUTHOR_BLIND_REVIEW_READY`
 - 更新时间：2026-08-10
-- 当前阶段：B02-G Round 2A 单机制隔离实验设计完成 Controller 最终放行。**READY_TO_RUN 不等于已运行：12 个正式 run 尚未开始。**
+- 当前阶段：B02-G Round 2A 正式生成已全部完成（12/12 run），匿名作者盲评包已生成。**作者盲评尚未完成；mapping 尚未揭盲；Controller 尚未阅读正文。**
 - Round1 evidence is exploratory; not production-ready and not sufficient for KB/Skill promotion.
 - 方法学限制（v0.2 记录）：作者评审存在 Controller 先行意见暴露（组3 不作为独立投票）；三任务匿名映射完全相同（A=G2/B=G1/C=D0）——Round2A 已通过 balanced permutation 与作者先评流程修正。
 
@@ -41,6 +41,11 @@
 - [x] Controller 复核要求 v0.1 修订完成（删除 T4 物件提示、固定 T4/T5 latent truth、删除 T5 成品台词）
 - [x] 机制泄露与内容污染审计 v0.2 通过（8 类检查项全部通过）
 - [x] Controller 最终放行 `B02_G_Round2A_Controller最终放行_v0.1.md` 已生成，状态转为 `B02_G_ROUND2A_READY_TO_RUN`（未运行）
+- [x] 旧匿名 mapping 因 `PRE_RUN_MAPPING_EXPOSURE` 正式作废（发生在任何正式 output 生成之前；未查看任何正式结果；不涉及根据结果重新随机；不改变 D0/M1/M2、任务、重复次数或评审问题）
+- [x] 新匿名 mapping 在正式 output 前独立生成并 Local Only 封存（`blind_map_presealed_r2a.json`，SHA256 见 `B02_G_Round2A_blind_map_seal_v0.1.md`），作者全部评审完成前不得公开
+- [x] 12-run 正式执行完成（2 tasks × 3 conditions × 2 repetitions，全部成功，retry=0）
+- [x] 确定性检查完成（纯机械：12/12 输出存在非空、exit=0、输入 hash 未变、mapping seal 未变、run order 未变）
+- [x] 作者盲评包已生成（4 组 × 方案 A/B/C，Local Only，无泄露审计通过），空白评审模板 `author_blind_review_record_r2a.md` 已生成待作者填写
 
 ## 揭盲后核心结论摘要（以 v0.2 为准）
 
@@ -55,9 +60,9 @@
 
 ## 当前下一动作
 
-等待启动 12 个正式 run（`2 tasks × 3 conditions × 2 repetitions`）。
+等待作者完成全部 4 组匿名盲评并封存（`author_blind_review_record_r2a.md`）。
 
-当前状态为 `READY_TO_RUN`，表示冻结输入已通过最终一致性检查与放行，但 **12 个正式 run 尚未开始**；正式运行后不得修改冻结输入并混入本轮。
+当前状态为 `B02_G_ROUND2A_AUTHOR_BLIND_REVIEW_READY`：正式生成已完成；作者盲评尚未完成；mapping 尚未揭盲；Controller 尚未阅读正文。只有作者评审封存完成后，才允许揭盲、Controller 阅读正文、condition 级成本比较、机制诊断与 Round2A 结果分析。
 
 ## 禁止
 
@@ -69,7 +74,8 @@
 - 不修改已封存的作者评审记录；Controller 辅助判断不得合并入作者票；
 - 不把首轮结果直接写入 `04_写作知识库` 或生产 Skill；
 - 不因某 Runner 相对胜出而判定其整套规则有效或已达生产级；
-- 不运行 Round 2A（当前只设计，不执行）；
+- 不重跑 / 不补写 / 不修改任何已完成的正式 run（12 个 run 与冻结输入保持一致）；
+- 作者盲评封存前：不揭盲、不阅读任何正式正文、不做 A/B/C 评价、不报告 condition→A/B/C、不提供可通过统计特征推断身份的信息；
 - 不测试 M1+M2 组合；
 - 不把"物件承重"写成必须规则；
 - 不建立"少写对话"等正式规则；
