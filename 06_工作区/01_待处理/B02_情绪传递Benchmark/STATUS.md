@@ -1,9 +1,10 @@
 # B02 情绪传递 Benchmark Status
 
-- 状态：`B02_G_ROUND1_UNBLINDED_ANALYSIS_COMPLETE`
+- 状态：`B02_G_ROUND2A_DESIGN_READY_FOR_CONTROLLER_REVIEW`
 - 更新时间：2026-08-09
-- 当前阶段：B02-G Round 1 揭盲与机制级结果分析完成（方法学修订版 v0.2）。正式分析见 `06_工作区/01_待处理/B02_情绪传递Benchmark/B02_G_Round1_揭盲与结果分析_v0.2.md`；v0.1 与作者评审封存记录保留于 Local Only（`_local_runs/round-b02g/`）。**Round1 evidence is exploratory; not production-ready and not sufficient for KB/Skill promotion.**
-- 方法学限制（v0.2 记录）：作者评审存在 Controller 先行意见暴露（组3 不作为独立投票）；三任务匿名映射完全相同（A=G2/B=G1/C=D0），后续 Round 必须使用预先约束的平衡映射。
+- 当前阶段：B02-G Round 2A 单机制隔离实验设计冻结，等待 Controller 复核。**未运行任何正式模型生成。**
+- Round1 evidence is exploratory; not production-ready and not sufficient for KB/Skill promotion.
+- 方法学限制（v0.2 记录）：作者评审存在 Controller 先行意见暴露（组3 不作为独立投票）；三任务匿名映射完全相同（A=G2/B=G1/C=D0）——Round2A 已通过 balanced permutation 与作者先评流程修正。
 
 ## 已完成
 
@@ -30,6 +31,13 @@
 - [x] 揭盲：三任务映射一致 A=G2 / B=G1 / C=D0；G1 在三个任务中均获得正向作者信号，但 Round1 作者评审存在 Controller 先行意见暴露，胜场统计不具严格独立性；全部输出不达生产级
 - [x] 机制级结果分析完成（逐规则五类标记；成本为 Round1 observed execution cost，仅观察不归因）
 - [x] 方法学修订版 v0.2 完成并入库（作者评审独立性下调、匿名映射重复限制、机制/成本因果表述降级、副作用降为假设）
+- [x] STATUS 概念修正："情绪重量无专属物件承重" → "人物化具体性不足或情绪表达落入通用化表现"；明确物件不是 B02 要求
+- [x] Round2A 单机制隔离实验设计冻结（M1 解释抑制 / M2 人物特异性反应）
+- [x] 两个新异质任务冻结（T4 亲密关系·隐瞒与信任 / T5 身份与利益·合伙人信任危机）
+- [x] 12-run 重复结构（2 tasks × 3 conditions × 2 repetitions）
+- [x] Balanced permutation 匿名映射冻结（D0/M1/M2 在 A/B/C 位置均衡分布）
+- [x] 评审隔离流程冻结（作者先评 → 封存 → Controller 后评）
+- [x] 机制泄露与内容污染审计通过（6 类检查项全部通过）
 
 ## 揭盲后核心结论摘要（以 v0.2 为准）
 
@@ -38,16 +46,16 @@
 - MODIFY_AND_RETEST：对话循环（G1-2）、压力反应库与内心化（G2-1/G2-3）。
 - SIDE_EFFECT_HYPOTHESIS（不建正式约束卡）：对话密度过高、情绪设计点/机关过密；不得据此推出“少写对话”等普遍规则。
 - BASELINE_OVERLAP：G1-1、G1-6、G2-8。WEAK_OR_NO_SIGNAL：G1-3、G2-2、G2-5。
-- Baseline 观察到的失败模式：结尾解释冲动、通用动作模板、情绪重量无专属物件承重（观察差异，非已证明结论）。
+- Baseline 观察到的失败模式：结尾解释冲动、通用动作模板、人物化具体性不足或情绪表达落入通用化表现（观察差异，非已证明结论）。注意："专属物件"不是 B02 要求；物件只是人物化具体细节的一种可能实现；不使用物件本身不构成失败；后续不得把"物件承重"固化成写作规则。
 - 成本：Round1 observed total tokens D0 24,283 / G1 88,255 / G2 35,682；每 cell 仅一次运行，差异是否稳定、是否由机制引起待后续重复验证。
 - 生产可用性：本轮统一判定非 production ready；相对胜出仅为组内比较。
 
 ## 当前下一动作
 
-等待 Controller 审阅 v0.2 揭盲分析并决定：
+等待 Controller 复核 Round2A 设计冻结材料并决定：
 
-1. 是否启动 B02-G Round 2（若启动：测机制子集而非整 Runner，预先约束的平衡映射，作者先评/Controller 后评的流程隔离，每 cell 多次重复）；
-2. 是否开始 B02-R 诊断轨的冻结设计；
+1. 是否放行正式运行（READY_TO_RUN）；
+2. 是否需要修改任务/注入/映射/流程；
 3. 以上均仅为建议，未执行。
 
 ## 禁止
@@ -60,5 +68,9 @@
 - 不修改已封存的作者评审记录；Controller 辅助判断不得合并入作者票；
 - 不把首轮结果直接写入 `04_写作知识库` 或生产 Skill；
 - 不因某 Runner 相对胜出而判定其整套规则有效或已达生产级；
+- 不运行 Round 2A（当前只设计，不执行）；
+- 不测试 M1+M2 组合；
+- 不把"物件承重"写成必须规则；
+- 不建立"少写对话"等正式规则；
 - 不修改 B09 Local Only 产物；
 - 不改动用户手动模型 / provider / reasoning / CLI 配置。

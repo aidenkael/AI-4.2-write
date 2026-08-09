@@ -1,0 +1,109 @@
+{
+  "benchmark": "B02-G",
+  "round": "Round2A",
+  "frozen_at": "2026-08-09",
+  "model": "deepseek-v4-flash",
+  "reasoning_effort": "high",
+  "heuristic_note": "est_tokens = CJK 字符数 + 非 CJK 字符数 x 0.4（仅估算，供成本参考）",
+  "base_tasks_file": "00_项目控制/B02_G_Round2A_base_tasks_v0.1.md",
+  "design_file": "00_项目控制/B02_G_Round2A_单机制隔离设计_v0.1.md",
+  "injections": {
+    "M1": {
+      "mechanism": "解释抑制",
+      "provenance": "Round1 G1-5（不在结尾替读者总结情绪）与 G2-7（不替读者解释情绪意义）同族机制；v0.2 标记 CONTINUE_VALIDATION（较强正向信号）",
+      "injection_file": "00_项目控制/B02_G_Round2A_runner_inputs/M1_injection.txt",
+      "injection_stats": {
+        "total_chars": 247,
+        "cjk_chars": 201,
+        "est_tokens": 219
+      }
+    },
+    "M2": {
+      "mechanism": "人物特异性反应",
+      "provenance": "Round1 G2-6（拒绝通用身体动作模板）为核心；v0.2 标记 CONTINUE_VALIDATION（反通用动作模板）",
+      "injection_file": "00_项目控制/B02_G_Round2A_runner_inputs/M2_injection.txt",
+      "injection_stats": {
+        "total_chars": 268,
+        "cjk_chars": 219,
+        "est_tokens": 239
+      }
+    }
+  },
+  "runners": [
+    {
+      "id": "T4_D0",
+      "task": "T4",
+      "condition": "D0",
+      "input_file": "00_项目控制/B02_G_Round2A_runner_inputs/T4_D0.txt",
+      "injection": null,
+      "injection_total_chars": 0,
+      "injection_est_tokens": 0,
+      "input_total_chars": 820,
+      "input_cjk_chars": 632,
+      "repetitions": 2
+    },
+    {
+      "id": "T4_M1",
+      "task": "T4",
+      "condition": "M1",
+      "input_file": "00_项目控制/B02_G_Round2A_runner_inputs/T4_M1.txt",
+      "injection": "00_项目控制/B02_G_Round2A_runner_inputs/M1_injection.txt",
+      "injection_total_chars": 247,
+      "injection_est_tokens": 219,
+      "input_total_chars": 1069,
+      "input_cjk_chars": 833,
+      "repetitions": 2
+    },
+    {
+      "id": "T4_M2",
+      "task": "T4",
+      "condition": "M2",
+      "input_file": "00_项目控制/B02_G_Round2A_runner_inputs/T4_M2.txt",
+      "injection": "00_项目控制/B02_G_Round2A_runner_inputs/M2_injection.txt",
+      "injection_total_chars": 268,
+      "injection_est_tokens": 239,
+      "input_total_chars": 1090,
+      "input_cjk_chars": 851,
+      "repetitions": 2
+    },
+    {
+      "id": "T5_D0",
+      "task": "T5",
+      "condition": "D0",
+      "input_file": "00_项目控制/B02_G_Round2A_runner_inputs/T5_D0.txt",
+      "injection": null,
+      "injection_total_chars": 0,
+      "injection_est_tokens": 0,
+      "input_total_chars": 1083,
+      "input_cjk_chars": 814,
+      "repetitions": 2
+    },
+    {
+      "id": "T5_M1",
+      "task": "T5",
+      "condition": "M1",
+      "input_file": "00_项目控制/B02_G_Round2A_runner_inputs/T5_M1.txt",
+      "injection": "00_项目控制/B02_G_Round2A_runner_inputs/M1_injection.txt",
+      "injection_total_chars": 247,
+      "injection_est_tokens": 219,
+      "input_total_chars": 1332,
+      "input_cjk_chars": 1015,
+      "repetitions": 2
+    },
+    {
+      "id": "T5_M2",
+      "task": "T5",
+      "condition": "M2",
+      "input_file": "00_项目控制/B02_G_Round2A_runner_inputs/T5_M2.txt",
+      "injection": "00_项目控制/B02_G_Round2A_runner_inputs/M2_injection.txt",
+      "injection_total_chars": 268,
+      "injection_est_tokens": 239,
+      "input_total_chars": 1353,
+      "input_cjk_chars": 1033,
+      "repetitions": 2
+    }
+  ],
+  "total_runs": 12,
+  "structure": "2 tasks x 3 conditions x 2 repetitions",
+  "revision": "v0.1 初始冻结 2026-08-09"
+}
