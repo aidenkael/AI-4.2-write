@@ -28,7 +28,7 @@
 
 - 主要赛道：人物结构、情绪 craft、Scene/结构诊断、Reader experience、Reveal economy、Pacing、世界观整合、修订诊断。
 - 独特价值：它不是单纯“代写 Skill”，而是以 development editor 为核心，强调诊断、结构和作者自己改；对 AI-write 的 C03/C04/C06/C09/C15/C18 很有价值。
-- 后续：**B02 情绪传递首轮正式候选**；之后进入 B03/B04/B06 相关赛道。
+- 后续：B02-G Round2A 中 Apodictic 未作为生成 condition 参赛（Round2A 的 D0/M1/M2 为同模型不同机制注入，非上游项目直接参赛）。Apodictic 继续保留在 C03 人物心理、C06 POV/叙述距离、C09 Scene/结构、C15 文学功能、C18 诊断/修订等赛道，以及后续其他合适赛道。
 - 许可证：CC BY-NC-SA 4.0。
 - 当前处理：AI-write 已明确是私人、非商业工作台，因此允许本地复制、修改、Benchmark；保留来源/许可证标记。未来公开或商业化再统一审计。
 
@@ -142,7 +142,7 @@
 | 能力赛道 | 第一候选 | 第二/补充候选 | 暂不参与 |
 |---|---|---|---|
 | C03 人物心理/自主性 | Apodictic | creative-writing-skills Character Sim | 大型工作台项目 |
-| C04 情绪传递 B02 | Apodictic | creative-writing-skills；oh-story 作为中文正文对照 | Canon/Memory 项目 |
+| C04 情绪传递 | Apodictic | creative-writing-skills；oh-story 作为中文正文对照 | Canon/Memory 项目。B02 Round2A 已完成，M2 人物特异性反应为 M3 初步验证，M1 解释抑制为轻量修订检查候选 |
 | C08 对话/潜台词 | creative-writing-skills | oh-story、Apodictic、B09-K2 | NovelForge/InkOS |
 | C09 Scene Turn | Apodictic | oh-story、B09-K1 | Memory 项目 |
 | C10 悬念/信息 | oh-story | B09-K4；K3 轻规则 | 暂不新开主赛道 |
@@ -154,9 +154,9 @@
 | C19 原著蒸馏 | ani-book | oh-story、AI-write Candidate、D0 | B09 当前暂停 |
 | C20 Controller/Context | AI-write 自身 | InkOS、NovelForge、AI-Novel-Writing-Assistant、AuthorAgent | 现在不先组装 |
 
-## 七、下一轮 B02 的候选冻结建议
+## 七、B02 候选冻结建议（历史 / 已完成阶段）
 
-B02 不再沿用旧的“Baseline + oh-story + 自研情绪 Prompt”三方结构。建议更新为：
+> 以下为 B02 启动前的候选冻结建议，已作为历史参考。B02-G Round2A 实际采用 D0/M1/M2 单机制隔离设计（同模型不同机制注入），未直接使用上述上游项目作为生成 condition。B02 本阶段已完成并暂停。
 
 1. `D0`：同模型，无小说 Skill strong baseline；
 2. `A`：Apodictic 情绪/人物相关机制适配；

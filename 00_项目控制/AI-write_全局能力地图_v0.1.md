@@ -32,7 +32,7 @@ AI-write 的终点不是堆叠多个外部 Agent，而是形成统一的作者�
 | C01 | 故事发动机 / 宏观结构 | 故事有没有持续可写的矛盾、目标、代价和阶段变化 | M1 | oh-story、Apodictic、AI-Novel-Writing-Assistant、autonovel | 暂不优先；人物/情绪稳定后再测 |
 | C02 | 人物声音与知识边界 | 不同人物说话是否可互换；是否知道不该知道的事 | M2 | creative-writing-skills Character Sim、oh-story dialogue | 保留 B01，放在 B02 后衔接 |
 | C03 | 人物心理与自主性 | 人物是否像活人，会误解、回避、撒谎、做错误选择，而非作者工具人 | M1 | Apodictic character architecture、creative-writing-skills Character Sim | 与 B02 联动，列为当前最高优先级之一 |
-| C04 | 情绪传递 | 不说“她吃醋了”，读者是否仍自然感受到；情绪是否通过注意、解释、选择和关系变化传递 | M2 | Apodictic emotional craft、creative-writing-skills、oh-story、AI-write Candidate | **下一主 Benchmark：B02** |
+| C04 | 情绪传递 | 不说“她吃醋了”，读者是否仍自然感受到；情绪是否通过注意、解释、选择和关系变化传递 | M3 初步验证 | Apodictic emotional craft、creative-writing-skills、oh-story | B02 Round2A 完成：M2 人物特异性反应为强正向方向性候选；M1 解释抑制为轻量修订检查候选。仍需真实创作观察，不进入 M4/M5 |
 | C05 | 关系状态与互动变化 | 一场戏后关系是否真的发生可识别变化，而非只有台词/情绪表演 | M1 | Apodictic、creative-writing-skills、oh-story | 嵌入 B02/B05，而非先单独开大赛道 |
 | C06 | 气氛 / POV 过滤 / 叙述距离 | 不同 POV 是否看到同一个“环境描写模板”；环境是否参与判断和压力 | M2 | Apodictic、后续文学蒸馏、AI-write Candidate | B03，排在 B02/B04/B05 后 |
 | C07 | 人物化微动作 | 是否仍是“握拳/咬唇/手指收紧”动作字典；动作是否来自人物常态偏移 | M2 | Apodictic + AI-write 原则 | B04；核心模型为“人物常态×控制习惯×关系×场合×压力→行为偏移” |
@@ -71,9 +71,9 @@ B09 不再作为主线继续扩张。四项原创迁移能力保留如下：
 
 ### P1：下一主线
 
-`B02 情绪传递 → B01 人物声音/边界 → B04 微动作 → B05 对话潜台词 → B06 Scene Turn → B03 POV/气氛`
+真实蒸馏 / 真实创作暴露问题 → 定位能力地图 → 优先调用已有候选 → 最小测试 → 必要时才升级严格 Benchmark。
 
-顺序允许根据实验结果小幅调整，但原则是先验证单项增量，再组合。
+不再按 `B02 → B01 → B04 → B05 → ...` 串行做完整重型 Benchmark。
 
 ### P2：人物链之后
 
