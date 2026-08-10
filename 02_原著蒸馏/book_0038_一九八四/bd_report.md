@@ -76,7 +76,9 @@
 
 ## 六、当前状态
 
-**`G1_PILOT_AWAITING_AUTHOR_REVIEW`**
+**`G1_PILOT_AUTHOR_REVIEWED_G1_COMPLETE`**
 
-- 状态含义：pilot 综合完成，等待作者审阅判断蒸馏产物是否有用；
-- 未声明事项：G1 未完成、BookDistill 未验证、不得进入 G2。
+- 状态含义：作者已实际审阅 model.md / mechanisms.md，"作者可读性 / 可理解性"通过 G1，
+  G1 已由用户确认退出，当前门禁切换至 G2；
+- 未声明事项：15 条机制未验证为能提升创作效果（延后到真实作品创作中验证）、
+  BookDistill 未达到生产级 / M5。
