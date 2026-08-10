@@ -25,10 +25,10 @@ AI-write 本地自研最小技能：脚本、证据模板、SKILL 文档均为�
 | InkOS | AGPL-3.0 | 代码/架构审阅，未实测 | v0.1 无 Controller/state/trace 需求 |
 | NovelForge | AGPL-3.0 | 代码/架构审阅，未实测 | v0.1 无结构化生成/知识图谱/写回需求 |
 | AI-Novel-Writing-Assistant | AGPL-3.0-only + 服务型商业授权说明 | 代码/架构审阅，未实测 | v0.1 无产品工作流/状态回灌需求；其贡献者 CLA/贡献协议与本轮本地研究无关，不得误写为研究前提 |
-| AuthorAgent | 候选路由未标注许可证 | 代码/架构审阅 | v0.1 不需要其代理/评审闭环 |
+| AuthorAgent | MIT，已核实根 LICENSE（以 `GitHub候选池_能力路由_v0.2.md` 为准） | 代码/架构审阅 | v0.1 不需要其代理/评审闭环 |
 | autonovel | 候选路由记录：未找到根 LICENSE 文件 | 架构/行为参考 | 只研究公开架构思想，不复制代码/Prompt |
-| novel-creator-skill | 候选路由未标注许可证 | 未实测 | v0.1 不需要借用 |
-| Long-Novel-GPT | 候选路由未标注许可证 | 产品体验观察 | v0.1 不需要借用 |
+| novel-creator-skill | README 声明 MIT，但当前未找到根 LICENSE；冻结前需复核（以候选路由 v0.2 为准） | 未实测 | v0.1 不需要借用 |
+| Long-Novel-GPT | 当前未在根目录确认 LICENSE（以候选路由 v0.2 为准） | 产品体验观察 | v0.1 不需要借用 |
 
 若未来实现遇到具体问题（如分批处理无法恢复、章节分析状态丢失），允许从上述项目借鉴一个最小机制，
 届时必须在本文件追加记录：来源项目、许可证、借用原因、实际吸收内容，且不得宣称为已验证能力。

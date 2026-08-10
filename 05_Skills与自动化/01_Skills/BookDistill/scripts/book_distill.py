@@ -11,6 +11,13 @@
   FACT（原文事实）/ INFERENCE（推断）/ MECHANISM（可迁移机制）/ BOUNDARY（边界与不确定性）。
 本脚本不调用大模型，不修改 SourcePrepare 输出，不读取 01_原始素材。
 
+版本说明（0.1.1）：
+  - 章节数校验改为精确相等（0000 前置不计入正文，不再允许“差 1”）。
+  - 新增 book_id 与输入目录前缀一致性校验。
+  - assemble 增加 --input：校验 source snapshot 与行号越界（end <= 章节实际行数）。
+  - distill_manifest.json 固化 source_sha256 / SP version / book_id / chapter_count /
+    chapter_content_fingerprint，供后续 assemble 防复用旧产物。
+
 接口契约（继承自旧分支 skill/source-prepare-v1 的接口草案，见 PROVENANCE.md）：
   SourcePrepare PASS -> 06_工作区/SourcePrepare/<作品ID>_<作品>/full.md + chapters/
                      -> 02_原著蒸馏/<作品ID>_<作品>/
@@ -19,6 +26,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -28,6 +36,7 @@ from pathlib import Path
 
 SP_STATUS_PASS = "PASS"
 SP_EXPECTED_VERSION = "0.2.1"
+BD_VERSION = "0.1.1"
 
 # 证据记录允许的分类（evidence-first 分层）
 EVIDENCE_KINDS = ("FACT", "INFERENCE", "MECHANISM", "BOUNDARY")
@@ -64,6 +73,55 @@ def is_chapter_file(name: str) -> bool:
 def is_preamble_file(name: str) -> bool:
     return name.startswith("0000_")
 
+
+def compute_chapter_fingerprint(chapters_dir: Path) -> str:
+    """按稳定章节顺序（NNNN.md 升序）计算聚合 SHA256。
+
+    每个章节的贡献 = 文件名 + "\\0" + 文件原始字节，按顺序拼接后整体哈希。
+    只要任一章节文件名或内容变化，fingerprint 即变化；0000 前置不计入。
+    """
+    h = hashlib.sha256()
+    for name in sorted(
+        (p.name for p in chapters_dir.glob("*.md") if is_chapter_file(p.name)),
+        key=chapter_sort_key,
+    ):
+        h.update(name.encode("utf-8"))
+        h.update(b"\0")
+        h.update((chapters_dir / name).read_bytes())
+    return h.hexdigest()
+
+
+def build_source_snapshot(meta: dict, chapters_dir: Path) -> dict | None:
+    """从 metadata.json + chapters/ 构建不可篡改的输入快照。
+
+    metadata 属于 Local Only，不进入 Git；snapshot 字段会固化进
+    distill_manifest.json / bd_report.md，供 assemble 校验复用。
+    """
+    selected = meta.get("selected_source") or {}
+    sha256 = str(selected.get("sha256", ""))
+    if not sha256 or not chapters_dir.is_dir():
+        return None
+    return {
+        "book_id": str(meta.get("book_id", "")),
+        "sp_version": str(meta.get("skill_version", "")),
+        "source_sha256": sha256,
+        "chapter_count": int(meta.get("chapter_files", -1)),
+        "chapter_content_fingerprint": compute_chapter_fingerprint(chapters_dir),
+    }
+
+
+def check_book_id_dir_prefix(sp_dir: Path, book_id: str) -> str | None:
+    """输入目录名必须形如 <book_id>_<书名>，前缀与 metadata.book_id 精确一致。"""
+    dirname = sp_dir.name
+    if not book_id:
+        return "metadata.json 缺少 book_id，无法核对目录前缀。"
+    if not dirname.startswith(book_id + "_") and dirname != book_id:
+        return (
+            f"输入目录名 '{dirname}' 与 metadata.book_id '{book_id}' 不一致"
+            "（目录名必须为 <book_id>_<书名>）。"
+        )
+    return None
+
 # ---- 输入校验 -----------------------------------------------------------
 
 
@@ -99,6 +157,10 @@ def validate_input(sp_dir: Path) -> dict:
     book = str(meta.get("book", ""))
     if not book_id:
         errors.append("metadata.json 缺少 book_id。")
+    else:
+        prefix_err = check_book_id_dir_prefix(sp_dir, book_id)
+        if prefix_err:
+            errors.append(prefix_err)
     info["book_id"] = book_id
     info["book"] = book
 
@@ -122,16 +184,12 @@ def validate_input(sp_dir: Path) -> dict:
     if meta_chapters == -1:
         errors.append("metadata.json 缺少 chapter_files。")
     elif len(chapter_files) != meta_chapters:
-        # 允许且仅允许差 1（0000 前置内容被当作非章节文件时），其余视为不一致
-        if abs(len(chapter_files) - meta_chapters) == 1:
-            warnings.append(
-                f"章节文件数 {len(chapter_files)} 与 metadata {meta_chapters} 差 1，"
-                "应为 0000_前置内容.md 计入差异，可接受。"
-            )
-        else:
-            errors.append(
-                f"章节文件数 {len(chapter_files)} 与 metadata {meta_chapters} 不一致。"
-            )
+        # 精确相等：0000_前置内容.md 不参与正文计数，metadata.chapter_files
+        # 只统计 NNNN.md；任何 ±1 都意味着实际缺章或多章，必须 FAIL。
+        errors.append(
+            f"章节文件数 {len(chapter_files)} 与 metadata.chapter_files "
+            f"{meta_chapters} 不一致（必须精确相等；0000 前置不影响正文计数）。"
+        )
 
     # 6. 源指纹 / SHA256 存在性
     selected = meta.get("selected_source") or {}
@@ -140,6 +198,16 @@ def validate_input(sp_dir: Path) -> dict:
     else:
         info["source_sha256"] = str(selected["sha256"])
         info["source_path"] = str(selected.get("path", ""))
+
+    # 6.5 source snapshot（book_id / SP version / source_sha256 / chapter_count /
+    #     chapter_content_fingerprint）——固化到最终 tracked 产物，不保存原始路径。
+    chapters_dir = sp_dir / CHAPTER_PREFIX
+    snapshot = build_source_snapshot(meta, chapters_dir)
+    if snapshot is None:
+        errors.append("无法构建 source snapshot（缺少 chapters/ 或 selected_source.sha256）。")
+    else:
+        info["source_snapshot"] = snapshot
+        info["chapter_content_fingerprint"] = snapshot["chapter_content_fingerprint"]
 
     # 7. 空章节检查
     empty_chapters = []
@@ -192,7 +260,7 @@ def render_index_md(book: str, book_id: str, entries: list[dict]) -> str:
     lines = [
         f"# 章节索引：{book}（{book_id}）",
         "",
-        "> 由 BookDistill v0.1 生成。每条证据必须引用 `chapters/NNNN.md` 章节文件；",
+        f"> 由 BookDistill v{BD_VERSION} 生成。每条证据必须引用 `chapters/NNNN.md` 章节文件；",
         "> 引用格式：`chapters/NNNN.md#L<起始行>-L<结束行>` 或 `chapters/NNNN.md#L<行>`。",
         "",
         "| 章节 | 标题 | 字符数 | 行数 |",
@@ -264,8 +332,10 @@ def extract_ref_from_line(line: str) -> str | None:
     return m.group(1) if m else None
 
 
-def validate_ref(ref: str, valid_files: list[str]) -> tuple[bool, str]:
-    """校验证据引用指向存在的章节文件，格式 chapters/NNNN.md#L<行>[-L<行>]。"""
+def validate_ref(
+    ref: str, valid_files: list[str], line_bounds: dict[str, int]
+) -> tuple[bool, str]:
+    """校验证据引用指向存在的章节文件，且行号不超出章节实际总行数。"""
     m = re.match(r"^(chapters/\d{4}\.md)#L(\d+)(?:-L(\d+))?$", ref)
     if not m:
         return False, f"引用格式不合法: {ref}"
@@ -274,14 +344,61 @@ def validate_ref(ref: str, valid_files: list[str]) -> tuple[bool, str]:
     start, end = int(m.group(2)), int(m.group(3) or m.group(2))
     if start < 1 or end < start:
         return False, f"行范围非法: {ref}"
+    max_lines = line_bounds.get(m.group(1))
+    if max_lines is None:
+        return False, f"无法取得章节行数: {ref}"
+    if end > max_lines:
+        return (
+            False,
+            f"引用行号超出章节实际行数: {ref}（章节 {m.group(1)} 共 {max_lines} 行）",
+        )
     return True, ""
 
 
-def assemble(output_dir: Path) -> dict:
+def read_manifest(output_dir: Path) -> dict | None:
+    manifest_path = output_dir / "distill_manifest.json"
+    if manifest_path.exists():
+        try:
+            return json.loads(read_text(manifest_path))
+        except (json.JSONDecodeError, OSError):
+            return None
+    return None
+
+
+def check_input_snapshot(
+    sp_dir: Path | None, output_dir: Path
+) -> tuple[str, dict | None]:
+    """assemble 时重算输入 snapshot 并与 prepare 记录比对。
+
+    返回 (状态, snapshot)：'ok' 一致可继续；'mismatch' 输入已变化必须 FAIL；
+    'missing' 为旧版产物首次升级，自动记录并继续（带警告）。
+    """
+    if sp_dir is None:
+        return "missing", None
+    meta_path = sp_dir / "metadata.json"
+    chapters_dir = sp_dir / CHAPTER_PREFIX
+    if not meta_path.exists() or not chapters_dir.is_dir():
+        return "missing", None
+    meta = json.loads(read_text(meta_path))
+    current = build_source_snapshot(meta, chapters_dir)
+    if current is None:
+        return "missing", None
+
+    manifest = read_manifest(output_dir)
+    recorded = (manifest or {}).get("source_snapshot")
+    if recorded is None:
+        return "missing", current
+    if recorded != current:
+        return "mismatch", current
+    return "ok", current
+
+
+def assemble(output_dir: Path, sp_dir: Path | None = None) -> dict:
     """校验 evidence/*.md 记录，生成 distill_manifest.json 与报告骨架。
 
     空模板（无任何条目）记为警告（未覆盖），不阻塞；
     条目格式/引用错误记为错误（格式坏），阻塞。
+    sp_dir 提供时额外校验：source snapshot 一致性 + 行号不越界。
     """
     errors: list[str] = []
     warnings: list[str] = []
@@ -297,6 +414,19 @@ def assemble(output_dir: Path) -> dict:
     if index_path.exists():
         for m in re.finditer(r"\| (chapters/\d{4}\.md) \|", read_text(index_path)):
             valid_files.append(m.group(1))
+
+    # 章节实际行数（来自输入 chapters/，用于行号越界校验；缺输入时用索引行数）
+    line_bounds: dict[str, int] = {}
+    if sp_dir is not None and (sp_dir / CHAPTER_PREFIX).is_dir():
+        for name in sorted(
+            (p.name for p in (sp_dir / CHAPTER_PREFIX).glob("*.md") if is_chapter_file(p.name)),
+            key=chapter_sort_key,
+        ):
+            text = read_text(sp_dir / CHAPTER_PREFIX / name)
+            line_bounds[f"{CHAPTER_PREFIX}/{name}"] = len(text.splitlines())
+    else:
+        for m in re.finditer(r"\| (chapters/\d{4}\.md) \| (\d+) \|", read_text(index_path)):
+            line_bounds[m.group(1)] = int(m.group(2))
 
     for evf in ev_files:
         text = read_text(evf)
@@ -317,14 +447,28 @@ def assemble(output_dir: Path) -> dict:
             if not ref:
                 errors.append(f"{evf.name}: 条目缺少'证据：'引用 -> {line[:60]}")
                 continue
-            ok, msg = validate_ref(ref, valid_files)
+            ok, msg = validate_ref(ref, valid_files, line_bounds)
             if not ok:
                 errors.append(f"{evf.name}: {msg} -> {line[:80]}")
+
+    # source snapshot 一致性（防 assemble 复用旧产物）
+    snapshot_status, current_snapshot = check_input_snapshot(sp_dir, output_dir)
+    if snapshot_status == "mismatch":
+        errors.append(
+            "输入 SourcePrepare 包与 distill_manifest.json 中记录的 source snapshot "
+            "不一致（章节内容或源指纹已变化），禁止复用旧 evidence，请重新 prepare。"
+        )
+    elif snapshot_status == "missing":
+        warnings.append(
+            "distill_manifest.json 缺少 source_snapshot（旧版产物），本次已自动记录当前 "
+            "输入 snapshot；下次 assemble 将严格比对。"
+        )
 
     # manifest
     manifest = {
         "skill": "BookDistill",
-        "version": "0.1.0",
+        "version": BD_VERSION,
+        "source_snapshot": current_snapshot,
         "evidence_files": [f.name for f in ev_files],
         "entries_per_file": per_file,
         "stats_by_kind": stats,
@@ -343,7 +487,8 @@ def assemble(output_dir: Path) -> dict:
 def render_report_skeleton(book: str, book_id: str, manifest: dict) -> str:
     return (
         f"# 蒸馏报告：{book}（{book_id}）\n\n"
-        f"- BookDistill 版本：0.1.0\n"
+        f"- BookDistill 版本：{BD_VERSION}\n"
+        f"- source snapshot：{json.dumps(manifest.get('source_snapshot'), ensure_ascii=False)}\n"
         f"- 证据条目总数：{manifest['total_entries']}\n"
         f"- 分类统计：{json.dumps(manifest['stats_by_kind'], ensure_ascii=False)}\n"
         f"- 覆盖章节：{len(manifest['entries_per_file'])} 个证据文件\n\n"
@@ -386,11 +531,30 @@ def cmd_prepare(args) -> int:
             render_evidence_template(e, info["book"], info["book_id"]),
         )
 
+    # 初始 manifest（固化 source snapshot，供 assemble 比对；条目由 assemble 填充）
+    initial_manifest = {
+        "skill": "BookDistill",
+        "version": BD_VERSION,
+        "source_snapshot": info.get("source_snapshot"),
+        "evidence_files": [],
+        "entries_per_file": {},
+        "stats_by_kind": {k: 0 for k in EVIDENCE_KINDS},
+        "total_entries": 0,
+        "ok": False,
+        "errors": [],
+        "warnings": [],
+    }
+    write_text(
+        out_dir / "distill_manifest.json",
+        json.dumps(initial_manifest, ensure_ascii=False, indent=2),
+    )
+
     # 报告骨架
     empty_manifest = {
         "total_entries": 0,
         "stats_by_kind": {k: 0 for k in EVIDENCE_KINDS},
         "entries_per_file": {},
+        "source_snapshot": info.get("source_snapshot"),
     }
     write_text(out_dir / "bd_report.md", render_report_skeleton(info["book"], info["book_id"], empty_manifest))
 
@@ -406,7 +570,7 @@ def cmd_prepare(args) -> int:
 
 
 def cmd_assemble(args) -> int:
-    manifest = assemble(Path(args.output))
+    manifest = assemble(Path(args.output), Path(args.input) if args.input else None)
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
     return 0 if manifest["ok"] else 1
 
@@ -426,6 +590,7 @@ def main(argv: list[str] | None = None) -> int:
     p_p.add_argument("--output", required=True, help="BookDistill 输出目录，如 02_原著蒸馏/book_0038_一九八四")
 
     p_a = sub.add_parser("assemble", help="校验证据并生成清单与报告骨架")
+    p_a.add_argument("--input", required=True, help="SourcePrepare 输出目录（用于校验 source snapshot 与行号越界）")
     p_a.add_argument("--output", required=True, help="BookDistill 输出目录")
 
     args = parser.parse_args(argv)

@@ -1,6 +1,13 @@
 {
   "skill": "BookDistill",
-  "version": "0.1.0",
+  "version": "0.1.1",
+  "source_snapshot": {
+    "book_id": "book_0038",
+    "sp_version": "0.2.1",
+    "source_sha256": "a426098082241b8260ee67112dd656e7677f3d90dab323083f2d0338322a5627",
+    "chapter_count": 24,
+    "chapter_content_fingerprint": "8d7e59437051e3381e462ded6025096078b911c81c078b8560f0fa990c13d62a"
+  },
   "evidence_files": [
     "ch_0001.md",
     "ch_0002.md",
