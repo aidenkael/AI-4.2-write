@@ -118,6 +118,18 @@ class ValidateTest(unittest.TestCase):
             self.assertFalse(r["ok"])
             self.assertTrue(any("不一致" in e for e in r["errors"]))
 
+    def test_chapter_count_long_by_one_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sp = make_fake_pass_pkg(Path(tmp), chapter_files=2, with_preamble=True)
+            # 磁盘正文章节 3（多出 0003）+ 0000 前置，meta 声称 2 → 多 1 必须 FAIL
+            (sp / "chapters" / "0003.md").write_text(
+                "> 第3章\n\n这是多出来的第3章正文，足够长以通过空章节检查。\n",
+                encoding="utf-8",
+            )
+            r = bd.validate_input(sp)
+            self.assertFalse(r["ok"])
+            self.assertTrue(any("不一致" in e for e in r["errors"]))
+
     def test_preamble_not_counted_when_meta_exact(self):
         with tempfile.TemporaryDirectory() as tmp:
             # meta 声称 2 章，磁盘 0001/0002 + 0000 前置：精确相等，PASS

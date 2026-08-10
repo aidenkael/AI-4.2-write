@@ -30,7 +30,7 @@
   第三部（0019–0024）：友爱部改造与结局。
 - **原始 chapter-evidence 条目**：348 条（FACT 169 / INFERENCE 46 / MECHANISM 85 / BOUNDARY 48）。
 - **机制收敛**：85 条原始 MECHANISM → 跨章合并/降级后保留 **15 条**正式机制（见 `mechanisms.md`）。
-- **精选证据**：`evidence.md` 精选 **57 条**（FACT 43 / INFERENCE 7 / BOUNDARY 7），
+- **精选证据**：`evidence.md` 精选 **70 条**（FACT 55 / INFERENCE 8 / BOUNDARY 7），
   支撑全部 15 条机制与 `model.md` 各项结论；不替代 348 条逐章底稿。
 - **校验状态**：assemble 通过，errors=0，warnings=0；全部证据引用行号均落在
   对应章节实际行数范围内。
@@ -69,7 +69,7 @@
 |---|---|
 | `model.md` | 作者第一阅读入口：整体写作模型（14 节） |
 | `mechanisms.md` | 可迁移机制集：85 条收敛为 15 条，含反证/失败模式/最小迁移测试 |
-| `evidence.md` | 精选证据索引：57 条，支撑 model/mechanisms |
+| `evidence.md` | 精选证据索引：70 条，支撑 model/mechanisms |
 | `evidence/ch_NNNN.md` | 逐章证据底稿（348 条，audit appendix，保留不删） |
 | `distill_manifest.json` | assemble 校验清单 + source snapshot（book_id/SP version/source_sha256/chapter_count/fingerprint） |
 | `chapters_index.md` | 章节索引与引用规范 |
