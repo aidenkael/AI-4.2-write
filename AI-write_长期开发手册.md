@@ -1,9 +1,9 @@
 # AI-write 长期开发手册
 
-> 更新日期：2026-08-11  
+> 更新日期：2026-08-12  
 > 文档定位：AI-write 根目录长期开发总纲，供作者、ChatGPT 与 Agent 共同阅读。  
-> 当前正式门禁：**G3｜跨书知识库与创作任务检索**（2026-08-11 建立，G3-C 最小原型已完成）。  
-> 当前战略状态：**Phase C 技术验证已完成；BookDistill vNext / BKP v0.1 进入稳定使用；G3-C 原型验证通过，轻量检索方案足以进入 G3-D 真实创作问题验证。**
+> 当前正式门禁：**G3｜跨书知识库与创作任务检索**（2026-08-11 建立，G3-D 验证完成，G3_RETRIEVAL_VALIDATED，等待收口判断）。  
+> 当前战略状态：**Phase C 技术验证已完成；BookDistill vNext / BKP v0.1 进入稳定使用；G3-D 8 个真实创作问题验证通过，轻量检索方案已验证足以服务真实创作。**
 
 ---
 
@@ -1002,14 +1002,15 @@ Agent 更新时优先修改固定小节，避免整篇重写造成漂移。
 <!-- AUTO:CURRENT_STATE START -->
 ## 当前状态快照
 
-- 正式 Gate：G3｜跨书知识库与创作任务检索（2026-08-11 建立，G3-C 最小原型已完成）
+- 正式 Gate：G3｜跨书知识库与创作任务检索（2026-08-11 建立，G3-D 验证完成，G3_RETRIEVAL_VALIDATED）
 - G3 对应 Phase D｜跨书知识库与检索；唯一核心目标：多 BKP 统一入口 + 真实创作问题跨书检索
-- G3 子阶段：G3-A 方案复查 ✅ → G3-B 检索合同 ✅ → G3-C 最小原型 ✅ → G3-D 验证 → 收口判断
+- G3 子阶段：G3-A 方案复查 ✅ → G3-B 检索合同 ✅ → G3-C 最小原型 ✅ → G3-D 验证 ✅ → 收口判断（等待作者）
 - 旧版"G3 = 直接正式作品工程"已经正式废止，不得恢复
-- G3-C 原型：KnowledgeRetrieve 最小实现（Python 标准库，无外部依赖），解析两个 BKP 共 1151 条知识为统一目录
-- 轻量检索链：关键词/bigram 候选召回 + Agent 语义判断 + TopK 输出
-- 4 个测试通过：Test A 偏单书（全部三体，高得分）、Test B 两本互补（三体悬念为主，一九八四可补回）、Test C INSUFFICIENT（篮球，得分极低）、Negative Test 假阳性被语义层正确过滤
-- 结论：NO_RAG_UPGRADE——当前两个 BKP + 轻量方案已足够
+- G3-D 验证：8 个真实创作问题，6 题偏单书命中正确知识，1 题跨书互补，2 题正确 INSUFFICIENT
+- 1 个 semantic recall miss（Q5 P12 恐惧→关系黏合剂），不阻塞最终答案
+- G3-C recall gap（一九八四宣布式失败悬念）在 Q2 自然语言下已修复
+- 未修改 KnowledgeRetrieve 代码——轻量方案已足够
+- 结论：NO_RAG_UPGRADE 维持；G3_RETRIEVAL_VALIDATED
 - Phase C｜BookDistill vNext 最小实现：技术验证完成
 - BookDistill 进入稳定使用状态；升级原则：真实使用暴露明确问题后再升级
 - 当前明确不做：RAG 升级、第三本自动蒸馏、60 本批量、完整 UI、最终知识库冻结；不把单书 Pattern 升级为普遍规则；G3 范围禁止事项见门禁
@@ -1018,9 +1019,9 @@ Agent 更新时优先修改固定小节，避免整篇重写造成漂移。
 <!-- AUTO:NEXT_ACTIONS START -->
 ## 下一步候选动作
 
-1. 执行 G3-D：真实创作问题验证——由作者提供真实创作问题，验证 KnowledgeRetrieve 输出是否真正有助于创作。
-2. G3-D 完成后进行 G3 收口判断，提交作者验收。
-3. 当前 G3-A/B/C 已完成，G3-D 为第一任务。
+1. G3 收口判断：根据 G3-D 验证结果，检查是否满足全部 10 项退出条件，提交作者验收。
+2. G3 收口通过后，进入 Phase E｜创作核心后台。
+3. 当前 G3-A/B/C/D 技术工作全部完成，等待作者验收。
 <!-- AUTO:NEXT_ACTIONS END -->
 
 <!-- AUTO:OPEN_RISKS START -->
@@ -1038,6 +1039,7 @@ Agent 更新时优先修改固定小节，避免整篇重写造成漂移。
 - 过早做 UI；
 - 未来检索精度不足，知识库变成"知识坟场"；
 - 关键词召回在语义相近但创作维度不同的问题上存在假阳性（Agent 语义层可过滤）；
+- 关键词召回在语义相近但用词完全不同的问题上存在遗漏（Q5 P12 恐惧→关系黏合剂，Agent 可手动补回）；
 - BKP 三体 observations.md 部分维度名编码有 `?` 替换现象（不影响解析，但需在未来 BookDistill 升级时修复）。
 <!-- AUTO:OPEN_RISKS END -->
 
@@ -1219,6 +1221,25 @@ G3-A（成熟方案复查）和 G3-B（检索合同设计）已完成；G3-C 用
 - 已知限制：关键词召回在语义相近但维度不同的问题上有假阳性（Agent 语义层可过滤）；一九八四"宣布式失败悬念"在 Test B 中被关键词遗漏（Agent 可补回）。
 
 未做（保持 G3 边界）：不进入 G3-D 验证、不开发 RAG/KG/向量库、不做 Context Compiler、不修改 BookDistill、不跑第三本。
+
+## 2026-08-12｜G3-D 真实创作问题端到端检索验证完成
+
+原因：
+
+G3-A/B/C 已完成，G3-D 用 8 个真实创作问题验证完整检索链路（作者问题 → query understanding → 轻量候选召回 → Agent 语义筛选 → 最终 hits → Retrieval Package）。
+
+结果：
+
+- 8 个问题全部达到预期：6 个偏单书/跨书问题命中 5-7 条 A 级知识，2 个超出 BKP 问题正确返回 INSUFFICIENT；
+- 1 个 semantic recall miss（Q5 P12 恐惧转化为关系黏合剂），不阻塞最终答案；
+- G3-C 暴露的"一九八四宣布式失败悬念"遗漏在自然语言下已修复；
+- Agent 语义层正确过滤全部假阳性（Q8"监控"关键词误召回一九八四→全部 C 级→INSUFFICIENT）；
+- 结论：**G3_RETRIEVAL_VALIDATED**；
+- 不需要修改 KnowledgeRetrieve 代码；
+- 不需要 embedding / 向量库 / KG / reranker（NO_RAG_UPGRADE 维持）；
+- 验证报告：`06_工作区/G3D_验证报告_v0.1.md`。
+
+未做：不退出 G3、不进入收口（需作者确认）、不修改代码、不批量蒸馏。
 
 ## 20. 一句话总纲
 
