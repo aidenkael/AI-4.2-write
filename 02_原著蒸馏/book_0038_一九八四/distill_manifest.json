@@ -1,6 +1,6 @@
 {
   "skill": "BookDistill",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "source_snapshot": {
     "book_id": "book_0038",
     "sp_version": "0.2.1",
@@ -63,9 +63,11 @@
   "stats_by_kind": {
     "FACT": 169,
     "INFERENCE": 46,
+    "OBSERVATION": 0,
     "MECHANISM": 85,
     "BOUNDARY": 48
   },
+  "dimension_stats": {},
   "total_entries": 348,
   "ok": true,
   "errors": [],

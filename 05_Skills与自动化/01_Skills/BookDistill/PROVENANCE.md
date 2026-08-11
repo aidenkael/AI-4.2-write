@@ -5,6 +5,21 @@
 AI-write 本地自研最小技能：脚本、证据模板、SKILL 文档均为本仓库原创实现。
 方法纪律继承自以下来源；本轮没有整体复制任何外部项目代码进入本目录。
 
+## v0.2 变更说明
+
+v0.2 在 v0.1.1 确定性 Core 基础上增加 Base Scan 升级：
+
+- 新增 OBSERVATION 证据分类（作品内观察，携带可扩展维度标签）
+- 新增 MAP 结构性作品地图（独立于 Evidence kind）
+- assemble 增加维度覆盖统计（dimension_stats）
+- 新增 profile / deepdive / bkp 子命令
+- bkp 子命令从占位升级为最小 BKP Finalize：读取人工验证的 `bkp_prototype/`，
+  校验身份/源指纹、知识类型边界、引用与计数后封装正式 BKP 到 `bkp/`；
+  依据 `BKP_v0.1_protocol.md`，不新增外部代码、不复制过程文件。
+- 专项深挖参考 Apodictic / ani-book / oh-story / creative-writing-skills 的分析框架/方法纪律
+- 旧四类证据（FACT/INFERENCE/MECHANISM/BOUNDARY）完全兼容
+- 不整体复制外部代码或 Prompt，只吸收抽象纪律
+
 ## 方法来源
 
 | 来源项目 | 来源仓库 | 许可证 | 证据状态 | 本轮继承内容 |
@@ -20,7 +35,7 @@ AI-write 本地自研最小技能：脚本、证据模板、SKILL 文档均为�
 
 | 项目 | 许可证（以候选路由 v0.2 为准） | 状态 | 未借用理由 |
 |---|---|---|---|
-| Apodictic | CC BY-NC-SA 4.0（P2） | 代码/架构审阅，未实测 | v0.1 无人物结构/修订诊断问题需要解决 |
+| Apodictic | CC BY-NC-SA 4.0（P2） | 代码/架构审阅 + v0.2 方法参考 | v0.2 专项深挖优先借用其分析框架（人物结构、修订诊断等）作为工具箱，不限于置信度评估 |
 | NovelClaw | MIT | 代码/架构审阅，未实测 | v0.1 无长期记忆/一致性（Canon/Memory）需求 |
 | InkOS | AGPL-3.0 | 代码/架构审阅，未实测 | v0.1 无 Controller/state/trace 需求 |
 | NovelForge | AGPL-3.0 | 代码/架构审阅，未实测 | v0.1 无结构化生成/知识图谱/写回需求 |
@@ -32,6 +47,9 @@ AI-write 本地自研最小技能：脚本、证据模板、SKILL 文档均为�
 
 若未来实现遇到具体问题（如分批处理无法恢复、章节分析状态丢失），允许从上述项目借鉴一个最小机制，
 届时必须在本文件追加记录：来源项目、许可证、借用原因、实际吸收内容，且不得宣称为已验证能力。
+
+v0.2 专项深挖已参考 Apodictic 的分析框架/方法纪律（人物结构、修订诊断等），
+未复制其代码或 Prompt 进入本目录，仅在 SKILL.md 中标记为优先参考来源。
 
 ## 许可证合规
 

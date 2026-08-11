@@ -1,0 +1,97 @@
+{
+  "bkp_version": "0.2",
+  "schema_status": "FINALIZED（依据 BKP_v0.1_protocol.md 封装；协议第 8 节未冻结项保持开放，不冻结最终 schema）",
+  "book": {
+    "book_id": "book_0065",
+    "title": "三体",
+    "author": "刘慈欣",
+    "category": "中文文学",
+    "language": "zh-CN",
+    "chapter_count": 42,
+    "parts": {
+      "第一部": "ch_0001–ch_0035（地球往事：发现与锁死）",
+      "第二部": "ch_0036（黑暗森林：推导与威慑，单章含整册）",
+      "第三部": "ch_0037–ch_0042（死神永生：继承与坠落）"
+    }
+  },
+  "source_snapshot": {
+    "book_id": "book_0065",
+    "sp_version": "0.2.1",
+    "source_sha256": "0fb3cde2dc4f8c9f4e5a2ba612f3d3d3eb049d67928cce4fcc8b2c94ea20c6a8",
+    "chapter_count": 42,
+    "chapter_content_fingerprint": "76df501c055d5d211c15d6fe572bf21bc821b80e74a139a61eb915c9c36c8603"
+  },
+  "provenance": {
+    "distill_tool": "BookDistill v0.2.0",
+    "distill_method": "vNext Base Scan（42 章完整扫描，899 条旧版逐章证据移植 + 240 条新 OBSERVATION）+ 3 次自适应专项深挖（科学概念进入剧情 / 悬念·读者认知 / 个体选择与文明后果）",
+    "scan_date": "2026-08-11",
+    "scan_scope": "全部 42 章，每章 MAP + FACT/INFERENCE/OBSERVATION/MECHANISM/BOUNDARY",
+    "deep_dive_count": 3,
+    "deep_dive_dimensions": [
+      "科学概念进入剧情",
+      "悬念",
+      "个体选择与文明后果"
+    ],
+    "stop_reason": "三大签名维度（世界观构建 / 悬念·认知管理 / 个体选择与文明后果）已有系统知识（18 条单书 Pattern）；剩余候选（文体/意象/情绪/节奏/关系/Reader Experience 等）主要重复已有 Pattern 或证据不足，边际收益低",
+    "nature": "正式 BKP（源自人工验证的 bkp_prototype，经 BookDistill bkp finalize 封装）"
+  },
+  "stats": {
+    "total_entries": 1139,
+    "by_kind": {
+      "FACT": 390,
+      "INFERENCE": 181,
+      "OBSERVATION": 240,
+      "MECHANISM": 244,
+      "BOUNDARY": 84
+    },
+    "dimensions_covered": 13,
+    "dimensions_with_observations": 13
+  },
+  "bkp_contents": {
+    "identity": "identity.json",
+    "work_map": "work_map.md",
+    "book_profile": "profile.md",
+    "observations": {
+      "file": "knowledge/observations.md",
+      "count": 240,
+      "note": "13 个维度分组，含引用与置信度"
+    },
+    "inferences": {
+      "file": "knowledge/inferences.md",
+      "count": 181
+    },
+    "patterns": {
+      "file": "knowledge/patterns.md",
+      "mechanism_count": 17,
+      "deep_dive_pattern_count": 18
+    },
+    "boundaries": {
+      "file": "knowledge/boundaries.md",
+      "note": "84 条章节级边界 + 三轮 Deep Dive 反证"
+    },
+    "deep_dives": [
+      {
+        "dimension": "科学概念进入剧情",
+        "file": "deep_dive/dd_科学概念进入剧情.md"
+      },
+      {
+        "dimension": "悬念",
+        "file": "deep_dive/dd_悬念.md"
+      },
+      {
+        "dimension": "个体选择与文明后果",
+        "file": "deep_dive/dd_个体选择与文明后果.md"
+      }
+    ]
+  },
+  "protocol_alignment": "BKP v0.1 候选协议（A–G 全覆盖）",
+  "finalize": {
+    "tool": "BookDistill bkp finalize",
+    "version": "0.2.0",
+    "date": "2026-08-11",
+    "input": "bkp_prototype/（人工验证的 curated 知识层）",
+    "protocol": "BKP_v0.1_protocol.md",
+    "knowledge_level": "单书 BKP 最高为 Work-specific Pattern；不得升级 Cross-book Pattern / Production Rule",
+    "rerun_policy": "curated 文件若被人工修改则保留并告警；identity.json 由工具重生成"
+  }
+}

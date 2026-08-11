@@ -1,0 +1,97 @@
+{
+  "bkp_version": "0.2",
+  "schema_status": "FINALIZED（依据 BKP_v0.1_protocol.md 封装；协议第 8 节未冻结项保持开放，不冻结最终 schema）",
+  "book": {
+    "book_id": "book_0038",
+    "title": "一九八四",
+    "author": "George Orwell",
+    "category": "外国文学",
+    "language": "zh-CN（上海译文译本）",
+    "chapter_count": 24,
+    "parts": {
+      "第一部": "ch_0001–ch_0008（世界建立与反抗萌芽）",
+      "第二部": "ch_0009–ch_0018（恋爱、同盟与被捕）",
+      "第三部": "ch_0019–ch_0024（刑讯、改造与投降）"
+    }
+  },
+  "source_snapshot": {
+    "book_id": "book_0038",
+    "sp_version": "0.2.1",
+    "source_sha256": "a426098082241b8260ee67112dd656e7677f3d90dab323083f2d0338322a5627",
+    "chapter_count": 24,
+    "chapter_content_fingerprint": "8d7e59437051e3381e462ded6025096078b911c81c078b8560f0fa990c13d62a"
+  },
+  "provenance": {
+    "distill_tool": "BookDistill v0.2.0",
+    "distill_method": "vNext Base Scan（逐章完整扫描，非抽样）+ 3 次自适应专项深挖（信息控制 / 情绪·恐惧塑造 / 结构·失败结局）",
+    "scan_date": "2026-08-11",
+    "scan_scope": "全部 24 章，每章 MAP + FACT/INFERENCE/OBSERVATION/MECHANISM/BOUNDARY",
+    "deep_dive_count": 3,
+    "deep_dive_dimensions": [
+      "信息控制",
+      "情绪",
+      "结构"
+    ],
+    "stop_reason": "主要高价值创作维度（信息控制/恐惧塑造/失败结局）已有系统知识；剩余候选（人物关系、世界观、Reader Experience 等）主要重复已有 Observation/Pattern，边际收益低",
+    "nature": "正式 BKP（源自人工验证的 bkp_prototype，经 BookDistill bkp finalize 封装）"
+  },
+  "stats": {
+    "total_entries": 682,
+    "by_kind": {
+      "FACT": 279,
+      "INFERENCE": 79,
+      "OBSERVATION": 245,
+      "MECHANISM": 29,
+      "BOUNDARY": 50
+    },
+    "dimensions_covered": 14,
+    "dimensions_with_observations": 14
+  },
+  "bkp_contents": {
+    "identity": "identity.json",
+    "work_map": "work_map.md",
+    "book_profile": "profile.md",
+    "observations": {
+      "file": "knowledge/observations.md",
+      "count": 245,
+      "note": "部分附 scope/boundary 标注"
+    },
+    "inferences": {
+      "file": "knowledge/inferences.md",
+      "count": 79
+    },
+    "patterns": {
+      "file": "knowledge/patterns.md",
+      "mechanism_count": 29,
+      "deep_dive_pattern_count": 18
+    },
+    "boundaries": {
+      "file": "knowledge/boundaries.md",
+      "note": "全局边界 + 章节级边界选录 + Deep Dive 反证"
+    },
+    "deep_dives": [
+      {
+        "dimension": "信息控制",
+        "file": "deep_dive/dd_信息控制.md"
+      },
+      {
+        "dimension": "情绪",
+        "file": "deep_dive/dd_情绪.md"
+      },
+      {
+        "dimension": "结构",
+        "file": "deep_dive/dd_结构.md"
+      }
+    ]
+  },
+  "protocol_alignment": "BKP v0.1 候选协议（A–G 全覆盖）",
+  "finalize": {
+    "tool": "BookDistill bkp finalize",
+    "version": "0.2.0",
+    "date": "2026-08-11",
+    "input": "bkp_prototype/（人工验证的 curated 知识层）",
+    "protocol": "BKP_v0.1_protocol.md",
+    "knowledge_level": "单书 BKP 最高为 Work-specific Pattern；不得升级 Cross-book Pattern / Production Rule",
+    "rerun_policy": "curated 文件若被人工修改则保留并告警；identity.json 由工具重生成"
+  }
+}

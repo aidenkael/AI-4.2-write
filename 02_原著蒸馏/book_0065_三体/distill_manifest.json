@@ -1,6 +1,6 @@
 {
   "skill": "BookDistill",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "source_snapshot": {
     "book_id": "book_0065",
     "sp_version": "0.2.1",
@@ -99,11 +99,15 @@
   "stats_by_kind": {
     "FACT": 390,
     "INFERENCE": 181,
+    "OBSERVATION": 0,
     "MECHANISM": 244,
     "BOUNDARY": 84
   },
+  "dimension_stats": {},
   "total_entries": 899,
   "ok": true,
   "errors": [],
-  "warnings": []
+  "warnings": [
+    "distill_manifest.json 缺少 source_snapshot（旧版产物），本次已自动记录当前 输入 snapshot；下次 assemble 将严格比对。"
+  ]
 }
