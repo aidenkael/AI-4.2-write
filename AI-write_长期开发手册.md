@@ -97,6 +97,32 @@ AI 工作台负责：
 - 根据作者确认修订；
 - 自动写回新状态。
 
+## 1.1 项目存在价值与核心闭环
+
+AI-write 不以"功能数量全面超过所有 GitHub 小说项目"为目标。这个方向只会把开发变成清单竞赛，偏离作者真正的创作需求。
+
+AI-write 自身最值得建立的核心闭环是：
+
+```text
+优秀作品
+→ 系统学习其中真正值得作者保留的创作智慧
+→ 形成长期可调用的原著知识资产
+→ 与作者自己作品的 Canon / Story State 严格分离
+→ 在真实创作问题出现时召回少量相关智慧
+→ 与作者意图、当前人物和故事状态共同进入创作
+→ Writer / Planner / Character Sim 等重新创造
+→ Reader / Critic / Continuity 等检查真实效果
+→ 作者最终判断
+```
+
+如果未来发现成熟项目已经完整而可靠地解决了其中某个环节，停止对应重复自研，改为直接借用或组合。
+
+真正目标是：
+
+> **组合成熟上游能力，补足现有项目没有解决好的关键缺口，形成最适合真实作者长期创作的整体工作台。**
+
+不要把"AI-write 必须比别人所有单项都强"写成目标。
+
 ---
 
 # 2. 核心开发哲学
@@ -219,6 +245,38 @@ AI-write 的日常开发由三方协作完成，各有明确职责边界：
 - 对作品的沉浸。
 
 AI-write 不能让作者长期处于"软件测试员模式"。
+
+### 2.5.1 AI-write 是持续成长项目
+
+必须区分两件事：
+
+**A. 系统本身——永远可以成长。**
+
+长期循环：
+
+```text
+真实创作
+→ 暴露不足
+→ 先检查成熟开源项目是否已有解决方案
+→ 借鉴 / 实测
+→ 只补剩余缺口
+→ 验证
+→ 更新 AI-write
+```
+
+同时定期关注重要上游的新版本和路线变化。
+
+**B. 正在进行中的正式创作——阶段性冻结。**
+
+为了保护作者的沉浸、人物感觉、想象力和创作连续性：
+
+一旦进入正式写作，当前阶段 / 当前卷 / 当前创作周期默认冻结核心 Skill 和工作流。创作中发现的问题先记录，除非是阻断性故障，不应边写小说边不断改工具。
+
+优先在：阶段结束、卷末、自然停顿点统一复盘并升级。
+
+因此：
+
+> **"AI-write 持续成长"与"正式创作期间阶段性冻结工具"不是矛盾关系。**
 
 ---
 
@@ -382,7 +440,55 @@ Agent 是发动机，界面是驾驶舱，作品与知识资产才是长期资�
 
 无法可靠概括成 Pattern 的重要发现，应保留为有充分语境和证据的 Observation / Inference，**不能因为无法分类而丢弃**。
 
-## 6.3 真实章节盲测暴露的精华发现盲区与下一步方向
+## 6.3 原著→BKP：生产逻辑与架构约束
+
+原著到 BKP 的生产链不是严格串行的信息压缩流水线。正式原则：
+
+```text
+SourcePrepare（素材预处理）
+→ BookProfile（作品画像）
+→ 多视角原著观察
+→ 必要 Deep Dive（专项深挖）
+→ BookDistill（原著蒸馏整合）
+→ 一个 BKP（原著知识包）
+→ KnowledgeRetrieve 后续按创作问题调用
+```
+
+必须遵守以下架构约束：
+
+**1. 原著始终是最高事实源。**
+
+**2. BookProfile 是导航，不是过滤器。** 它负责判断"哪里可能值得多投入注意力"，不能决定"其他地方没有价值"。画像判断错了，不能让后续观察失明。
+
+**3. 重要观察能力必须可以直接读取原著。** 不能形成"Profile 摘要 → A 摘要 → B 摘要 → BookDistill"这种逐层二手信息链——前一步遗漏，后面会永久丢失。应更接近：多个不同专业读者分别直接读同一本原著 → 各自产生观察 → BookDistill 最后统一整理。
+
+**4. 多视角观察目前只确定"能力需求"，不提前冻结一定要做几个 Skill。** 最终可能是一个 Skill 内多个独立 Pass、2～3 个互补 Skill、总控 Agent 调不同成熟 Skill，或其他更简单的实现。1～5 个 Skill 都只是实现形式，不是当前要冻结的架构。
+
+**5. 当前至少已确认需要覆盖两类此前容易不足的观察能力：**
+
+- 长篇运行 / 情绪与期待 / 读者动力观察；
+- 微观读者体验 / 创作机巧 / 潜台词 / 感官 / 幽默 / 欲望 / 留白 / 组合细节观察。
+
+这些是观察方向，不是固定 taxonomy。不得因为有分类表而丢弃文本自身的重要发现。允许"重要但暂时难以命名"。
+
+**6. 发现阶段可以宽，最终 BKP 必须克制。** 观察阶段可以产生很多候选。BookDistill 最终负责：
+
+- 回原文核证；
+- 区分 Observation / Inference；
+- 识别过度解读；
+- 合并重复；
+- 发现多个普通细节形成的组合效果；
+- 必要时重新 Deep Dive；
+- 加范围、边界、反例、置信度；
+- 能可靠抽象的形成 Work-specific Pattern；
+- 不能可靠抽象但很有价值的继续作为 Observation / Inference 保存；
+- 压缩为真正值得长期调用的知识。
+
+不要因为知识包需要克制，反过来让观察阶段变得保守。
+
+**7. BookDistill 的角色调整。** BookDistill 不再被要求"单枪匹马发现一本书全部精华"。它的核心职责更像总编辑：多视角发现 → 回源验证 → 整合 → 深挖 → 判断 → 压缩 → 封装为 BKP。保留现有 evidence-first、证据、边界、置信度等已经验证的底盘。
+
+## 6.4 真实章节盲测暴露的精华发现盲区与下一步方向
 
 本次真实章节盲测表明：多个模型能够抓住结构、人物、信息、潜台词等大量价值，但仍可能共同漏掉：
 
@@ -836,29 +942,49 @@ Production Rule（极少数长期确认后才可能进入）
 - 记录真正缺口；
 - **缺口才进入自主研发队列。**
 
-当前已知值得继续复查的老候选包括：
+### 核心长期参照
 
-- ani-book
-- oh-story
-- creative-writing-skills
-- Apodictic
-- NovelClaw
-- InkOS
-- NovelForge
-- AI-Novel-Writing-Assistant
-- AuthorAgent
-- novel-creator-skill
-- autonovel
+以下项目作为 AI-write 的长期主要横向参照，不以 star 数判断价值：
 
-近期新发现、尚待正式入池审查的方向包括：
+| 项目 | 主要参照能力 | 战略意义 |
+|---|---|---|
+| [oh-story](https://github.com/worldwonderer/oh-story-claudecode) | 中文网文扫榜、长/短篇拆文、拆文库、情绪模块、节奏、文风、对话潜台词、期待/回报、拆解资产进入写作、长篇正文生产、去 AI 味、本地工作台 | 中文商业网文"拆解→写作"长期主要横向参照；此前借得偏薄，后续应按完整上游流程理解 |
+| [creative-writing-skills](https://github.com/haowjy/creative-writing-skills) | Reader Sim、Character Sim、Muse、Writer、Critic、Editor、Outliner、Continuity、Chronicler、Writing Principles、Creative Writing Craft、Style Analysis、Story Memory | "专业创作角色 + 读者体验 + 创作技法 + 人物 + 编辑"核心参照；Reader Sim / Writing Principles 也可能成为原著观察的方法来源 |
+| [Apodictic](https://github.com/anotherpanacea-eng/apodictic) | Developmental Editing、作品 contract / reader promise、Reader Experience、Scene Function、Character Architecture、Reveal Economy、Emotional Craft、Pacing、Dialogue / Subtext、多分析 Pass | 发展编辑、诊断和高层观察镜头参照；暂不预设为独立 BookDistill 替代品 |
+| [InkOS](https://github.com/Narcooo/inkos) | author_intent、current_focus、chapter intent、Context Compiler、rule stack、trace、写作→审计→修订、状态回灌、长篇连续性、Studio / TUI / CLI 统一工作台 | "作者意图 + 当前状态 + 本章上下文 + 创作运行时"主要横向参照 |
+| [AI-Novel-Writing-Assistant](https://github.com/ExplosiveCoderflome/AI-Novel-Writing-Assistant) | AI Native 完整小说工作台、自动导演、卷级规划、章节生产、RAG、写法引擎、动态角色、审校/修复、状态回灌、UI/桌面工作台、长任务恢复与运行时 | 未来完整工作台和整本生产工程的重要横向参照 |
+| [NovelForge](https://github.com/RhythmicWave/NovelForge) | Schema 驱动卡片、字段级结构化生成、@DSL 上下文注入、知识图谱、动态状态、工作流系统、工作流 Agent、拆书工作流、UI 工作台 | 结构化创作资产、上下文注入、可配置工作流、知识图谱和拆书资产的结合方式参照 |
+| [graphify-novel](https://github.com/Anshler/graphify-novel) | Story Bible、Knowledge Graph、chapter→bible 更新、跨章节 thread/character/world tracking、source of truth 与派生图谱分离、多批次 fresh context 处理长篇 | Canon / Story Bible / 派生图谱 / 长篇状态检索的轻量参照 |
+| [ani-book-skill](https://github.com/ExplosiveCoderflome/ani-book-skill) | Codex 原生 Skill、Markdown/YAML 权威状态、Python 只做确定性校验、一章一章稳定推进、连续性、跨书资产、可重建索引、作者验收后再进入长期事实、拆解已有授权文本 | evidence-first、权威工件、派生索引、长期小说资产和确定性/LLM 边界的重要参照 |
 
-- graphify-novel 类 Story Bible / KG 项目；
+### 次级 / 待触发候选池
+
+以下 G0 阶段候选继续保留，在相关能力需求明确时触发复查：
+
+NovelClaw、AuthorAgent、novel-creator-skill、autonovel、Long-Novel-GPT、Lorn.NovelWriteSkills、chinese-novelist-skill。
+
+### 近期新发现方向
+
+- Story Bible / KG 类项目（graphify-novel 已进入核心参照）；
 - story-skills 类轻量写作 Skill 组织；
-- ConStory 类一致性分类/Benchmark；
+- ConStory 类一致性分类 / Benchmark；
 - 长篇层级规划类项目；
-- 书籍级实体/人物/引语抽取工具（语言适配需单独判断）。
+- 书籍级实体 / 人物 / 引语抽取工具（语言适配需单独判断）。
 
-**禁止无限搜索。** 一轮审查达到“每能力层已有足够成熟候选且差异清晰”后立即停止搜索，进入最小验证。
+### 参照池维护原则
+
+1. **不记录容易迅速过期的 star 数作为核心判断依据。**
+2. 每个核心参照项目至少保留：repo / URL、主要能力、AI-write 应借什么、不应直接照搬什么、当前状态（核心参照 / 候选 / 已吸收部分）、最近复核日期、何时需要再次查看。
+3. 出现以下情况时优先重新查看上游，而不是先自己开发：
+   - AI-write 某项能力暴露真实不足；
+   - 准备进入新的重大开发阶段；
+   - 已借用项目发生明显升级；
+   - 当前方案开始需要大量自研规则；
+   - 作者真实创作出现新的长期痛点。
+4. 流程：真实问题 → 查询能力地图和上游参照池 → 看成熟项目当前做法 → 最小实测 → 能直接借就借 → 只有剩余缺口才自研。
+5. 这是持续机制，不是 G0 结束后失效的历史文档。
+
+**禁止无限搜索。** 一轮审查达到"每能力层已有足够成熟候选且差异清晰"后立即停止搜索，进入最小验证。
 
 ---
 
@@ -935,7 +1061,7 @@ BookDistill 升级原则：
 - 一个真实创作问题能召回少量相关、可追溯、有边界的知识；
 - 不需要作者手动记住参考书和机制名。
 
-2026-08-12 补充：Phase D 对应 Gate G3 的检索技术验证（G3-A/B/C/D）已完成，但 **G3 收口前需先完成"蒸馏能力重新审查"**（见 6.2 / 6.3）。`G3_RETRIEVAL_VALIDATED` 只证明：当 BKP 中已经存在相关知识时，当前 KnowledgeRetrieve（知识检索）可以进行少量、跨书、可追溯、有边界的检索；它不证明 BKP 已完整保存作品真正精华，不证明 BookDistill 的精华发现能力已最终验收，也不证明检索结果已经证明能提高原创作品质量。
+2026-08-12 补充：Phase D 对应 Gate G3 的检索技术验证（G3-A/B/C/D）已完成，但 **G3 收口前需先完成"蒸馏能力重新审查"**（见 6.2 / 6.3 / 6.4）。`G3_RETRIEVAL_VALIDATED` 只证明：当 BKP 中已经存在相关知识时，当前 KnowledgeRetrieve（知识检索）可以进行少量、跨书、可追溯、有边界的检索；它不证明 BKP 已完整保存作品真正精华，不证明 BookDistill 的精华发现能力已最终验收，也不证明检索结果已经证明能提高原创作品质量。
 
 ## Phase E｜创作核心后台
 
@@ -1078,6 +1204,28 @@ BookDistill 升级原则：
 12. **禁止未经用户确认自动退出当前 Gate 或进入下一 Gate。**
 13. **禁止自动覆盖/清理 Local Only、untracked 或不明来源本地变化。**
 14. **禁止为了统一结构而牺牲不同作品的独特性。**
+15. **禁止把"功能数量全面超过所有 GitHub 项目"作为开发目标。**
+
+## 16.1 当前未决定事项（蒸馏能力重新审查期间）
+
+截至本次更新，以下事项**尚未决定**，审查完成前不得提前固化为架构决策：
+
+- 是否一定新增蒸馏 Skill，以及新增几个；
+- 是否一定建立观察 Agent，以及具体分工；
+- 是否一定修改 BKP Schema；
+- 是否一定重做 BookDistill；
+- 多视角观察最终采用何种实现形式（一个 Skill 多 Pass / 多个互补 Skill / Agent 调度 / 其他）。
+
+当前正确步骤仍是：
+
+1. 把成熟上游项目的完整"拆解 / 阅读 / 写作消费链"看透；
+2. 判断我们以前究竟借薄了哪些完整能力；
+3. 用少量真实章节做盲测；
+4. 作者判断是否真的减少了高价值漏检；
+5. 只做最小必要整合；
+6. 再决定 G3 是否收口。
+
+不得因为本次战略更新直接实现任何上述候选架构。
 
 ---
 
@@ -1384,13 +1532,29 @@ G3-A/B/C 已完成，G3-D 用 8 个真实创作问题验证完整检索链路（
 决定：
 
 - 现有 BookDistill 工程底盘全部保留（BookProfile / Base Scan / Deep Dive / Evidence / Observation / Inference / Work-specific Pattern / Scope / Boundary / Counterevidence / BKP 基础结构），不推倒重来；
-- 正式确立"原著蒸馏的真正目标"：发现并保存成熟作者真正认为值得学习、以后创作可能重新调用的作品精华；预设维度只是观察工具，不是知识边界；无法概括成 Pattern 的重要发现保留为有语境和证据的 Observation / Inference（见 6.2 / 6.3）；
+- 正式确立"原著蒸馏的真正目标"：发现并保存成熟作者真正认为值得学习、以后创作可能重新调用的作品精华；预设维度只是观察工具，不是知识边界；无法概括成 Pattern 的重要发现保留为有语境和证据的 Observation / Inference（见 6.2 / 6.3 / 6.4）；
 - BKP（原著知识包）仍是最终统一知识资产：同一原著 → 1～3 个互补蒸馏视角 → 广泛发现 → BKP 证据约束与压缩 → 一个最终 BKP；发现阶段可以宽，最终知识包必须克制（见 9.4）；
 - 下一正式工作为【蒸馏能力重新审查】：重新审查 oh-story、creative-writing-skills、Apodictic 及能力地图相关成熟候选的"读懂优秀小说"能力；不是 BookDistill vNext 开发，不是继续优化 Retrieval，不是直接进入 Phase E；
 - 重新定义 G3_RETRIEVAL_VALIDATED 的边界：只证明 BKP 已有知识可被可靠检索；不证明 BKP 精华完整、不证明 BookDistill 发现能力已最终验收、不证明检索能提高原创作品质量；
 - G3-A/B/C/D 技术工作保持"完成"，但 G3 不自动退出；收口判断等待"蒸馏能力重新审查 + 少量真实章节盲测"的作者判断；不重新开启 G2，不新增正式 Gate，不修改已完成的 G3 技术实现；
 - 新增项目级原则：开发顺序必须符合真实作者工作方式，正式创作阶段默认冻结核心 Skill / 工作流（见 2.5）；
 - 强化 Borrow-first 执行原则（见 2.1）。
+
+## 2026-08-12｜长期开发手册战略共识固化
+
+原因：
+
+G3 技术验证已通过但尚未退出；蒸馏能力重新审查启动前，需要把近期已明确形成的战略结论写入长期手册，防止后续会话遗忘或漂移。
+
+决定：
+
+- 明确项目存在价值与核心闭环（见 1.1）：AI-write 不以功能数量超过所有 GitHub 项目为目标，核心闭环是"优秀作品 → 系统学习 → 原著知识资产 → 与 Canon 分离 → 按创作问题召回 → 重新创造 → 检查效果 → 作者判断"；
+- 明确 AI-write 是持续成长项目，与正式创作期间阶段性冻结工具不矛盾（见 2.5.1）；
+- 重写"原著→BKP"生产逻辑与七项架构约束（见 6.3）：原著是最高事实源、BookProfile 是导航不是过滤器、观察者必须直接读取原著、不冻结 Skill 数量、允许"重要但难以命名"、发现阶段宽而 BKP 克制、BookDistill 角色调整为总编辑；
+- 重组开源参照池（见 13）：建立 8 个核心长期参照（oh-story、creative-writing-skills、Apodictic、InkOS、AI-Novel-Writing-Assistant、NovelForge、graphify-novel、ani-book-skill）+ 次级候选池 + 维护原则；
+- 新增禁止事项：禁止把"功能数量全面超过所有 GitHub 项目"作为开发目标（见 16）；
+- 新增当前未决定事项清单（见 16.1），审查完成前不提前固化架构；
+- 本次只修改长期手册，不修改其他文件，不改变 Gate 状态，不实现任何候选架构。
 
 ## 20. 一句话总纲
 
