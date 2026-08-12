@@ -1,6 +1,6 @@
 # G4-A 最小创作合同 v0.1.1
 
-> 状态：**G4-A 技术产物完成候选；本版完成“作者控制 ≠ 作者审批”校准，尚未自动进入 G4-B。**  
+> 状态：**G4-A 已完成；本文件是持续有效的最小合同，不再承担“当前阶段”状态提示。当前 Gate 以 `00_项目控制/当前工作索引.md` 为准。**  
 > 日期：2026-08-12  
 > 上位边界：`00_项目控制/G4_启动记录_2026-08-12.md`、`00_项目控制/项目阶段门禁.md`
 
@@ -38,12 +38,7 @@
 
 ### A. `mechanical_settlement`｜机械状态结算
 
-作者已接受正文后，文本中清楚发生的事实可自动写回 Story State，例如：
-
-- 人物移动、持有物、已知信息发生明确变化；
-- 清楚发生的事件；
-- 明确兑现/关闭的线索；
-- 文本直接成立的关系状态变化。
+作者已接受正文后，文本中清楚发生的事实可自动写回 Story State，例如人物移动、持有物、已知信息、清楚发生的事件、明确兑现/关闭的线索和文本直接成立的关系变化。
 
 authority source：`accepted_text:<chapter/scene ref>`。
 
@@ -51,24 +46,13 @@ authority source：`accepted_text:<chapter/scene ref>`。
 
 ### B. `creative_change`｜创作性变更
 
-涉及以下内容时，AI 只能提议，作者明确确认后才写回：
-
-- 作品承诺/核心方向；
-- 人物核心动机或重大关系走向；
-- 重要生死；
-- 世界基本规则；
-- 卷级/主线重大重规划；
-- 与既有 Author Intent 明显冲突的改变。
+涉及作品承诺/核心方向、人物核心动机或重大关系走向、重要生死、世界基本规则、卷级/主线重大重规划，或与既有 Author Intent 明显冲突的改变时，AI 只能提议，作者明确确认后才写回。
 
 authority source：`author_decision:<decision_id>`。
 
 ### C. `ambiguous_inference`｜歧义或推断
 
-如果正文没有清楚成立，或 Observer 需要加入解释才能得到某个状态变化：
-
-- 不自动写回；
-- 标记候选/冲突；
-- 必要时询问作者。
+如果正文没有清楚成立，或 Observer 需要加入解释才能得到某个状态变化：不自动写回；标记候选/冲突；必要时询问作者。
 
 **BKP、AI 推演和 Context Package 永远不能直接成为 Canon authority source。**
 
@@ -88,15 +72,7 @@ authority source：`author_decision:<decision_id>`。
 
 # 4. 最小 ID / revision
 
-至少需要：
-
-- `project_id`
-- `intent_rev`
-- `state_rev`
-- `brief_id + brief_rev`
-- `context_id`
-- `decision_id`（有重大决策时）
-- `diff_id`
+至少需要：`project_id`、`intent_rev`、`state_rev`、`brief_id + brief_rev`、`context_id`、`decision_id`（有重大决策时）、`diff_id`。
 
 依赖变化后，旧 Context 必须 STALE。State Diff 只能基于当前 `base_state_rev` 应用，不能让旧会话覆盖新状态。
 
@@ -106,17 +82,7 @@ authority source：`author_decision:<decision_id>`。
 
 回答：**作者现在想把作品写成什么，当前最在意什么，什么不能被系统擅自牺牲。**
 
-最小字段：
-
-- `project_id`
-- `intent_rev`
-- `work_direction`
-- `reader_promise`
-- `current_priority`
-- `current_focus`
-- `hard_constraints`
-- `avoidances`
-- `open_space`
+最小字段：`project_id / intent_rev / work_direction / reader_promise / current_priority / current_focus / hard_constraints / avoidances / open_space`。
 
 AI 可以从对话中整理/提议修订；改变重大方向时需要作者确认。作者不需要填写表格，系统负责把自然语言转成该工件。
 
@@ -126,24 +92,11 @@ AI 可以从对话中整理/提议修订；改变重大方向时需要作者确�
 
 回答：**这部原创作品目前已经是什么样，哪些未来安排只是计划。**
 
-最小内容：
-
-- `project_id`
-- `state_rev`
-- `canon_facts`
-- `character_state`
-- `relationship_state`
-- `occurred_events`
-- `open_threads`
-- `approved_plan`
+最小内容：`project_id / state_rev / canon_facts / character_state / relationship_state / occurred_events / open_threads / approved_plan`。
 
 `approved_plan ≠ Canon`：未来安排可以被作者推翻。
 
-合法 authority source：
-
-- `accepted_text:<ref>`；
-- `author_decision:<decision_id>`；
-- 必要时 `manual_import:<source>`。
+合法 authority source：`accepted_text:<ref>`、`author_decision:<decision_id>`、必要 `manual_import:<source>`。
 
 禁止把 `bkp:<...>`、AI candidate、Context Package 作为 authority source。
 
@@ -153,25 +106,9 @@ AI 可以从对话中整理/提议修订；改变重大方向时需要作者确�
 
 回答：**这一次具体要解决什么创作问题。**
 
-最小字段：
+最小字段：`brief_id / brief_rev / project_id / scope / objective / focal_entities / desire_and_obstacle / desired_reader_experience / inherited_obligations / hard_constraints / freedom_zone / knowledge_need / assumptions / source_versions`。
 
-- `brief_id / brief_rev`
-- `project_id`
-- `scope`
-- `objective`
-- `focal_entities`
-- `desire_and_obstacle`（相关时）
-- `desired_reader_experience`
-- `inherited_obligations`
-- `hard_constraints`
-- `freedom_zone`
-- `knowledge_need`
-- `assumptions`
-- `source_versions`
-
-Creation Brief 默认由系统根据作者当前自然语言要求自动编译。
-
-`assumptions` 必须暴露 AI 自己补出的理解，避免把“这段有点闷”静默改写成“必须加打斗”。
+Creation Brief 默认由系统根据作者当前自然语言要求自动编译。`assumptions` 必须暴露 AI 自己补出的理解，避免把“这段有点闷”静默改写成“必须加打斗”。
 
 ---
 
@@ -179,25 +116,9 @@ Creation Brief 默认由系统根据作者当前自然语言要求自动编译�
 
 回答：**这一次任务真正需要看到哪些少量信息，为什么。**
 
-最小字段：
+最小字段：`context_id / project_id / built_from / selected_intent / selected_story_state / selected_bkp_hits / selection_reason / conflicts_or_tensions / size_summary`。
 
-- `context_id`
-- `project_id`
-- `built_from`
-- `selected_intent`
-- `selected_story_state`
-- `selected_bkp_hits`
-- `selection_reason`
-- `conflicts_or_tensions`
-- `size_summary`
-
-要求：
-
-- 小而相关；
-- Story State 与 BKP 明确分区；
-- BKP Hit 保留 source / knowledge id / scope / boundary / confidence；
-- 可重建；
-- 依赖 revision 变化后自动失效。
+要求：小而相关；Story State 与 BKP 明确分区；BKP Hit 保留 source / knowledge id / scope / boundary / confidence；可重建；依赖 revision 变化后自动失效。
 
 ---
 
@@ -207,30 +128,13 @@ Creation Brief 默认由系统根据作者当前自然语言要求自动编译�
 
 只在真正存在创作取舍时发挥核心作用。
 
-最小字段：
+最小字段：`decision_id / brief/context ref / options / author_action / final_decision / confirmation_ref / status`。
 
-- `decision_id`
-- `brief/context ref`
-- `options`（需要时 1～3 个差异方向）
-- `author_action`：choose / modify / reject_all / defer
-- `final_decision`
-- `confirmation_ref`
-- `status`
-
-AI 可以推荐，但必须标成建议，不得伪装成客观最优。
+`author_action` 可为：`choose / modify / reject_all / defer`。AI 可以推荐，但必须标成建议，不得伪装成客观最优。
 
 ## 9.2 State Diff
 
-最小字段：
-
-- `diff_id`
-- `base_state_rev`
-- `writeback_class`：`mechanical_settlement / creative_change / ambiguous_inference`
-- `source_ref`
-- `changes`
-- `conflicts_or_warnings`
-- `apply_status`
-- `resulting_state_rev`
+最小字段：`diff_id / base_state_rev / writeback_class / source_ref / changes / conflicts_or_warnings / apply_status / resulting_state_rev`。
 
 应用规则：
 
@@ -280,20 +184,9 @@ AI 可以推荐，但必须标成建议，不得伪装成客观最优。
 
 ---
 
-# 12. G4-B/C 后的机械校验
+# 12. 机械校验
 
-未来脚本只检查工程事实，不做文学评分：
-
-1. ID/revision 是否有效；
-2. Context 是否 stale；
-3. Canon authority source 是否合规；
-4. BKP 是否被错误写入 Canon；
-5. `base_state_rev` 是否匹配；
-6. `creative_change` 是否缺作者确认；
-7. `mechanical_settlement` 是否有 accepted_text 来源；
-8. `ambiguous_inference` 是否被错误自动应用；
-9. `approved_plan` 是否被误当成已发生事实；
-10. apply 后 trace/revision 是否完整。
+未来脚本只检查工程事实，不做文学评分：ID/revision 有效性、Context stale、Canon authority 合规、BKP 是否误写 Canon、`base_state_rev` 匹配、`creative_change` 作者确认、`mechanical_settlement` 的 accepted_text 来源、`ambiguous_inference` 是否误自动应用、`approved_plan` 是否误当已发生事实、apply 后 trace/revision 是否完整。
 
 ---
 
@@ -321,6 +214,5 @@ AI-write 自己需要定义的仍只是薄协议、BKP/Canon 隔离、作者控�
 - 歧义/推断不自动写回：✅
 - revision / stale / base-state 防旧写覆盖：✅
 - 未冻结最终技术载体：✅
-- 未抢跑 G4-B/C/D：✅
 
-**结论：G4-A 合同已完成当前必要校准，继续停在 G4-A，未自动进入 G4-B。**
+**结论：G4-A 合同已完成并持续作为后续 G4-B/C/D 的最小语义边界；当前阶段请读取 `当前工作索引.md`。**

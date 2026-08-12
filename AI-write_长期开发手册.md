@@ -1,7 +1,7 @@
 # AI-write 长期开发手册
 
 > 更新日期：2026-08-12  
-> 当前正式 Gate：**G4｜创作上下文与作者决策最小闭环（ACTIVE / G4-C 技术验证完成候选）**  
+> 当前正式 Gate：**G4｜创作上下文与作者决策最小闭环（ACTIVE / G4-D）**  
 > 本文件只保留长期有效原则、当前路线和关键边界；过程细节放专项文件与 Git 历史。
 
 ---
@@ -25,9 +25,9 @@ AI-write 是**作者主导、AI 辅助**的中文长篇小说创作工作台，�
 → AI 生成/修改正文
 → 作者凭阅读感觉给自然语言反馈
 → Controller/Muse 自动判断问题并调用相关技能
-→ Writer / Character Sim / Reader Sim / Critic / Editor / Continuity 等针对性处理
+→ 专业能力针对性处理
 → 作者继续阅读、接受、拒绝或再给模糊反馈
-→ 已接受正文中的明确事实自动结算进 Story State
+→ 已接受正文中的明确事实自动结算 Story State
 → 下一轮创作
 ```
 
@@ -41,7 +41,7 @@ AI-write 是**作者主导、AI 辅助**的中文长篇小说创作工作台，�
 
 `真实问题 → 查成熟上游 → 最小真实测试 → 能借就借 → 只补剩余缺口`
 
-AI-write 自研尽量集中在：**协议、路由、胶水、BKP、中文长篇适配、作者控制、必要状态接口。**
+AI-write 自研尽量集中在：协议、路由、胶水、BKP、中文长篇适配、作者控制、必要状态接口。
 
 ## 2.2 案例只暴露问题，不决定架构
 
@@ -67,15 +67,7 @@ AI-write 自研尽量集中在：**协议、路由、胶水、BKP、中文长篇
 
 # 3. 原著知识与原创状态
 
-原著是最高事实源。BookDistill 当前采用：
-
-```text
-长篇运行 / 读者动力：oh-story + AI-Novel
-Reader / Page Craft：creative-writing-skills
-必要 Developmental Deep Dive：Apodictic
-→ BookDistill 总编辑回源核证、去重、组合效果、边界/反例/置信度
-→ BKP
-```
+原著是最高事实源。BookDistill 当前采用多视角直接读原著 + 总编辑收敛，形成 BKP。
 
 知识成熟度：
 
@@ -106,7 +98,7 @@ C01–C20 只是技术路由，不是作者操作的 20 个 Skill。
 
 # 5. 核心长期上游
 
-- AI-Novel-Writing-Assistant：完整长篇生产链、任务合同、Reader Experience Contract、拆书资产回流、状态回灌；
+- AI-Novel-Writing-Assistant：完整长篇生产链、任务合同、Reader Experience Contract、状态回灌；
 - oh-story：中文网文拆解、期待/回报、情绪/节奏、卷纲/细纲/正文回流；
 - creative-writing-skills：Muse、Writer、Reader Sim、Character Sim、Critic、Editor、Outliner、Continuity；
 - Apodictic：Developmental Editing 与“诊断而不夺权”的 Firewall；
@@ -124,38 +116,33 @@ C01–C20 只是技术路由，不是作者操作的 20 个 Skill。
 - G1：CLOSED；
 - G2：CLOSED；
 - G3：`G3_RETRIEVAL_VALIDATED / CLOSED`；
-- **G4：ACTIVE / G4-C 技术验证完成候选。**
+- **G4：ACTIVE / G4-D。**
 
-G4-A 已完成最小合同。G4-B 已完成可丢弃原创沙盒与 cold-read 恢复验证。
+G4-A 已完成最小合同；G4-B 已证明创作现场可文件化恢复；G4-C 已证明：
 
-G4-C 已真实验证：
+`Author Intent + Story State + Creation Brief + 少量真实 BKP Hit → 小 Context → 情境化创作方向`
 
-`Author Intent + Story State + Creation Brief + 少量真实 BKP Hit → 小 Context Package → 情境化创作方向`
+长期保留结论：小 Context 成立；跨书按问题自然发生；非阻塞 BKP gap 不立即触发扩库；当前无 Retrieval/RAG/KG 升级理由。
 
-覆盖人物、情节/信息、读者体验三类问题。
+当前 G4-D 验证：
 
-当前保留的长期结论只有：
+`作者自然语言反馈 → 系统理解接受/修改/拒绝/暂缓 → Decision Record / State Diff → 合法写回或明确不写`
 
-- 小 Context 成立；
-- 跨书综合应按问题自然发生，不强制多书；
-- 非阻塞 BKP gap 只记录，不立即触发扩库；
-- 当前无 Retrieval / RAG / KG 升级理由。
-
-G4-D 才验证作者选择 / 修改 / 拒绝与状态写回；未获作者确认前不提前做。
+真实作者反馈才具有 `author_decision` authority；模拟输入只做非写入测试。
 
 ---
 
 # 7. 当前禁止事项
 
 - 不批量蒸馏更多书；
-- 不重跑旧书；
 - 不修改 BookDistill/BKP/KnowledgeRetrieve 只为结果更漂亮；
 - 不自研成熟 Writer / Reader / Editor / Canon / Continuity；
 - 不拿正式长篇做工具实验；
 - 不开发完整 UI；
 - 不让作者面对内部工具堆或频繁确认；
 - 不让 AI 自动替作者做重大创作决定；
-- 不自动进入 G4-D。
+- 不用模拟作者输入写权威状态；
+- 不自动进入 G4-E。
 
 ---
 
@@ -165,14 +152,14 @@ G4-D 才验证作者选择 / 修改 / 拒绝与状态写回；未获作者确认
 
 长期文档只保存稳定原则和当前边界；实验细节放 `06_工作区` 或 Git 历史。
 
-本地历史 dirty / untracked / stash 先识别内容，再决定是否恢复或清理；不得自动 pop/drop/clean。
+本地历史 dirty / untracked / `stash@{0}` 先识别内容，再决定是否恢复或清理；不得自动 pop/drop/clean，也不为普通同步建立无意义分支。
 
 当前状态入口：`00_项目控制/当前工作索引.md`。  
 当前门禁：`00_项目控制/项目阶段门禁.md`。  
-G4-C 验证报告：`06_工作区/G4B_沙盒_雾港档案室/g4c/G4C_VALIDATION.md`。
+当前 G4-D 真实验证：`06_工作区/G4B_沙盒_雾港档案室/g4d/G4D_作者决策真实验证.md`。
 
 ---
 
 # 9. 一句话总纲
 
-> **AI-write 要把优秀作品的创作智慧变成后台能力，让作者主要通过“看正文、说感觉、做重大取舍”来创作；G4-C 已证明参考智慧可以在真实创作现场被压成小而有用的 Context，下一步只在作者确认后进入 G4-D。**
+> **AI-write 要让复杂后台尽量消失：优秀作品的创作智慧在后台被调用，作者主要通过看内容、说感觉和做重大取舍来创作；当前 G4-D 正在真实验证这条作者决策反馈环。**
