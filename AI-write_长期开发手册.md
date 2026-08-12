@@ -1,180 +1,194 @@
 # AI-write 长期开发手册
 
 > 更新日期：2026-08-13  
-> 当前正式 Gate：**G5｜正文诊断与修订最小闭环（ACTIVE / G5-C）**  
+> 当前主线：**单书蒸馏成品化**  
+> G5｜正文诊断与修订最小闭环：**PAUSED**  
 > 本文件只保留长期有效原则、当前路线和关键边界；过程细节放专项文件与 Git 历史。
 
 ---
 
 # 1. 项目目标
 
-AI-write 是**作者主导、AI 辅助**的中文长篇小说创作工作台，不是一键自动写整本书，也不是只会服从作者修改指令的文字工具。
+AI-write 是**作者主导、AI 辅助**的中文长篇小说创作工作台，不是一键自动写整本书。
 
-作者主要面对：
+长期目标仍是：
 
-`参考/研究 → 构思 → 规划 → 写 → 审阅 → 修改`
+`参考作品知识 → 构思/规划 → 正文生成与修改 → 作者反馈 → 后台诊断/修订 → 状态维护`
 
-后台负责：
-
-`Book Knowledge + Canon/Story State + Retrieval + Context Compiler + Planner + Writer + Reader/Critic/Editor + Continuity + State Writeback + Controller`
-
-理想创作体验：
-
-```text
-工作台准备当前状态 + 少量相关知识
-→ AI 生成/修改正文
-→ 后台从文本本身做独立 Reader/Critic/Editor 诊断
-→ 作者凭阅读感觉给自然语言反馈
-→ Controller 区分作者目标、症状、原因判断和修法建议
-→ 结合文本证据、专业诊断与 BKP，必要时同意、修正或挑战作者判断
-→ 针对性修改正文
-→ 作者继续阅读、接受、拒绝或再反馈
-→ 已接受正文中的明确事实由后台机械结算 Story State
-→ 下一轮创作
-```
-
-作者不需要理解内部 Schema、手动挑 Skill、维护状态表或逐条审批机械记账。
+但当前不继续扩展写作闭环。先把最前面的“参考作品知识”做成真正可用的成品。
 
 ---
 
-# 2. 核心原则
+# 2. 当前唯一主线：一本书如何完成蒸馏
 
-## 2.1 Borrow-first
+用户侧体验必须尽量简单：
 
-`真实问题 → 查成熟上游 → 最小真实测试 → 能借就借 → 只补剩余缺口`
+`指定书名/book_id → 一次启动 → 等待 → BookProfile + 可检索 BKP + 简短完成报告`
 
-AI-write 自研尽量集中在：协议、路由、胶水、BKP、中文长篇适配、作者控制、必要状态接口。
+内部复杂度由 Agent 承担，作者不负责执行命令、选择 Deep Dive、维护 Evidence 或理解 BKP Schema。
 
-## 2.2 案例只暴露问题，不决定架构
+## 2.1 SourcePrepare
 
-单个章节、技巧或漏检不能直接升级成长期 Schema / Skill。回到完整能力地图和成熟上游，再判断是否存在系统性缺口。
+SourcePrepare 负责输入标准化，不算文学蒸馏。
 
-## 2.3 真实任务优先
+它把 `01_原始素材` 中的 EPUB/TXT/PDF 只读转换与质检为 PASS 的：
 
-普通能力用少量真实任务判断；只有长期核心规则且证据矛盾、固化错误代价高时才升级严格 Benchmark。
+`full.md + chapters/ + metadata.json + conversion_report.md`
 
-## 2.4 作者控制 ≠ 作者审批
+只有 PASS 才进入 BookDistill；REVIEW/FAIL 才需要人工介入。
 
-作者控制作品方向、审美、人物重大取舍和重要创作决定。
+## 2.2 BookDistill 内部分析
 
-后台默认自动处理知识检索、技能路由、上下文装配、诊断、连续性检查、从已接受正文提取明确事实和机械状态结算。
+BookDistill 不采用固定“蒸馏三次/五次”的机械规则，而采用稳定基础 + 自适应专项：
 
-只有重大创作变化、真实冲突/歧义，或正文尚未成立的新解释/新剧情需要作者显式确认。
+1. **Base Scan**：1 类全书基础扫描，建立 MAP、Evidence、Observation、Boundary；
+2. **Discovery Pass A**：长篇运行 / 读者动力；
+3. **Discovery Pass B**：Reader / Page Craft；
+4. **BookProfile**：汇总覆盖、强项、潜在强项、不确定项，并决定专项预算；
+5. **Deep Dive：0～N 次**：只对高价值或不确定问题触发；
+6. **总编辑式 Finalize**：回原著核证、合并重复、识别组合效果、补 scope/boundary/counterevidence/confidence，形成正式 BKP。
 
-## 2.5 作者反馈是信号，不是默认正确的诊断
+“Pass”是分析目标，不等于一次模型调用。长书可以按章节/分块执行，同一 Pass 的中间结果落盘，再做跨章收敛。
 
-作者对“我想要什么”“我接受什么”“哪些重大取舍我不愿意让步”拥有最终控制权；但作者对“为什么这段不好”“应该怎样修”不被系统默认视为客观真理。
-
-系统应区分：
-
-- **目标/约束**：作者真正想得到什么；
-- **症状/感觉**：例如“这段太平”“这里拖”“这个人不像前面”；
-- **原因判断**：作者或 AI 对问题原因的解释；
-- **修法建议**：例如删半段、加冲突、换视角。
-
-后两项默认是**待验证假设**。Controller 应结合正文证据、Reader/Critic/Editor、角色/连续性检查和相关 BKP 独立判断；有理由时应明确告诉作者“感觉成立，但你提出的原因或修法可能不对”，并给出更合适的替代方向。
-
-AI 的诊断也不是绝对真理。多个诊断信号冲突时保留分歧、说明依据和不确定性，不用“AI 专业判断”夺走作者最终取舍。
-
-## 2.6 正式创作阶段性冻结工具
-
-正式创作开始后，核心工作流默认阶段性冻结；除阻断性问题外，在卷末、故事弧结束或自然停顿点统一升级。
+《一九八四》《三体》验证时各做了 3 次专项 Deep Dive，只证明 v0.2 流程能运行；**不把 3 次冻结为以后每本书的固定规则。**
 
 ---
 
-# 3. 原著知识与原创状态
+# 3. 蒸馏最终得到什么
 
-原著是最高事实源。BookDistill 采用多视角直接读原著 + 总编辑收敛形成 BKP。
+BKP（Book Knowledge Package）是一部参考作品完成蒸馏后的长期知识资产。
 
-知识成熟度：
+作者默认只需要看到：
 
-`Evidence → Observation / Inference → Work-specific Pattern → Cross-book Pattern → Creation-tested Heuristic → Production Rule`
+1. **BookProfile**：这本书在哪些创作问题上值得参考、主要强项、潜在强项、不确定项、已完成专项；
+2. **可检索 BKP**：未来真正写作时由后台按问题调用；
+3. **简短完成报告**：来源、覆盖、Deep Dive、校验和 Retrieval 可发现状态。
 
-BKP 是参考作品知识；Canon / Story State 是原创作品权威事实。BKP、AI 推演和派生 Context 不能直接成为 Canon authority。
+BKP 内部长期保存：
 
-合法 Story State authority 可来自：`author_decision`、`accepted_text`、必要 `manual_import`。
+- 作品身份与 source fingerprint；
+- 作品地图；
+- Observation；
+- 重要 Inference；
+- Work-specific Pattern；
+- Deep Dive 最终知识；
+- 对应 Evidence、scope、boundary、counterevidence、confidence。
 
----
+逐章 evidence、manifest、Agent 工作记录和测试日志主要是后台审计材料，不是作者日常阅读材料。
 
-# 4. 成熟作者能力地图
-
-长期只用六区检查漏项：作品方向与判断、故事运行、读者与文本效果、页面写作、判断与修订、长期知识与创作运行。
-
-永久开放：**重要，但目前无法命名。**
-
-C01–C20 只是技术路由，不是作者操作的 20 个 Skill。
-
----
-
-# 5. 核心长期上游
-
-- AI-Novel-Writing-Assistant：完整长篇生产链、任务合同、Reader Experience Contract、状态回灌；
-- oh-story：中文网文拆解、期待/回报、情绪/节奏、卷纲/细纲/正文回流；
-- creative-writing-skills：Muse、Writer、Reader Sim、Character Sim、Critic、Editor、Outliner、Continuity；
-- Apodictic：Developmental Editing 与“诊断而不夺权”的 Firewall；
-- InkOS：author_intent、current_focus、Context Compiler、未来分支、状态治理、重动作确认；
-- graphify-novel / NovelForge：Story Bible、source of truth 与派生层；
-- ani-book-skill：人可读权威工件、渐进确认、确定性校验、已验收内容进入长期记忆。
-
-出现真实问题时优先回到这些上游，不无限搜索。
+正常写作阶段只检索 BKP，不重新蒸馏原著。
 
 ---
 
-# 6. 已完成路线与当前 Gate
+# 4. 当前已有能力
 
-- G0：CLOSED；
-- G1：CLOSED；
-- G2：CLOSED；
-- G3：`G3_RETRIEVAL_VALIDATED / CLOSED`；
-- G4｜创作上下文与作者决策最小闭环：CLOSED；
-- **G5｜正文诊断与修订最小闭环：ACTIVE / G5-C。**
+- SourcePrepare v0.2.1：稳定地基；
+- BookDistill v0.2：Base Scan、Discovery、BookProfile、Deep Dive、BKP Finalize 已存在；
+- 《一九八四》《三体》已完成真实 vNext 验证；
+- KnowledgeRetrieve 已能加载正式 BKP。
 
-G4 已证明：可恢复创作状态、小 Context、按问题自然发生的跨书综合、作者自然语言 Decision/合法 Diff、revision/stale 边界。
-
-G5 只验证下一条真实链：
-
-`当前状态 + 新 Context → 一次性正文 → 独立 Reader/Critic/Editor 诊断 → 作者自然语言反馈 → Controller 三角校验 → 有依据的修订 → 作者判断`
-
-G5-A 已固定“作者反馈不是默认诊断真理”的最小合同。
-
-G5-B 已真实完成：基于 `state_rev=2` 重建新 Brief/Context，生成 noncanon 短正文；Reader/Critic/Editor 在没有作者反馈时独立完成诊断，Controller 保留了真实共识、冲突与不确定性；Story State 未修改，无 Retrieval/BKP/Writer 架构阻塞。
-
-当前 G5-C 只做：作者直接读正文、给真实自然语言感觉；Controller 再与已有独立诊断和文本 evidence 三角校验，形成有依据的小修订。作者不需要先诊断正确。
+因此当前缺口不是继续设计新的蒸馏理论，而是**把现有零件收成一个单书编排入口**。
 
 ---
 
-# 7. 当前禁止事项
+# 5. 当前开发任务
 
-- 不把作者每句话机械当成修改命令；
-- 不把 AI/Reader/Critic 的判断包装成客观唯一答案；
-- 不先用完整 AI 诊断锚定作者本轮阅读反馈；
-- 不一次自研完整 Writer / Reader / Editor / Controller；
-- 不拿正式长篇做尚未稳定工具的实验场；
-- 不批量蒸馏更多书，只为填单个非阻塞 gap；
-- 不升级 Retrieval/RAG/KG 只为结果更漂亮；
-- 不开发完整 UI、大型数据库、KG 或多 Agent 平台；
-- 不复用已因 state revision 变化而 STALE 的旧 Context；
-- 不在作者接受正文前把草稿当 accepted text 或写 Story State；
-- 不让 G5 自动扩大成完整小说生产系统。
+优先复用现有 SourcePrepare / BookDistill，实现：
+
+`书名/book_id`
+`→ 判断 SourcePrepare 是否已有 PASS；必要时运行`
+`→ BookDistill Base + Discovery`
+`→ BookProfile 自动决定 0～N Deep Dive`
+`→ 总编辑式收敛`
+`→ BKP Finalize`
+`→ 校验 KnowledgeRetrieve 可发现`
+`→ 一份简短最终报告`
+
+需要补的主要是：
+
+- 单书 orchestrator / runbook；
+- 阶段状态判断；
+- 自动选择/记录 Deep Dive；
+- 失败时明确停在哪一步、为什么；
+- 中断后的最小恢复能力；
+- 一次真实新书端到端验收。
+
+不重写已经稳定的 SourcePrepare / BookDistill 核心，除非真实端到端运行暴露阻塞。
 
 ---
 
-# 8. Git 与文档纪律
+# 6. 长期核心原则
 
-长期禁止无明确授权执行：`reset / restore / clean / force push / rebase / merge`。
+## 6.1 Borrow-first
 
-长期文档只保存稳定原则和当前边界；实验细节放 `06_工作区` 或 Git 历史。
+`真实问题 → 查成熟上游 → 能借就借 → 最小适配 → 真实运行`
 
-本地历史 dirty / untracked / stash 先识别内容，再决定是否恢复或清理；不得自动 pop/drop/clean。普通同步不建立无意义长期分支。
+成熟实现能直接复用时，不重复造轮子。
 
-当前状态入口：`00_项目控制/当前工作索引.md`。  
+## 6.2 案例只暴露问题，不决定架构
+
+单本书的特殊问题不能直接升级成永久 Schema / Skill。
+
+## 6.3 原著是最高事实源
+
+重要观察必须能回到原著证据；BookProfile、BKP、Agent 推断都不能替代原著。
+
+## 6.4 发现可以宽，最终 BKP 必须克制
+
+允许多视角、跨尺度、未命名发现；最终只保留长期有调用价值、证据充分、边界清楚的知识。
+
+## 6.5 单书不能证明普遍规律
+
+单本 BKP 最高默认只到：
+
+`Evidence → Observation / Inference → Work-specific Pattern`
+
+Cross-book Pattern、Creation-tested Heuristic、Production Rule 属于后续阶段。
+
+## 6.6 作者控制 ≠ 作者审批
+
+后台机械工作默认自动完成。只有来源 REVIEW/FAIL、作品身份冲突或真正无法裁决的重大问题才打断作者。
+
+---
+
+# 7. 暂停的后续工作
+
+G5 正文诊断与修订实验暂停。已有 G5 工件保留为历史证据，不删除，也不继续要求作者阅读测试正文。
+
+在单书蒸馏入口完成前，不继续：
+
+- Writer / Reader / Critic / Editor / Controller 实质开发；
+- 正文质量 Benchmark；
+- UI；
+- 大型数据库、RAG、KG、多 Agent 平台；
+- 批量蒸馏全部素材。
+
+---
+
+# 8. 当前完成标准
+
+当前主线完成只需要证明：
+
+> **选一部此前没有蒸馏的新书，用户只指定一次书名/book_id；Agent 可以从 SourcePrepare 状态判断开始，独立跑到最终 BKP，并让 KnowledgeRetrieve 成功发现。**
+
+如果成功，这一版才可以称为“单书蒸馏成品”。
+
+---
+
+# 9. Git 与文档纪律
+
+无明确授权禁止：`reset / restore / clean / force push / rebase / merge`。
+
+本地 dirty / untracked / stash 先识别内容再处理，不自动 pop/drop/clean，不为了普通同步建立无意义长期分支。
+
+长期文档只留稳定原则和当前路线；具体实现过程放 `06_工作区` 和 Git 历史。
+
+当前入口：`00_项目控制/当前工作索引.md`。  
 当前门禁：`00_项目控制/项目阶段门禁.md`。  
-G5-A 合同：`06_工作区/G5A_作者反馈与诊断合同_v0.1.md`。  
-G5-B 验证：`06_工作区/G4B_沙盒_雾港档案室/g5b/G5B_VALIDATION.md`。  
-G5-C 当前正文：`06_工作区/G4B_沙盒_雾港档案室/g5b/draft_v1.md`。
+专项目标：`06_工作区/单书蒸馏成品化_当前目标.md`。
 
 ---
 
-# 9. 一句话总纲
+# 10. 一句话总纲
 
-> **作者拥有作品最终控制权，不等于作者对问题原因和修法永远正确；AI-write 要让后台专业能力既能先独立判断，也能认真接收作者真实感觉，用证据辅助修订，再把最终取舍交还作者。**
+> **当前先不研究 AI 怎么把小说写好；先把“一本参考书一次交给 Agent，就能自动得到高质量、可追溯、可检索 BKP”做成真正可用的成品。**

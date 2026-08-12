@@ -1,106 +1,90 @@
 # AI-write Agent 长期规则
 
-> 面向进入仓库工作的 Agent。目标是让复杂后台服务作者，而不是让作者服务系统。
+> 目标：让复杂后台服务作者，而不是让作者服务系统。
 
 ## 1. 当前阶段
 
-**G5｜正文诊断与修订最小闭环：ACTIVE / G5-C。**
+**当前唯一主线：单书蒸馏成品化。**
 
-G0–G4 已关闭。G5-A/B 已完成；当前只推进 G5-C，不自动进入 G5-D/E。
+G0–G4 已关闭。G5｜正文诊断与修订最小闭环：**PAUSED**。不得继续要求作者评价 G5 测试正文。
 
-开始任务前读：目录说明、AGENTS、长期手册、当前索引、项目记忆、阶段门禁和当前专项工件。
+开始任务前读：目录说明、AGENTS、长期手册、当前索引、项目记忆、阶段门禁和当前专项文件。
 
-## 2. 作者交互原则
+## 2. 当前用户体验目标
 
-**作者控制 ≠ 作者审批；作者反馈是信号，不是默认正确的诊断。**
+用户只指定一本书并发起一次“蒸馏这本书”的任务。
 
-必须区分：
+Agent 应尽量独立完成：
 
-- 作者目标 / 硬约束；
-- 作者感觉 / 症状；
-- 原因判断；
-- 修法建议。
+`书名/book_id → SourcePrepare 状态判断 → BookDistill → BKP Finalize → Retrieval 可发现 → 简短报告`
 
-作者控制目标、重大取舍和最终接受；原因判断与修法默认是待验证假设。Agent 应结合正文证据、Reader/Critic/Editor、角色/连续性和相关 BKP 独立判断，必要时有依据地反对作者提出的修法。
+不要让作者手动执行内部命令、选择 Deep Dive、维护 evidence 或检查 Schema。
 
-同时不得把 AI 诊断包装成唯一客观答案；冲突时保留依据、不确定性和替代解释。
+## 3. SourcePrepare 边界
 
-## 3. 已验证规则
+SourcePrepare 只做输入标准化，不做文学分析。
 
-G4 已证明：
+- 已有 PASS：直接复用；
+- 没有输出：运行单书 SourcePrepare；
+- REVIEW/FAIL：停止并报告原因，只有确实需要人工选源/补素材时再询问作者；
+- 不覆盖、不修改 `01_原始素材`。
 
-- Author Intent / Story State / Creation Brief 可文件化恢复；
-- Context 小而相关，可重建；revision 变化后旧 Context 必须 STALE；
-- Retrieval 只负责召回，Synthesis 属于创作上下文/决策层；
-- 跨书知识不强制多书共识；
-- `approved_plan ≠ Canon`；
-- Story State authority 仅来自合规 `accepted_text / author_decision / manual_import`；
-- BKP / AI candidate / Context 不写 Canon。
+## 4. BookDistill 内部方法
 
-G5-B 已证明：
+当前方法保持：
 
-- 可从 `state_rev=2` 重建新 Brief/Context，而不复用 STALE Context；
-- 可生成一次性 noncanon 正文；
-- Reader Sim / Critic / Editor 能在没有作者本轮反馈时分别独立诊断正文；
-- Controller 能保留共识、冲突、单一路径观察和不确定性；
-- Story State 保持不变；当前无 Retrieval/BKP/Writer 架构阻塞。
+1. Base Scan；
+2. 至少两个互补 Discovery Pass：长篇运行/读者动力、Reader/Page Craft；
+3. BookProfile；
+4. 0～N 个按需 Deep Dive；
+5. 总编辑式回源核证与 Finalize；
+6. BKP 校验。
 
-## 4. G5-C 规则
+Deep Dive 次数不固定。《一九八四》《三体》各 3 次专项只是历史验证样本。
 
-当前正文：`06_工作区/G4B_沙盒_雾港档案室/g5b/draft_v1.md`。
+“Pass”是分析目标，不等于单次模型调用。长书可分章/分块，结果落盘后跨章收敛。
 
-当前独立诊断已经完成，但在作者本轮反馈形成前，不应额外展开完整诊断去锚定作者。
+BookProfile 是导航，不是过滤器；原著始终是最高事实源。
 
-收到真实作者反馈后：
+## 5. BKP 边界
 
-1. 保留原话；
-2. 拆分 goal/constraint、symptom/experience、diagnosis、remedy；
-3. 与已有 Reader/Critic/Editor 报告和正文 evidence 三角校验；
-4. 输出 agree / partly_agree / disagree / uncertain，并说明依据；
-5. 若作者修法不合适，给出更小、更贴目标的替代方向；
-6. 不为了证明 AI 有价值而故意唱反调；
-7. 只对确认值得处理的问题生成小修订；
-8. 修订稿仍为 sandbox/noncanon，作者接受前不得产生 accepted_text 或修改 Story State。
+BKP 长期保留作品身份、作品地图、BookProfile、Observation、重要 Inference、Work-specific Pattern、Deep Dive 最终知识，以及可追溯 Evidence / scope / boundary / counterevidence / confidence。
 
-## 5. 模型/执行推荐纪律
+单书 BKP 不自动升级为普遍写作规则。
 
-优先减少用户操作：一个任务尽量只推荐一个 Agent、一个模型、一次操作。
+作者默认只先看到 BookProfile、最值得调用的创作问题和简短完成报告；后台详细知识按需检索。
 
-- 代码、架构、跨文件工程、脚本调试、Git/CI、本地运行占主导：可以优先推荐 Codex；
-- 正文阅读、文本提取、总结归纳、章节分析、BKP 蒸馏、文学诊断占主导：不要优先推荐 Codex，选更适合中文长文本理解的模型；
-- 混合任务按主任务选择一个模型，不做无必要的细碎拆分；只有明显质量/风险收益时才拆。
+## 6. 当前开发任务
 
-推荐时写清：执行者、模型、思考强度、备选/升级条件。
+优先复用现有 SourcePrepare / BookDistill；只补：
 
-## 6. Borrow-first
+- 单书 orchestrator / runbook；
+- 阶段状态判断；
+- Deep Dive 选择与记录；
+- 失败报告；
+- 必要的中断恢复；
+- 新书端到端验收。
 
-优先参照：
-
-- `haowjy/creative-writing-skills`：Muse / Writer / Critic / Editor / Reader Sim 的职责与协作；
-- `anotherpanacea-eng/apodictic`：从文本实际效果与作者意图的差异中做诊断。
-
-不要安装或整合大型插件体系只为通过一个测试；只借职责、工作流和必要提示方法。
+除真实阻塞外，不重写稳定核心，不扩张 Schema。
 
 ## 7. 当前禁止
 
-- 不先向作者索要“正确诊断”；
-- 不机械执行作者修法；
-- 不把完整 AI 诊断提前灌给作者以引导其本轮反馈；
-- 不复用 STALE Context；
-- 不修改正式小说；
-- 不修改 Story State；
-- 不把 draft v1 当 accepted text；
-- 不批量蒸馏新书；
+- 不继续 G5 正文诊断/修订实验；
+- 不要求作者阅读测试小说；
+- 不批量蒸馏全部素材；
+- 不固定每本书相同 Deep Dive 次数；
 - 不升级 Retrieval/RAG/KG；
-- 不实现完整 Writer/Reader/Critic/Editor/Controller 平台；
-- 不自动进入 G5-D/E。
+- 不开发 Writer/Reader/Editor/Controller/UI/大型数据库/多 Agent 平台；
+- 不因为单本书一个特殊问题扩张长期架构。
 
 ## 8. Git 安全
 
 无明确授权禁止：`reset / restore / clean / force push / rebase / merge`。
 
-未知或历史 local dirty / untracked / `stash@{0}` 不清理、不覆盖、不自动 pop/drop。普通同步优先保持单一 `main`，不要为了临时保护留下无意义长期分支。
+未知或历史 local dirty / untracked / `stash@{0}` 不清理、不覆盖、不自动 pop/drop。普通同步保持单一 `main`，不要为了临时保护留下无意义长期分支。
 
-## 9. 文档纪律
+## 9. 当前验收标准
 
-长期文档只保留稳定原则和当前边界；实验细节留在 `06_工作区`。阶段状态以当前索引和门禁为准。
+选一部此前未蒸馏的新书；用户只启动一次；Agent 从 SourcePrepare 状态判断开始独立跑到最终 BKP，校验通过且 KnowledgeRetrieve 可发现。
+
+专项入口：`06_工作区/单书蒸馏成品化_当前目标.md`。
