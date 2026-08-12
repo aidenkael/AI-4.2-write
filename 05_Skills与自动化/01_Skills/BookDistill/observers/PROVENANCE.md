@@ -1,6 +1,6 @@
 # Observer Layer PROVENANCE v0.1
 
-本文件只记录 BookDistill `observers/` 与 `observer_bridge.py` 的来源性质。
+本文件记录 BookDistill `observers/`、`observer_bridge.py` 与 `profile_scout.py` 的来源性质。
 
 ## 分类
 
@@ -15,12 +15,13 @@
 
 | AI-write 组件 | 性质 | 上游来源 | 实际吸收 |
 |---|---|---|---|
+| `book_profile_scout.md` / `profile_scout.py` | ADAPT + ORIGINAL | AI-Novel 的 `overview → section`；oh-story 的 thin first-pass / 故事框架识别 | 深度 Discovery 前先建立导航性定位、Contract/Reader Promise、阶段/强项/疑点假设；AI-write 额外规定 Profile 只能导航、可被后续推翻、不得过滤未知价值 |
 | `longform_reader_dynamics.md` | ADAPT | `worldwonderer/oh-story-claudecode`：`skills/story-long-analyze/SKILL.md`、`references/material-decomposition.md`、`pipeline-ops.md` | 逐章原子提取、情节点、关键信息与扩写技法、剧情单元、情绪/节奏/信息推进、跨章聚合、稳定章节边界与恢复思想 |
 | `longform_reader_dynamics.md` | ADAPT | `ExplosiveCoderflome/AI-Novel-Writing-Assistant`：`shared/types/bookAnalysis.ts`、`bookAnalysis.prompts.ts`、拆书 workflow | overview 导航、section 化分析、evidence 绑定原文、source range、token/失败恢复/只补缺口等工程思想 |
 | `reader_page_craft.md` | ADAPT | `haowjy/creative-writing-skills`：`reader-sim`、`writing-principles`、`creative-writing-craft/resources/prose-writing.md`、`scene-construction.md` | first-time reader 顺序体验、reward channels、信任读者、psychic distance、POV、interiority、节奏、感官、对话/潜台词、scene pacing |
 | Developmental Deep Dive 路由 | ADAPT / existing | `anotherpanacea-eng/apodictic` | contract、Reader Experience、Decision Pressure、Scene Function/Turn、Emotional Craft、Reveal Economy、Character Architecture、POV/Voice 等按问题触发镜头；本版未复制完整审稿流程 |
 | `observer_bridge.py` | WRAPPER + ORIGINAL | AI-write | SourcePrepare snapshot 校验、observer staging、引用/行号/标签校验、幂等合并到 canonical evidence；不调用模型 |
-| `README.md` | ORIGINAL + integration | AI-write | 规定观察者只产生 Observation/Inference/Boundary，BookDistill 才能提升为 Mechanism/BKP；保证多上游最终进入统一知识协议 |
+| `README.md` | ORIGINAL + integration | AI-write | 规定 Scout→多观察者→BookDistill 的职责链；观察者只产生 Observation/Inference/Boundary，BookDistill 才能提升为 Mechanism/BKP |
 | Evidence / BKP / BookDistill Finalize | ORIGINAL / existing | AI-write（早期证据纪律受 ani-book 等启发） | 原著最高事实源、Evidence→Observation/Inference→Work-specific Pattern、scope/boundary/counterevidence/confidence、参考知识与原创 Canon 隔离 |
 
 ## 关键上游版本锚点（2026-08-13 集成时）
@@ -41,6 +42,7 @@
 统一流程是：
 
 `上游成熟观察方法`
+→ `initial BookProfile navigation`
 → `observer staging`
 → `AI-write Evidence / Observation / Inference / Boundary`
 → `BookDistill 回原著核证、去重、组合`

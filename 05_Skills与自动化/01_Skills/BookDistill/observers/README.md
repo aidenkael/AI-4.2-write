@@ -8,6 +8,12 @@
 
 固定的是职责边界，不固定模型、Agent 数量或调用次数。
 
+## 前置：BookProfile Scout
+
+深度 Discovery 前先运行一个轻量的导航性识别：`book_profile_scout.md` + `profile_scout.py`。
+
+它只建立 `book_profile_initial.md`：作品定位、Contract/Reader Promise、粗略阶段、显著/潜在强项和不确定项的**假设**。它不算完整蒸馏，也没有权力排除后续观察维度；两个默认观察者仍直接读原著。
+
 ## 输入
 
 只接受 SourcePrepare `PASS` 包：
@@ -78,12 +84,21 @@
 
 ## 运行顺序
 
-执行多视角 Discovery 前，运行 BookDistill 的 Agent 必须先读本文件，再读对应观察者合同。
+执行多视角 Discovery 前，运行 BookDistill 的 Agent 必须先读本文件，再读 Scout 与对应观察者合同。
 
 ```bash
 python 05_Skills与自动化/01_Skills/BookDistill/scripts/book_distill.py validate --input <SP_PASS>
 python 05_Skills与自动化/01_Skills/BookDistill/scripts/book_distill.py prepare --input <SP_PASS> --output <BD_OUT>
 
+# 先识别 / 导航：不做完整蒸馏，不过滤后续发现
+python 05_Skills与自动化/01_Skills/BookDistill/scripts/profile_scout.py init \
+  --input <SP_PASS> --output <BD_OUT>
+
+# Agent 按 observers/book_profile_scout.md 直接读取锚点原著并填写 book_profile_initial.md
+python 05_Skills与自动化/01_Skills/BookDistill/scripts/profile_scout.py validate \
+  --input <SP_PASS> --output <BD_OUT>
+
+# 再建立两个完整 Discovery staging
 python 05_Skills与自动化/01_Skills/BookDistill/scripts/observer_bridge.py init \
   --input <SP_PASS> --output <BD_OUT>
 ```
@@ -119,7 +134,9 @@ python 05_Skills与自动化/01_Skills/BookDistill/scripts/observer_bridge.py me
 
 之后继续现有 BookDistill：
 
-`assemble → profile → 必要 deepdive → 总编辑收敛 → bkp`
+`assemble → final profile → 必要 deepdive → 总编辑收敛 → bkp`
+
+最终 `book_profile.md` 需要回看 `book_profile_initial.md`，至少说明：`confirmed / revised / rejected / newly_discovered`。Scout 没看到、后续才发现的重要价值属于正常结果。
 
 ## 总编辑合并原则
 
