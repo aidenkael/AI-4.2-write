@@ -1,227 +1,426 @@
 # GitHub 候选池｜能力路由 v0.2
 
-> 日期：2026-08-10（G0-2 校准更新）
-> 状态：正式候选路由；与能力地图 v0.2 配套使用
-> 原则：不选"项目总冠军"；只保留具有独特能力、明确工程价值或必要对照价值的上游。
-> 证据账本：`06_工作区/能力地图收口/G0_能力证据与比较状态盘点_v0.1.md`
+> 首建：2026-08-10  
+> 最近校准：2026-08-12（G3 closeout 后）  
+> 状态：**长期上游路由表**，与全局能力地图和长期开发手册配套使用。  
+> 旧版 G0/G3 收口前内容已原样归档：`99_归档/GitHub候选池_能力路由_v0.2_G3收口前_2026-08-12.md`。
 
-## 一、当前正式保留池
+## 一、这份候选池怎么用
 
-### A 级｜核心能力候选：后续会直接进入专项 Benchmark
+这不是“项目排行榜”，也不是“以后全部排队做 Benchmark”的清单。
 
-#### 1. worldwonderer/oh-story-claudecode
+默认流程：
 
-- 主要赛道：中文网文、追读、节奏、钩子、信息控制、对白、长篇拆文、正文工程、去 AI 味。
-- 许可证：MIT（P1）。
-- **项目整体**：未原样直接运行。
-- **方法/机制适配实测**：
-  - B09 R01 Runner A：`story-long-analyze` 方法适配，正式实测（12 run 中的 3 个），结论 = 方向性证据，证据关系 = **间接**（测蒸馏质量，非正文生成能力直接证明）。
-  - B02 R1 G1：7 条规则机制子集（anti-ai-writing.md / emotional-methods.md / dialogue-mastery.md），正式实测（9 run 中 3 cell），结论 = Exploratory，证据关系 = **直接**（测情绪传递）。
-- **不得把方法适配被正式测试扩大成整个项目所有能力已验证。**
-- 后续：C08 对话、C11 连载留存、C14 中文自然度继续作为主要候选。C19 蒸馏方法已验证。
+```text
+真实创作 / 蒸馏问题
+→ 定位需要的能力
+→ 看本表中最相关的 1～3 个成熟上游
+→ 先理解其完整工作逻辑
+→ 最小真实测试
+→ 直接借 / 适配后借 / 只借方法 / 放弃
+→ 只有剩余缺口才自研
+```
 
-#### 2. ExplosiveCoderflome/ani-book-skill
+长期原则：
 
-- 主要赛道：原著蒸馏、证据纪律、范围控制、fact/inference/hypothesis 分离、可恢复长篇 Markdown 工作流。
-- 许可证：Apache-2.0（P1）。
-- **项目整体**：未原样直接运行。
-- **方法适配实测**：
-  - B09 R01 Runner B：evidence-first 方法适配，正式实测（12 run 中的 3 个），结论 = 方向性证据，证据关系 = **直接**（R01 直接测试蒸馏/能力发现能力）。
-- **ani-book 未直接参加 Round02A**——Round02A 测试的是从 Round01 抽象出的 K1-K4 候选能力迁移 Smoke Test，Treatment 不直接等于 ani-book 方法运行。
-- 直接价值集中在 C19；不需要参加所有创作专项。
-- 后续：BookDistill 实现时优先继承其证据纪律。
+1. **Borrow-first，不重复造轮子。**
+2. 存在于候选池 ≠ 已经整体实测通过。
+3. 某个方法/机制被验证 ≠ 整个仓库所有能力都已验证。
+4. 不因为某项目整体很重就忽略其中成熟局部能力。
+5. 不默认每项能力都建立严格 Benchmark；普通能力用少量真实任务快速判断。
+6. 不以 star 数作为核心判断。
+7. 当前私人研究阶段，许可证不作为技术候选淘汰标准；真正复制/修改时仍保留来源、上游 commit/tag、LICENSE 和改动范围。
+8. 达到“成熟候选足够、差异清楚”后停止搜索，进入组合和最小验证。
 
-#### 3. anotherpanacea-eng/apodictic
+---
 
-- 主要赛道：人物结构、情绪 craft、Scene/结构诊断、Reader experience、Reveal economy、Pacing、世界观整合、修订诊断。
-- 独特价值：以 development editor 为核心，强调诊断、结构和作者自己改；对 AI-write 的 C03/C04/C06/C09/C15/C18 很有价值。
-- 许可证：CC BY-NC-SA 4.0（P2）。当前私人非商业本地研究允许；未来公开/商业化需复审。
-- **项目整体**：未直接运行。
-- **机制子集**：**未进入任何 Runner**。B02 冻结适配做了详细机制分析（Meaning Pipeline、Wound/Lie/Want/Need、relational charge、somatic mode 等），但 Runner 使用的是 G1=oh-story 子集和 G2=creative-writing-skills 子集，不包含 Apodictic 机制。B02 Round2A 的 M1/M2 是 AI-write 自身抽象，不直接等于 Apodictic 任一机制。
-- **全部能力停留代码/架构审阅级别，没有真实效果证据。**
-- 未参赛 ≠ 失败；仍是 C03/C04/C06/C09/C15/C18 的高价值诊断候选。
-- 后续：C03/C04/C18 启动专项时，应作为正式参赛候选。
+# 二、核心长期横向参照
 
-#### 4. haowjy/creative-writing-skills
+以下项目是当前 AI-write 最重要的长期能力参照。它们不是彼此竞争“总冠军”，而是承担不同能力层。
 
-- 主要赛道：Character Sim、Reader Sim、Writer/Critic/Editor、Continuity、Style、知识库交接和 Muse 路由。
-- 独特价值：能把"人物模拟""读者模拟""创作/评审/编辑"拆成不同角色，并有稳定的上下文交接思想。
-- 许可证：Apache-2.0（P1）。
-- **项目整体**：未原样直接运行。
-- **机制子集实测**：
-  - B02 R1 G2：8 条规则（character-sim/SKILL.md、prose-writing.md、failure-modes.md、character.md）正式进入 Runner（9 run 中 3 cell），结论 = Exploratory，证据关系 = **直接**（测情绪传递）。
-- **不得把 G2 机制子集实测扩大成整仓能力已验证。** Reader Sim / Character Sim / Writer-Critic-Editor 角色拆分等仍未直接实测。
-- 后续：C02/C08/C12/C13 专项启动时值得最小实测。
+## 1. ExplosiveCoderflome/AI-Novel-Writing-Assistant
 
-#### 5. iLearn-Lab/NovelClaw
+**当前定位：核心长期参照。**
 
-- 主要赛道：dynamic-memory-first 长篇协作、章节规划、RAG/记忆、一致性。
-- 独特价值：适合 C17 Canon/Memory，而不是人物情绪或 B09。
-- 后续：B08 正式候选。**代码/架构审阅，尚未实测。**
-- 许可证：MIT。
-- 当前处理：可直接 clone / 修改 / 适配。
+主要能力：
 
-#### 6. Narcooo/inkos
+- 一句灵感 → 书级方向 → 世界 / 角色 → 卷战略 → 章节任务 → 正文；
+- 拆书证据回溯与角色深度分析；
+- 拆书 / 知识库通过 RAG 回流规划、续写和正文；
+- 写法资产进入生成、检测、修复；
+- Reader Experience Contract：章节核心问题、承诺回报、主角即时欲望、阻力、转折、情绪/信息变化、章末净变化、继承钩子、追读钩子；
+- Writer / acceptance / repair 消费同一读者体验合同；
+- 事实、角色、伏笔、状态回灌；
+- 自动导演、任务恢复、运行时治理、桌面工作台。
 
-- 主要赛道：长篇真相文件、作者意图/current focus、上下文编译、plan→compose→write→audit→revise→state sync、结构化 delta 回写。
-- 独特价值：输入治理、运行时 trace、真相文件和审计/修订闭环；适合研究未来 Controller 与长篇状态层。
-- 后续：B08 / C20 架构专项候选；不进入 B02。**代码/架构审阅，尚未实测。**
-- 许可证：AGPL-3.0。
-- 当前处理：当前私人本地研究可以 clone、运行和修改；保留来源。未来如分发或网络服务，再审计 AGPL 义务。
+AI-write 应重点借：
 
-### B 级｜工程架构核心参考：不与轻量 Skill 正面对打，但会拆机制参赛
+- 完整“参考资产 → 创作”生产链；
+- Reader Experience Contract 的运行时思想；
+- 书 / 卷 / 章 / 场景分层；
+- 写作后验收、修复、状态回写；
+- 长任务恢复与上下文治理；
+- 拆书资产不只是保存，而是真正进入后续写作。
 
-#### 7. RhythmicWave/NovelForge
+不整体照搬：
 
-- 主要赛道：JSON Schema 结构化生成、卡片、动态输出模型、上下文注入、知识图谱、状态回写。
-- 独特价值：适合 C17/C20，特别是 Canon 数据结构、结构化生成和可控写回。
-- 后续：B08 中拆"schema/canon/context/writeback"机制参与，而不是整套产品与 Prompt Skill 比输赢。**代码/架构审阅，尚未实测。不因未参加 B02 写成"失败/淘汰"。**
-- 许可证：AGPL-3.0。
-- 当前处理：私人研究可直接下载/修改；未来公开服务再审计。
+- 其产品目标更偏“让不懂写作的新手自动完成整本书”；
+- AI-write 更强调**重大创作决定由作者掌握**，AI 提供方案、证据、风险和推演。
 
-#### 8. ExplosiveCoderflome/AI-Novel-Writing-Assistant
+当前证据状态：
 
-- 主要赛道：完整小说产品工作流、自动导演、规划→章节生产、RAG、角色/世界状态、任务恢复、模型路由、状态回灌。
-- 独特价值：是 AI-write 未来完整工作台/运行时的工程参照，而不是某个文学技巧 Skill。
-- 后续：B08 / C20 架构专项；拆出状态回灌、恢复、上下文选择、审批/生产边界做测试。**代码/架构审阅，尚未实测。**
-- 许可证：AGPL-3.0-only + 服务型商业用途单独授权说明。
-- 当前处理：当前私人本地研究允许 clone/修改；未来如果 AI-write 对外做 SaaS/托管，必须重新审计或独立实现。
+- 已完成较深入代码/文档横向审查；
+- 已作为 G3 closeout 能力地图核心参照；
+- 未把整套产品原样接入 AI-write；
+- 下一触发点：Phase E 的 Context Compiler、Planner、Reader Experience、生产链与状态回写设计。
 
-## 二、本轮新发现、值得加入观察池的项目
+## 2. worldwonderer/oh-story-claudecode
 
-### 9. leenbj/novel-creator-skill
+**当前定位：中文商业网文“拆解 → 写作”核心参照。**
 
-- 新发现价值：文件级长期记忆、五步质量门禁、RAG 两级检索、知识图谱回写、大纲锚点、断点恢复，且面向 Codex/Claude/OpenCode 等 Skill 形态。
-- 适合：C17 Canon/Memory、C20 长篇工作流。
-- 与现有候选关系：和 NovelClaw/InkOS/NovelForge 高度重叠，但因为它更接近“可移植 Skill + 文件状态”的形态，值得在 B08 前做一次代码级比较。
-- 许可证：README 声明 MIT；本轮通过 GitHub 内容接口未找到根 `LICENSE` 文件，因此**冻结前必须再次核实许可证文件/仓库授权状态**。在核实前可研究公开结构，不先复制核心代码进 AI-write。
-- 当前级别：`观察 → B08 前决定是否升级为正式候选`。
+主要能力：
 
-### 10. Ckokoski/AuthorAgent
+- 扫榜选材；
+- 长篇 / 短篇拆文；
+- 黄金三章、逐章摘要、剧情单元；
+- 情绪模块；
+- 节奏 / 爽点 / 虐点 / 期待点 / 回报；
+- 关键信息推进；
+- 全书情绪节奏；
+- 角色、世界、关系；
+- 文风、对话潜台词；
+- 拆文资产进入对标目录、卷纲、细纲和正文；
+- 长篇追踪状态；
+- 日更 / 续写 / 修订；
+- 去 AI 味。
 
-- 新发现价值：本地优先、完整书籍流水线、CORE/ARCHIVAL/RECALL 分层记忆、睡眠式 consolidation、风格指纹、series bible。
-- 适合：C17 Memory、C14 Voice、C20 本地工作台架构。
-- 许可证：MIT，已核实根 LICENSE。
-- 与现有候选关系：和 NovelClaw/InkOS 有重叠，但分层记忆设计足够独立，可作为 B08 的补充架构候选。
-- 当前级别：`观察/架构候选`，不进入下一轮 B02。
+AI-write 应重点借：
 
-### 11. NousResearch/autonovel
+- 长篇运行 / 读者动力 Discovery 镜头；
+- “拆别人为什么有效 → 形成剧情/情绪/节奏资产 → 回到自己的规划和正文”的天然迁移链；
+- 中文网文的期待 / 回报、压力 / 换气、章末钩子、剧情单元；
+- 中文长篇实际生产纪律。
 
-- 新发现价值：从 foundation→draft→review→revision 的自动迭代循环；有 canon、voice fingerprint、reader_panel、review/revision 脚本，并真实跑过整本书生产流程。
-- 适合：C01、C12、C18、C20 的“自动迭代/评审闭环”研究。
-- 风险：本轮检查没有找到根 LICENSE 文件。公开 GitHub 不等于拥有复制/改造授权；没有明确许可证时默认版权仍在作者。
-- 当前处理：**只做架构/行为参考，不复制代码或 Prompt 进入 AI-write 核心**，除非后续许可证被明确。
+不整体照搬：
 
-## 三、降级为观察/历史基线，不再消耗近期 Benchmark 成本
+- 题材和商业网文方法不能被升级成所有小说的普遍写作规则；
+- “验证过的模式”必须结合作者意图、题材、人物和当前作品状态重新创造。
 
-### MaoXiaoYuZ/Long-Novel-GPT
+当前证据状态：
 
-- 有价值点：自上而下大纲→章节→正文、RAG 检索相关正文/纲要、修改正文同时同步剧情纲要。
-- 原因：这些核心能力目前已有 NovelClaw/InkOS/NovelForge/AI-Novel-Writing-Assistant 等更活跃或更可拆分候选覆盖。
-- 许可证：本轮未在根目录确认 LICENSE 文件。
-- 处理：保留历史架构参考；不作为近期正式参赛者。
+- B02 / B09 曾实测其部分机制和拆文方法；
+- G3 closeout 又重新审查其完整拆解→写作链；
+- 已正式成为 BookDistill 默认“长篇运行 / 读者动力”观察镜头的重要方法来源；
+- 下一触发点：Phase E Planner / 中文长篇读者动力 / Writer 组合。
 
-### YILING0013/AI_NovelGenerator
+## 3. haowjy/creative-writing-skills
 
-- 定位：较早期完整生成流程基线。
-- 处理：历史参考，不进入近期能力赛道。
+**当前定位：专业创作团队 + Reader/Page Craft 核心参照。**
 
-### t59688/arboris-novel
+主要能力：
 
-- 定位：作者辅助/UI/工作台体验参考。
-- 处理：产品体验观察，不作为当前文学能力 Benchmark 主参赛者。
+- Muse；
+- Writer；
+- Critic；
+- Editor；
+- Reader Sim；
+- Character Sim；
+- Brainstormer；
+- Outliner；
+- Continuity Checker；
+- Style Creator；
+- Story Memory；
+- Writing Principles；
+- Creative Writing Craft。
 
-## 四、退出正式候选池
+AI-write 应重点借：
 
-以下项目不等于“差”，只是目前没有足够独特增量，或质量/许可证/重复度不值得继续占用 Benchmark 成本：
+- 作者只面对 Muse / 创作问题，后台自动路由专业角色；
+- Reader Sim 的第一次阅读、逐时体验方法；
+- reader reward channels：transportation、aesthetic、social simulation、flow、curiosity/prediction；
+- 人物作为“心智”而不是设定卡的观察和模拟；
+- 页面级语言、POV、潜台词、留白、节奏、感官等 Craft；
+- Writer → Critic / Editor / Reader Sim → 再修订的反馈环。
 
-- `PenglongHuang/chinese-novelist-skill`：流程完整但模板化倾向较强，与 oh-story/其他中文长篇 Skill 重叠；曾存在许可证核实问题。
-- `lornshrimp/Lorn.NovelWriteSkills`：能力重叠较高，且存在伪精确/自评分倾向；许可证仍需核实。
-- `HZ-KMNO/web-novel-writing-guidance-skill`：思路与当前 AI-write 很接近，但现阶段社区/实证信号弱，且大量能力已被核心候选覆盖。
-- `modoojunko/awesome-novel-skill`：工作流完整但与 oh-story、creative-writing-skills、长篇工程候选高度重叠；先不扩大池子。
-- `wgwtest/novel-writing`、`howells/fiction` 等小型新 Skill：可继续观察，但当前没有证明其提供核心池尚未覆盖的独特机制。
-- 各类“多维打分/总分 9.x”小说评估 Skill：不进入正式池，避免把主观创作质量伪装成单一分数。
+不整体照搬：
 
-## 五、方法论参考，不作为小说能力参赛者
+- 不让作者手动管理大量 Agent / Skill；
+- 不把风格学习变成机械模仿原作者。
 
-### anthropics/skills
+当前证据状态：
 
-- 用途：Skill 设计、progressive disclosure、真实任务评测、with-skill vs baseline、迭代方法。
-- 不参加“谁更会写小说”的比赛。
-- 使用时逐文件检查许可证，不假定整个仓库所有内容许可证完全一致。
+- B02 曾实测其中部分机制；
+- G3 closeout 已深入复查 Reader Sim / Writing Principles / 整体角色架构；
+- 已正式成为 BookDistill 默认“Reader / Page Craft”观察镜头的主要方法来源；
+- 下一触发点：Phase E Muse / Writer / Reader / Critic / Editor / Character Sim 组合。
 
-## 六、候选池 → 能力路由
+## 4. anotherpanacea-eng/apodictic
 
-| 能力赛道 | 成熟度 | 第一候选 | 第二/补充候选 | 证据状态 |
-|---|---|---|---|---|
-| C03 人物心理/自主性 | M1 | Apodictic | cw-skills Character Sim | 无直接实证；代码/架构审阅 |
-| C04 情绪传递 | M3 | Apodictic | cw-skills；oh-story 中文对照 | **直接实证**：B02 R2A M2 |
-| C08 对话/潜台词 | M2 | oh-story G1 | cw-skills G2、Apodictic、B09-K2 | **直接实证**：B09-K2 + B02 R1 G1 |
-| C09 Scene Turn | M2 | Apodictic | oh-story、B09-K1 | **直接实证**：B09-K1 |
-| C10 悬念/信息 | M3(局部) | oh-story | B09-K4；K3 轻规则 | **直接实证**：B09-K3/K4 |
-| C11 连载留存 | M1 | oh-story | 网文蒸馏结果 | 间接旁证 |
-| C12 Reader Sim | M2 | cw-skills | autonovel reader_panel（仅参考） | 无直接实证 |
-| C14 中文自然度/Voice | M1 | oh-story | cw-skills Style；后续作者语料 | 间接旁证 |
-| C17 Canon/Memory | M1 | NovelClaw | InkOS、NovelForge、AINWA、AuthorAgent | **候选最密集但实测最空白**；全部代码/架构审阅 |
-| C18 修订诊断 | M1 | Apodictic | cw-skills Critic/Editor、oh-story review | 无直接实证 |
-| C19 原著蒸馏 | M4(方法论) | ani-book | oh-story、D0 | **直接实证**：B09 R01 + R02A |
-| C20 Controller/Context | M1 | AI-write 自身 | InkOS、NovelForge、AINWA、AuthorAgent | 全部代码/架构审阅 |
+**当前定位：Developmental Editing / 高层诊断核心参照。**
 
-> 暂不参与：大型 Canon/Memory 项目不参与情绪/文学赛道；单纯禁词表不参与中文自然度；单纯自动重写器不参与修订诊断；B09 当前暂停不扩 Round02B。
+主要能力：
 
-## 6.5 重点上游 × 能力覆盖矩阵
+- contract / reader promise / controlling idea；
+- Reverse Outline；
+- Reader Experience；
+- Structural Mapping；
+- Character Audit / Character Architecture；
+- Reveal Economy；
+- Rhythm / Modulation；
+- Emotional Value / Emotional Craft；
+- Scene Function / Scene Turn；
+- POV / Voice；
+- Theme；
+- Entity Tracking；
+- Decision Pressure；
+- 多种 genre / craft / tag audits；
+- Revision Coach。
 
-> 格式：覆盖强度 / 证据状态。oh-story/ani-book/cw-skills 标注的是方法/机制适配（非项目整体原样运行）。
+AI-write 应重点借：
 
-| 能力 | oh-story | ani-book | Apodictic | cw-skills | NovelClaw | InkOS | NovelForge | AINWA | AuthorAgent |
-|------|----------|----------|-----------|-----------|-----------|-------|------------|-------|-------------|
-| C04 情绪 | 中/正式·Expl(直) | — | 强/审阅 | 强/正式·Expl(直) | — | — | — | — | — |
-| C08 对话 | 强/正式·Expl(直)+轻量(直) | — | 强/审阅 | 强/正式·Expl(间) | — | — | — | — | — |
-| C09 Scene | 中/正式(间) | — | 强/审阅 | 弱/审阅 | — | 弱/审阅 | — | — | — |
-| C10 信息 | 强/正式(间) | — | 中/审阅 | 弱/审阅 | — | — | — | — | — |
-| C11 连载 | 强/正式(间) | — | 弱/审阅 | 弱/审阅 | — | — | — | — | — |
-| C14 中文 | 强/正式(间) | — | 弱/审阅 | 中/正式·Expl(间) | — | — | — | — | 弱/审阅 |
-| C17 Canon | — | — | 弱/审阅 | 弱/审阅 | 强/审阅 | 强/审阅 | 强/审阅 | 强/审阅 | 中/审阅 |
-| C19 蒸馏 | 强/正式(直) | 强/正式(直) | 弱/审阅 | 弱/审阅 | — | — | — | — | — |
-| C20 工作流 | 弱/审阅 | — | 弱/审阅 | 弱/审阅 | 中/审阅 | 强/审阅 | 强/审阅 | 强/审阅 | 中/审阅 |
+- “作品真正承诺了什么，文本是否真的兑现”的观察方式；
+- 成熟发展编辑的多镜头诊断；
+- 当基础观察发现系统性问题时，按问题触发 Deep Dive，而不是每本书固定跑几十个检查；
+- Firewall 思想：指出问题和解决方案类别，但不自动夺走作者创作权。
 
-> 缩写：Expl=Exploratory；直=证据关系直接；间=证据关系间接。全部工程候选（NovelClaw/InkOS/NovelForge/AINWA/AuthorAgent）均为代码/架构审阅，尚未实测。
+不整体照搬：
 
-## 七、B02 候选冻结建议（历史 / 已完成阶段）
+- 不把 40+ Audits 直接变成 AI-write 的固定 Skill 清单；
+- 不要求每本参考书或每篇正文都全量跑完整 DE。
 
-> 以下为 B02 启动前的候选冻结建议，已作为历史参考。B02-G Round2A 实际采用 D0/M1/M2 单机制隔离设计（同模型不同机制注入），未直接使用上述上游项目作为生成 condition。B02 本阶段已完成并暂停。
+当前证据状态：
 
-1. `D0`：同模型，无小说 Skill strong baseline；
-2. `A`：Apodictic 情绪/人物相关机制适配；
-3. `B`：creative-writing-skills Character Sim / craft 相关机制适配；
-4. `C`：oh-story 中文正文/情绪相关方法；
-5. `D`：AI-write Candidate —— **必须在 A/B/C 独立方案明确后再设计，不能提前把三家优点全抄进去造成不公平。**
+- B02 早期做过机制分析但未原样跑整个工具；
+- G3 closeout 已对其当前 Audit Matrix、Reader Experience、Developmental Editing 体系做深入方法审查；
+- 已正式进入 BookDistill 的“按问题触发 Developmental Deep Dive”方法来源；
+- 下一触发点：Phase E Critic / Editor / Reader diagnosis 与作者判断环。
 
-首轮至少 3 个不同性质的情绪任务：
+## 5. Narcooo/inkos
 
-- 爱情：吃醋但不承认；
-- 权力：下属受辱但不能发作；
-- 丧失：亲人死亡后异常冷静，不能直接贴“悲痛”标签。
+**当前定位：作者意图 + Context Compiler + Story State + 创作运行时核心参照。**
 
-核心作者评审保持普通语言：
+主要能力：
 
-- 哪一版人物最像活人？
-- 哪一版情绪最能自然传到读者？
-- 哪一版最自然、最少 AI/模板感？
-- 哪个具体设计值得留下？
+- author_intent；
+- current_focus；
+- chapter intent；
+- Context Compiler；
+- protected / compressible context；
+- narrative forecast / 多未来分支；
+- 分支比较：人物决策、风险、作者意图对齐；
+- Canon / Story State；
+- plan → compose → write → audit → revise → state settlement；
+- 导入已有作品并回放状态；
+- 写作任务恢复 / 并发治理；
+- Skills 作为专业指导，但不能绕过工具权限和确认门。
 
-Controller 再检查机制增量、动作模板率、人物自主性、关系变化、成本和副作用。
+AI-write 应重点借：
 
-## 八、下载/冻结策略
+- 作者意图与当前 1–3 章 focus 的显式保存；
+- Context Compiler；
+- 多个未来分支先隔离推演，作者选中后只写计划，不提前污染 Canon；
+- 正文之后 Observer / audit / revise / state writeback；
+- “完成状态必须由真实工具结果和文件决定”，不能靠 AI 口头声称完成。
 
-下一步不把整个候选池全部塞进 AI-write 核心。由本地 Agent 在专项启动前建立“上游冻结候选区”，每个实际下载项目记录：
+当前证据状态：
 
-`repo URL | frozen commit/tag | LICENSE | 下载日期 | 使用能力 | 复制/修改范围 | 是否 restricted-source`
+- 已多轮代码/架构审查；
+- 已被确认是 Phase E Author Decision Loop 与 Context Compiler 的主要参照；
+- 下一触发点：Phase E 最小创作后台组合。
 
-处理原则：
+## 6. RhythmicWave/NovelForge
 
-- MIT / Apache-2.0：可积极复制、修改、汉化、拆解并固化为本地 Skill。
-- CC BY-NC-SA / AGPL：当前私人用途不自动排除；可本地研究、修改、Benchmark，保持来源标记；未来公开/商业化时再审计。
-- 无明确许可证：只研究思想和公开行为，不直接复制代码/Prompt 进入核心。
+**当前定位：结构化创作资产 / 工作流 / 上下文注入参照。**
 
-GitHub 是上游零件库；最终生产运行应尽量使用 AI-write 自己的本地 Skill，而不是每次写作联网依赖上游项目。
+主要价值：
+
+- Schema 驱动卡片；
+- 字段级结构化生成；
+- 上下文注入 / DSL；
+- Knowledge Graph；
+- 动态状态；
+- 可配置工作流；
+- 工作流 Agent；
+- 拆书工作流与 UI。
+
+AI-write 应重点借：
+
+- 结构化创作资产的组织方式；
+- Context 注入与工作流可配置思想；
+- Canon / Story State 与图谱/派生索引的接口思路。
+
+下一触发点：Phase E Story Bible / Canon / Context / Workflow 设计。
+
+## 7. Anshler/graphify-novel
+
+**当前定位：Story Bible / Canon / 派生 Knowledge Graph 轻量参照。**
+
+主要价值：
+
+- 从已有章节建立 Story Bible；
+- 人物 / 世界 / thread 跨章追踪；
+- chapter → bible 更新；
+- source of truth 与派生图谱分离；
+- 多批次 fresh context 处理长篇；
+- query / status / update。
+
+AI-write 应重点借：
+
+- Canon 作为权威、KG/索引作为可重建派生层；
+- 跨章 thread / character / world tracking；
+- 简单而透明的 Story Bible 结构。
+
+下一触发点：Phase E Canon / Story Bible 候选比较。
+
+## 8. ExplosiveCoderflome/ani-book-skill
+
+**当前定位：evidence-first / 权威工件 / 确定性与 LLM 边界核心参照。**
+
+主要价值：
+
+- Codex 原生 Skill；
+- Markdown / YAML 权威状态；
+- Python 只负责确定性校验；
+- 一章一章稳定推进；
+- Continuity；
+- 可重建索引；
+- 作者验收后再进入长期事实；
+- 授权文本拆解与证据约束。
+
+AI-write 已吸收：
+
+- BookDistill 的 evidence-first、来源追溯、事实/推断边界、确定性校验思想。
+
+下一触发点：Phase E 权威状态 / Canon 写回 / 确定性校验边界。
+
+---
+
+# 三、Phase E 优先路由
+
+下一阶段不是“再找更多项目”，而是用现有核心参照拼最小创作后台。
+
+| Phase E 能力 | 首看上游 | 主要问题 |
+|---|---|---|
+| Story / Project Bible | graphify-novel、InkOS、NovelForge、ani-book | 什么是权威 Canon，什么是派生索引 |
+| Canon / Story State | InkOS、graphify-novel、NovelForge、ani-book | 作者确认后的写回、状态差异、连续性 |
+| Context Compiler | InkOS、AI-Novel、NovelForge | 当前章到底装哪些资料、如何控制成本 |
+| Cross-book Synthesis | creative-writing-skills Muse、InkOS forecast、AI-Novel planning | 如何综合多书 Hit 而不制造普遍规则 |
+| Planner / Outliner | oh-story、creative-writing-skills、AI-Novel、ani-book | 事件计划 + 读者体验 + 人物行动如何一起规划 |
+| Writer | creative-writing-skills、oh-story、AI-Novel | 不自研超级 Writer；怎样消费统一 Context |
+| Character Sim | creative-writing-skills | 人物声音、关系和决策测试 |
+| Reader Sim | creative-writing-skills、Apodictic、AI-Novel | 感受信号 vs 分析诊断如何分工 |
+| Critic / Editor | Apodictic、creative-writing-skills、AI-Novel | 问题优先级、修订类别、避免 AI 抢作者决策 |
+| Continuity | InkOS、graphify-novel、ani-book、ConStory 类 | 哪些确定性检查，哪些语义检查 |
+| State Writeback | InkOS、AI-Novel、graphify-novel、ani-book | 正文发生了什么，何时进入 Canon |
+| Controller / Author Decision Loop | creative-writing-skills Muse、InkOS、AI-Novel | 后台自动路由，重大决定作者确认 |
+
+**达到可组合方案后停止搜索。**
+
+---
+
+# 四、次级 / 按真实问题触发的候选池
+
+这些项目继续保留，但不占用当前主线注意力。只有相关能力出现真实缺口时再复查。
+
+## NovelClaw
+
+价值：dynamic-memory-first 长篇协作、章节规划、RAG / 记忆、一致性。
+
+触发条件：Phase E Canon / Memory 候选比较仍缺成熟方案，或正式长篇暴露动态记忆问题。
+
+## leenbj/novel-creator-skill
+
+价值：文件级长期记忆、质量门、RAG、KG 回写、大纲锚点、断点恢复、Skill 形态。
+
+触发条件：需要更轻量、可移植的文件工作流时复查。
+
+## Ckokoski/AuthorAgent
+
+价值：本地优先、分层记忆、consolidation、voice fingerprint、series bible。
+
+触发条件：Memory / Voice / Series 真实问题出现时复查。
+
+## story-skills
+
+价值：简单标准化的创作项目结构与少量主要 Skill。
+
+触发条件：Phase E 组合开始过度复杂时，用作“能否更简单”的对照。
+
+## NousResearch/autonovel
+
+价值：foundation → draft → review → revision 的自动迭代闭环、canon、voice fingerprint、reader panel。
+
+触发条件：Phase F 创作沙盒需要完整自动迭代对照时复查。
+
+## Long-Novel-GPT / StoryWriter / DOC / GOAT 等层级规划类
+
+价值：多级规划、上下文选择、长篇生成研究。
+
+触发条件：现有 Planner 候选在长篇层级规划上暴露真实不足时复查。
+
+## ConStory 类一致性项目 / Benchmark
+
+价值：人物、事实、叙事风格、时间/剧情、世界规则等长篇一致性错误分类。
+
+触发条件：Phase E Continuity 需要明确错误 taxonomy 或 Phase F 暴露连续性问题时复查。
+
+## BookNLP / 书籍级机械抽取工具
+
+价值：实体归一、人物、引语说话者、事件等机械抽取。
+
+触发条件：需要降低 LLM 在机械信息提取上的成本，且语言适配可行时复查。
+
+---
+
+# 五、历史 / 低优先级参考
+
+以下不等于“差”，只是当前没有足够独特增量，或者已有更合适核心参照覆盖。
+
+- `YILING0013/AI_NovelGenerator`：较早期完整生成流程参考；
+- `t59688/arboris-novel`：作者辅助 / UI / 工作台体验参考；
+- `PenglongHuang/chinese-novelist-skill`：与当前中文长篇核心候选重叠较多；
+- `lornshrimp/Lorn.NovelWriteSkills`：能力重叠较高；
+- `HZ-KMNO/web-novel-writing-guidance-skill`：思路接近，但当前核心参照已覆盖主要方向；
+- `modoojunko/awesome-novel-skill`：工作流完整，但与核心池高度重叠；
+- 各类只提供“多维打分 / 总分 9.x”的小说评估 Skill：不作为核心质量判断依据。
+
+保留它们只是为了未来查历史，不再默认消耗 Benchmark 成本。
+
+---
+
+# 六、证据状态怎么写，避免再次误解
+
+今后每个项目只用以下几种状态，不再用“参赛/淘汰”主导思路：
+
+- **整体运行验证**：原项目按其真实工作流实际运行过；
+- **局部机制实测**：只测试了其中明确一小部分；
+- **方法级审查 / 已吸收原则**：认真阅读并采用了其方法，但没有声称整个工具已运行；
+- **架构参照**：只用于工程设计比较；
+- **按需候选**：真实问题出现时再复查。
+
+禁止写法：
+
+> “某个项目某个机制没参加 B02，所以这个项目失败。”
+
+正确写法：
+
+> “当前只验证到哪一层；没有验证到的部分保持未知。”
+
+---
+
+# 七、G3 closeout 后的固定结论
+
+1. `AI-Novel-Writing-Assistant` 升级为最重要的完整工作台横向参照之一，不再归入 B 级次要工程候选。
+2. `oh-story` 不只借局部钩子/节奏规则，要完整理解其拆解资产回流创作的链。
+3. `creative-writing-skills` 不只用于后期正文检查；Reader Sim / Writing Principles 已成为原著 Discovery 的方法来源。
+4. `Apodictic` 不再只等“未来某个专项 Benchmark”；它是 Developmental Deep Dive 和作者判断能力的长期参照。
+5. `InkOS` 是 Phase E Context Compiler / Author Decision Loop / Story State 的核心参照。
+6. Retrieval 技术链已经在 G3 关闭；不继续为了技术完整度搜索/升级 Retrieval。
+7. Phase E 的重点是**组合**上述成熟上游，不是再扩大项目池。
+8. 如果组合方案开始需要大量自研规则，先回本表检查是否漏看成熟能力。
+
+---
+
+# 八、一句话路由
+
+> **以后不是“这个 GitHub 项目要不要参赛”，而是“当前真实创作问题需要什么能力，哪个成熟上游已经做得好，我们最小借什么，剩下什么才值得自己做”。**
