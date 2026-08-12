@@ -64,33 +64,94 @@ BookDistill 不读取 `01_原始素材` 作为正文输入；不修改 SourcePre
 10. **不随意外推**：局部样本只标记为局部证据，不宣称覆盖整书或整个类型。
 11. **coverage 不是价值判断**：维度覆盖统计只是 BookProfile 的辅助信号，禁止“Observation 数量多 = 更重要”这类机械判断。
 12. **不做原作者风格模仿器**：产出是分析性证据，不是模仿奥威尔文风的仿写样本。
+13. **重要发现可跨尺度、跨位置聚合**：一条高价值 Observation / Pattern 可以由多个不相邻句子、场景或章节共同支撑；不得为了“一条结论只配一个局部证据”而拆散真实效果链。
+14. **保留未命名价值**：发现“重要但暂时难以命名”的创作智慧时，允许先以 Observation / Inference 保存，不得因为暂时不属于现有 taxonomy 而丢弃。
+
+## 原著 Discovery：多视角直接阅读（G3 closeout 方法修正）
+
+BookDistill 不再被要求单枪匹马发现一本书的全部精华。它的核心职责是**总编辑式收敛**：让互补观察镜头直接阅读同一原著，随后回源核证、合并重复、识别组合效果、补边界/反例/置信度，并封装为 BKP。
+
+### 原则
+
+1. **原著始终是最高事实源。** 重要观察镜头应直接读取原文，不经过“Profile 摘要 → 二手摘要 → 再总结”的逐层压缩链。
+2. **BookProfile 是导航，不是过滤器。** 它用于分配后续深挖预算，不能提前宣布其他维度“没有价值”。
+3. **默认使用两个互补 Discovery 镜头；不是两个固定 Skill。** 可以由同一个 Agent 分 Pass、多个 Agent、成熟上游 Skill 或其他简单实现完成，不冻结实现形式。
+4. **专项 Developmental Deep Dive 按问题触发，不默认全跑。** 只有 Base / Discovery 暴露明显高价值或不确定问题时才进入。
+5. **作品 contract / reader promise / controlling idea 属于合法观察对象。** 既要看“作者做了什么”，也要看“作品向读者承诺了什么、实际怎样兑现或偏离”。
+6. **发现阶段可以宽，BKP 必须克制。** 多镜头可产生很多候选；最终只有长期有调用价值、证据充分且边界清楚的知识进入 BKP。
+
+### 默认镜头 A：长篇运行 / 读者动力
+
+优先借鉴 oh-story 与 AI-Novel-Writing-Assistant 已成熟的方法，重点观察但不限于：
+
+- story engine、长篇推进与阶段变化；
+- 作品承诺、题材/类型读者预期、核心 reader promise；
+- 章节/场景功能、主角即时欲望与阻力；
+- 期待建立、延迟、部分兑现、重大兑现与旧钩子责任；
+- 情绪生态、压力/释放、张弛、换气；
+- 信息债、悬念、认知变化与 reveal timing；
+- 关系推进、人物欲望变化以及读者为什么愿意继续读；
+- 跨章、跨卷累积后才出现的效果。
+
+### 默认镜头 B：Reader / Page Craft
+
+优先借鉴 creative-writing-skills 的 Writing Principles / Reader Sim / Craft 观察方法，重点观察但不限于：
+
+- 读者逐时刻的投入、漂移、疑问、预测与认知变化；
+- transportation / aesthetic / social simulation / curiosity-prediction / flow 等读者回报通道；
+- 人物作为“心智”的可信度：行为、内心、欲望、选择、反应是否让读者能建模；
+- POV、叙事距离、声音、语言节奏、句法与意象；
+- 对话、潜台词、动作、微动作、感官、心理距离；
+- 留白、幽默、暧昧、欲望、尴尬、惊奇等微观体验；
+- 多个普通细节组合后产生、单独拆句时看不出的整体效果；
+- 一句话、一个动作、一个称呼、一个省略等微观机巧。
+
+### 触发型 Developmental Deep Dive
+
+Base / Discovery 暴露明显高价值问题时，可借鉴 Apodictic 的发展编辑镜头进行专项深挖，例如：
+
+- contract / reader promise；
+- Reader Experience；
+- Decision Pressure；
+- Scene Turn / Scene Function；
+- Emotional Craft / Rhythm；
+- Reveal Economy；
+- Character Architecture；
+- POV / Voice / Interiority；
+- Theme / controlling idea；
+- genre-specific audit。
+
+Apodictic 式镜头用于诊断和发现，不自动覆盖为普遍写作规则；最终仍须回到本作品证据、scope、boundary、counterevidence 与 confidence。
 
 ## 工作流（v0.2 vNext 流程）
 
 1. `validate`：校验 SourcePrepare PASS 包（状态、版本、book_id、文件、章节一致性、SHA256、空章节）。
 2. 阅读 `chapters/` 原文（逐章阅读，不做抽样猜整书）。
 3. `prepare`：生成章节索引 + 每章证据模板（含 MAP 和 OBSERVATION 节）+ 报告骨架 + 初始 manifest。
-4. **Base Scan**：在 `evidence/ch_NNNN.md` 按模板填写：
-   - MAP（章节作品地图，结构性信息）
-   - FACT / INFERENCE / OBSERVATION（携带维度标签）/ MECHANISM / BOUNDARY
-   - 第一次完整扫描优先支持作品地图 + Observation + Evidence + 少量 Pattern + uncertainty
+4. **Base Scan + 多视角 Discovery**：所有关键观察都以原文为一手来源。
+   - Base Scan 在 `evidence/ch_NNNN.md` 填写 MAP、FACT / INFERENCE / OBSERVATION / 少量 MECHANISM / BOUNDARY；
+   - 至少完成“长篇运行 / 读者动力”与“Reader / Page Craft”两个互补观察 Pass；
+   - 同一高价值效果允许跨多个句子、场景和章节聚合证据；
+   - 允许记录“重要但暂时难以命名”的 Observation / Inference；
+   - 不要求每个 Pass 机械覆盖所有分类，也不把维度数量当成质量指标。
 5. `assemble --input <SourcePrepare PASS> --output <BookDistill 输出>`：
    校验条目分类合法性、引用可追溯与**行号不越界**，
    重算输入 snapshot 并比对，计算**维度覆盖统计**，生成 `distill_manifest.json`。
-6. `profile --output <BookDistill 输出>`：生成 `book_profile.md`（维度覆盖、深挖建议骨架）。
-   脚本只做确定性统计；文学价值判断由运行 Skill 的 Agent 完成。
+6. `profile --output <BookDistill 输出>`：生成 `book_profile.md`（维度覆盖、强项/潜在强项、不确定项、深挖建议骨架）。
+   脚本只做确定性统计；文学价值判断由运行 Skill 的 Agent 完成。Profile 只能分配深挖预算，不能否定未选维度的潜在价值。
 7. `deepdive --output <BookDistill 输出> --dimension <维度名> [--input <SourcePrepare PASS>]`：生成专项深挖模板。
    专项文学分析优先参考 Apodictic / ani-book / creative-writing-skills / oh-story 的分析框架。
    传入 `--input` 时复用 assemble 校验逻辑（引用格式、章节存在性、行号越界）校验已填写的深挖内容；不传 `--input` 时仅生成模板。文件已存在时不覆盖。
-8. 跨章收敛机制：从逐章 MECHANISM 中合并同质、降级单章小技巧、补充反证，
-   产出 `mechanisms.md`（10–20 条高价值机制，不设数量指标）。
-9. 生成 `evidence.md`（精选支撑最终结论的证据）与 `model.md`（作者第一阅读入口）。
-10. 完成 `bd_report.md`：来源身份 + 覆盖范围与置信度 + 边界与不确定性 + 状态。
-11. `bkp --output <BookDistill 输出> [--prototype <原型目录>]`：BKP Finalize——
+8. **BookDistill 总编辑式收敛**：汇总 Base Scan、多视角 Discovery 与 Deep Dive，回原文核证；合并同质观察，识别多个普通细节形成的组合效果；区分 Observation / Inference；降级过度抽象；补充反证、scope、boundary 和 confidence。
+9. 跨章收敛机制：从充分支撑的 Observation / MECHANISM 中合并同质、降级单章小技巧，
+   产出 `mechanisms.md`（10–20 条高价值机制，不设数量指标）。无法可靠抽象但很有价值的内容继续保留为 Observation / Inference，不强行机制化。
+10. 生成 `evidence.md`（精选支撑最终结论的证据）与 `model.md`（作者第一阅读入口）。
+11. 完成 `bd_report.md`：来源身份 + 覆盖范围与置信度 + 边界与不确定性 + Discovery / Deep Dive 覆盖状态。
+12. `bkp --output <BookDistill 输出> [--prototype <原型目录>]`：BKP Finalize——
     读取 `bkp_prototype/`（人工验证的知识层），校验身份/源指纹、Observation/Inference/Pattern
     类型边界、引用可追溯与条目计数后，封装正式 BKP 到 `bkp/`；
     重跑不覆盖被人工修改的 curated 文件（仅告警保留）。
-12. 作者审阅产物。
+13. 作者审阅产物。
 
 ## 运行方式
 
@@ -123,4 +184,6 @@ python -m unittest discover -s tests -p "test_*.py"
   不把 `02_原著蒸馏` 默认膨胀成逐章分析数据库。
 - 专项深挖的文学分析方法优先参考已有来源（Apodictic / ani-book / creative-writing-skills / oh-story），
   当前只吸收分析框架/方法纪律，不整体复制外部代码或 Prompt。
+- 多视角 Discovery 是**方法要求**而不是固定 Skill 数量；不要为了满足本节而制造新的平级 Skill、复杂编排或永久 taxonomy。
+- 当前 G3 closeout 修正只改变分析执行方法与职责边界，不新增 BKP schema，不要求重跑已完成的《一九八四》《三体》验证样本。
 - 方法来源与许可证记录见 `PROVENANCE.md`。
