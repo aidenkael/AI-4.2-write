@@ -27,7 +27,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - package-style import in tests
     from . import book_distill as bd  # type: ignore
 
-BRIDGE_VERSION = "0.1.0"
+BRIDGE_VERSION = "0.1.1"
 
 OBSERVER_IDS = (
     "longform_reader_dynamics",
@@ -48,7 +48,9 @@ SECTION_HEADINGS = {
 }
 
 ENTRY_RE = re.compile(r"^\s*-\s*\[(OBSERVATION|INFERENCE|BOUNDARY)\]\s*(.+)$")
-OBSERVER_TAG_RE = re.compile(r"(?:^|\|)\s*observer\s*[:：]\s*([A-Za-z0-9_-]+)\s*(?:\||$)")
+# observer tag can appear immediately after the kind (INFERENCE/BOUNDARY) or
+# after dimension/other pipe-delimited fields (OBSERVATION).
+OBSERVER_TAG_RE = re.compile(r"\bobserver\s*[:：]\s*([A-Za-z0-9_-]+)\b")
 SOURCE_FILE_RE = re.compile(r"^ch_(\d{4})\.md$")
 
 

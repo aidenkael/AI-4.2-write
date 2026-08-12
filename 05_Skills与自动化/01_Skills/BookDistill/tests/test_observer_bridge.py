@@ -87,6 +87,34 @@ class ObserverBridgeTests(unittest.TestCase):
             self.assertFalse(result["ok"])
             self.assertTrue(any("缺少 observer" in err for err in result["errors"]))
 
+    def test_inference_and_boundary_tags_are_valid(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sp = make_fake_pass_pkg(root)
+            out = root / "out"
+            bd.prepare(sp, out)
+            ob.init_workspace(sp, out)
+
+            observer_id = "reader_page_craft"
+            path = out / "discovery" / observer_id / "chapters" / "ch_0001.md"
+            text = path.read_text(encoding="utf-8")
+            inference = (
+                f"- [INFERENCE] observer:{observer_id} | 这里可能通过省略增强读者参与"
+                "｜证据：chapters/0001.md#L3-L4｜置信度：中"
+            )
+            boundary = (
+                f"- [BOUNDARY] observer:{observer_id} | 该判断高度依赖前文语境"
+                "｜证据：chapters/0001.md#L3-L4｜置信度：高"
+            )
+            text = text.replace("## INFERENCE\n", f"## INFERENCE\n\n{inference}\n")
+            text = text.replace("## BOUNDARY\n", f"## BOUNDARY\n\n{boundary}\n")
+            path.write_text(text, encoding="utf-8")
+
+            result = ob.validate_observer(sp, out, observer_id)
+            self.assertTrue(result["ok"], result["errors"])
+            self.assertEqual(result["stats"]["INFERENCE"], 1)
+            self.assertEqual(result["stats"]["BOUNDARY"], 1)
+
     def test_merge_is_idempotent(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
