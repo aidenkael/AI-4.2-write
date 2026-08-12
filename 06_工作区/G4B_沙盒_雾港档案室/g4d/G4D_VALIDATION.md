@@ -1,10 +1,12 @@
 # G4-D 验证报告
 
+> 状态：**COMPLETED / historical evidence**。G4-E 已接受本报告作为 G4-D 关闭证据。
+
 ## 真实作者输入
 
 作者没有使用后台命令，而是自然表达：当前场景更接近 C，同时提醒小说节奏与详略不是固定模板。
 
-系统判定为 `modify`，生成 `g4d-dec-001`。解释保留了两个层次：
+系统判定为 `modify`，生成 `g4d-dec-001`。解释保留两个层次：
 
 - 当前场景偏向 C；
 - 不把 C 或某一种节奏/详略方式升级成通用写法。
@@ -26,6 +28,6 @@
 
 ## 结论
 
-G4-D 当前满足最小技术验证：真实作者可以只说感觉，系统能形成可追溯 Decision Record，并只把当前场景未来计划作为 `creative_change` 写回；作者的泛化提醒没有被误写成固定创作规则。
+G4-D 最小技术验证通过：真实作者可以只说感觉，系统能形成可追溯 Decision Record，并只把当前场景未来计划作为 `creative_change` 写回；作者的泛化提醒没有被误写成固定创作规则。
 
-**状态：G4-D 技术验证完成候选，等待作者确认是否进入 G4-E。**
+G4-E 随后处理了两个收口事项：旧 `state_rev=1` Context/Brief 标记 STALE，以及 accepted-text mechanical settlement 的协议级 dry-run。G4-D 不再作为当前执行入口。

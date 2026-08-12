@@ -1,6 +1,9 @@
 # Q3 Context Package｜读者体验
 
-`authority: derived_context_only`
+`authority: derived_context_only`  
+`status: STALE`  
+`stale_reason: story_state advanced from state_rev=1 to state_rev=2 by g4d-diff-001`  
+`reuse: forbidden; rebuild from current revisions for any future task`  
 `context_id: g4c-q3-reader-v1`
 
 ## built_from
@@ -11,8 +14,8 @@
 
 ## selected_intent / selected_story_state
 
-- Intent 的 Reader Promise 是谜团每推进一步都更深入林舟与林晚未完成的情感关系；avoidances 禁止用“她很悲伤”代替反应。
-- State：林晚官方死亡、林舟漏接最后来电；异常档案与死后提交日期；开放线索和“不可提前证明林晚活着”的约束。
+- Intent 的 Reader Promise 是谜团每推进一步都更深入林昼与林晚未完成的情感关系；avoidances 禁止用“她很悲伤”代替反应。
+- State：林晚官方死亡、林昼漏接最后来电；异常档案与死后提交日期；开放线索和“不可提前证明林晚活着”的约束。
 
 ## selected_bkp_hits
 
@@ -29,5 +32,5 @@
 
 ## synthesis / candidate_directions
 
-1. **读者先看见代价线索**：读者从系统提示或值班规则知道一次深查会留下审计痕迹，林舟尚未读到该后果；随后以她的具体回避动作连到姐姐。优点是担心来自选择代价；风险是信息差若过大，会削弱与林舟的同步。
-2. **角色先感到私人刺痛**：先让林舟对日期/身份标记产生克制的身体反应，再只拿到一个可验证但不解释原因的小结果；读者与她一起追问。优点是情感和好奇同源；风险是没有外显后果时悬念可能变成纯回忆。
+1. **读者先看见代价线索**：读者从系统提示或值班规则知道一次深查会留下审计痕迹，林昼尚未读到该后果；随后以她的具体回避动作连到姐姐。优点是担心来自选择代价；风险是信息差若过大，会削弱与林昼的同步。
+2. **角色先感到私人刺痛**：先让林昼对日期/身份标记产生克制的身体反应，再只拿到一个可验证但不解释原因的小结果；读者与她一起追问。优点是情感和好奇同源；风险是没有外显后果时悬念可能变成纯回忆。

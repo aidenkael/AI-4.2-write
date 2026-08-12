@@ -3,7 +3,9 @@
 > `brief_id: g4b-brief-001`  
 > `brief_rev: 1`  
 > `project_id: g4b-fogharbor-archive`  
-> `source_versions: intent_rev=1, state_rev=1`
+> `source_versions: intent_rev=1, state_rev=1`  
+> `status: HISTORICAL / STALE_FOR_FUTURE_EXECUTION`  
+> `stale_reason: current story_state is state_rev=2 after g4d-diff-001; future tasks must rebuild a new Brief`
 
 ## Scope
 
@@ -65,14 +67,7 @@
 
 ## Knowledge Need（供 G4-C 使用）
 
-未来可从 BKP 查询：
-
-- 信息延迟与揭示节奏；
-- 人物决策压力；
-- 悬念如何与私人情感绑定；
-- 读者逐时体验与章/场景末牵引。
-
-当前 G4-B **不运行 Retrieval**。
+可从 BKP 查询：信息延迟与揭示节奏、人物决策压力、悬念与私人情感绑定、读者逐时体验与场景末牵引。
 
 ## Assumptions
 
@@ -81,3 +76,5 @@
 - “林昼应该违规打开”不是作者已确认结论，只是待探索选项。
 
 这些 assumptions 不是 Canon。
+
+> 本 Brief 保留为 G4-B/C 历史证据，不得在 `state_rev=2` 的未来任务中直接复用。

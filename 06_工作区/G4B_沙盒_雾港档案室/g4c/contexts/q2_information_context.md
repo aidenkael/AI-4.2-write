@@ -1,6 +1,9 @@
 # Q2 Context Package｜情节 / 信息
 
-`authority: derived_context_only`
+`authority: derived_context_only`  
+`status: STALE`  
+`stale_reason: story_state advanced from state_rev=1 to state_rev=2 by g4d-diff-001`  
+`reuse: forbidden; rebuild from current revisions for any future task`  
 `context_id: g4c-q2-information-v1`
 
 ## built_from
@@ -12,7 +15,7 @@
 ## selected_intent / selected_story_state
 
 - Intent：信息逐步释放、不急于解释谜底；悬疑由人物选择推动。
-- State：`canon.memory_package_metadata` 的可查元数据/不可随意查看内容；死亡后六个月提交是已发生异常；`thread.signature_validity`、`thread.submission_origin`、`thread.postmortem_date`；林舟须在上报、忽略、进一步查看间选择。
+- State：`canon.memory_package_metadata` 的可查元数据/不可随意查看内容；死亡后六个月提交是已发生异常；`thread.signature_validity`、`thread.submission_origin`、`thread.postmortem_date`；林昼须在上报、忽略、进一步查看间选择。
 
 ## selected_bkp_hits
 
@@ -31,5 +34,5 @@
 
 ## synthesis / candidate_directions
 
-1. **元数据阶梯**：先只给提交日期矛盾，再给“认证曾通过”的结果，最后才让林舟发现一条会决定是否上报的权限记录；每级只回答一个小问题并制造下一项选择。风险是把元数据堆成说明，须让每级都改变她能否/是否继续查。
-2. **命名但不定义**：把异常标为既有制度术语（例如“死后提交复核”），让读者知道它可被处理却不知道机制；林舟为确认术语适用性做合规核验。风险是新术语若没有可见后果，会成为空名词。
+1. **元数据阶梯**：先只给提交日期矛盾，再给“认证曾通过”的结果，最后才让林昼发现一条会决定是否上报的权限记录；每级只回答一个小问题并制造下一项选择。风险是把元数据堆成说明，须让每级都改变她能否/是否继续查。
+2. **命名但不定义**：把异常标为既有制度术语（例如“死后提交复核”），让读者知道它可被处理却不知道机制；林昼为确认术语适用性做合规核验。风险是新术语若没有可见后果，会成为空名词。

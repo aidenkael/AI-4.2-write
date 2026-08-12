@@ -1,7 +1,7 @@
 # AI-write 长期开发手册
 
-> 更新日期：2026-08-12  
-> 当前正式 Gate：**G4｜创作上下文与作者决策最小闭环（ACTIVE / G4-D）**  
+> 更新日期：2026-08-13  
+> 当前正式 Gate：**无；G4 已 CLOSED**  
 > 本文件只保留长期有效原则、当前路线和关键边界；过程细节放专项文件与 Git 历史。
 
 ---
@@ -24,10 +24,9 @@ AI-write 是**作者主导、AI 辅助**的中文长篇小说创作工作台，�
 工作台准备当前状态 + 少量相关知识
 → AI 生成/修改正文
 → 作者凭阅读感觉给自然语言反馈
-→ Controller/Muse 自动判断问题并调用相关技能
-→ 专业能力针对性处理
-→ 作者继续阅读、接受、拒绝或再给模糊反馈
-→ 已接受正文中的明确事实自动结算 Story State
+→ Controller/Muse 自动判断问题并调用相关专业能力
+→ 作者继续阅读、接受、拒绝或再给反馈
+→ 已接受正文中的明确事实由后台机械结算 Story State
 → 下一轮创作
 ```
 
@@ -67,7 +66,7 @@ AI-write 自研尽量集中在：协议、路由、胶水、BKP、中文长篇�
 
 # 3. 原著知识与原创状态
 
-原著是最高事实源。BookDistill 当前采用多视角直接读原著 + 总编辑收敛，形成 BKP。
+原著是最高事实源。BookDistill 采用多视角直接读原著 + 总编辑收敛形成 BKP。
 
 知识成熟度：
 
@@ -110,56 +109,68 @@ C01–C20 只是技术路由，不是作者操作的 20 个 Skill。
 
 ---
 
-# 6. 当前路线
+# 6. 已完成路线
 
 - G0：CLOSED；
 - G1：CLOSED；
 - G2：CLOSED；
 - G3：`G3_RETRIEVAL_VALIDATED / CLOSED`；
-- **G4：ACTIVE / G4-D。**
+- **G4｜创作上下文与作者决策最小闭环：CLOSED。**
 
-G4-A 已完成最小合同；G4-B 已证明创作现场可文件化恢复；G4-C 已证明：
+G4 稳定结论：
 
-`Author Intent + Story State + Creation Brief + 少量真实 BKP Hit → 小 Context → 情境化创作方向`
+- Author Intent / Story State / Creation Brief 可脱离聊天恢复；
+- 小 Context 成立，跨书综合按问题自然发生；
+- 非阻塞 BKP gap 不自动触发扩库；
+- 作者自然语言反馈可以转成可追溯 Decision / 合法 Diff；
+- `approved_plan ≠ Canon`，作者可推翻计划；
+- state/intent revision 变化会使旧 Context 失效；
+- `accepted_text → mechanical_settlement` 的 authority 与歧义边界已在协议层验证；
+- 当前无 Retrieval / RAG / KG 升级理由。
 
-长期保留结论：小 Context 成立；跨书按问题自然发生；非阻塞 BKP gap 不立即触发扩库；当前无 Retrieval/RAG/KG 升级理由。
-
-当前 G4-D 验证：
-
-`作者自然语言反馈 → 系统理解接受/修改/拒绝/暂缓 → Decision Record / State Diff → 合法写回或明确不写`
-
-真实作者反馈才具有 `author_decision` authority；模拟输入只做非写入测试。
+G4 不证明 Writer 正文质量、生产级 accepted-text 抽取/写回、完整 Controller 或 UI 已完成。
 
 ---
 
-# 7. 当前禁止事项
+# 7. 下一方向
 
-- 不批量蒸馏更多书；
+当前没有 ACTIVE Gate。
+
+从长期产品目标看，下一步自然方向是把已经证明的创作中枢接向真实正文执行：
+
+`当前状态 + BKP + 创作任务 → 生成/修改正文 → 作者说感觉 → 后台路由专业能力 → accepted text 状态结算`
+
+但仍坚持 Borrow-first；在新 Gate 正式建立前，不开始整个 Writer/Reader/Controller/UI 的大规模实现。
+
+---
+
+# 8. 当前禁止事项
+
+- 不批量蒸馏更多书，只为填单个非阻塞 gap；
 - 不修改 BookDistill/BKP/KnowledgeRetrieve 只为结果更漂亮；
-- 不自研成熟 Writer / Reader / Editor / Canon / Continuity；
-- 不拿正式长篇做工具实验；
-- 不开发完整 UI；
+- 不一次自研完整 Writer / Reader / Editor / Canon / Continuity；
+- 不拿正式长篇做尚未稳定工具的实验场；
+- 不开发完整 UI、大型数据库、KG 或多 Agent 平台；
 - 不让作者面对内部工具堆或频繁确认；
 - 不让 AI 自动替作者做重大创作决定；
-- 不用模拟作者输入写权威状态；
-- 不自动进入 G4-E。
+- 不在没有新 Gate 的情况下继续堆功能。
 
 ---
 
-# 8. Git 与文档纪律
+# 9. Git 与文档纪律
 
 长期禁止无明确授权执行：`reset / restore / clean / force push / rebase / merge`。
 
 长期文档只保存稳定原则和当前边界；实验细节放 `06_工作区` 或 Git 历史。
 
-本地历史 dirty / untracked / `stash@{0}` 先识别内容，再决定是否恢复或清理；不得自动 pop/drop/clean，也不为普通同步建立无意义分支。
+本地历史 dirty / untracked / stash 先识别内容，再决定是否恢复或清理；不得自动 pop/drop/clean。普通同步不建立无意义长期分支。
 
 当前状态入口：`00_项目控制/当前工作索引.md`。  
 当前门禁：`00_项目控制/项目阶段门禁.md`。  
-当前 G4-D 真实验证：`06_工作区/G4B_沙盒_雾港档案室/g4d/G4D_作者决策真实验证.md`。
+G4 收口：`00_项目控制/G4_启动记录_2026-08-12.md` 与 `06_工作区/G4B_沙盒_雾港档案室/g4e/G4E_CLOSEOUT.md`。
 
 ---
 
-# 9. 一句话总纲
+# 10. 一句话总纲
 
-> **AI-write 要让复杂后台尽量消失：优秀作品的创作智慧在后台被调用，作者主要通过看内容、说感觉和做重大取舍来创作；当前 G4-D 正在真实验证这条作者决策反馈环。**
+> **AI-write 要把优秀作品的创作智慧和复杂后台变成作者看不见的能力，让作者主要通过看内容、说感觉和做重大取舍来创作；G4 已证明最小创作中枢成立，下一 Gate 尚未建立。**

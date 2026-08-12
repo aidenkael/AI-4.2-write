@@ -1,6 +1,9 @@
 # Q1 Context Package｜人物
 
-`authority: derived_context_only`
+`authority: derived_context_only`  
+`status: STALE`  
+`stale_reason: story_state advanced from state_rev=1 to state_rev=2 by g4d-diff-001`  
+`reuse: forbidden; rebuild from current revisions for any future task`  
 `context_id: g4c-q1-person-v1`
 
 ## built_from
@@ -16,7 +19,7 @@
 
 ## selected_bkp_hits
 
-1. 《一九八四》`knowledge/observations.md`，人物 Observation：温斯顿在电幕前先摆出安详乐观的表情（evidence `chapters/0001.md#L29`；confidence 高）。此处可借的是“先展示自我保护动作，再让选择从该动作的失效中生出”，而非把林舟等同温斯顿。
+1. 《一九八四》`knowledge/observations.md`，人物 Observation：温斯顿在电幕前先摆出安详乐观的表情（evidence `chapters/0001.md#L29`；confidence 高）。此处可借的是“先展示自我保护动作，再让选择从该动作的失效中生出”，而非把林昼等同温斯顿。
 2. 《一九八四》`knowledge/observations.md`，人物 Observation：温斯顿因身体上不能跑/动手而放弃袭击（evidence `chapters/0008.md#L203`；confidence 高）。此处可借“回避应落实为可观察的限制/动作”，不把抽象内疚直接宣告为动机。
 
 两个条目的 scope / boundary / counterevidence 在 Retrieval 输出中均为 `absent`；它们都是单书 Observation，不是普遍规则。
@@ -31,5 +34,5 @@
 
 ## synthesis / candidate_directions
 
-1. **流程先行后失效**：让林舟先完成一次合规的异常登记/封存动作；其中一个确切元数据或权限提示触发她对“最后来电”的回避性身体动作，再让她选择暂不自动上报、先核验许可链。适合她的流程本能；代价是保留文件会增加违规暴露。
-2. **回避也成为选择**：林舟准备将档案移交，却必须亲手确认提交者标记是否可被系统复核。她可选择关闭窗口（维持秩序）或查询仅限元数据的深层记录（承担后果），不打开记忆内容。适合当前 hard constraints；风险是若缺少可感知的私人触点，会显得只是流程题。
+1. **流程先行后失效**：让林昼先完成一次合规的异常登记/封存动作；其中一个确切元数据或权限提示触发她对“最后来电”的回避性身体动作，再让她选择暂不自动上报、先核验许可链。适合她的流程本能；代价是保留文件会增加违规暴露。
+2. **回避也成为选择**：林昼准备将档案移交，却必须亲手确认提交者标记是否可被系统复核。她可选择关闭窗口（维持秩序）或查询仅限元数据的深层记录（承担后果），不打开记忆内容。适合当前 hard constraints；风险是若缺少可感知的私人触点，会显得只是流程题。

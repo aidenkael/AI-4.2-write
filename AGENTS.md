@@ -4,9 +4,9 @@
 
 ## 1. 当前阶段
 
-**G4｜创作上下文与作者决策最小闭环：ACTIVE / G4-D。**
+**当前无 ACTIVE Gate。G4 已 CLOSED。**
 
-G4-A/B/C 已完成；当前只推进 G4-D。未获用户明确确认，不自动进入 G4-E。
+G0–G4 均已关闭。没有用户明确确认新的 Gate 前，不自动继续 G4，也不启动下一阶段实质开发。
 
 开始任务前读：目录说明、AGENTS、长期手册、当前索引、项目记忆、阶段门禁和当前专项文件。
 
@@ -20,43 +20,44 @@ Story State 合法 authority：`accepted_text:<ref>`、`author_decision:<id>`、
 
 禁止 BKP / AI candidate / Context Package 直接写 Canon。
 
-## 3. G4-D 专项规则
+## 3. G4 已验证规则
 
-沙盒：`06_工作区/G4B_沙盒_雾港档案室/`。
+- Author Intent / Story State / Creation Brief 可文件化恢复；
+- Context 应小而相关，可重建；
+- state/intent revision 变化后旧 Context 必须 STALE；
+- Retrieval 只负责召回，Synthesis 属于创作上下文/决策层；
+- 跨书知识不强制多书共识；
+- `approved_plan ≠ Canon`；
+- 真实用户自然语言反馈才可成为 `author_decision`；
+- 模拟输入只能测试解析，不得写权威状态；
+- `reject_all / defer / ambiguity` 默认不写 Story State；
+- `accepted_text` 只有文本明确事实可 mechanical settlement，歧义/推断不得自动写回。
 
-当前真实验证入口：`g4d/G4D_作者决策真实验证.md`。
+G4 的 accepted-text 验证是协议级 dry-run，不代表 Writer/runtime 已接入。
 
-要求：
+## 4. Borrow-first
 
-- 真实用户自然语言反馈才能成为 `author_decision`；
-- Agent/测试脚本模拟的 choose/modify/reject/defer 只能验证解析，不得写权威状态；
-- `reject_all / defer` 默认不改 Story State；
-- 作者修改未来场景方向时，必要写回只更新 `approved_plan` 等未来计划，不把计划伪装成 occurred Canon；
-- 没有已接受正文时禁止制造 `accepted_text` mechanical settlement；
-- 有歧义时停止写回并请求澄清；
-- Decision Record / Diff 由后台生成，作者不填表；
-- Diff 必须匹配当前 `base_state_rev`。
+核心长期参照：AI-Novel-Writing-Assistant、oh-story、creative-writing-skills、Apodictic、InkOS、NovelForge、graphify-novel、ani-book-skill。
 
-## 4. 已验证前提
-
-G4-C 已证明：真实 KnowledgeRetrieve 可运行；小 Context 覆盖人物、情节/信息、读者体验；跨书按问题自然发生；当前无 Retrieval/RAG/KG 升级理由。
+能借不自研；不把多个上游 schema 机械合成超级 schema；AI-write 自研集中在协议、路由、胶水、BKP、中文长篇适配、作者控制和必要状态接口。
 
 ## 5. 当前禁止
 
-- 自动替作者选创作方向；
-- 用模拟用户输入获得 authority；
-- 为测试而强制修改 Story State；
-- 实现完整 Writer / Reader / Critic / Editor；
-- 批量蒸馏新书；
-- 升级 Retrieval/RAG/KG；
-- 自动进入 G4-E。
+没有新 Gate 时：
+
+- 不自动开发完整 Writer / Reader / Critic / Editor / Controller；
+- 不批量蒸馏新书；
+- 不升级 Retrieval/RAG/KG 只为非阻塞 gap；
+- 不开发完整 UI、大型数据库或多 Agent 平台；
+- 不把 G4 沙盒当正式小说继续写；
+- 不新增长期 Schema / Skill taxonomy 只为覆盖单个案例。
 
 ## 6. Git 安全
 
 无明确授权禁止：`reset / restore / clean / force push / rebase / merge`。
 
-历史 local dirty / untracked / `stash@{0}` 不清理、不覆盖、不自动 pop/drop。本阶段不为它们创建临时分支；需要处理时先识别内容。
+未知或历史 local dirty / untracked / stash 不清理、不覆盖、不自动 pop/drop。普通同步优先保持单一 `main`，不要为了临时保护留下无意义长期分支。
 
 ## 7. 文档纪律
 
-长期文档只保留稳定原则和当前边界；实验细节留在 `06_工作区`。阶段状态以当前索引和门禁为准。
+长期文档只保留稳定原则和当前边界；实验细节留在 `06_工作区`。阶段状态以当前索引和门禁为准。下一 Gate 未确认前，不自行把候选方向写成正式阶段。
