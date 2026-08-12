@@ -1,7 +1,7 @@
 # AI-write 长期开发手册
 
 > 更新日期：2026-08-12  
-> 当前正式 Gate：**G4｜创作上下文与作者决策最小闭环（ACTIVE / G4-C）**  
+> 当前正式 Gate：**G4｜创作上下文与作者决策最小闭环（ACTIVE / G4-C 技术验证完成候选）**  
 > 本文件只保留长期有效原则、当前路线和关键边界；过程细节放专项文件与 Git 历史。
 
 ---
@@ -124,39 +124,32 @@ C01–C20 只是技术路由，不是作者操作的 20 个 Skill。
 - G1：CLOSED；
 - G2：CLOSED；
 - G3：`G3_RETRIEVAL_VALIDATED / CLOSED`；
-- **G4：ACTIVE / G4-C。**
+- **G4：ACTIVE / G4-C 技术验证完成候选。**
 
 G4-A 已完成最小合同。G4-B 已完成可丢弃原创沙盒与 cold-read 恢复验证。
 
-当前 G4-C 验证：
+G4-C 已真实验证：
 
 `Author Intent + Story State + Creation Brief + 少量真实 BKP Hit → 小 Context Package → 情境化创作方向`
 
-至少覆盖人物、情节/信息、读者体验三类问题。
+覆盖人物、情节/信息、读者体验三类问题。
 
-G4-D 才验证作者选择/修改/拒绝与状态写回；当前不提前做。
+当前保留的长期结论只有：
 
----
+- 小 Context 成立；
+- 跨书综合应按问题自然发生，不强制多书；
+- 非阻塞 BKP gap 只记录，不立即触发扩库；
+- 当前无 Retrieval / RAG / KG 升级理由。
 
-# 7. G4-C 原则
-
-- 必须真实运行现有 KnowledgeRetrieve；
-- Retrieval 只负责召回，Synthesis 属于 Context Compiler / Muse / Planner；
-- Context 只取当前任务需要的少量 Intent / State / BKP；
-- 选择 BKP 时保留来源、Scope/Boundary/Confidence；
-- 多书知识可以互补或冲突，不以“多数书这么写”制造规则；
-- 只有一本书真正相关时不强行跨书；
-- 无足够知识时明确 gap；
-- Context 与候选方向都是派生物，不写 Canon；
-- 无真实阻塞不升级 Retrieval / RAG / KG。
+G4-D 才验证作者选择 / 修改 / 拒绝与状态写回；未获作者确认前不提前做。
 
 ---
 
-# 8. 当前禁止事项
+# 7. 当前禁止事项
 
 - 不批量蒸馏更多书；
 - 不重跑旧书；
-- 不修改 BookDistill/BKP/KnowledgeRetrieve 只为让 G4-C 更漂亮；
+- 不修改 BookDistill/BKP/KnowledgeRetrieve 只为结果更漂亮；
 - 不自研成熟 Writer / Reader / Editor / Canon / Continuity；
 - 不拿正式长篇做工具实验；
 - 不开发完整 UI；
@@ -166,18 +159,20 @@ G4-D 才验证作者选择/修改/拒绝与状态写回；当前不提前做。
 
 ---
 
-# 9. Git 与文档纪律
+# 8. Git 与文档纪律
 
 长期禁止无明确授权执行：`reset / restore / clean / force push / rebase / merge`。
 
 长期文档只保存稳定原则和当前边界；实验细节放 `06_工作区` 或 Git 历史。
 
+本地历史 dirty / untracked / stash 先识别内容，再决定是否恢复或清理；不得自动 pop/drop/clean。
+
 当前状态入口：`00_项目控制/当前工作索引.md`。  
 当前门禁：`00_项目控制/项目阶段门禁.md`。  
-当前 G4-C Agent 任务：`06_工作区/G4C_Agent任务_最小Context与跨书综合.md`。
+G4-C 验证报告：`06_工作区/G4B_沙盒_雾港档案室/g4c/G4C_VALIDATION.md`。
 
 ---
 
-# 10. 一句话总纲
+# 9. 一句话总纲
 
-> **AI-write 要把优秀作品的创作智慧变成后台能力，让作者主要通过“看正文、说感觉、做重大取舍”来创作；当前 G4-C 正在验证参考智慧能否在真实创作现场被自动压成小而有用的 Context。**
+> **AI-write 要把优秀作品的创作智慧变成后台能力，让作者主要通过“看正文、说感觉、做重大取舍”来创作；G4-C 已证明参考智慧可以在真实创作现场被压成小而有用的 Context，下一步只在作者确认后进入 G4-D。**
