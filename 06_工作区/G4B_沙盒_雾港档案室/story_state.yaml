@@ -1,7 +1,7 @@
 project_id: g4b-fogharbor-archive
-state_rev: 1
+state_rev: 2
 sandbox_only: true
-last_authority_source: manual_import:sandbox_seed_v1
+last_authority_source: author_decision:g4d-dec-001
 
 canon_facts:
   - id: canon.memory_archive_exists
@@ -62,11 +62,11 @@ open_threads:
 
 approved_plan:
   - id: plan.next_scene
-    plan: 下一场先不解释谜底；让林昼在制度规则与私人情感之间被迫做出是否进一步查看的选择。
+    plan: 当前场景仍不解释谜底；优先采用“读者先感知继续深查存在代价，林昼随后意识到并仍选择继续”的效果目标。具体代价机制在后续场景设计或正文前再决定，未决定前保持候选；本场景详略与节奏按场景功能决定，不把这一方向固化为通用写法。
     status: approved_for_sandbox_test
-    authority: manual_import:sandbox_seed_v1
+    authority: author_decision:g4d-dec-001
 
 notes:
   - BKP、AI 推演、未来方案均不得直接写入本文件。
-  - 当前没有 accepted_text 来源，因为 G4-B 尚未生成正文。
+  - 当前没有 accepted_text 来源，因为沙盒尚未生成并验收正文。
   - approved_plan 不是已发生 Canon，可在后续决策中被推翻。
