@@ -138,7 +138,7 @@ Apodictic 式镜头用于诊断和发现，不自动覆盖为普遍写作规则�
    校验条目分类合法性、引用可追溯与**行号不越界**，
    重算输入 snapshot 并比对，计算**维度覆盖统计**，生成 `distill_manifest.json`。
 6. `profile --output <BookDistill 输出>`：生成 `book_profile.md`（维度覆盖、强项/潜在强项、不确定项、深挖建议骨架）。
-   脚本只做确定性统计；文学价值判断由运行 Skill 的 Agent 完成。Profile 只能分配深挖预算，不能否定未选维度的潜在价值。
+   脚本只做确定性统计；文学价值判断由运行本 Skill 的 Agent 完成。Profile 只能分配深挖预算，不能否定未选维度的潜在价值。
 7. `deepdive --output <BookDistill 输出> --dimension <维度名> [--input <SourcePrepare PASS>]`：生成专项深挖模板。
    专项文学分析优先参考 Apodictic / ani-book / creative-writing-skills / oh-story 的分析框架。
    传入 `--input` 时复用 assemble 校验逻辑（引用格式、章节存在性、行号越界）校验已填写的深挖内容；不传 `--input` 时仅生成模板。文件已存在时不覆盖。
