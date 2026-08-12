@@ -1,0 +1,72 @@
+project_id: g4b-fogharbor-archive
+state_rev: 1
+sandbox_only: true
+last_authority_source: manual_import:sandbox_seed_v1
+
+canon_facts:
+  - id: canon.memory_archive_exists
+    fact: 雾港允许公民将经过认证的个人记忆封存为可用于法律与遗产事务的档案。
+    authority: manual_import:sandbox_seed_v1
+  - id: canon.memory_package_metadata
+    fact: 每份封存记忆至少记录提交者身份、提交日期与封存状态；普通档案员无权随意查看内容。
+    authority: manual_import:sandbox_seed_v1
+  - id: canon.linwan_officially_dead
+    fact: 林晚在当前时间点的官方记录中已死亡三年。
+    authority: manual_import:sandbox_seed_v1
+
+character_state:
+  lin_zhou:
+    name: 林昼
+    age: 27
+    role: 雾港记忆档案中心夜班档案员
+    current_state:
+      - 对规则熟悉，遇到异常时本能先按流程处理。
+      - 对姐姐林晚的死亡仍有未解决的内疚：三年前最后一次来电没有接。
+      - 不愿主动谈起姐姐。
+    authority: manual_import:sandbox_seed_v1
+  lin_wan:
+    name: 林晚
+    relation: 林昼的姐姐
+    current_state:
+      - 官方记录为已死亡三年。
+      - 当前没有任何权威事实证明她仍然活着。
+    authority: manual_import:sandbox_seed_v1
+
+relationship_state:
+  - id: relation.linzou_linwan
+    parties: [林昼, 林晚]
+    state: 生前亲近，但林昼因最后一次未接来电留下长期内疚；关系在林昼心中没有真正结束。
+    authority: manual_import:sandbox_seed_v1
+
+occurred_events:
+  - id: event.anomalous_package_arrived
+    event: 夜班入库中出现一份提交者身份标记为“林晚”的封存记忆。
+    authority: manual_import:sandbox_seed_v1
+  - id: event.postmortem_submission_date
+    event: 该档案元数据显示提交日期在林晚官方死亡日期之后六个月。
+    authority: manual_import:sandbox_seed_v1
+
+open_threads:
+  - id: thread.signature_validity
+    question: “林晚”身份标记为何能通过档案系统？
+    status: open
+  - id: thread.submission_origin
+    question: 谁实际提交了这份记忆？
+    status: open
+  - id: thread.postmortem_date
+    question: 为什么提交日期晚于官方死亡日期六个月？
+    status: open
+  - id: thread.linzou_choice
+    question: 林昼会按流程上报、忽略，还是冒险进一步查看？
+    status: open
+
+approved_plan:
+  - id: plan.next_scene
+    plan: 下一场先不解释谜底；让林昼在制度规则与私人情感之间被迫做出是否进一步查看的选择。
+    status: approved_for_sandbox_test
+    authority: manual_import:sandbox_seed_v1
+
+notes:
+  - BKP、AI 推演、未来方案均不得直接写入本文件。
+  - 当前没有 accepted_text 来源，因为 G4-B 尚未生成正文。
+  - approved_plan 不是已发生 Canon，可在后续决策中被推翻。
