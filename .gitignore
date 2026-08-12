@@ -51,6 +51,9 @@ __pycache__/
 # SourcePrepare 为本地来源预处理工作区，可能含由原著生成的完整/近完整派生正文；整体不上传
 06_工作区/SourcePrepare/
 
+# BookDistill Observer discovery 是逐章发现阶段 staging；正式长期资产由 evidence/BKP 收敛后保存，staging 不上传
+02_原著蒸馏/*/discovery/
+
 # B09 原著蒸馏 Benchmark 本地运行数据（含源路径、冻结范围、Runner 输出；不上传）
 06_工作区/01_待处理/B09_原著蒸馏Benchmark/_local_manifests/
 06_工作区/01_待处理/B09_原著蒸馏Benchmark/_local_runs/

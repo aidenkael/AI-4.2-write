@@ -47,6 +47,8 @@
 
 这些是**发现阶段 staging**，不是 BKP，不自动成为写作规则。
 
+`discovery/` 是逐章工作底稿，默认 Local Only；`.gitignore` 已排除 `02_原著蒸馏/*/discovery/`。正式长期保存的是 BookDistill 收敛后的 canonical evidence、BookProfile、Deep Dive 结论和 BKP，不把 observer staging 当长期知识库提交。
+
 ## 可桥接条目
 
 观察者只直接产出三类：
@@ -75,6 +77,8 @@
 - 不大量摘抄原文。
 
 ## 运行顺序
+
+执行多视角 Discovery 前，运行 BookDistill 的 Agent 必须先读本文件，再读对应观察者合同。
 
 ```bash
 python 05_Skills与自动化/01_Skills/BookDistill/scripts/book_distill.py validate --input <SP_PASS>
