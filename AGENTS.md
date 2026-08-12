@@ -4,9 +4,11 @@
 
 ## 1. 当前阶段
 
-**G4｜创作上下文与作者决策最小闭环：ACTIVE / G4-A。**
+**G4｜创作上下文与作者决策最小闭环：ACTIVE / G4-B。**
 
-当前只允许完成/复核 G4-A 最小合同。未获用户明确确认，不自动进入 G4-B/C/D/E。
+G4-A 最小合同已完成。当前 G4-B 沙盒：`06_工作区/G4B_沙盒_雾港档案室/`。
+
+G4-B 已完成 cold-read 技术验证候选；未获用户明确确认，不自动进入 G4-C/D/E。
 
 开始任务前先读：
 
@@ -91,9 +93,9 @@
 
 允许跨句/跨场景/跨章节证据，永久允许“重要但暂时无法命名”。不因单个案例新增硬编码 taxonomy。
 
-## 7. G4-A 专项边界
+## 7. G4 当前专项边界
 
-当前五类工件：
+五类工件：
 
 1. Author Intent；
 2. Story State / Canon；
@@ -101,7 +103,15 @@
 4. Context Package；
 5. Decision Record / State Diff。
 
-当前合同：`06_工作区/G4A_最小创作合同_v0.1.md`（内容 v0.1.1）。
+G4-A 合同：`06_工作区/G4A_最小创作合同_v0.1.md`（内容 v0.1.1）。
+
+G4-B 权威沙盒故事工件只有：
+
+- `author_intent.md`
+- `story_state.yaml`
+- `briefs/brief-001.md`
+
+沙盒必须标记 disposable，不得外推为作者真实创作偏好。
 
 State Diff 至少区分：
 
@@ -111,9 +121,13 @@ State Diff 至少区分：
 
 Context 依赖 revision 改变后必须 stale；旧 Diff 不得覆盖新 state_rev。
 
-## 8. 当前禁止
+## 8. 当前允许 / 禁止
 
-- 自动进入 G4-B；
+允许：复核 G4-B cold-read、修真实恢复缺口、设计 G4-C 最小实现边界。
+
+禁止：
+
+- 未确认前进入 G4-C；
 - 完整 Writer / Reader / Critic / Editor；
 - 正式长篇做实验；
 - UI / 独立客户端；
