@@ -1160,6 +1160,11 @@ def finalize_bkp(out_dir: Path, proto_dir: Path | None = None) -> dict:
 # ---- CLI ----------------------------------------------------------------
 
 
+def prepare(sp_dir: Path, out_dir: Path) -> int:
+    """Convenience wrapper: prepare from two paths (used by tests and observer bridge)."""
+    return cmd_prepare(type("A", (), {"input": str(sp_dir), "output": str(out_dir)})())
+
+
 def cmd_validate(args) -> int:
     result = validate_input(Path(args.input))
     print(json.dumps(result, ensure_ascii=False, indent=2))
