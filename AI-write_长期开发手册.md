@@ -39,16 +39,17 @@ SourcePrepare 负责输入标准化，不算文学蒸馏。
 
 ## 2.2 BookDistill 内部分析
 
-BookDistill 不采用固定“蒸馏三次/五次”的机械规则，而采用稳定基础 + 自适应专项：
+生产口径统一为：
 
-1. **Base Scan**：1 类全书基础扫描，建立 MAP、Evidence、Observation、Boundary；
-2. **Discovery Pass A**：长篇运行 / 读者动力；
-3. **Discovery Pass B**：Reader / Page Craft；
-4. **BookProfile**：汇总覆盖、强项、潜在强项、不确定项，并决定专项预算；
-5. **Deep Dive：0～N 次**：只对高价值或不确定问题触发；
-6. **总编辑式 Finalize**：回原著核证、合并重复、识别组合效果、补 scope/boundary/counterevidence/confidence，形成正式 BKP。
+> **2 次全书蒸馏 + 默认 0–2 次按需专项深挖 + 1 次总编辑式收敛。**
 
-“Pass”是分析目标，不等于一次模型调用。长书可以按章节/分块执行，同一 Pass 的中间结果落盘，再做跨章收敛。
+1. **Discovery Pass A｜长篇运行 / 读者动力**：直接读全书原文，重点观察故事发动机、作品承诺、章节/场景功能、期待/兑现、情绪生态、信息释放、人物/关系推进、跨章回收和追读动力。MAP、FACT、INFERENCE、OBSERVATION、BOUNDARY 等 Base Scan 基础记录在这一 Pass 与 Pass B 的阅读过程中一并产生，**Base Scan 是证据记录层，不再算第三次全书文学蒸馏。**
+2. **Discovery Pass B｜Reader / Page Craft**：再次直接读全书原文，重点观察逐时阅读体验、人物心智可信度、POV/叙事距离、声音、句法与节奏、对话/潜台词、动作/感官/留白、微观机巧和跨尺度组合效果。
+3. **BookProfile**：汇总覆盖、强项、潜在强项、不确定项，并决定是否需要专项预算；它是导航，不是额外一次蒸馏。
+4. **Deep Dive｜默认 0–2 个专项**：只对高价值或高不确定问题触发，读取相关章节/主题，不重新无差别扫描整书；一本书确有明显额外价值时可以超过 2 个，但最终报告必须说明原因。
+5. **总编辑式 Finalize**：回原著核证、合并重复、识别跨尺度效果链、补 scope/boundary/counterevidence/confidence，形成正式 BKP；这是综合与核证，不算第三次全书蒸馏。
+
+“Pass”是分析目标，不等于一次模型调用。长书可以按章节/稳定分块执行，同一 Pass 的中间结果落盘，再做跨章收敛。
 
 《一九八四》《三体》验证时各做了 3 次专项 Deep Dive，只证明 v0.2 流程能运行；**不把 3 次冻结为以后每本书的固定规则。**
 
@@ -83,7 +84,7 @@ BKP 内部长期保存：
 # 4. 当前已有能力
 
 - SourcePrepare v0.2.1：稳定地基；
-- BookDistill v0.2：Base Scan、Discovery、BookProfile、Deep Dive、BKP Finalize 已存在；
+- BookDistill v0.2：证据记录、多视角 Discovery、BookProfile、Deep Dive、BKP Finalize 已存在；
 - 《一九八四》《三体》已完成真实 vNext 验证；
 - KnowledgeRetrieve 已能加载正式 BKP。
 
@@ -97,8 +98,9 @@ BKP 内部长期保存：
 
 `书名/book_id`
 `→ 判断 SourcePrepare 是否已有 PASS；必要时运行`
-`→ BookDistill Base + Discovery`
-`→ BookProfile 自动决定 0～N Deep Dive`
+`→ Discovery A`
+`→ Discovery B`
+`→ BookProfile 自动决定默认 0–2 个 Deep Dive`
 `→ 总编辑式收敛`
 `→ BKP Finalize`
 `→ 校验 KnowledgeRetrieve 可发现`
@@ -113,7 +115,7 @@ BKP 内部长期保存：
 - 中断后的最小恢复能力；
 - 一次真实新书端到端验收。
 
-不重写已经稳定的 SourcePrepare / BookDistill 核心，除非真实端到端运行暴露阻塞。
+不重写已经稳定的 SourcePrepare / BookDistill 确定性核心，除非真实端到端运行暴露阻塞。
 
 ---
 
@@ -123,7 +125,7 @@ BKP 内部长期保存：
 
 `真实问题 → 查成熟上游 → 能借就借 → 最小适配 → 真实运行`
 
-成熟实现能直接复用时，不重复造轮子。
+成熟实现能直接复用时，不重复造轮子。当前私人项目中，许可证只做 provenance 记录，不作为技术路线阻塞。
 
 ## 6.2 案例只暴露问题，不决定架构
 
@@ -169,7 +171,7 @@ G5 正文诊断与修订实验暂停。已有 G5 工件保留为历史证据，�
 
 当前主线完成只需要证明：
 
-> **选一部此前没有蒸馏的新书，用户只指定一次书名/book_id；Agent 可以从 SourcePrepare 状态判断开始，独立跑到最终 BKP，并让 KnowledgeRetrieve 成功发现。**
+> **选一部此前没有蒸馏的新书，用户只指定一次书名/book_id；Agent 可以从 SourcePrepare 状态判断开始，自动完成两次全书 Discovery、必要专项深挖、最终 BKP，并让 KnowledgeRetrieve 成功发现。**
 
 如果成功，这一版才可以称为“单书蒸馏成品”。
 
@@ -191,4 +193,4 @@ G5 正文诊断与修订实验暂停。已有 G5 工件保留为历史证据，�
 
 # 10. 一句话总纲
 
-> **当前先不研究 AI 怎么把小说写好；先把“一本参考书一次交给 Agent，就能自动得到高质量、可追溯、可检索 BKP”做成真正可用的成品。**
+> **当前先不研究 AI 怎么把小说写好；先把“一本参考书一次交给 Agent → 两次互补全书蒸馏 → 必要专项深挖 → 一个高质量、可追溯、可检索 BKP”做成真正可用的成品。**
