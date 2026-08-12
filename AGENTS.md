@@ -4,111 +4,98 @@
 
 ## 1. 当前阶段
 
-**当前唯一主线：单书蒸馏成品化。**
+**当前唯一主线：原著知识提取与蒸馏。**
 
 G0–G4 已关闭。G5｜正文诊断与修订最小闭环：**PAUSED**。不得继续要求作者评价 G5 测试正文。
 
 开始任务前读：目录说明、AGENTS、长期手册、当前索引、项目记忆、阶段门禁和当前专项文件。
 
-## 2. 当前用户体验目标
+## 2. 当前方法链
 
-用户只指定一本书并发起一次“蒸馏这本书”的任务。
+`SourcePrepare → 初步作品识别/BookProfile → 多视角直接原著 Discovery → 按需 Deep Dive → BookDistill 总编辑收敛 → BKP → KnowledgeRetrieve`
 
-Agent 应尽量独立完成：
+当前固定的是职责链，不是 Skill 数量、Pass 数量或作者操作次数。
 
-`书名/book_id → SourcePrepare 状态判断 → Discovery A → Discovery B → BookProfile → 按需 Deep Dive → BKP Finalize → Retrieval 可发现 → 简短报告`
+### SourcePrepare
 
-不要让作者手动执行内部命令、选择 Deep Dive、维护 evidence 或检查 Schema。
+只做作品身份、来源/版本、完整性、章节与标准输入。已有 PASS 可复用；REVIEW/FAIL 才停下报告。不得修改 `01_原始素材`。
 
-## 3. SourcePrepare 边界
+### 初步 BookProfile
 
-SourcePrepare 只做输入标准化，不做文学分析。
+先建立结构、阶段、reader promise、显著/潜在强项与不确定项，用于导航后续阅读。Profile 可以随着后续原著阅读修订；不得把初步识别变成过滤器。
 
-- 已有 PASS：直接复用；
-- 没有输出：运行单书 SourcePrepare；
-- REVIEW/FAIL：停止并报告原因，只有确实需要人工选源/补素材时再询问作者；
-- 不覆盖、不修改 `01_原始素材`。
+### Discovery
 
-## 4. BookDistill 内部方法
+重要观察镜头必须直接读或回查原著，不只消费摘要。
 
-统一生产口径：
+默认两个互补方法源：
 
-1. **Discovery A｜第 1 次全书蒸馏**：长篇运行/读者动力；MAP/FACT/INFERENCE/OBSERVATION/BOUNDARY 等 Base Scan 基础记录在阅读中一并完成，Base Scan 不另算一次全书蒸馏；
-2. **Discovery B｜第 2 次全书蒸馏**：Reader/Page Craft；
-3. **BookProfile**：导航和专项路由，不算额外蒸馏；
-4. **Deep Dive**：默认 0–2 个局部专项，按作品真实强项/疑点触发；确有明显额外价值时可超过 2 个，但必须说明；
-5. **Finalize**：1 次总编辑式回源核证与 BKP 收敛，不算第三次全书蒸馏；
-6. BKP 校验 + Retrieval smoke test。
+- `worldwonderer/oh-story-claudecode` + `AI-Novel-Writing-Assistant`：长篇运行、期待/兑现、情绪、信息释放、人物/关系、跨章回收；
+- `haowjy/creative-writing-skills`：Reader / Page Craft、人物心智、POV、声音、句法、对话、动作、感官、留白和微观体验。
 
-默认答案：**1 次用户操作；2 次全书蒸馏；默认 0–2 次局部深挖；1 次最终收敛；1 个正式 BKP。**
+这两个只是默认镜头，不是固定“两次蒸馏”。作品需要更多视角可增加，明显无关可调整。Base Scan 的 MAP / Evidence / Observation / Boundary 属于阅读中的证据记录层。
 
-“Pass”是分析目标，不等于单次模型调用。长书可分章/分块，结果落盘后跨章收敛。
+### Deep Dive
 
-BookProfile 是导航，不是过滤器；原著始终是最高事实源。
+只对真实高价值或高不确定问题触发。优先借 `anotherpanacea-eng/apodictic` 等成熟 Developmental Editing 镜头。次数不冻结。
 
-## 5. Borrow-first
+### BookDistill
 
-当前不继续泛搜项目，优先直接借：
+核心职责是总编辑式收敛：回原著核证、去重、识别跨尺度组合效果、区分 Observation / Inference、降级过度抽象、补 scope / boundary / counterevidence / confidence，再 Finalize BKP。
 
-- `worldwonderer/oh-story-claudecode`：单一拆文管道、章节边界、逐章处理、`_progress` 断点恢复、聚合；
-- `ExplosiveCoderflome/AI-Novel-Writing-Assistant`：证据回溯、范围定向分析、token 预算、分档/增量深度扫描；
-- `haowjy/creative-writing-skills`：Reader Sim / Writing Principles / Craft，作为 Discovery B；
-- `anotherpanacea-eng/apodictic`：按需 Developmental Deep Dive；
-- `ExplosiveCoderflome/ani-book-skill`：evidence-first、权威工件、确定性校验、恢复状态。
+## 3. Borrow-first
 
-当前私人项目中许可证只做 `PROVENANCE.md` 记录，不作为技术路线阻塞，也不要再把许可证讨论扩成单独研究任务。
+当前优先直接借成熟上游，不继续泛搜：
 
-## 6. BKP 边界
+- oh-story：拆文、逐章处理、聚合、章节边界与恢复；
+- AI-Novel-Writing-Assistant：拆书工作台、范围定向、token 预算、增量/分档分析、证据回溯；
+- creative-writing-skills：Reader / Craft；
+- Apodictic：专项发展编辑；
+- ani-book-skill：evidence-first、权威工件、确定性校验、恢复状态。
 
-BKP 长期保留作品身份、作品地图、BookProfile、Observation、重要 Inference、Work-specific Pattern、Deep Dive 最终知识，以及可追溯 Evidence / scope / boundary / counterevidence / confidence。
+当前私人项目中许可证只做 provenance 记录，不作为技术路线阻塞。
 
-单书 BKP 不自动升级为普遍写作规则。
+## 4. BKP 边界
 
-作者默认只先看到 BookProfile、最值得调用的创作问题和简短完成报告；后台详细知识按需检索。
+BKP 长期保存作品身份、作品地图、BookProfile、Observation、重要 Inference、Work-specific Pattern、Deep Dive 最终知识，以及可追溯 Evidence / scope / boundary / counterevidence / confidence。
 
-## 7. 当前开发任务
+单书 BKP 不自动升级为普遍写作规则。正常写作阶段检索 BKP，不重新蒸馏原著。
 
-优先复用现有 SourcePrepare / BookDistill；只补：
+## 5. 当前任务判断
 
-- 单书 orchestrator / runbook；
-- 阶段状态与唯一恢复状态源；
-- 章节边界复用和进度记录；
-- Deep Dive 选择与记录；
-- 失败报告；
-- 中断恢复；
-- BKP Finalize 后的 Retrieval smoke test；
-- 新书端到端验收。
+当前优先解决原著提取质量，而不是先做一个统一 orchestrator 或单体 Skill。可以多流程、多 Pass、多 Skill；只有真实运行证明“操作碎片化本身阻碍提取质量/恢复”时，才优先做统一编排。
 
-除真实阻塞外，不重写稳定核心，不扩张 Schema。
+下一轮应使用一部尚未蒸馏的新书，真实检查初步识别、多视角提取、专项深挖和最终收敛各自的质量与遗漏。
 
-## 8. 模型/执行推荐纪律
+## 6. 模型/执行推荐纪律
 
-优先减少用户操作：一个任务尽量只推荐一个 Agent、一个模型、一次操作。
+优先减少用户不必要操作，但不要为了操作少牺牲任务质量。
 
-- 代码、架构、跨文件工程、脚本调试、Git/CI、本地运行占主导：可以推荐 Codex；
+- 代码、架构、脚本调试、Git/CI、本地运行占主导：可以推荐 Codex；
 - 正文阅读、文本提取、总结归纳、章节分析、BKP 蒸馏、文学诊断占主导：不要优先推荐 Codex，选更适合中文长文本理解的模型；
 - 混合任务按主任务选择一个模型，不做无必要细拆。
 
 推荐时写清：执行者、模型、思考强度、备选/升级条件。
 
-## 9. 当前禁止
+## 7. 当前禁止
 
 - 不继续 G5 正文诊断/修订实验；
 - 不要求作者阅读测试小说；
+- 不把“一次操作 / 一个 Skill / 固定两遍”写成方法硬约束；
+- 不固定所有作品相同 Discovery / Deep Dive 数量；
 - 不批量蒸馏全部素材；
-- 不固定所有作品相同 Deep Dive 次数；
 - 不升级 Retrieval/RAG/KG；
 - 不开发 Writer/Reader/Editor/Controller/UI/大型数据库/多 Agent 平台；
 - 不因为单本书一个特殊问题扩张长期架构。
 
-## 10. Git 安全
+## 8. Git 安全
 
 无明确授权禁止：`reset / restore / clean / force push / rebase / merge`。
 
 未知或历史 local dirty / untracked / `stash@{0}` 不清理、不覆盖、不自动 pop/drop。普通同步保持单一 `main`，不要为了临时保护留下无意义长期分支。
 
-## 11. 当前验收标准
+## 9. 当前验收标准
 
-选一部此前未蒸馏的新书；用户只启动一次；Agent 从 SourcePrepare 状态判断开始独立跑到最终 BKP，校验通过且 KnowledgeRetrieve 可发现。
+选一部此前未蒸馏的新书，跑完整“识别 → 多视角原著提取 → 必要深挖 → 总编辑收敛 → BKP”链。验收重点是知识质量、证据链、跨尺度发现、遗漏与最终可检索性，不要求一键化。
 
-专项入口：`06_工作区/单书蒸馏成品化_当前目标.md`。
+专项入口：`06_工作区/原著提取与蒸馏_当前目标.md`。
