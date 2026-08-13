@@ -1,0 +1,57 @@
+{
+  "bkp_version": "0.2",
+  "bkp_protocol_version": "0.2",
+  "book": {
+    "book_id": "book_0035",
+    "title": "长安十二时辰",
+    "author": "马伯庸",
+    "category": "中文文学",
+    "language": "zh-CN",
+    "chapter_count": 24,
+    "parts": {
+      "追索与狼卫": "ch_0001–ch_0006",
+      "中枢失守与蚍蜉显形": "ch_0007–ch_0013",
+      "灯楼终局": "ch_0014–ch_0021",
+      "余波与总账": "ch_0022–ch_0024"
+    }
+  },
+  "source_snapshot": {
+    "book_id": "book_0035",
+    "sp_version": "0.2.1",
+    "source_sha256": "38b604e406bcb58b793a94446433c4a69b4a17de3c25125da4217ccc8f38d8d6",
+    "chapter_count": 24,
+    "chapter_content_fingerprint": "42c8b966190e8265bdcdb702e146f67c0b7cd41fb2729ebfab5226b3731f0a27"
+  },
+  "provenance": {
+    "distill_tool": "BookDistill v0.3.0",
+    "distill_method": "Chief Editor compression of frozen two-observer Discovery",
+    "scan_date": "2026-08-13",
+    "scan_scope": "24/24 LONG + 24/24 CRAFT; 707 canonical Discovery entries",
+    "deep_dive_count": 0,
+    "deep_dive_candidates": ["配给制揭示", "知识即武器", "道德记账", "题记预告装置"],
+    "stop_reason": "No new Deep Dive started; frozen Discovery already supports the callable-card closure task.",
+    "nature": "正式 BKP（源自人工验证的 bkp_prototype，经 BookDistill bkp finalize 封装）"
+  },
+  "stats": {
+    "raw_discovery": 707,
+    "by_discovery_kind": {"OBSERVATION": 566, "INFERENCE": 93, "BOUNDARY": 48}
+  },
+  "bkp_contents": {
+    "identity": "identity.json",
+    "work_map": "work_map.md",
+    "book_profile": "profile.md",
+    "author_view": "author_view.md",
+    "cards": {"file": "knowledge/cards.md"}
+  },
+  "knowledge_card_count": 48,
+  "schema_status": "FINALIZED（依据 BKP_protocol.md 封装；v0.2 cards 为 canonical 调用层）",
+  "finalize": {
+    "tool": "BookDistill bkp finalize",
+    "version": "0.3.0",
+    "date": "2026-08-13",
+    "input": "bkp_prototype/（人工验证的 curated 知识层）",
+    "protocol": "BKP_protocol.md",
+    "knowledge_level": "单书 BKP 最高为 Work-specific Pattern；不得升级 Cross-book Pattern / Production Rule",
+    "rerun_policy": "curated 文件若被人工修改则保留并告警；identity.json 由工具重生成"
+  }
+}

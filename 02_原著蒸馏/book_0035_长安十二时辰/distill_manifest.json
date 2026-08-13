@@ -1,0 +1,17 @@
+{
+  "skill": "BookDistill",
+  "version": "0.3.0",
+  "source_snapshot": {
+    "book_id": "book_0035",
+    "sp_version": "0.2.1",
+    "source_sha256": "38b604e406bcb58b793a94446433c4a69b4a17de3c25125da4217ccc8f38d8d6",
+    "chapter_count": 24,
+    "chapter_content_fingerprint": "42c8b966190e8265bdcdb702e146f67c0b7cd41fb2729ebfab5226b3731f0a27"
+  },
+  "total_entries": 707,
+  "stats_by_kind": {"OBSERVATION": 566, "INFERENCE": 93, "BOUNDARY": 48},
+  "discovery_status": "FROZEN_VALIDATED",
+  "ok": true,
+  "errors": [],
+  "warnings": ["Raw Discovery remains in the read-only lab audit layer and is not part of this formal BKP."]
+}

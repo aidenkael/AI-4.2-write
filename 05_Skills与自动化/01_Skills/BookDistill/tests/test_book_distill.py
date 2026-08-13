@@ -159,6 +159,129 @@ def make_fake_prototype(out: Path) -> Path:
     return proto
 
 
+def make_fake_cards_prototype(out: Path) -> Path:
+    """构造 canonical v0.2 cards 原型。"""
+    manifest = json.loads((out / "distill_manifest.json").read_text(encoding="utf-8"))
+    snap = manifest["source_snapshot"]
+    proto = out / "cards_prototype"
+    (proto / "knowledge").mkdir(parents=True)
+    identity = {
+        "bkp_version": "0.2-prototype",
+        "book": {"book_id": snap["book_id"], "title": "测试之书", "author": "测试作者",
+                 "chapter_count": snap["chapter_count"]},
+        "source_snapshot": snap,
+        "provenance": {"distill_tool": "BookDistill", "deep_dive_count": 0},
+        "bkp_contents": {"cards": {"file": "knowledge/cards.md"}},
+    }
+    (proto / "identity.json").write_text(json.dumps(identity, ensure_ascii=False), encoding="utf-8")
+    (proto / "README.md").write_text("# BKP\n", encoding="utf-8")
+    (proto / "work_map.md").write_text("# 地图\n\n### ch_0001\n", encoding="utf-8")
+    (proto / "profile.md").write_text("# Profile\n", encoding="utf-8")
+    (proto / "author_view.md").write_text("# 作者视图\n", encoding="utf-8")
+    (proto / "knowledge" / "cards.md").write_text(
+        "# Cards\n\n## K001｜危机后保留新债\n\n"
+        "- knowledge_level: Work-specific Pattern\n"
+        "- dimension: 结构\n"
+        "- use_stages: longform_plan, chapter_plan, review\n"
+        "- problem_types: phase_transition, reader_promise\n"
+        "- scale: arc\n"
+        "- statement: 危机解决时同步暴露更具体的新债。\n"
+        "- function: 避免阶段张力归零。\n"
+        "- conditions: 前一危机已有真实兑现。\n"
+        "- mechanism: 让解决动作制造下一阶段义务。\n"
+        "- effect: 满足与前拉并存。\n"
+        "- scope: 本书阶段转折。\n"
+        "- boundary: 不能用空泛更大阴谋代替兑现。\n"
+        "- confidence: 高\n"
+        "- evidence:\n  - chapters/0001.md#L3\n",
+        encoding="utf-8",
+    )
+    return proto
+
+
+class BkpCardsV02Test(unittest.TestCase):
+    def test_compact_frozen_chapter_index_is_accepted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            (out / "chapters_index.md").write_text(
+                "| 章节 | 行数 |\n|---|---:|\n| chapters/0001.md | 42 |\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(bd.parse_chapter_lines(out), {"chapters/0001.md": 42})
+
+    def _prepared(self, tmp: Path):
+        sp = make_fake_pass_pkg(tmp)
+        out = tmp / "out"
+        bd.cmd_prepare(type("A", (), {"input": str(sp), "output": str(out)})())
+        return out, make_fake_cards_prototype(out)
+
+    def test_valid_card_and_identity_count(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out, proto = self._prepared(Path(tmp))
+            r = bd.finalize_bkp(out, proto)
+            self.assertTrue(r["ok"], r["errors"])
+            identity = json.loads((out / "bkp" / "identity.json").read_text(encoding="utf-8"))
+            self.assertEqual(identity["bkp_protocol_version"], "0.2")
+            self.assertEqual(identity["knowledge_card_count"], 1)
+            self.assertTrue((out / "bkp" / "author_view.md").exists())
+
+    def _mutate(self, proto: Path, old: str, new: str):
+        path = proto / "knowledge" / "cards.md"
+        path.write_text(path.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
+
+    def test_duplicate_card_id_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out, proto = self._prepared(Path(tmp))
+            text = (proto / "knowledge" / "cards.md").read_text(encoding="utf-8")
+            (proto / "knowledge" / "cards.md").write_text(text + "\n" + text.split("## K001", 1)[1].join(["## K001", ""]), encoding="utf-8")
+            cards = (proto / "knowledge" / "cards.md").read_text(encoding="utf-8")
+            (proto / "knowledge" / "cards.md").write_text(cards + "\n## K001｜重复\n", encoding="utf-8")
+            r = bd.finalize_bkp(out, proto)
+            self.assertFalse(r["ok"])
+            self.assertTrue(any("duplicate card ID" in e for e in r["errors"]))
+
+    def test_invalid_level_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out, proto = self._prepared(Path(tmp)); self._mutate(proto, "Work-specific Pattern", "Production Rule")
+            self.assertFalse(bd.finalize_bkp(out, proto)["ok"])
+
+    def test_invalid_use_stage_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out, proto = self._prepared(Path(tmp)); self._mutate(proto, "longform_plan", "draft_magic")
+            self.assertFalse(bd.finalize_bkp(out, proto)["ok"])
+
+    def test_invalid_scale_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out, proto = self._prepared(Path(tmp)); self._mutate(proto, "- scale: arc", "- scale: universe")
+            self.assertFalse(bd.finalize_bkp(out, proto)["ok"])
+
+    def test_missing_core_field_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out, proto = self._prepared(Path(tmp)); self._mutate(proto, "- function: 避免阶段张力归零。\n", "")
+            self.assertFalse(bd.finalize_bkp(out, proto)["ok"])
+
+    def test_missing_evidence_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out, proto = self._prepared(Path(tmp)); self._mutate(proto, "- evidence:\n  - chapters/0001.md#L3\n", "")
+            self.assertFalse(bd.finalize_bkp(out, proto)["ok"])
+
+    def test_out_of_range_evidence_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out, proto = self._prepared(Path(tmp)); self._mutate(proto, "#L3", "#L999")
+            self.assertFalse(bd.finalize_bkp(out, proto)["ok"])
+
+    def test_curated_cards_rerun_preserved(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out, proto = self._prepared(Path(tmp))
+            self.assertTrue(bd.finalize_bkp(out, proto)["ok"])
+            dst = out / "bkp" / "knowledge" / "cards.md"
+            dst.write_text(dst.read_text(encoding="utf-8") + "\n人工批注\n", encoding="utf-8")
+            r = bd.finalize_bkp(out, proto)
+            self.assertTrue(r["ok"])
+            self.assertIn("knowledge/cards.md", r["skipped_curated"])
+            self.assertIn("人工批注", dst.read_text(encoding="utf-8"))
+
+
 class ValidateTest(unittest.TestCase):
     def test_pass_pkg_ok(self):
         with tempfile.TemporaryDirectory() as tmp:

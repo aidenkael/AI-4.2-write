@@ -20,11 +20,22 @@ class KnowledgeItem:
     counterevidence: Optional[str] = None
     confidence: Optional[str] = None
     tags: list = field(default_factory=list)
+    use_stages: list = field(default_factory=list)
+    problem_types: list = field(default_factory=list)
+    scale: Optional[str] = None
+    function: Optional[str] = None
+    conditions: Optional[str] = None
+    mechanism: Optional[str] = None
+    effect: Optional[str] = None
 
     @property
     def searchable_text(self) -> str:
         """All text fields joined for search matching."""
-        parts = [self.text, self.dimension]
+        parts = [self.text, self.dimension, " ".join(self.use_stages),
+                 " ".join(self.problem_types), " ".join(self.tags)]
+        for value in (self.scale, self.function, self.conditions, self.mechanism, self.effect):
+            if value:
+                parts.append(value)
         if self.scope:
             parts.append(self.scope)
         if self.boundary:
@@ -46,12 +57,20 @@ class KnowledgeHit:
     statement: str
     relevance_reason: str
     source: str
+    source_anchor: str
     evidence: list
     scope: Optional[str]
     boundary: Optional[str]
     counterevidence: Optional[str]
     confidence: Optional[str]
     dimension: str
+    use_stages: list = field(default_factory=list)
+    problem_types: list = field(default_factory=list)
+    scale: Optional[str] = None
+    function: Optional[str] = None
+    conditions: Optional[str] = None
+    mechanism: Optional[str] = None
+    effect: Optional[str] = None
     raw_score: float = 0.0
 
     def to_dict(self) -> dict:
@@ -61,9 +80,17 @@ class KnowledgeHit:
             "book_id": self.book_id,
             "knowledge_level": self.knowledge_level,
             "dimension": self.dimension,
+            "use_stages": self.use_stages,
+            "problem_types": self.problem_types,
+            "scale": self.scale if self.scale else "absent",
+            "function": self.function if self.function else "absent",
+            "conditions": self.conditions if self.conditions else "absent",
+            "mechanism": self.mechanism if self.mechanism else "absent",
+            "effect": self.effect if self.effect else "absent",
             "statement": self.statement,
             "relevance_reason": self.relevance_reason,
             "source": self.source,
+            "source_anchor": self.source_anchor,
             "evidence": self.evidence,
             "scope": self.scope if self.scope else "absent",
             "boundary": self.boundary if self.boundary else "absent",

@@ -86,7 +86,7 @@
 | C16 | 世界质感 / 世界进入叙事 | **方法已确认，Phase E 待组合** | Apodictic SFF Worldbuilding、InkOS / AI-Novel 世界状态 | 世界设定很多 ≠ 世界在正文中有叙事作用 | Phase E Story Bible / Planner / Writer |
 | C17 | Canon / Memory / Story State | **Phase E 核心待组合** | InkOS、graphify-novel、NovelForge、ani-book、AI-Novel | 候选丰富，但 AI-write 的最小权威状态协议尚未正式建立 | Phase E 第一批架构决策 |
 | C18 | 修订 / 诊断 | **Phase E 核心待组合** | Apodictic、creative-writing-skills Critic/Editor、AI-Novel repair、oh-story review | Reader 感受、Critic 分析、Editor 优先级不能重复成三个相同报告 | Phase E Review / Revision loop |
-| C19 | 原著蒸馏 / 能力发现 | **可用地基 + Discovery 方法已升级** | SourcePrepare、BookDistill v0.2、BKP v0.1、ani-book、oh-story、creative-writing-skills、Apodictic、AI-Novel | 旧版“BookDistill 尚未实现”已废止；当前未验证的是多视角 Discovery 在新书上的长期实际收益，不是工具不存在 | 新参考书真实蒸馏时验证；不重开 G3 |
+| C19 | 原著蒸馏 / 能力发现 | **结构冻结建议** | SourcePrepare、BookDistill v0.3、BKP v0.2 cards、ani-book、oh-story、creative-writing-skills、Apodictic、AI-Novel | 《长安十二时辰》707 条 Discovery 压缩为 48 张可追溯 cards；单书不升级为通用规则 | 仅在新书或真实调用暴露问题时窄改 |
 | C20 | 工作流 / Controller / 作者控制 | **Phase E 核心待组合** | InkOS、creative-writing-skills Muse、AI-Novel、NovelForge | 目标不是自动化最大化，而是后台自动路由 + 重大决定作者确认 | Phase E Gate 的核心之一 |
 
 ---

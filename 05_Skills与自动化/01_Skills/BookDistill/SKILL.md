@@ -37,7 +37,7 @@ BookDistill 不读取 `01_原始素材` 作为正文输入；不修改 SourcePre
 | `chapters_index.md` | 章节索引（章节/标题/字符数/行数）与引用规范 |
 | `evidence/ch_NNNN.md` | 每章证据底稿（FACT / INFERENCE / OBSERVATION / MECHANISM / BOUNDARY）+ MAP |
 | `distill_manifest.json` | assemble 校验清单 + source snapshot + dimension_stats |
-| `bkp/` | **v0.2 新增**：BKP Finalize 正式知识包（`identity.json` / `README.md` / `work_map.md` / `profile.md` / `knowledge/` / `deep_dive/`，依据 `BKP_v0.1_protocol.md`） |
+| `bkp/` | BKP v0.2 正式知识包：`knowledge/cards.md` 为 canonical 知识层，`author_view.md` 为非权威八区投影；旧 v0.1 split files 仍可读取，依据 `BKP_protocol.md`。 |
 
 ### source snapshot（固化在 distill_manifest.json / bd_report.md）
 
@@ -148,7 +148,7 @@ Apodictic 式镜头用于诊断和发现，不自动覆盖为普遍写作规则�
 10. 生成 `evidence.md`（精选支撑最终结论的证据）与 `model.md`（作者第一阅读入口）。
 11. 完成 `bd_report.md`：来源身份 + 覆盖范围与置信度 + 边界与不确定性 + Discovery / Deep Dive 覆盖状态。
 12. `bkp --output <BookDistill 输出> [--prototype <原型目录>]`：BKP Finalize——
-    读取 `bkp_prototype/`（人工验证的知识层），校验身份/源指纹、Observation/Inference/Pattern
+    读取 `bkp_prototype/`（人工验证的知识层），校验身份/源指纹、v0.2 cards 的调用字段、
     类型边界、引用可追溯与条目计数后，封装正式 BKP 到 `bkp/`；
     重跑不覆盖被人工修改的 curated 文件（仅告警保留）。
 13. 作者审阅产物。
@@ -175,8 +175,8 @@ python -m unittest discover -s tests -p "test_*.py"
 - 本技能只做 1 部作品的真实蒸馏；批量蒸馏、RAG、知识图谱、多 Agent、复杂长期状态不属于当前版本。
 - 脚本不调用大模型；分析内容由运行本 Skill 的 Agent / 作者填写。
 - **v0.1 不提供自动 resume**：中断时依赖已有文件人工继续，不实现断点/状态恢复。
-- BKP schema 未冻结（`BKP_v0.1_protocol.md` 第 8 节）；`bkp` 子命令只做最小 Finalize
-  封装（校验 + 复制白名单知识文件 + 生成 identity.json），不新增 schema，
+- BKP v0.2 只冻结知识卡职责/调用字段/证据边界；`bkp` 子命令只做最小 Finalize
+  封装（校验 + 复制白名单知识文件 + 生成 identity.json），不新增 RAG/KG，
   不自动升级知识等级（单书 BKP 最高为 Work-specific Pattern）。
 - 逐章 evidence 与 manifest 是 audit appendix / 工作附件；作者核心产物是
   `model.md` / `evidence.md` / `mechanisms.md` / `book_profile.md` / `bd_report.md`。
@@ -185,5 +185,5 @@ python -m unittest discover -s tests -p "test_*.py"
 - 专项深挖的文学分析方法优先参考已有来源（Apodictic / ani-book / creative-writing-skills / oh-story），
   当前只吸收分析框架/方法纪律，不整体复制外部代码或 Prompt。
 - 多视角 Discovery 是**方法要求**而不是固定 Skill 数量；不要为了满足本节而制造新的平级 Skill、复杂编排或永久 taxonomy。
-- 当前 G3 closeout 修正只改变分析执行方法与职责边界，不新增 BKP schema，不要求重跑已完成的《一九八四》《三体》验证样本。
+- v0.2 不要求重跑或迁移已完成的《一九八四》《三体》：适配器在 cards 缺失时继续加载其 v0.1 split files。
 - 方法来源与许可证记录见 `PROVENANCE.md`。

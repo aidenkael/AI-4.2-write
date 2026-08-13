@@ -9,6 +9,8 @@ import re
 from pathlib import Path
 from models import KnowledgeItem
 
+CARD_HEADER_RE = re.compile(r"^##\s+([A-Za-z][A-Za-z0-9_-]*)\s*[｜|]\s*(.+?)\s*$")
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -81,6 +83,68 @@ def _extract_refs_paren(text: str) -> tuple:
         rest = re.sub(r"（[^）]+?）", "", rest).strip()
 
     return evidence, confidence, scope, boundary, rest
+
+
+def parse_cards(bkp_dir: str, book_id: str, book_title: str) -> list:
+    """Parse canonical v0.2 knowledge/cards.md."""
+    text = _read(Path(bkp_dir) / "knowledge" / "cards.md")
+    if not text:
+        return []
+    cards = []
+    current = None
+    active_list = None
+    for raw in text.splitlines():
+        header = CARD_HEADER_RE.match(raw)
+        if header:
+            if current:
+                cards.append(current)
+            current = {"id": header.group(1), "title": header.group(2)}
+            active_list = None
+            continue
+        if current is None:
+            continue
+        field = re.match(r"^-\s+([a-z_]+)\s*:\s*(.*)$", raw)
+        if field:
+            key, value = field.group(1), field.group(2).strip()
+            active_list = key if key in {"evidence", "use_stages", "problem_types", "tags"} else None
+            if key == "evidence":
+                current[key] = [value] if value else []
+            elif key in {"use_stages", "problem_types", "tags"}:
+                current[key] = [v.strip() for v in re.split(r"[,，]", value) if v.strip()]
+            else:
+                current[key] = value
+            continue
+        item = re.match(r"^\s{2,}-\s+(.+?)\s*$", raw)
+        if item and active_list:
+            current.setdefault(active_list, []).append(item.group(1).strip())
+    if current:
+        cards.append(current)
+
+    return [KnowledgeItem(
+        book_id=book_id,
+        book_title=book_title,
+        knowledge_level=c.get("knowledge_level", ""),
+        dimension=c.get("dimension", ""),
+        text=c.get("statement", ""),
+        source_file="knowledge/cards.md",
+        source_anchor=c["id"],
+        evidence=c.get("evidence", []),
+        scope=c.get("scope"),
+        boundary=c.get("boundary"),
+        counterevidence=c.get("counterevidence"),
+        confidence=c.get("confidence"),
+        # The title is a human-facing retrieval cue as well as the stable
+        # source-anchor label; include it in searchable tags without making a
+        # second knowledge field.
+        tags=c.get("tags", []) + [c["title"]],
+        use_stages=c.get("use_stages", []),
+        problem_types=c.get("problem_types", []),
+        scale=c.get("scale"),
+        function=c.get("function"),
+        conditions=c.get("conditions"),
+        mechanism=c.get("mechanism"),
+        effect=c.get("effect"),
+    ) for c in cards]
 
 
 # ---------------------------------------------------------------------------
@@ -422,6 +486,10 @@ def load_bkp(bkp_info: dict) -> list:
     book_id = bkp_info["book_id"]
     book_title = bkp_info["title"]
     identity = bkp_info["identity"]
+
+    cards = parse_cards(bkp_dir, book_id, book_title)
+    if cards:
+        return cards
 
     items = []
     items.extend(parse_observations(bkp_dir, book_id, book_title))

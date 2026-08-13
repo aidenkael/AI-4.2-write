@@ -52,7 +52,7 @@ from pathlib import Path
 
 SP_STATUS_PASS = "PASS"
 SP_EXPECTED_VERSION = "0.2.1"
-BD_VERSION = "0.2.0"
+BD_VERSION = "0.3.0"
 
 # 证据记录允许的分类（evidence-first 分层，v0.2 扩展 OBSERVATION）
 EVIDENCE_KINDS = ["FACT", "INFERENCE", "OBSERVATION", "MECHANISM", "BOUNDARY"]
@@ -104,6 +104,26 @@ BKP_CURATED_FILES = [
     "knowledge/boundaries.md",
 ]
 BKP_BASE_WHITELIST = set(BKP_CURATED_FILES) | {"identity.json"}
+
+# v0.2 canonical knowledge-card protocol. Legacy split files remain supported.
+BKP_CARD_FILE = "knowledge/cards.md"
+BKP_AUTHOR_VIEW_FILE = "author_view.md"
+BKP_CARD_LEVELS = {
+    "Observation", "Inference", "Work-specific Pattern", "Deep Dive Knowledge"
+}
+BKP_USE_STAGES = {
+    "story_design", "character_design", "worldbuilding", "longform_plan",
+    "chapter_plan", "scene_write", "review", "revise",
+}
+BKP_SCALES = {
+    "work", "arc", "chapter", "scene", "page", "sentence", "cross_scale"
+}
+BKP_CARD_CORE_FIELDS = {
+    "knowledge_level", "dimension", "use_stages", "problem_types", "scale",
+    "statement", "function", "conditions", "mechanism", "effect", "scope",
+    "boundary", "confidence", "evidence",
+}
+BKP_CARD_HEADER_RE = re.compile(r"^##\s+([A-Za-z][A-Za-z0-9_-]*)\s*[｜|]\s*(.+?)\s*$")
 
 # 引用与类型边界校验用正则
 LINE_REF_RE = re.compile(r"chapters/\d{4}\.md#L\d+(?:-L\d+)?")
@@ -700,8 +720,14 @@ def parse_chapter_lines(out_dir: Path) -> dict[str, int]:
     result: dict[str, int] = {}
     for line in read_text(index_path).splitlines():
         parts = [p.strip() for p in line.split("|")]
-        if len(parts) >= 5 and parts[1].startswith("chapters/") and parts[4].isdigit():
-            result[parts[1]] = int(parts[4])
+        if not (len(parts) >= 4 and parts[1].startswith("chapters/")):
+            continue
+        # Standard BookDistill indexes have title/chars/lines columns.  A
+        # compact frozen index may retain only chapter and line count; in both
+        # forms the last non-empty cell is the authoritative line bound.
+        values = [p for p in parts[2:] if p]
+        if values and values[-1].isdigit():
+            result[parts[1]] = int(values[-1])
     return result
 
 
@@ -857,10 +883,110 @@ def validate_work_map(path: Path, chapter_lines: dict[str, int]) -> list[str]:
     return errors
 
 
+def parse_bkp_cards(text: str) -> tuple[list[dict], list[str]]:
+    """Parse canonical v0.2 Markdown cards without external dependencies."""
+    cards: list[dict] = []
+    errors: list[str] = []
+    current: dict | None = None
+    active_list: str | None = None
+
+    for line_no, raw in enumerate(text.splitlines(), 1):
+        header = BKP_CARD_HEADER_RE.match(raw)
+        if header:
+            if current is not None:
+                cards.append(current)
+            current = {
+                "id": header.group(1).strip(),
+                "title": header.group(2).strip(),
+                "_line": line_no,
+            }
+            active_list = None
+            continue
+        if current is None:
+            continue
+
+        field = re.match(r"^-\s+([a-z_]+)\s*:\s*(.*)$", raw)
+        if field:
+            key, value = field.group(1), field.group(2).strip()
+            active_list = key if key in {"evidence", "use_stages", "problem_types", "tags"} else None
+            if key == "evidence":
+                current[key] = [value] if value else []
+            elif key in {"use_stages", "problem_types", "tags"}:
+                current[key] = [v.strip() for v in re.split(r"[,，]", value) if v.strip()]
+            else:
+                current[key] = value
+            continue
+
+        list_item = re.match(r"^\s{2,}-\s+(.+?)\s*$", raw)
+        if list_item and active_list:
+            current.setdefault(active_list, []).append(list_item.group(1).strip())
+            continue
+
+        if raw.strip() and not raw.startswith("#") and not raw.startswith(">"):
+            errors.append(f"cards.md:L{line_no} 无法解析卡片字段 -> {raw[:60]}")
+
+    if current is not None:
+        cards.append(current)
+    return cards, errors
+
+
+def validate_bkp_cards(path: Path, chapter_lines: dict[str, int]) -> tuple[list[dict], list[str]]:
+    cards, errors = parse_bkp_cards(read_text(path))
+    if not cards:
+        return cards, errors + ["cards.md 未包含任何知识卡。"]
+
+    ids: set[str] = set()
+    for card in cards:
+        cid = card["id"]
+        line = card["_line"]
+        if cid in ids:
+            errors.append(f"cards.md:L{line} duplicate card ID: {cid}")
+        ids.add(cid)
+
+        missing = sorted(
+            field for field in BKP_CARD_CORE_FIELDS
+            if field not in card or card[field] in (None, "", [])
+        )
+        if missing:
+            errors.append(f"cards.md:{cid} 缺少或为空的核心字段: {', '.join(missing)}")
+
+        level = card.get("knowledge_level")
+        if level and level not in BKP_CARD_LEVELS:
+            errors.append(f"cards.md:{cid} 非法 knowledge_level: {level}")
+
+        stages = card.get("use_stages") or []
+        illegal_stages = sorted(set(stages) - BKP_USE_STAGES)
+        if illegal_stages:
+            errors.append(f"cards.md:{cid} 非法 use_stage: {', '.join(illegal_stages)}")
+
+        scale = card.get("scale")
+        if scale and scale not in BKP_SCALES:
+            errors.append(f"cards.md:{cid} 非法 scale: {scale}")
+
+        for ref in card.get("evidence") or []:
+            if not LINE_REF_RE.fullmatch(ref):
+                errors.append(f"cards.md:{cid} evidence 格式不合法: {ref}")
+                continue
+            errors += validate_line_refs_in_text(ref, chapter_lines, f"cards.md:{cid}")
+
+    return cards, errors
+
+
 def validate_bkp_counts(identity: dict, proto_dir: Path) -> list[str]:
     """校验 identity.json 声明的知识条数与实际文件一致（manifest 完整性）。"""
     errors: list[str] = []
     bc = identity.get("bkp_contents") or {}
+
+    cards_path = proto_dir / BKP_CARD_FILE
+    if cards_path.exists():
+        cards, parse_errors = parse_bkp_cards(read_text(cards_path))
+        errors += parse_errors
+        declared_cards = identity.get("knowledge_card_count")
+        if declared_cards is not None and declared_cards != len(cards):
+            errors.append(
+                f"identity 声明 knowledge_card_count={declared_cards}，实际 {len(cards)}。"
+            )
+        return errors
 
     def declared(key: str, field: str):
         item = bc.get(key)
@@ -942,7 +1068,7 @@ def validate_bkp_identity(identity, manifest_snapshot) -> list[str]:
 
 def build_bkp_whitelist(identity: dict) -> set[str]:
     """原型允许进入正式 BKP 的文件白名单（标准文件 + identity 声明的文件）。"""
-    whitelist = set(BKP_BASE_WHITELIST)
+    whitelist = set(BKP_BASE_WHITELIST) | {BKP_CARD_FILE, BKP_AUTHOR_VIEW_FILE}
 
     def add_file(value) -> None:
         if isinstance(value, dict) and value.get("file"):
@@ -961,8 +1087,8 @@ def normalize_readme_status(text: str) -> str:
     """将原型 README 的 PROTOTYPE 横幅替换为 FINALIZED 状态（其余内容原样保留）。"""
     banner = re.compile(r"^>\s*\*\*PROTOTYPE\*\*.*$", re.MULTILINE)
     new_banner = (
-        "> **FINALIZED** — 依据 `BKP_v0.1_protocol.md` 封装；"
-        "协议第 8 节未冻结项保持开放。本文件是作者打开 BKP 后的第一阅读入口。"
+        "> **FINALIZED** — 依据 `BKP_protocol.md` 封装；"
+        "知识卡是机器检索权威层，author_view 是作者可读投影。"
     )
     return banner.sub(new_banner, text, count=1) if banner.search(text) else text
 
@@ -973,6 +1099,9 @@ def _copy_curated(
     """复制 curated 文件；目标已存在且内容不同时保留人工修改并告警。"""
     if content is None:
         content = read_text(src)
+    if src.resolve() == dst.resolve():
+        report["copied"].append(rel)
+        return
     if dst.exists():
         if read_text(dst) == content:
             # 内容一致时字节级复制，保持原型行尾/字节不变
@@ -1042,19 +1171,28 @@ def finalize_bkp(out_dir: Path, proto_dir: Path | None = None) -> dict:
 
     whitelist = build_bkp_whitelist(identity)
 
-    for rel, role in BKP_ROLE_FILES.items():
-        path = proto_dir / rel
-        if not path.exists():
-            report["errors"].append(f"原型缺少必需知识文件: {rel}")
-            continue
-        if role == "observation":
-            report["errors"] += validate_observation_file(path, chapter_lines)
-        elif role == "inference":
-            report["errors"] += validate_inference_file(path, chapter_lines)
-        elif role == "patterns":
-            report["errors"] += validate_patterns_file(path, chapter_lines, proto_dir)
-        elif role == "boundaries":
-            report["errors"] += validate_boundaries_file(path, chapter_lines)
+    cards_path = proto_dir / BKP_CARD_FILE
+    cards: list[dict] = []
+    if cards_path.exists():
+        cards, card_errors = validate_bkp_cards(cards_path, chapter_lines)
+        report["errors"] += card_errors
+        for rel in ("README.md", "profile.md", BKP_AUTHOR_VIEW_FILE):
+            if not (proto_dir / rel).exists():
+                report["errors"].append(f"v0.2 原型缺少必需文件: {rel}")
+    else:
+        for rel, role in BKP_ROLE_FILES.items():
+            path = proto_dir / rel
+            if not path.exists():
+                report["errors"].append(f"原型缺少必需知识文件: {rel}")
+                continue
+            if role == "observation":
+                report["errors"] += validate_observation_file(path, chapter_lines)
+            elif role == "inference":
+                report["errors"] += validate_inference_file(path, chapter_lines)
+            elif role == "patterns":
+                report["errors"] += validate_patterns_file(path, chapter_lines, proto_dir)
+            elif role == "boundaries":
+                report["errors"] += validate_boundaries_file(path, chapter_lines)
 
     work_map_path = proto_dir / "work_map.md"
     if not work_map_path.exists():
@@ -1084,9 +1222,11 @@ def finalize_bkp(out_dir: Path, proto_dir: Path | None = None) -> dict:
 
     new_identity = json.loads(json.dumps(identity))
     new_identity["bkp_version"] = "0.2"
+    new_identity["bkp_protocol_version"] = "0.2" if cards else "0.1-legacy"
+    if cards:
+        new_identity["knowledge_card_count"] = len(cards)
     new_identity["schema_status"] = (
-        "FINALIZED（依据 BKP_v0.1_protocol.md 封装；"
-        "协议第 8 节未冻结项保持开放，不冻结最终 schema）"
+        "FINALIZED（依据 BKP_protocol.md 封装；v0.2 cards 为 canonical 调用层）"
     )
     new_identity["source_snapshot"] = manifest_snapshot
     provenance = dict(identity.get("provenance") or {})
@@ -1099,7 +1239,7 @@ def finalize_bkp(out_dir: Path, proto_dir: Path | None = None) -> dict:
         "version": BD_VERSION,
         "date": datetime.date.today().isoformat(),
         "input": "bkp_prototype/（人工验证的 curated 知识层）",
-        "protocol": "BKP_v0.1_protocol.md",
+        "protocol": "BKP_protocol.md",
         "knowledge_level": (
             "单书 BKP 最高为 Work-specific Pattern；"
             "不得升级 Cross-book Pattern / Production Rule"
@@ -1131,7 +1271,10 @@ def finalize_bkp(out_dir: Path, proto_dir: Path | None = None) -> dict:
         readme_dst.write_text(readme_content, encoding="utf-8", newline="\n")
         report["copied"].append("README.md")
 
-    for rel in BKP_CURATED_FILES:
+    curated_files = list(BKP_CURATED_FILES)
+    if cards:
+        curated_files = ["README.md", "work_map.md", "profile.md", BKP_AUTHOR_VIEW_FILE, BKP_CARD_FILE]
+    for rel in curated_files:
         if rel == "README.md":
             continue
         src = proto_dir / rel
