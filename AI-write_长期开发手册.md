@@ -89,7 +89,8 @@ Canon / Story State 最小权威协议、StoryDesign 运行底座（E1-A～E1-M�
 1. ~~研究并确定 Canon / Story State 最小协议~~（已合入 main）；
 2. ~~开发 StoryDesign~~（已合入 main）；
 3. ~~开发 StoryPlan 最小合同~~（E2-A 已合入 main）；
-4. 开发 Context Compiler，把当前创作任务需要的自身小说状态与相关 BKP 知识编译成克制上下文。
+4. 执行 E2-B StoryPlan 真实长篇规划纵切，验证真实规划质量、deliberate ambiguity、后置稀疏 BKP 与局部 scope；
+5. 开发 Context Compiler，把当前创作任务需要的自身小说状态与相关 BKP 知识编译成克制上下文。
 
 尚未确认的具体 Canon 字段、Story State Schema、StoryDesign 输出结构不得提前写死。
 
@@ -174,7 +175,7 @@ AI-write 应优先发挥基础模型自身的综合创作能力。外部知识�
 
 当前不重新打开 BookDistill 横向研究，不继续 G5 沙盒正文，不要求作者评价测试文章。
 
-在 Canon / Story State 与 StoryDesign 地基没有定稳之前，不优先开发：
+Canon / Story State、StoryDesign 与 StoryPlan 最小合同已经定稳；当前仍不优先开发：
 
 - 完整 Writer 平台；
 - 大型 RAG / Knowledge Graph；
@@ -212,4 +213,4 @@ SourcePrepare 与 BookDistill 保持可分开执行。未来真正出现批量�
 
 # 10. 一句话总纲
 
-> **参考作品学习链已经完成结构冻结；写作主链的 StoryDesign 运行底座与 StoryPlan 最小合同均已合入 main 并通过真实实验与代码审查，知识介入策略冻结为稀疏后置问题驱动；下一候选是 E2-B 真实长篇规划纵切（尚未启动）。**
+> **参考作品学习链已经完成结构冻结；StoryDesign 运行底座已通过真实实验与代码审查，StoryPlan 最小合同已通过技术验证、测试与代码审查并合入 main，但真实长篇规划质量尚待 E2-B 验证；知识介入策略冻结为稀疏后置问题驱动。**
