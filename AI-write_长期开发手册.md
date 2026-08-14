@@ -78,7 +78,11 @@ Raw Discovery 是研究/审计层；正式 BKP cards 是正常创作调用层。
 
 ## 3.1 当前具体开发顺序
 
-Canon / Story State 最小权威协议、StoryDesign 运行底座（E1-A～E1-M）与 StoryPlan 最小合同（E2-A）均已完成并合入 main；知识介入策略已冻结为稀疏后置问题驱动。**下一候选是 E2-B 真实长篇规划纵切实验**（尚未启动）。
+Canon / Story State 最小权威协议、StoryDesign 运行底座（E1-A～E1-M）与 StoryPlan 最小合同（E2-A）均已完成并合入 main；知识介入策略已冻结为稀疏后置问题驱动。
+
+E2-B 真实长篇规划纵切已完成并正式关闭（`E2B_VERTICAL_SLICE_PASS` / `E2B_STORYPLAN_REAL_VERTICAL_SLICE_CLOSED`）：0 张 BKP 的自由规划形成了可用长篇发动机，local relationship scope 局部规划成立且未重算全书，simulated writeback 的 Canon 隔离为零污染。八项结论与保留缺口以 `06_工作区/E2B_StoryPlan真实纵切_2026-08-15/final_report.md` 为准。
+
+**NEXT_MAINLINE = E2-C_STORYPLAN_LOCAL_REPLAN_VALIDATION**（尚未启动）：只验证作者修改/否定已确认的局部 planning 时，能否只替换目标 planning、旧 planning 如何标记 superseded/stale、无关 sibling 与 ancestor 是否保持、已发生 Canon 是否保持、是否不因局部修改重算全书；不设计完整 replacement engine。
 
 原因：StoryDesign 在业务上发生在前，但它产生的人物、世界、冲突、关系和方向等内容需要有稳定的落点。先把“自己的小说事实怎样保存、哪些是权威、怎样更新”定稳，再实现 StoryDesign，可避免后续反复改接口。
 
@@ -89,8 +93,9 @@ Canon / Story State 最小权威协议、StoryDesign 运行底座（E1-A～E1-M�
 1. ~~研究并确定 Canon / Story State 最小协议~~（已合入 main）；
 2. ~~开发 StoryDesign~~（已合入 main）；
 3. ~~开发 StoryPlan 最小合同~~（E2-A 已合入 main）；
-4. 执行 E2-B StoryPlan 真实长篇规划纵切，验证真实规划质量、deliberate ambiguity、后置稀疏 BKP 与局部 scope；
-5. 开发 Context Compiler，把当前创作任务需要的自身小说状态与相关 BKP 知识编译成克制上下文。
+4. ~~执行 E2-B StoryPlan 真实长篇规划纵切~~（已合入 main，E2-B 关闭）；
+5. 执行 E2-C 局部重规划验证：局部 planning 的替换 / supersede / stale / replacement 边界；
+6. 开发 Context Compiler，把当前创作任务需要的自身小说状态与相关 BKP 知识编译成克制上下文。
 
 尚未确认的具体 Canon 字段、Story State Schema、StoryDesign 输出结构不得提前写死。
 
@@ -169,6 +174,19 @@ AI-write 应优先发挥基础模型自身的综合创作能力。外部知识�
 
 新增复杂能力必须证明边际价值；不能因为系统具备某项能力，就默认让所有任务经过它。
 
+## 6.9 自由规划优先与 BKP 后置策略得到真实纵切支持
+
+E2-B 真实长篇规划纵切验证：强模型自由规划优先原则继续成立——第一轮 0 张 BKP 即可形成可用长篇发动机；BKP 后置策略得到支持——Retrieval status=OK 时仍允许因为无独立增益而采用 0 张。
+
+准确表述：本次 StoryPlan 案例没有召回真正有独立增益的 BKP，因此 `BKP_INDEPENDENT_VALUE = NO_USEFUL_BKP_AVAILABLE`；这不等同于“BKP 已证明没有价值”。
+
+future planning 与 Canon 的隔离也真实通过：simulated writeback 的 `CANON_POLLUTION = ZERO`。
+
+## 6.10 E2-B 保留的真实缺口
+
+- `FREE_PLAN_QUALITY = PASS_WITH_RESERVATIONS`：P0 有轻度“策划委员会感”；初版父亲旧债存在“可拆除”问题；local relationship scope 说明该问题可通过更聚焦任务改善，但不能据此声称所有长篇规划质量问题已经解决。
+- Retrieval 观察：当前检索对“责任 / 选择 / 后果”语义召回正常，但对“未解过去如何持续通过现在改变人物关系判断”的细粒度机制匹配不足。这是观察，不是现在重开 KnowledgeRetrieve / BookDistill 的理由。
+
 ---
 
 # 7. 当前不做什么
@@ -194,6 +212,8 @@ SourcePrepare 与 BookDistill 保持可分开执行。未来真正出现批量�
 
 > **原创小说的核心设计可以进入稳定、可维护、不会被参考知识污染的 Canon / Story State；随后 StoryPlan 和 Context Compiler 能消费这些权威状态，并按真实创作任务调用少量相关 BKP 知识。**
 
+E2-B 已证明：StoryPlan 能从权威状态出发做真实长篇规划（0-BKP 可用长篇发动机），local scope 成立，未来规划不污染 Canon（CANON_POLLUTION=ZERO）。保留缺口：规划质量存在轻度“策划委员会感”与初版父亲旧债“可拆除”问题，不能据此声称所有长篇规划质量问题已经解决。
+
 不是先做一个庞大的“全功能 AI 作家”。
 
 ---
@@ -213,4 +233,4 @@ SourcePrepare 与 BookDistill 保持可分开执行。未来真正出现批量�
 
 # 10. 一句话总纲
 
-> **参考作品学习链已经完成结构冻结；StoryDesign 运行底座已通过真实实验与代码审查，StoryPlan 最小合同已通过技术验证、测试与代码审查并合入 main，但真实长篇规划质量尚待 E2-B 验证；知识介入策略冻结为稀疏后置问题驱动。**
+> **参考作品学习链已经完成结构冻结；StoryDesign 运行底座与 StoryPlan 最小合同均已合入 main，StoryPlan 真实长篇规划纵切（E2-B）已通过并关闭（0-BKP 长篇发动机成立、局部 scope 成立、Canon 隔离零污染）；知识介入策略冻结为稀疏后置问题驱动；下一主线是 E2-C 局部重规划验证（尚未启动）。**
