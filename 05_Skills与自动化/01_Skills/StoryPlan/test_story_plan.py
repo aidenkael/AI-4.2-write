@@ -79,6 +79,49 @@ class StoryPlanContractTest(unittest.TestCase):
         with self.assertRaises(ContractError):
             self.brief(sources=[{"kind": "model_idea", "ref": "guess-1"}])
 
+    # 1b. planning source 必须在当前 Story State approved_plan 中真实存在
+    def test_nonexistent_approved_plan_ref_is_rejected(self):
+        with self.assertRaises(ContractError):
+            self.brief(sources=[{"kind": "approved_plan", "ref": "fake-plan-id"}])
+
+    def test_real_approved_plan_ref_is_verified(self):
+        brief = self.brief()
+        self.assertEqual(
+            brief["planning_sources"],
+            [{"kind": "approved_plan", "ref": "plan.design.engine",
+              "verified_authority": "author_decision:sim-design-001"}],
+        )
+
+    def test_valid_source_mixed_with_unknown_kind_is_rejected(self):
+        with self.assertRaises(ContractError):
+            self.brief(sources=CONFIRMED_SOURCES + [{"kind": "random_source", "ref": "r1"}])
+
+    def test_forbidden_source_kinds_stay_rejected(self):
+        for kind in ("proposal", "context", "bkp", "ai_candidate"):
+            with self.assertRaises(ContractError, msg=kind):
+                self.brief(sources=[{"kind": kind, "ref": "plan.design.engine"}])
+
+    def test_direct_decision_ref_kinds_are_deferred_in_v0(self):
+        # 锁定 E2-A v0 行为：无 Decision resolver/store 前不直接接受 Decision ref。
+        for kind in ("design_decision", "author_decision"):
+            with self.assertRaises(ContractError, msg=kind):
+                self.brief(sources=[{"kind": kind, "ref": "decision-001"}])
+
+    def test_untrusted_authority_approved_plan_is_rejected(self):
+        polluted = dict(STATE, approved_plan=STATE["approved_plan"] + [
+            {"id": "plan.bad", "description": "不可信来源", "target_ref": "x",
+             "authority": "manual_import:ok", "occurred": False},
+        ])
+        # manual_import 是可信的；换成一个非可信但能通过 state 校验的前缀验证拒绝路径。
+        polluted["approved_plan"][-1]["authority"] = "accepted_text:ch1"
+        compile_kwargs = dict(
+            project_id="plan-project", brief_id="plan-brief-auth", author_planning_question="规划",
+            planning_target=TARGET, planning_sources=[{"kind": "approved_plan", "ref": "plan.bad"}],
+            intent=INTENT, state=polluted,
+        )
+        with self.assertRaises(ContractError):
+            compile_plan_brief(**compile_kwargs)
+
     # 2. Plan Candidate 是 noncanonical
     def test_plan_candidate_is_noncanonical(self):
         candidate = self.candidate()
@@ -166,6 +209,39 @@ class StoryPlanContractTest(unittest.TestCase):
             make_plan_diff(
                 diff_id="plan-diff-m", state=STATE, decision=decision, brief=self.brief(),
                 plans=[{"id": "plan.pm", "description": "错位", "target_ref": "target.other"}], allow_simulation=True,
+            )
+
+    # 8c. Decision 必须绑定当前 Plan Brief：Brief A 的 Decision 不得写 Brief B
+    def test_decision_from_other_brief_is_rejected(self):
+        other_brief = compile_plan_brief(
+            project_id="plan-project", brief_id="plan-brief-2",
+            author_planning_question="另一个规划问题。",
+            planning_target=TARGET, planning_sources=CONFIRMED_SOURCES,
+            intent=INTENT, state=STATE,
+        )
+        decision = self.confirmed_decision()  # bound to plan-brief-1
+        with self.assertRaises(ContractError):
+            make_plan_diff(
+                diff_id="plan-diff-b", state=STATE, decision=decision, brief=other_brief,
+                plans=[{"id": "plan.pb", "description": "错位 Brief"}], allow_simulation=True,
+            )
+
+    def test_tampered_brief_project_id_is_rejected(self):
+        decision = self.confirmed_decision()
+        tampered = dict(self.brief(), project_id="other-project")
+        with self.assertRaises(ContractError):
+            make_plan_diff(
+                diff_id="plan-diff-t", state=STATE, decision=decision, brief=tampered,
+                plans=[{"id": "plan.pt", "description": "篡改 project"}], allow_simulation=True,
+            )
+
+    def test_stale_brief_cannot_write_back_on_new_state(self):
+        decision = self.confirmed_decision()
+        new_state = dict(STATE, state_rev=2)
+        with self.assertRaises(ContractError):
+            make_plan_diff(
+                diff_id="plan-diff-s", state=new_state, decision=decision, brief=self.brief(),
+                plans=[{"id": "plan.ps", "description": "旧 Brief"}], allow_simulation=True,
             )
 
     # 9 + 10. knowledge_needs 空时 Retrieval 0 调用；0 BKP 正常

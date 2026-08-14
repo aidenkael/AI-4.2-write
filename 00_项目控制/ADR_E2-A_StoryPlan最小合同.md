@@ -1,6 +1,6 @@
 # ADR E2-A｜StoryPlan 最小合同
 
-- 状态：技术候选，等待 ChatGPT 审查；未 push、未 merge。
+- 状态：技术候选，feature branch 已 push，ChatGPT 首轮审查的两个权限 blocker 已窄修（planning source 真实可验证 + Decision 绑定当前 Plan Brief），等待复审；未 merge。
 - 范围：Phase E 的 E2-A；不实现 Writer、StoryReview、完整 Context Compiler、完整 State Writeback、UI、DB、Graph、全局 Router 或固定多 Agent 平台。
 - 实现位置：`05_Skills与自动化/01_Skills/StoryPlan/`。
 - 上游核查记录：`06_工作区/E2A_StoryPlan上游核查与研究记录_2026-08-15.md`。
@@ -29,9 +29,10 @@ Plan Candidate 一律 `proposal_noncanonical`；确认后只能进入 `approved_
 
 ## 5. 新增的最小语义
 
-- **Plan Brief**（`artifact_type=plan_brief`）：project、source revisions、`planning_target {target_id, description, scope_kind, scope}`、`author_planning_question`（作者原话）、`planning_sources`（必须至少含一个已确认来源：approved_plan / design_decision / author_decision ref）、inherited_obligations、hard_constraints、`deliberate_open_space`、assumptions、knowledge_needs（允许空）。无已确认规划来源时直接拒绝编译——StoryPlan 不假装已有作者方向。
+- **Plan Brief**（`artifact_type=plan_brief`）：project、source revisions、`planning_target {target_id, description, scope_kind, scope}`、`author_planning_question`（作者原话）、`planning_sources`（E2-A v0 唯一正式可验证来源是当前 Story State `approved_plan` 中真实存在、`occurred` 非 true、authority 为 `author_decision:` / `manual_import:` 的条目；未知 kind 与 proposal/context/bkp/ai_candidate 一律拒绝）、inherited_obligations、hard_constraints、`deliberate_open_space`、assumptions、knowledge_needs（允许空）。无已验证规划来源时直接拒绝编译——StoryPlan 不假装已有作者方向。直接 Decision Record（design_decision / author_decision ref）作为 planning source，待未来有正式 Decision resolver/store 后再开放；当前确定性来源使用 Story State 中已落地的 approved_plan。这是收紧合同，不是能力退化。
 - **Plan Candidate**（`artifact_type=story_plan_candidate`）：`proposal_noncanonical`；模型规划内容作为 opaque `content`，runtime 不解析为 Canon facts；保留 brief_ref（含 rev）、context_ref、source_versions、planning_target。
 - **Planning item 最小接口**：append 进 `approved_plan` 的条目要求 `id`、`description`、`target_ref`；允许 `supersedes` / `built_from` ref 字段；`occurred` 强制 false。
+- **Decision → planning writeback 绑定**：`make_plan_diff` 除复用 E1 choose/modify + project 检查外，还要求 Decision 的 `brief_ref` 精确等于当前 Plan Brief 的 `brief_id@brief_rev`、Brief 与 State 同 project、且 Brief 的 `source_versions.state_rev` 等于当前 `state_rev`（旧 Brief 不得在新 State 上写回）。
 
 ## 6. 哪些 Schema 故意未确定
 
@@ -39,7 +40,7 @@ Plan Candidate 一律 `proposal_noncanonical`；确认后只能进入 `approved_
 
 ## 7. 局部重规划未来如何留接口
 
-stable `id` + `target_ref` 已强制；`supersedes` / `built_from` 字段已允许；Plan Brief 记录 planning_target。作者未来说「第三卷不要这样走，前两卷保留」时，可只对 target_ref 指向第三卷的条目发起 supersede/replace，而不重算其它 target。E2-A 不实现 dependency graph engine，也不实现完整 subtree replacement。
+stable `id` + `target_ref` 已强制；`supersedes` / `built_from` 字段已允许；Plan Brief 记录 planning_target。作者未来说「第三卷不要这样走，前两卷保留」时，可只对 target_ref 指向第三卷的条目发起 supersede/replace，而不重算其它 target。E2-A 仅保存 `supersedes` / `built_from` 元数据，为以后局部重规划与失效传播留下接口；当前 runtime 不解释 `supersedes`，不会自动使旧 planning 失效，也不实现 dependency graph engine 或完整 subtree replacement。
 
 ## 8. BKP 后置稀疏原则如何继承
 

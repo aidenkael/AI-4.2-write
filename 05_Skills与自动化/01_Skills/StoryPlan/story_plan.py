@@ -60,9 +60,13 @@ CAPABILITY = {
     "outputs": ["Plan Brief", "Context Package", "noncanonical StoryPlan candidate", "trace"],
 }
 
-# 已确认方向的可追溯来源类别；proposal / context / bkp 永远不算。
-CONFIRMED_PLANNING_SOURCE_KINDS = ("approved_plan", "design_decision", "author_decision")
+# E2-A v0 唯一正式可验证的 planning source：当前 Story State approved_plan
+# 中真实存在的条目。直接 Decision ref 待未来有正式 Decision resolver/store
+# 后再开放（见 ADR E2-A）；proposal / context / bkp 永远不算。
+SUPPORTED_PLANNING_SOURCE_KINDS = ("approved_plan",)
+DEFERRED_PLANNING_SOURCE_KINDS = ("design_decision", "author_decision")
 FORBIDDEN_PLANNING_SOURCE_KINDS = ("proposal", "context", "bkp", "ai_candidate")
+TRUSTED_PLANNING_SOURCE_AUTHORITIES = ("author_decision:", "manual_import:")
 
 
 def compile_plan_brief(
@@ -93,17 +97,32 @@ def compile_plan_brief(
         raise ContractError("planning_target 必须有 target_id 与 description")
     if not planning_sources:
         raise ContractError("StoryPlan 需要至少一个已确认规划来源；无已确认 StoryDesign/方向时不得假装已有作者方向")
-    confirmed = []
+    plans_by_id = {plan.get("id"): plan for plan in state["approved_plan"]}
+    verified_sources = []
     for source in planning_sources:
         if not isinstance(source, dict) or not source.get("kind") or not source.get("ref"):
             raise ContractError("planning source 必须有 kind 与 ref")
         kind = source["kind"]
         if kind in FORBIDDEN_PLANNING_SOURCE_KINDS:
             raise ContractError(f"未确认的 {kind} 不能作为规划来源")
-        if kind in CONFIRMED_PLANNING_SOURCE_KINDS:
-            confirmed.append(source)
-    if not confirmed:
-        raise ContractError("规划来源必须至少包含一个已确认方向（approved_plan / design_decision / author_decision）")
+        if kind in DEFERRED_PLANNING_SOURCE_KINDS:
+            raise ContractError(
+                f"E2-A v0 暂不接受直接 Decision ref（{kind}）作为 planning source；"
+                "确定性来源是当前 Story State approved_plan 中真实存在的条目"
+            )
+        if kind not in SUPPORTED_PLANNING_SOURCE_KINDS:
+            raise ContractError(f"未知 planning source kind：{kind}")
+        entry = plans_by_id.get(source["ref"])
+        if entry is None:
+            raise ContractError(f"planning source ref 不存在于当前 Story State approved_plan：{source['ref']}")
+        if entry.get("occurred") is True:
+            raise ContractError(f"planning source {source['ref']} 不得是已发生内容")
+        authority = str(entry.get("authority", ""))
+        if not authority.startswith(TRUSTED_PLANNING_SOURCE_AUTHORITIES):
+            raise ContractError(f"planning source {source['ref']} 的 authority 不是可信规划来源：{authority}")
+        verified_sources.append({"kind": kind, "ref": source["ref"], "verified_authority": authority})
+    if not verified_sources:
+        raise ContractError("规划来源必须至少包含一个已验证的 approved_plan 条目")
 
     semantic_interpretation = semantic_interpretation or {}
     model_assumptions = list(semantic_interpretation.get("assumptions", []))
@@ -121,7 +140,7 @@ def compile_plan_brief(
         "status": "CURRENT",
         "author_planning_question": author_planning_question,
         "planning_target": dict(planning_target),
-        "planning_sources": list(planning_sources),
+        "planning_sources": verified_sources,
         "inherited_obligations": semantic_interpretation.get("inherited_obligations", []),
         "hard_constraints": list(intent.get("hard_constraints", [])),
         "deliberate_open_space": semantic_interpretation.get("deliberate_open_space", []),
@@ -219,9 +238,21 @@ def make_plan_diff(
     allow_simulation: bool = False,
 ) -> dict[str, Any]:
     """StoryPlan writeback gate: reuse E1 make_planning_diff (author_action
-    choose/modify only, same project) after normalizing planning items."""
+    choose/modify only, same project) after normalizing planning items.
+
+    Extra deterministic guards: the Decision must really target the current
+    Plan Brief (brief_ref), the Brief must belong to the current project,
+    and a Brief compiled against an older state_rev may not write back on
+    the new State (stale Brief rejection).
+    """
     if not plans:
         raise ContractError("StoryPlan Diff 需要至少一条 planning 条目")
+    if brief.get("project_id") != state.get("project_id"):
+        raise ContractError("Plan Brief 与 Story State project_id 不一致")
+    if brief.get("source_versions", {}).get("state_rev") != state.get("state_rev"):
+        raise ContractError("旧 state_rev 的 Plan Brief 不得在当前 State 上生成 Planning Diff")
+    if decision.get("brief_ref") != f"{brief['brief_id']}@{brief['brief_rev']}":
+        raise ContractError("Decision 不是针对当前 Plan Brief 做出的，不得写回该 Brief 的 planning")
     target_ref = brief["planning_target"]["target_id"]
     normalized = [normalize_planning_item(plan, target_ref=target_ref) for plan in plans]
     diff = make_planning_diff(
