@@ -1,6 +1,6 @@
 # ADR E2-A｜StoryPlan 最小合同
 
-- 状态：技术候选，feature branch 已 push，ChatGPT 两轮审查问题均已窄修（planning source 真实可验证、Decision 绑定当前 Plan Brief、planning id 唯一性、intent_rev+state_rev 双 stale guard），等待最终审查；未 merge。
+- 状态：**PASS**；StoryPlan Foundation 已完成两轮真实代码审查并 fast-forward 合入 main，E2-A 关闭（`E2A_STORYPLAN_FOUNDATION_CLOSED`）。
 - 范围：Phase E 的 E2-A；不实现 Writer、StoryReview、完整 Context Compiler、完整 State Writeback、UI、DB、Graph、全局 Router 或固定多 Agent 平台。
 - 实现位置：`05_Skills与自动化/01_Skills/StoryPlan/`。
 - 上游核查记录：`06_工作区/E2A_StoryPlan上游核查与研究记录_2026-08-15.md`。

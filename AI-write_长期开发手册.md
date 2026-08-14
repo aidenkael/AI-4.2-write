@@ -78,7 +78,7 @@ Raw Discovery 是研究/审计层；正式 BKP cards 是正常创作调用层。
 
 ## 3.1 当前具体开发顺序
 
-Canon / Story State 最小权威协议与 StoryDesign 运行底座已完成并合入 main（E1-A～E1-M），经过 E1-B / E1-C / E1-D 真实实验验证；知识介入策略已冻结为稀疏后置问题驱动。**下一候选是 StoryPlan**（审查与 merge 已完成，尚未启动实现）。
+Canon / Story State 最小权威协议、StoryDesign 运行底座（E1-A～E1-M）与 StoryPlan 最小合同（E2-A）均已完成并合入 main；知识介入策略已冻结为稀疏后置问题驱动。**下一候选是 E2-B 真实长篇规划纵切实验**（尚未启动）。
 
 原因：StoryDesign 在业务上发生在前，但它产生的人物、世界、冲突、关系和方向等内容需要有稳定的落点。先把“自己的小说事实怎样保存、哪些是权威、怎样更新”定稳，再实现 StoryDesign，可避免后续反复改接口。
 
@@ -88,7 +88,7 @@ Canon / Story State 最小权威协议与 StoryDesign 运行底座已完成并�
 
 1. ~~研究并确定 Canon / Story State 最小协议~~（已合入 main）；
 2. ~~开发 StoryDesign~~（已合入 main）；
-3. 开发 StoryPlan；
+3. ~~开发 StoryPlan 最小合同~~（E2-A 已合入 main）；
 4. 开发 Context Compiler，把当前创作任务需要的自身小说状态与相关 BKP 知识编译成克制上下文。
 
 尚未确认的具体 Canon 字段、Story State Schema、StoryDesign 输出结构不得提前写死。
@@ -212,4 +212,4 @@ SourcePrepare 与 BookDistill 保持可分开执行。未来真正出现批量�
 
 # 10. 一句话总纲
 
-> **参考作品学习链已经完成结构冻结；写作主链的 StoryDesign 运行底座已合入 main 并通过真实实验验证，知识介入策略冻结为稀疏后置问题驱动；下一候选是 StoryPlan（尚未启动实现）。**
+> **参考作品学习链已经完成结构冻结；写作主链的 StoryDesign 运行底座与 StoryPlan 最小合同均已合入 main 并通过真实实验与代码审查，知识介入策略冻结为稀疏后置问题驱动；下一候选是 E2-B 真实长篇规划纵切（尚未启动）。**
