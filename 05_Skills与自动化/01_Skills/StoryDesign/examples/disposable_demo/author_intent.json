@@ -1,0 +1,23 @@
+{
+  "project_id": "demo-rain-garden",
+  "intent_rev": 1,
+  "work_direction": "都市奇幻长篇的开端设计。",
+  "reader_promise": "读者先感到日常秩序被一条私人秘密撬开。",
+  "current_priority": [
+    "人物选择",
+    "秘密的信息层次"
+  ],
+  "current_focus": "只设计故事发动机，不写正文。",
+  "hard_constraints": [
+    "不把候选谜底写成既成事实",
+    "不开篇解释全部世界规则"
+  ],
+  "avoidances": [
+    "把参考书经验当模板"
+  ],
+  "open_space": [
+    "秘密来源",
+    "关系走向",
+    "世界机制细节"
+  ]
+}

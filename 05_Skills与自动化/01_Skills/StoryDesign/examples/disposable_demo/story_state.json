@@ -1,0 +1,17 @@
+{
+  "project_id": "demo-rain-garden",
+  "state_rev": 1,
+  "sandbox_only": true,
+  "canon_facts": [
+    {
+      "id": "canon.garden",
+      "fact": "旧城区有一座只在暴雨夜开放的公共花园。",
+      "authority": "manual_import:demo_seed"
+    }
+  ],
+  "character_state": [],
+  "relationship_state": [],
+  "occurred_events": [],
+  "open_threads": [],
+  "approved_plan": []
+}
