@@ -8,17 +8,15 @@
   "authority": "ai_candidate:noncanonical",
   "content": {
     "stance": [
-      "story_engine",
-      "character",
-      "reader_promise"
+      "story_engine"
     ],
     "proposal": "候选 A：花园只返还一个秘密的后果，主角必须先决定是否交出与朋友有关的记忆。",
     "unknowns": [
       "朋友是否仍在世",
       "花园保存秘密的代价"
     ],
-    "note": "演示候选；不是作者事实或 Canon。"
+    "note": "第一轮 noncanonical 提案；0 张 BKP 是正常路径；不是作者事实或 Canon。"
   },
   "must_not_write_canon": true,
-  "created_at": "2026-08-14T10:46:22Z"
+  "created_at": "2026-08-14T18:43:04Z"
 }

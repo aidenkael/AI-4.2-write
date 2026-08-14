@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import argparse
-import shutil
-import tempfile
+import sys
 from pathlib import Path
 
 from story_design import run_story_design
-from story_runtime import initialize_project, read_json, write_json
+from story_runtime import ContractError, initialize_project, write_json
 
 
 DEMO_INTENT = {
@@ -33,11 +32,15 @@ DEMO_STATE = {
 
 
 def create_demo(output: Path) -> dict:
-    if output.exists():
-        shutil.rmtree(output)
+    output = Path(output)
+    if output.exists() and any(output.iterdir()):
+        raise ContractError(f"demo 目录已存在且非空，拒绝覆盖；请换一个空目录：{output}")
     paths = initialize_project(output)
     write_json(paths["intent"], DEMO_INTENT)
     write_json(paths["state"], DEMO_STATE)
+    # Frozen E1 policy demo: natural-language seed -> Brief -> first-round
+    # noncanonical proposal with 0 BKP.  No knowledge needs means no
+    # KnowledgeRetrieve call at all.
     return run_story_design(
         project_dir=output,
         author_input="我想写一个在暴雨夜发现花园会替人保存秘密的故事，主角和失联多年的朋友有关。",
@@ -45,15 +48,15 @@ def create_demo(output: Path) -> dict:
         semantic_interpretation={
             "scope": "story_design",
             "objective": "探索能让主角主动进入花园秘密的故事发动机。",
-            "knowledge_needs": ["受限信息制造参与式推理", "章末钩子落在行动或决定"],
-            "selected_bkp_ids": ["K004", "K006", "K007"],
+            "knowledge_needs": [],
+            "selected_bkp_ids": [],
             "assumptions": ["失联朋友与花园秘密的具体因果尚未获得作者确认。"],
         },
         model_output={
-            "stance": ["story_engine", "character", "reader_promise"],
+            "stance": ["story_engine"],
             "proposal": "候选 A：花园只返还一个秘密的后果，主角必须先决定是否交出与朋友有关的记忆。",
             "unknowns": ["朋友是否仍在世", "花园保存秘密的代价"],
-            "note": "演示候选；不是作者事实或 Canon。",
+            "note": "第一轮 noncanonical 提案；0 张 BKP 是正常路径；不是作者事实或 Canon。",
         },
     )
 
@@ -62,7 +65,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--demo-dir", type=Path, required=True, help="disposable sandbox output directory")
     args = parser.parse_args()
-    result = create_demo(args.demo_dir)
+    try:
+        result = create_demo(args.demo_dir)
+    except ContractError as exc:
+        print(f"demo 拒绝运行：{exc}", file=sys.stderr)
+        raise SystemExit(2)
     print(f"demo created: {args.demo_dir}")
     print(f"retrieval status: {result['context']['retrieval']['status']}")
     print(f"selected BKP hits: {len(result['context']['selected_bkp_hits'])}")

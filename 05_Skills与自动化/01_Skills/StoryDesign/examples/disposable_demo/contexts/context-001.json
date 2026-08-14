@@ -5,6 +5,7 @@
   "status": "CURRENT",
   "built_from": {
     "brief_id": "brief-001",
+    "brief_rev": 1,
     "intent_rev": 1,
     "state_rev": 1
   },
@@ -23,72 +24,17 @@
     "open_threads": [],
     "approved_plan": []
   },
-  "selected_bkp_hits": [
-    {
-      "book_id": "book_0035",
-      "book_title": "长安十二时辰",
-      "knowledge_id": "K007",
-      "source": "knowledge/cards.md",
-      "statement": "章节在一个可见但用途未知的物件上停止，比抽象宣布还有危险更具体。",
-      "scope": "屋顶鸱吻旁异物等实物钩子。",
-      "boundary": "物件若下一章不发挥因果作用，会退化为装饰性悬念。",
-      "confidence": "高",
-      "provenance": {
-        "evidence": [
-          "chapters/0020.md#L521-L533"
-        ],
-        "rank": 1,
-        "relevance_reason": "关键词匹配 4 个，原始得分 1.240"
-      }
-    },
-    {
-      "book_id": "book_0035",
-      "book_title": "长安十二时辰",
-      "knowledge_id": "K004",
-      "source": "knowledge/cards.md",
-      "statement": "大谜底按词语、假说、实物、装置和动机分层发放，每层只改变一个关键认知且更换揭示渠道。",
-      "scope": "阙勒霍多与蚍蜉主谜面。",
-      "boundary": "本轮未做专项 Deep Dive；“间隔最优”没有被量化，不能把五层固化成模板。",
-      "confidence": "高",
-      "provenance": {
-        "evidence": [
-          "chapters/0008.md#L111-L201",
-          "chapters/0011.md#L627-L651",
-          "chapters/0014.md#L621-L633",
-          "chapters/0015.md#L255-L285"
-        ],
-        "rank": 3,
-        "relevance_reason": "关键词匹配 2 个，原始得分 0.645"
-      }
-    },
-    {
-      "book_id": "book_0035",
-      "book_title": "长安十二时辰",
-      "knowledge_id": "K006",
-      "source": "knowledge/cards.md",
-      "statement": "推理链把必要前提逐项给到读者，却在最后一步停住，让读者自行补出目标。",
-      "scope": "李泌由引爆特性和当量反推定点袭击的场景。",
-      "boundary": "若前提专业门槛过高，留白会被读成信息缺失。",
-      "confidence": "高",
-      "provenance": {
-        "evidence": [
-          "chapters/0011.md#L627-L643"
-        ],
-        "rank": 6,
-        "relevance_reason": "关键词匹配 10 个，原始得分 0.626"
-      }
-    }
-  ],
-  "selection_reason": "模型/Skill 明示选择的少量 BKP；runtime 只校验 provenance 和数量上限。",
+  "selected_bkp_hits": [],
+  "selection_reason": "Brief 没有明确 knowledge_needs；按冻结策略跳过 KnowledgeRetrieve，0 张 BKP 是正常路径。",
   "retrieval": {
-    "query": "受限信息制造参与式推理；章末钩子落在行动或决定",
-    "status": "OK",
+    "query": null,
+    "status": "SKIPPED_NO_KNOWLEDGE_NEED",
     "gaps": [],
-    "candidate_count": 8
+    "candidate_count": 0
   },
   "size_summary": {
-    "selected_bkp_hits": 3,
+    "selected_bkp_hits": 0,
     "catalog_not_injected": true
   },
-  "created_at": "2026-08-14T10:46:22Z"
+  "created_at": "2026-08-14T18:43:04Z"
 }

@@ -1,5 +1,7 @@
 # E1-B｜真实 StoryDesign A/B 验证内部工程报告
 
+> ❗**后续说明（2026-08-15）**：后续作者盲评和解盲已完成，最终结论以 `06_工作区/E1_StoryDesign冻结结论_2026-08-15.md`（`BKP_POSTHOC_SPARSE_PROBLEM_DRIVEN`）为准。本文件是实验当时的技术记录，正文保持原样，不追溯修改。
+
 ## 1. 结论状态
 
 **TECHNICAL_EVIDENCE_READY / AWAITING_AUTHOR_BLIND_REVIEW**

@@ -1,16 +1,14 @@
 # E1-B｜StoryDesign A/B 验证
 
-状态：**技术证据已生成，等待作者盲评**。
+状态：**作者盲评已完成并已解盲；结论已进入冻结总结**（`06_工作区/E1_StoryDesign冻结结论_2026-08-15.md`）。
 
 本目录只包含一次性实验材料，不属于正式 Story State，不产生 `author_decision`、Decision、Diff、Canon 或 `approved_plan` 写入。
 
-作者盲评时请只打开：
+盲评阶段曾要求作者只打开：
 
 - `seed-01/blind/`
 - `seed-02/blind/`
 - `seed-03/blind/`
 - `author_review_form.md`
 
-盲评完成前不要打开 `sealed_mapping.json`、`internal_report.md`、`baseline/`、`aiwrite/` 或 `trace/`，以免破坏盲评。
-
-实验方法、运行元数据、知识来源和未盲化分析保存在内部材料中。
+盲评与解盲已完成；`sealed_mapping.json`、`internal_report.md` 等内部材料现在可以阅读，但其中 `internal_report.md` 是实验当时的技术记录，最终结论以冻结总结为准。

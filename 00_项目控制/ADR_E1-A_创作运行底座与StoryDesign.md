@@ -53,7 +53,9 @@ StoryDesign 默认由一个强模型承担创作判断；人物、结构、读�
 
 因为本次没有复制或改编上游代码/文本，未引入 NOTICE 或第三方代码文件；上表仍保留可审计 provenance。尤其 AGPL 和 CC BY-NC-SA 上游不被引入本仓库实现。
 
-## 真实 A/B 的下一步
+## 真实 A/B 的下一步（历史计划，已由 E1-B / E1-C / E1-D 执行完毕）
+
+以下为 E1-A 当时规划的下一步；实际已按更广的 E1-B / E1-C / E1-D 实验完成并冻结，见本文末节。
 
 选择两个明确不同的作者自然语言种子（一个信息充分、一个故意模糊），让同一模型产生 Brief/Context/candidate。作者只评价候选是否有助于继续设计，而不评价模板完整度。比较：assumption 是否可见、BKP 是否真的相关、模型能否保留未知项、作者 choose/modify 后 planning 是否准确且 Canon 未变化。任何真实缺口再窄改 E1-A；不自动进入 StoryPlan 或 Writer。
 

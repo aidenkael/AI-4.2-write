@@ -1,6 +1,6 @@
 # AI-write 长期开发手册
 
-> 更新日期：2026-08-14  
+> 更新日期：2026-08-15  
 > 当前主线：**Phase E｜写作主链**  
 > G5｜正文诊断与修订最小闭环：**PAUSED**  
 > 本文件只保留长期有效原则、当前路线和关键边界；过程细节放专项文件与 Git 历史。
@@ -78,16 +78,16 @@ Raw Discovery 是研究/审计层；正式 BKP cards 是正常创作调用层。
 
 ## 3.1 当前具体开发顺序
 
-当前第一项具体工作是：**先确定 Canon / Story State 的最小权威协议和数据边界，然后马上开发 StoryDesign 接进去。**
+Canon / Story State 最小权威协议与 StoryDesign 运行底座已经完成候选（E1-A），并经过 E1-B / E1-C / E1-D 真实实验验证；知识介入策略已冻结为稀疏后置问题驱动。**下一候选是 StoryPlan**，但必须先完成分支代码审查与 merge 决策。
 
 原因：StoryDesign 在业务上发生在前，但它产生的人物、世界、冲突、关系和方向等内容需要有稳定的落点。先把“自己的小说事实怎样保存、哪些是权威、怎样更新”定稳，再实现 StoryDesign，可避免后续反复改接口。
 
 这不等于把产品流程改成 `Canon → StoryDesign`；产品/业务顺序仍是 `StoryDesign → Canon / Story State`。
 
-当前近端顺序：
+近端顺序：
 
-1. 研究并确定 Canon / Story State 最小协议；
-2. 开发 StoryDesign，并让产物写入/更新 Canon / Story State；
+1. ~~研究并确定 Canon / Story State 最小协议~~（已完成候选，待 merge）；
+2. ~~开发 StoryDesign~~（已完成候选，待 merge）；
 3. 开发 StoryPlan；
 4. 开发 Context Compiler，把当前创作任务需要的自身小说状态与相关 BKP 知识编译成克制上下文。
 
@@ -212,4 +212,4 @@ SourcePrepare 与 BookDistill 保持可分开执行。未来真正出现批量�
 
 # 10. 一句话总纲
 
-> **参考作品学习链已经完成结构冻结；AI-write 现在转入真正的写作主链，先把自己的小说事实与状态记稳，再依次打通 StoryDesign、StoryPlan、Context 和后续写作/审阅/修订能力。**
+> **参考作品学习链已经完成结构冻结；写作主链的 StoryDesign 运行底座已建成候选并通过真实实验验证，知识介入策略已冻结为稀疏后置问题驱动；下一步是完成分支审查与 merge 决策，再候选启动 StoryPlan。**

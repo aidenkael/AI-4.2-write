@@ -78,6 +78,12 @@ def _validate_authority(authority: str) -> None:
         raise ContractError(f"不合规 Canon authority: {authority}")
 
 
+def _require_same_project(*artifacts: dict[str, Any]) -> None:
+    ids = {artifact.get("project_id") for artifact in artifacts}
+    if len(ids) != 1 or None in ids:
+        raise ContractError(f"工件 project_id 不一致: {sorted(str(i) for i in ids)}")
+
+
 def validate_author_intent(intent: dict[str, Any]) -> None:
     _require(intent, "project_id", "intent_rev", "work_direction", "reader_promise", "hard_constraints", "open_space")
     if not isinstance(intent["intent_rev"], int) or intent["intent_rev"] < 1:
@@ -201,44 +207,65 @@ def build_context(
     """Build a small, reconstructible Context Package from a retrieval call."""
     validate_author_intent(intent)
     validate_story_state(state)
+    _require_same_project(brief, intent, state)
     if brief["source_versions"] != {"intent_rev": intent["intent_rev"], "state_rev": state["state_rev"]}:
         raise ContractError("不能用过期 Brief 构建 Context")
-    retrieval = retrieval or _default_retrieve
-    query = "；".join(brief.get("knowledge_needs") or [brief["objective"]])
-    package = retrieval(query)
-    selected = []
-    selected_knowledge_ids = selected_knowledge_ids or []
-    selected_id_set = set(selected_knowledge_ids)
-    if getattr(package, "status", "INSUFFICIENT_BKP") == "OK":
-        # Retrieval only recalls candidates.  A model/Skill must explicitly
-        # select ids after considering scope and boundary; rank is not a
-        # substitute for literary/semantic judgment.
-        for hit in list(getattr(package, "hits", [])):
-            if hit.source_anchor not in selected_id_set or len(selected) >= max_bkp_hits:
-                continue
-            selected.append({
-                "book_id": hit.book_id,
-                "book_title": hit.book_title,
-                "knowledge_id": hit.source_anchor,
-                "source": hit.source,
-                "statement": hit.statement,
-                "scope": hit.scope,
-                "boundary": hit.boundary,
-                "confidence": hit.confidence,
-                "provenance": {"evidence": hit.evidence, "rank": hit.rank, "relevance_reason": hit.relevance_reason},
-            })
-    gaps = list(getattr(package, "gaps", []))
-    if getattr(package, "status", "INSUFFICIENT_BKP") == "OK" and not selected:
-        gaps.append("模型/Skill 未选择可用 BKP；Context 不注入未审查候选。")
-    elif selected_id_set - {hit["knowledge_id"] for hit in selected}:
-        gaps.append("部分模型/Skill 选择的 BKP id 不在本次有效召回中。")
-    status = "CURRENT" if selected else "CURRENT_WITH_BKP_GAP"
+    knowledge_needs = list(brief.get("knowledge_needs") or [])
+    selected_knowledge_ids = list(selected_knowledge_ids or [])
+    if selected_knowledge_ids and not knowledge_needs:
+        raise ContractError("选择 BKP 必须先有明确 knowledge_needs；不允许无知识需求直接选卡")
+    selected: list[dict[str, Any]] = []
+    gaps: list[str] = []
+    if not knowledge_needs:
+        # Frozen E1 policy: without an explicit knowledge need there is no
+        # retrieval call at all.  0 BKP is a normal path; never fall back to
+        # objective-based auto retrieval.
+        retrieval_info = {"query": None, "status": "SKIPPED_NO_KNOWLEDGE_NEED", "gaps": gaps, "candidate_count": 0}
+        selection_reason = ("Brief 没有明确 knowledge_needs；按冻结策略跳过 KnowledgeRetrieve，"
+                            "0 张 BKP 是正常路径。")
+    else:
+        retrieval = retrieval or _default_retrieve
+        query = "；".join(knowledge_needs)
+        package = retrieval(query)
+        selected_id_set = set(selected_knowledge_ids)
+        if getattr(package, "status", "INSUFFICIENT_BKP") == "OK":
+            # Retrieval only recalls candidates.  A model/Skill must explicitly
+            # select ids after considering scope and boundary; rank is not a
+            # substitute for literary/semantic judgment.
+            for hit in list(getattr(package, "hits", [])):
+                if hit.source_anchor not in selected_id_set or len(selected) >= max_bkp_hits:
+                    continue
+                selected.append({
+                    "book_id": hit.book_id,
+                    "book_title": hit.book_title,
+                    "knowledge_id": hit.source_anchor,
+                    "source": hit.source,
+                    "statement": hit.statement,
+                    "scope": hit.scope,
+                    "boundary": hit.boundary,
+                    "confidence": hit.confidence,
+                    "provenance": {"evidence": hit.evidence, "rank": hit.rank, "relevance_reason": hit.relevance_reason},
+                })
+        gaps = list(getattr(package, "gaps", []))
+        if getattr(package, "status", "INSUFFICIENT_BKP") == "OK" and not selected:
+            gaps.append("模型/Skill 未选择可用 BKP；Context 不注入未审查候选。")
+        elif selected_id_set - {hit["knowledge_id"] for hit in selected}:
+            gaps.append("部分模型/Skill 选择的 BKP id 不在本次有效召回中。")
+        retrieval_info = {
+            "query": query,
+            "status": getattr(package, "status", "INSUFFICIENT_BKP"),
+            "gaps": gaps,
+            "candidate_count": getattr(package, "candidate_count", 0),
+        }
+        selection_reason = ("模型/Skill 明示选择的少量 BKP；runtime 只校验 provenance 和数量上限。"
+                             if selected else "没有可注入的模型/Skill 选择；保留检索 gap 而非按排名硬凑。")
+    status = "CURRENT" if selected or not knowledge_needs else "CURRENT_WITH_BKP_GAP"
     return {
         "artifact_type": "context_package",
         "context_id": context_id,
         "project_id": brief["project_id"],
         "status": status,
-        "built_from": {"brief_id": brief["brief_id"], **brief["source_versions"]},
+        "built_from": {"brief_id": brief["brief_id"], "brief_rev": brief["brief_rev"], **brief["source_versions"]},
         "selected_intent": {"work_direction": intent["work_direction"], "reader_promise": intent["reader_promise"]},
         "selected_story_state": {
             "canon_facts": state.get("canon_facts", []),
@@ -246,14 +273,8 @@ def build_context(
             "approved_plan": state.get("approved_plan", []),
         },
         "selected_bkp_hits": selected,
-        "selection_reason": ("模型/Skill 明示选择的少量 BKP；runtime 只校验 provenance 和数量上限。"
-                             if selected else "没有可注入的模型/Skill 选择；保留检索 gap 而非按排名硬凑。"),
-        "retrieval": {
-            "query": query,
-            "status": getattr(package, "status", "INSUFFICIENT_BKP"),
-            "gaps": gaps,
-            "candidate_count": getattr(package, "candidate_count", 0),
-        },
+        "selection_reason": selection_reason,
+        "retrieval": retrieval_info,
         "size_summary": {"selected_bkp_hits": len(selected), "catalog_not_injected": True},
         "created_at": utc_now(),
     }
@@ -269,6 +290,10 @@ def create_design_candidate(
     """Persist a model proposal as noncanonical material only."""
     if context.get("status") == "STALE":
         raise ContractError("STALE Context 不得生成 StoryDesign candidate")
+    _require_same_project(brief, context)
+    if context.get("built_from", {}).get("brief_id") != brief["brief_id"] \
+            or context.get("built_from", {}).get("brief_rev") != brief["brief_rev"]:
+        raise ContractError("Context 的 built_from 与 Brief 不一致")
     return {
         "artifact_type": "story_design_candidate",
         "candidate_id": candidate_id,
@@ -302,6 +327,24 @@ def create_decision_record(
     confirmed = bool(author_confirmation_ref and author_confirmation_ref.startswith(("author:", "chat:")))
     if author_action in {"choose", "modify"} and not confirmed:
         raise ContractError("创作性选择必须有真实作者 confirmation_ref")
+    _require_same_project(brief, context, candidate)
+    if candidate.get("brief_ref") != f"{brief['brief_id']}@{brief['brief_rev']}":
+        raise ContractError("Candidate 的 brief_ref 与 Brief 不一致")
+    if candidate.get("context_ref") != context["context_id"]:
+        raise ContractError("Candidate 的 context_ref 与 Context 不一致")
+    if context.get("built_from", {}).get("brief_id") != brief["brief_id"] \
+            or context.get("built_from", {}).get("brief_rev") != brief["brief_rev"]:
+        raise ContractError("Context 的 built_from 与 Brief 不一致")
+    if author_action in {"choose", "modify"}:
+        authority = (f"simulation_author_decision:{decision_id}" if simulation and confirmed
+                     else f"author_decision:{decision_id}")
+        status = ("simulated_confirmed_for_test" if simulation and confirmed
+                  else "confirmed_for_plan_only")
+    else:
+        # reject_all / defer never gain planning writeback authority, even
+        # with a real author confirmation.
+        authority = None
+        status = "unconfirmed" if not confirmed else f"{author_action}_no_writeback"
     return {
         "artifact_type": "decision_record",
         "decision_id": decision_id,
@@ -311,11 +354,9 @@ def create_decision_record(
         "candidate_ref": candidate["candidate_id"],
         "author_action": author_action,
         "confirmation_ref": author_confirmation_ref,
-        "authority": (f"simulation_author_decision:{decision_id}" if simulation and confirmed
-                      else f"author_decision:{decision_id}" if confirmed else None),
+        "authority": authority,
         "final_decision": final_decision or {},
-        "status": ("simulated_confirmed_for_test" if simulation and confirmed
-                   else "confirmed_for_plan_only" if confirmed else "unconfirmed"),
+        "status": status,
         "simulation_only": simulation,
         "created_at": utc_now(),
     }
@@ -323,6 +364,9 @@ def create_decision_record(
 
 def make_planning_diff(*, diff_id: str, state: dict[str, Any], decision: dict[str, Any], plan: dict[str, Any], allow_simulation: bool = False) -> dict[str, Any]:
     validate_story_state(state)
+    _require_same_project(decision, state)
+    if decision.get("author_action") not in {"choose", "modify"}:
+        raise ContractError("只有 choose/modify 的确认 Decision 才能生成 planning Diff")
     simulated = decision.get("status") == "simulated_confirmed_for_test"
     if simulated and not allow_simulation:
         raise ContractError("simulation Decision 不得在生产路径生成 Diff")
@@ -346,6 +390,10 @@ def make_planning_diff(*, diff_id: str, state: dict[str, Any], decision: dict[st
 def apply_diff(state: dict[str, Any], diff: dict[str, Any], decision: dict[str, Any] | None = None, *, allow_simulation: bool = False) -> dict[str, Any]:
     """Apply only permitted deterministic mutations, returning a new state."""
     validate_story_state(state)
+    if diff.get("project_id") != state["project_id"]:
+        raise ContractError("Diff 与 Story State project_id 不一致")
+    if decision is not None and decision.get("project_id") != state["project_id"]:
+        raise ContractError("Decision 与 Story State project_id 不一致")
     if diff.get("base_state_rev") != state["state_rev"]:
         raise ContractError("旧 base_state_rev Diff 不得覆盖当前 Story State")
     writeback_class = diff.get("writeback_class")
