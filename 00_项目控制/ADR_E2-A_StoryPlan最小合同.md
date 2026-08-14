@@ -1,6 +1,6 @@
 # ADR E2-A｜StoryPlan 最小合同
 
-- 状态：技术候选，feature branch 已 push，ChatGPT 首轮审查的两个权限 blocker 已窄修（planning source 真实可验证 + Decision 绑定当前 Plan Brief），等待复审；未 merge。
+- 状态：技术候选，feature branch 已 push，ChatGPT 两轮审查问题均已窄修（planning source 真实可验证、Decision 绑定当前 Plan Brief、planning id 唯一性、intent_rev+state_rev 双 stale guard），等待最终审查；未 merge。
 - 范围：Phase E 的 E2-A；不实现 Writer、StoryReview、完整 Context Compiler、完整 State Writeback、UI、DB、Graph、全局 Router 或固定多 Agent 平台。
 - 实现位置：`05_Skills与自动化/01_Skills/StoryPlan/`。
 - 上游核查记录：`06_工作区/E2A_StoryPlan上游核查与研究记录_2026-08-15.md`。
@@ -31,8 +31,8 @@ Plan Candidate 一律 `proposal_noncanonical`；确认后只能进入 `approved_
 
 - **Plan Brief**（`artifact_type=plan_brief`）：project、source revisions、`planning_target {target_id, description, scope_kind, scope}`、`author_planning_question`（作者原话）、`planning_sources`（E2-A v0 唯一正式可验证来源是当前 Story State `approved_plan` 中真实存在、`occurred` 非 true、authority 为 `author_decision:` / `manual_import:` 的条目；未知 kind 与 proposal/context/bkp/ai_candidate 一律拒绝）、inherited_obligations、hard_constraints、`deliberate_open_space`、assumptions、knowledge_needs（允许空）。无已验证规划来源时直接拒绝编译——StoryPlan 不假装已有作者方向。直接 Decision Record（design_decision / author_decision ref）作为 planning source，待未来有正式 Decision resolver/store 后再开放；当前确定性来源使用 Story State 中已落地的 approved_plan。这是收紧合同，不是能力退化。
 - **Plan Candidate**（`artifact_type=story_plan_candidate`）：`proposal_noncanonical`；模型规划内容作为 opaque `content`，runtime 不解析为 Canon facts；保留 brief_ref（含 rev）、context_ref、source_versions、planning_target。
-- **Planning item 最小接口**：append 进 `approved_plan` 的条目要求 `id`、`description`、`target_ref`；允许 `supersedes` / `built_from` ref 字段；`occurred` 强制 false。
-- **Decision → planning writeback 绑定**：`make_plan_diff` 除复用 E1 choose/modify + project 检查外，还要求 Decision 的 `brief_ref` 精确等于当前 Plan Brief 的 `brief_id@brief_rev`、Brief 与 State 同 project、且 Brief 的 `source_versions.state_rev` 等于当前 `state_rev`（旧 Brief 不得在新 State 上写回）。
+- **Planning item 最小接口**：append 进 `approved_plan` 的条目要求 `id`、`description`、`target_ref`；允许 `supersedes` / `built_from` ref 字段；`occurred` 强制 false。planning id 在当前 approved_plan namespace 内必须唯一（批次内不重复、不与现有 id 重名；supersedes 引用旧条目也必须使用新 id，不存在同 id 覆盖）。
+- **Decision → planning writeback 绑定**：`make_plan_diff` 除复用 E1 choose/modify + project 检查外，还要求 Decision 的 `brief_ref` 精确等于当前 Plan Brief 的 `brief_id@brief_rev`、Brief / State / Intent 同 project、且 Brief 的 `source_versions` 同时等于当前 `intent_rev` 与 `state_rev`（旧 Intent 或旧 State 上的 Brief 均不得写回）。
 
 ## 6. 哪些 Schema 故意未确定
 

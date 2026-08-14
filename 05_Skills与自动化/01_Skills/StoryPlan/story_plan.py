@@ -97,7 +97,15 @@ def compile_plan_brief(
         raise ContractError("planning_target 必须有 target_id 与 description")
     if not planning_sources:
         raise ContractError("StoryPlan 需要至少一个已确认规划来源；无已确认 StoryDesign/方向时不得假装已有作者方向")
-    plans_by_id = {plan.get("id"): plan for plan in state["approved_plan"]}
+    # 防御性检查：当前 State 的 approved_plan id 必须唯一，否则 ref 解析会歧义。
+    plans_by_id: dict[str, dict[str, Any]] = {}
+    for plan in state["approved_plan"]:
+        pid = plan.get("id")
+        if not pid:
+            raise ContractError("Story State approved_plan 条目缺少 id")
+        if pid in plans_by_id:
+            raise ContractError(f"Story State approved_plan 存在重复 id：{pid}")
+        plans_by_id[pid] = plan
     verified_sources = []
     for source in planning_sources:
         if not isinstance(source, dict) or not source.get("kind") or not source.get("ref"):
@@ -232,6 +240,7 @@ def make_plan_diff(
     *,
     diff_id: str,
     state: dict[str, Any],
+    intent: dict[str, Any],
     decision: dict[str, Any],
     brief: dict[str, Any],
     plans: list[dict[str, Any]],
@@ -241,18 +250,35 @@ def make_plan_diff(
     choose/modify only, same project) after normalizing planning items.
 
     Extra deterministic guards: the Decision must really target the current
-    Plan Brief (brief_ref), the Brief must belong to the current project,
-    and a Brief compiled against an older state_rev may not write back on
-    the new State (stale Brief rejection).
+    Plan Brief (brief_ref); Brief, Intent and State must belong to the same
+    project; a Brief compiled against an older intent_rev OR state_rev may
+    not write back on current authoritative sources (stale Brief rejection);
+    planning ids must be non-empty, unique within the batch and unique
+    within the existing approved_plan namespace (supersedes always uses a
+    new id; there is no replacement/supersede execution semantics in E2-A).
     """
     if not plans:
         raise ContractError("StoryPlan Diff 需要至少一条 planning 条目")
-    if brief.get("project_id") != state.get("project_id"):
-        raise ContractError("Plan Brief 与 Story State project_id 不一致")
-    if brief.get("source_versions", {}).get("state_rev") != state.get("state_rev"):
+    validate_author_intent(intent)
+    projects = {brief.get("project_id"), state.get("project_id"), intent.get("project_id")}
+    if len(projects) != 1 or None in projects:
+        raise ContractError("Plan Brief、Story State 与 Author Intent 必须属于同一 project_id")
+    source_versions = brief.get("source_versions", {})
+    if source_versions.get("intent_rev") != intent.get("intent_rev"):
+        raise ContractError("旧 intent_rev 的 Plan Brief 不得在当前 Intent 上生成 Planning Diff")
+    if source_versions.get("state_rev") != state.get("state_rev"):
         raise ContractError("旧 state_rev 的 Plan Brief 不得在当前 State 上生成 Planning Diff")
     if decision.get("brief_ref") != f"{brief['brief_id']}@{brief['brief_rev']}":
         raise ContractError("Decision 不是针对当前 Plan Brief 做出的，不得写回该 Brief 的 planning")
+    plan_ids = [plan.get("id") for plan in plans]
+    if any(not pid for pid in plan_ids):
+        raise ContractError("planning 条目必须包含非空 plan id")
+    if len(set(plan_ids)) != len(plan_ids):
+        raise ContractError("本批 planning 条目 id 不得重复")
+    existing_ids = {plan.get("id") for plan in state["approved_plan"]}
+    collisions = sorted(set(plan_ids) & existing_ids)
+    if collisions:
+        raise ContractError(f"planning id 与现有 approved_plan id 重名：{collisions}；supersedes 也必须使用新 id")
     target_ref = brief["planning_target"]["target_id"]
     normalized = [normalize_planning_item(plan, target_ref=target_ref) for plan in plans]
     diff = make_planning_diff(

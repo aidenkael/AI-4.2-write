@@ -155,7 +155,7 @@ class StoryPlanContractTest(unittest.TestCase):
             )
             with self.assertRaises(ContractError, msg=action):
                 make_plan_diff(
-                    diff_id=f"plan-diff-{action}", state=STATE, decision=decision, brief=self.brief(),
+                    diff_id=f"plan-diff-{action}", state=STATE, decision=decision, brief=self.brief(), intent=INTENT,
                     plans=[{"id": "plan.p1", "description": "不应写入"}], allow_simulation=True,
                 )
 
@@ -163,7 +163,7 @@ class StoryPlanContractTest(unittest.TestCase):
     def test_accepted_planning_forces_occurred_false(self):
         decision = self.confirmed_decision()
         diff = make_plan_diff(
-            diff_id="plan-diff-1", state=STATE, decision=decision, brief=self.brief(),
+            diff_id="plan-diff-1", state=STATE, intent=INTENT, decision=decision, brief=self.brief(),
             plans=[
                 {"id": "plan.p1", "description": "前半程三次共同行动", "occurred": True},
                 {"id": "plan.p2", "description": "第三次行动后信息互相咬合", "supersedes": [], "built_from": ["plan.design.engine"]},
@@ -198,7 +198,7 @@ class StoryPlanContractTest(unittest.TestCase):
         decision = self.confirmed_decision()
         with self.assertRaises(ContractError):
             make_plan_diff(
-                diff_id="plan-diff-x", state=other_state, decision=decision, brief=self.brief(),
+                diff_id="plan-diff-x", state=other_state, intent=INTENT, decision=decision, brief=self.brief(),
                 plans=[{"id": "plan.px", "description": "跨 project"}], allow_simulation=True,
             )
 
@@ -207,7 +207,7 @@ class StoryPlanContractTest(unittest.TestCase):
         decision = self.confirmed_decision()
         with self.assertRaises(ContractError):
             make_plan_diff(
-                diff_id="plan-diff-m", state=STATE, decision=decision, brief=self.brief(),
+                diff_id="plan-diff-m", state=STATE, intent=INTENT, decision=decision, brief=self.brief(),
                 plans=[{"id": "plan.pm", "description": "错位", "target_ref": "target.other"}], allow_simulation=True,
             )
 
@@ -222,7 +222,7 @@ class StoryPlanContractTest(unittest.TestCase):
         decision = self.confirmed_decision()  # bound to plan-brief-1
         with self.assertRaises(ContractError):
             make_plan_diff(
-                diff_id="plan-diff-b", state=STATE, decision=decision, brief=other_brief,
+                diff_id="plan-diff-b", state=STATE, intent=INTENT, decision=decision, brief=other_brief,
                 plans=[{"id": "plan.pb", "description": "错位 Brief"}], allow_simulation=True,
             )
 
@@ -231,7 +231,7 @@ class StoryPlanContractTest(unittest.TestCase):
         tampered = dict(self.brief(), project_id="other-project")
         with self.assertRaises(ContractError):
             make_plan_diff(
-                diff_id="plan-diff-t", state=STATE, decision=decision, brief=tampered,
+                diff_id="plan-diff-t", state=STATE, intent=INTENT, decision=decision, brief=tampered,
                 plans=[{"id": "plan.pt", "description": "篡改 project"}], allow_simulation=True,
             )
 
@@ -240,9 +240,88 @@ class StoryPlanContractTest(unittest.TestCase):
         new_state = dict(STATE, state_rev=2)
         with self.assertRaises(ContractError):
             make_plan_diff(
-                diff_id="plan-diff-s", state=new_state, decision=decision, brief=self.brief(),
+                diff_id="plan-diff-s", state=new_state, intent=INTENT, decision=decision, brief=self.brief(),
                 plans=[{"id": "plan.ps", "description": "旧 Brief"}], allow_simulation=True,
             )
+
+    # 8d. intent_rev stale：方向权威变化后旧 Brief 不得写回（即使 state_rev 未变）
+    def test_stale_intent_brief_cannot_write_back(self):
+        decision = self.confirmed_decision()
+        new_intent = dict(INTENT, intent_rev=2)  # state 仍是 rev=1，必须单独拒绝
+        with self.assertRaises(ContractError):
+            make_plan_diff(
+                diff_id="plan-diff-i", state=STATE, intent=new_intent, decision=decision, brief=self.brief(),
+                plans=[{"id": "plan.pi", "description": "旧 Intent Brief"}], allow_simulation=True,
+            )
+
+    # 8e. cross-project Intent 被拒绝
+    def test_cross_project_intent_is_rejected(self):
+        decision = self.confirmed_decision()
+        other_intent = dict(INTENT, project_id="other-project")
+        with self.assertRaises(ContractError):
+            make_plan_diff(
+                diff_id="plan-diff-ci", state=STATE, intent=other_intent, decision=decision, brief=self.brief(),
+                plans=[{"id": "plan.pci", "description": "跨 project intent"}], allow_simulation=True,
+            )
+
+    # 8f. planning id 稳定性：批次内唯一、不与现有 approved_plan id 重名
+    def test_duplicate_plan_ids_in_batch_rejected(self):
+        decision = self.confirmed_decision()
+        with self.assertRaises(ContractError):
+            make_plan_diff(
+                diff_id="plan-diff-d", state=STATE, intent=INTENT, decision=decision, brief=self.brief(),
+                plans=[
+                    {"id": "plan.dup", "description": "第一条"},
+                    {"id": "plan.dup", "description": "第二条"},
+                ],
+                allow_simulation=True,
+            )
+
+    def test_plan_id_colliding_with_existing_approved_plan_rejected(self):
+        decision = self.confirmed_decision()
+        with self.assertRaises(ContractError):
+            make_plan_diff(
+                diff_id="plan-diff-c", state=STATE, intent=INTENT, decision=decision, brief=self.brief(),
+                plans=[{"id": "plan.design.engine", "description": "重名覆盖"}], allow_simulation=True,
+            )
+
+    def test_supersede_requires_new_id_and_keeps_old_entry(self):
+        # E2-A 无 replacement 执行语义：supersedes 引用旧 plan 但必须用新 id。
+        decision = self.confirmed_decision()
+        diff = make_plan_diff(
+            diff_id="plan-diff-su", state=STATE, intent=INTENT, decision=decision, brief=self.brief(),
+            plans=[{"id": "plan.p3", "description": "重做前半程", "supersedes": ["plan.design.engine"]}],
+            allow_simulation=True,
+        )
+        updated = apply_diff(STATE, diff, decision, allow_simulation=True)
+        appended = updated["approved_plan"][len(STATE["approved_plan"]):]
+        self.assertEqual([plan["id"] for plan in appended], ["plan.p3"])
+        self.assertEqual(appended[0]["supersedes"], ["plan.design.engine"])
+        self.assertTrue(any(p["id"] == "plan.design.engine" for p in updated["approved_plan"]))
+
+    def test_duplicate_approved_plan_ids_in_state_rejected(self):
+        polluted = dict(STATE, approved_plan=STATE["approved_plan"] + [
+            {"id": "plan.design.engine", "description": "重复条目", "target_ref": "x",
+             "authority": "author_decision:sim-design-002", "occurred": False},
+        ])
+        with self.assertRaises(ContractError):
+            compile_plan_brief(
+                project_id="plan-project", brief_id="plan-brief-dup", author_planning_question="规划",
+                planning_target=TARGET, planning_sources=CONFIRMED_SOURCES, intent=INTENT, state=polluted,
+            )
+
+    def test_multiple_distinct_plan_ids_still_pass(self):
+        # 正常多条不同 id 路径继续通过（批次唯一 + 不与 state 重名）。
+        decision = self.confirmed_decision()
+        diff = make_plan_diff(
+            diff_id="plan-diff-ok", state=STATE, intent=INTENT, decision=decision, brief=self.brief(),
+            plans=[
+                {"id": "plan.q1", "description": "第一条"},
+                {"id": "plan.q2", "description": "第二条"},
+            ],
+            allow_simulation=True,
+        )
+        self.assertEqual([c["value"]["id"] for c in diff["changes"]], ["plan.q1", "plan.q2"])
 
     # 9 + 10. knowledge_needs 空时 Retrieval 0 调用；0 BKP 正常
     def test_no_knowledge_need_skips_retrieval_and_zero_bkp_is_legal(self):

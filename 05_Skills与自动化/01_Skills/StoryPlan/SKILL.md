@@ -30,6 +30,7 @@ reader promise / reader expectation、人物欲望与选择、关系变化、冲
 4. 不默认生成全书章纲、卷名、章数、高潮位点等固定结构；作者可见内容优先保留人物动机、关系变化和具体后果。
 5. 专业 stance（character / reader / structure / continuity / research）只在具体缺陷触发时使用，不默认全开，不固化为多 Agent 流水线。
 6. 把所有未来安排保留在 proposal，直到作者 Decision；局部重规划通过新 Decision + 携带 supersedes 的 planning 条目表达，不全书重算。注意：当前 runtime 只保存 supersedes/built_from 元数据作为未来接口，不解释 supersedes，也不会自动使旧 planning 失效。
+7. planning id 在当前 approved_plan namespace 内必须唯一（批次内不重复、不与现有 id 重名；supersedes 也必须使用新 id）；Brief writeback 同时受 intent_rev 与 state_rev 双 stale guard 约束。
 
 ## CLI
 
