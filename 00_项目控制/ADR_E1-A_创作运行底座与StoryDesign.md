@@ -1,6 +1,6 @@
 # ADR E1-A｜创作运行底座正式化与 StoryDesign 最小骨架
 
-- 状态：已实现，等待真实作者 A/B 验证。
+- 状态：已实现；E1-B / E1-C / E1-D 真实实验已完成，使用策略已冻结为 `BKP_POSTHOC_SPARSE_PROBLEM_DRIVEN`（见本文末节）。
 - 范围：Phase E 的 E1-A；不实现 Writer、正文主链、Review、UI、数据库、全局 Router 或固定多 Agent 平台。
 - 实现位置：`05_Skills与自动化/01_Skills/StoryDesign/`。
 
@@ -56,3 +56,17 @@ StoryDesign 默认由一个强模型承担创作判断；人物、结构、读�
 ## 真实 A/B 的下一步
 
 选择两个明确不同的作者自然语言种子（一个信息充分、一个故意模糊），让同一模型产生 Brief/Context/candidate。作者只评价候选是否有助于继续设计，而不评价模板完整度。比较：assumption 是否可见、BKP 是否真的相关、模型能否保留未知项、作者 choose/modify 后 planning 是否准确且 Canon 未变化。任何真实缺口再窄改 E1-A；不自动进入 StoryPlan 或 Writer。
+
+## E1-B / E1-C / E1-D 验证结果与冻结策略（2026-08-15）
+
+三轮真实实验均已执行完毕，正式结论为 **`BKP_POSTHOC_SPARSE_PROBLEM_DRIVEN`**；完整证据入口为 `06_工作区/E1_StoryDesign冻结结论_2026-08-15.md`。
+
+- **E1-B（知识前置 A/B）**：前置较多知识会提高结构纪律，但可能损失人物自然度和生活质感；三组 B 输出趋同于固定策划语法，且真正专门的问题均应记为 `NO_USEFUL_BKP`。
+- **E1-C（稀疏后置对照）**：“自由初稿 → 窄诊断 → 后置修订”优于知识前置策略，但尚不能把改善全部归因于 BKP；检索前的自由初稿已拥有绝大多数人物生命感与生活细节。
+- **E1-D（独立边际价值消融）**：严格消融中 K016 对特定 W1 提供小幅、独立、可追溯增益；W2 保持 `NO_USEFUL_BKP`。
+
+冻结边界：BKP 并非每次必要；0 张是正常路径；BKP 独立增益目前只得到窄证据支持；不得外推为“知识库越多越好”。
+
+冻结的 StoryDesign 使用策略：强模型优先自由完成第一轮原创设计；不默认在第一轮设计前注入 BKP；第一轮之后先诊断真实薄弱点，只有存在明确知识缺口时才调用 KnowledgeRetrieve；BKP 默认允许 0 张，常规目标 0–1 张，只有不同卡分别解决不同明确缺口时才允许更多；KnowledgeRetrieve 返回 OK ≠ 必须使用知识卡，相关但没有独立增益的卡必须允许拒绝；BKP 主要用于 challenge、counterexample、gap filling、targeted deepening、boundary checking，不负责搭建第一版故事骨架；不默认生成分卷、多路线、风险清单、分层揭示、多时钟等固定策划形状；专业 stance / Agent 只在具体缺陷触发时使用；`NO_USEFUL_BKP` / `INSUFFICIENT_BKP` 是正常结果；作者可见结果优先保留人物、场景、关系和具体生活质感，trace/provenance 完整保存但不强迫作者阅读。
+
+代码影响：无。E1-A runtime 的 0 BKP / gap 记录 / `proposal_noncanonical` / Canon 隔离路径已支持上述策略，本冻结只同步 Skill 使用策略与文档，不新增流程硬编码，也不新增上游（上游 provenance 保持 E1-A 已记录的五项 pinned commit）。

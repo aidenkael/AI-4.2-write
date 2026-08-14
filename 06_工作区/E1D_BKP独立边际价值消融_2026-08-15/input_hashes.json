@@ -1,0 +1,42 @@
+{
+  "algorithm": "SHA-256",
+  "source_root": "../E1C_StoryDesign_稀疏后置BKP_验证_2026-08-15",
+  "inputs": [
+    {
+      "name": "seed",
+      "source_path": "seed.md",
+      "snapshot_path": "fixed_inputs/seed.md",
+      "sha256": "530da5b675f892eeb93cd4611a303c308eaf84ac787edbdffab9979482e490f9",
+      "bytes": 977
+    },
+    {
+      "name": "initial_brief",
+      "source_path": "b-lite/round-1/initial_brief.json",
+      "snapshot_path": "fixed_inputs/initial_brief.json",
+      "sha256": "a5cacde1b7aae5a4a05e772cbf00bfca87431eaff4ac87b0c3f41ea52d60bf1d",
+      "bytes": 4377
+    },
+    {
+      "name": "free_design",
+      "source_path": "b-lite/round-1/free_design.md",
+      "snapshot_path": "fixed_inputs/free_design.md",
+      "sha256": "74d717c71ef464ebb4e5b83aab3bdbf0fdb8b440925d50530162ff413f9bd307",
+      "bytes": 7642
+    },
+    {
+      "name": "weakness_diagnosis",
+      "source_path": "b-lite/round-2/weakness_diagnosis.json",
+      "snapshot_path": "fixed_inputs/weakness_diagnosis.json",
+      "sha256": "acb4accc595ad2e144ebbd8866ea135df898785e879bdbc48d1165e681e64077",
+      "bytes": 4410
+    }
+  ],
+  "c1_only_extra_input": {
+    "name": "K016",
+    "snapshot_path": "fixed_inputs/k016.json",
+    "sha256": "f9b7ec3fbd8e0312112ee85fb9469e3804f9f1230194a70e1840f96afe006d97",
+    "bytes": 2014
+  },
+  "require_source_snapshot_hash_equality": true,
+  "c0_c1_must_use_same_snapshots": true
+}

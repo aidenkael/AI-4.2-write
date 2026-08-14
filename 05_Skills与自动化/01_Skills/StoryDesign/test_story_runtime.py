@@ -142,6 +142,29 @@ class StoryRuntimeTest(unittest.TestCase):
         self.assertEqual(context["status"], "CURRENT_WITH_BKP_GAP")
         self.assertEqual(context["selected_bkp_hits"], [])
 
+    def test_zero_bkp_with_all_candidates_rejected_is_legal(self):
+        # Frozen E1 policy: retrieval OK ≠ must use; 0 selected / NO_USEFUL_BKP is a normal result.
+        context = build_context(
+            context_id="context-zero", brief=self.brief(), intent=INTENT, state=STATE,
+            retrieval=fake_retrieve_ok, selected_knowledge_ids=[],
+        )
+        self.assertEqual(context["status"], "CURRENT_WITH_BKP_GAP")
+        self.assertEqual(context["selected_bkp_hits"], [])
+        self.assertTrue(context["retrieval"]["gaps"])
+        candidate = create_design_candidate(
+            candidate_id="candidate-zero", brief=self.brief(), context=context, model_output={"proposal": "候选"},
+        )
+        self.assertEqual(candidate["status"], "proposal_noncanonical")
+
+    def test_empty_knowledge_needs_is_legal(self):
+        brief = self.brief({"knowledge_needs": [], "selected_bkp_ids": []})
+        self.assertEqual(brief["knowledge_needs"], [])
+
+    def test_proposal_cannot_pollute_canon(self):
+        polluted = dict(STATE, canon_facts=[{"id": "bad", "fact": "坏", "authority": "proposal:design-001"}])
+        with self.assertRaises(ContractError):
+            validate_story_state(polluted)
+
     def test_retrieval_rank_is_not_a_semantic_selection(self):
         context = build_context(context_id="context-rank-only", brief=self.brief(), intent=INTENT, state=STATE, retrieval=fake_retrieve_ok)
         self.assertEqual(context["selected_bkp_hits"], [])
