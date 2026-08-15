@@ -1,0 +1,278 @@
+{
+  "summary": {
+    "task": "E2-C-A local replan sandbox",
+    "SIMULATED_DECISION_ONLY": true,
+    "CANON_POLLUTION": "ZERO",
+    "LOCAL_REPLAN_ONLY_TARGET_CHANGED": true,
+    "STALE_REPLAN_BRIEF_REJECTED": true,
+    "RECOMPILED_CURRENT_BRIEF_PASS": true,
+    "checks_total": 44,
+    "checks_failed": 0,
+    "final_activity": {
+      "active": [
+        "plan.book.direction",
+        "plan.suspense.mid",
+        "plan.suspense.mid.extra",
+        "plan.rel.mid.v5"
+      ],
+      "superseded": [
+        "plan.rel.mid.v1",
+        "plan.rel.mid.v2",
+        "plan.rel.mid.v3",
+        "plan.rel.mid.v4a",
+        "plan.rel.mid.v4b"
+      ],
+      "superseded_by": {
+        "plan.rel.mid.v1": [
+          "plan.rel.mid.v2"
+        ],
+        "plan.rel.mid.v2": [
+          "plan.rel.mid.v3"
+        ],
+        "plan.rel.mid.v3": [
+          "plan.rel.mid.v4a",
+          "plan.rel.mid.v4b"
+        ],
+        "plan.rel.mid.v4a": [
+          "plan.rel.mid.v5"
+        ],
+        "plan.rel.mid.v4b": [
+          "plan.rel.mid.v5"
+        ]
+      }
+    },
+    "approved_plan_ids_final": [
+      "plan.book.direction",
+      "plan.rel.mid.v1",
+      "plan.suspense.mid",
+      "plan.rel.mid.v2",
+      "plan.rel.mid.v3",
+      "plan.rel.mid.v4a",
+      "plan.rel.mid.v4b",
+      "plan.suspense.mid.extra",
+      "plan.rel.mid.v5"
+    ]
+  },
+  "checks": [
+    {
+      "check": "plan-brief-rel-a: 0 BKP 路径",
+      "pass": true,
+      "detail": "SKIPPED_NO_KNOWLEDGE_NEED"
+    },
+    {
+      "check": "cand-rel-v2: noncanonical",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "decision-rel-v2: simulated modify",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "diff base_state_rev==1",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "diff writeback append-only",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "v1 仍原样保留（append-only history）",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "v1 条目未被改写",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "v2 已新增",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "无持久 status/active 字段",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "v1 = superseded/inactive",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "v1.superseded_by == [v2]",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "v2 = active",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "ancestor 保持 active",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "sibling 保持 active",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "LOCAL_REPLAN_ONLY_TARGET_CHANGED",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "state_rev 1->2",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "CANON_POLLUTION = ZERO",
+      "pass": true,
+      "detail": "canon_facts/character/relationship/occurred/open_threads deep-equal"
+    },
+    {
+      "check": "last_authority_source = simulated decision",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "plan-brief-reject: 0 BKP 路径",
+      "pass": true,
+      "detail": "SKIPPED_NO_KNOWLEDGE_NEED"
+    },
+    {
+      "check": "cand-reject: noncanonical",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "decision-reject: simulated modify",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "cross-target supersede 拒绝",
+      "pass": true,
+      "detail": "ContractError: planning plan.rel.mid.v3x 不得跨 target supersede plan.suspense.mid：被替换条目 target_ref=target.suspense.mid，当前 Brief target=target.rel.mid"
+    },
+    {
+      "check": "missing supersede ref 拒绝",
+      "pass": true,
+      "detail": "ContractError: planning plan.rel.mid.v3y 的 supersedes ref 不存在于当前 approved_plan：plan.not.exists"
+    },
+    {
+      "check": "dead base: v3 supersedes v1 拒绝（v1 已 inactive）",
+      "pass": true,
+      "detail": "ContractError: planning plan.rel.mid.v3z 不得 supersede 已失效条目 plan.rel.mid.v1（当前被 ['plan.rel.mid.v2'] 替换）；应 supersede 当前 active 的最新版本"
+    },
+    {
+      "check": "plan-brief-rel-c: 0 BKP 路径",
+      "pass": true,
+      "detail": "SKIPPED_NO_KNOWLEDGE_NEED"
+    },
+    {
+      "check": "cand-rel-v3: noncanonical",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "decision-rel-v3: simulated modify",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "链 v1→v2→v3：v1/v2 inactive、v3 active",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "plan-brief-split: 0 BKP 路径",
+      "pass": true,
+      "detail": "SKIPPED_NO_KNOWLEDGE_NEED"
+    },
+    {
+      "check": "cand-split: noncanonical",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "decision-split: simulated modify",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "1→N replacement 成立",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "plan-brief-stale-a: 0 BKP 路径",
+      "pass": true,
+      "detail": "SKIPPED_NO_KNOWLEDGE_NEED"
+    },
+    {
+      "check": "cand-stale-a: noncanonical",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "decision-stale-a: simulated modify",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "Brief A source_versions.state_rev==4",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "无关 append 推进 state_rev 4->5",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "STALE_REPLAN_BRIEF_REJECTED",
+      "pass": true,
+      "detail": "ContractError: 旧 state_rev 的 Plan Brief 不得在当前 State 上生成 Planning Diff"
+    },
+    {
+      "check": "plan-brief-rel-b: 0 BKP 路径",
+      "pass": true,
+      "detail": "SKIPPED_NO_KNOWLEDGE_NEED"
+    },
+    {
+      "check": "cand-rel-v5: noncanonical",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "decision-rel-v5: simulated modify",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "Brief B source_versions.state_rev==5",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "RECOMPILED_CURRENT_BRIEF_PASS",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "check": "全程 Canon 保持 ZERO pollution",
+      "pass": true,
+      "detail": ""
+    }
+  ]
+}

@@ -5,6 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from story_plan import (
+    CANON_AREAS,
     ContractError,
     apply_diff,
     build_plan_context,
@@ -15,6 +16,7 @@ from story_plan import (
     make_plan_diff,
     mark_stale_if_needed,
     normalize_planning_item,
+    resolve_plan_activity,
     run_story_plan,
     validate_story_state,
 )
@@ -286,18 +288,22 @@ class StoryPlanContractTest(unittest.TestCase):
             )
 
     def test_supersede_requires_new_id_and_keeps_old_entry(self):
-        # E2-A 无 replacement 执行语义：supersedes 引用旧 plan 但必须用新 id。
+        # E2-C-A：supersedes 必须用新 id 且同 target；旧条目原样保留，仅通过 activity 投影标记失效。
+        local_state = dict(STATE, approved_plan=STATE["approved_plan"] + [
+            {"id": "plan.rel.v1", "description": "关系中段 v1", "target_ref": "target.front-half",
+             "authority": "author_decision:sim-rel", "occurred": False},
+        ])
         decision = self.confirmed_decision()
         diff = make_plan_diff(
-            diff_id="plan-diff-su", state=STATE, intent=INTENT, decision=decision, brief=self.brief(),
-            plans=[{"id": "plan.p3", "description": "重做前半程", "supersedes": ["plan.design.engine"]}],
+            diff_id="plan-diff-su", state=local_state, intent=INTENT, decision=decision, brief=self.brief(),
+            plans=[{"id": "plan.p3", "description": "重做前半程", "supersedes": ["plan.rel.v1"]}],
             allow_simulation=True,
         )
-        updated = apply_diff(STATE, diff, decision, allow_simulation=True)
-        appended = updated["approved_plan"][len(STATE["approved_plan"]):]
+        updated = apply_diff(local_state, diff, decision, allow_simulation=True)
+        appended = updated["approved_plan"][len(local_state["approved_plan"]):]
         self.assertEqual([plan["id"] for plan in appended], ["plan.p3"])
-        self.assertEqual(appended[0]["supersedes"], ["plan.design.engine"])
-        self.assertTrue(any(p["id"] == "plan.design.engine" for p in updated["approved_plan"]))
+        self.assertEqual(appended[0]["supersedes"], ["plan.rel.v1"])
+        self.assertTrue(any(p["id"] == "plan.rel.v1" for p in updated["approved_plan"]))
 
     def test_duplicate_approved_plan_ids_in_state_rejected(self):
         polluted = dict(STATE, approved_plan=STATE["approved_plan"] + [
@@ -382,6 +388,288 @@ class StoryPlanContractTest(unittest.TestCase):
             self.assertEqual(result["candidate"]["status"], "proposal_noncanonical")
             self.assertTrue((root / "plans" / "pp.json").exists())
             self.assertTrue((root / "traces" / "trace-pp.json").exists())
+
+
+# ---------------------------------------------------------------------------
+# E2-C-A：最小局部重规划语义（append-only history + derived activity projection）
+# ---------------------------------------------------------------------------
+
+SANDBOX_STATE = {
+    "project_id": "plan-project", "state_rev": 1,
+    "canon_facts": [{"id": "canon.seed", "fact": "两人因旧案结识。", "authority": "manual_import:seed"}],
+    "character_state": [{"id": "char.lead", "name": "女主", "authority": "manual_import:seed"}],
+    "relationship_state": [{"id": "rel.seed", "description": "同盟假象", "authority": "manual_import:seed"}],
+    "occurred_events": [], "open_threads": [],
+    "approved_plan": [
+        {"id": "plan.book.direction", "description": "全书方向：先相信同盟，后发现目标互斥。",
+         "target_ref": "target.book.direction", "authority": "author_decision:sim-book", "occurred": False},
+        {"id": "plan.rel.mid.v1", "description": "关系中段 v1：隐瞒与试探。",
+         "target_ref": "target.rel.mid", "authority": "author_decision:sim-rel-1", "occurred": False},
+        {"id": "plan.suspense.mid", "description": "悬念链：旧案卷宗的去向。",
+         "target_ref": "target.suspense.mid", "authority": "author_decision:sim-suspense", "occurred": False},
+    ],
+}
+REL_TARGET = {"target_id": "target.rel.mid", "description": "关系中段局部重规划",
+              "scope_kind": "relationship", "scope": "只动关系中段，不重算全书"}
+
+
+class StoryPlanLocalReplanTest(unittest.TestCase):
+    def brief(self, state, *, brief_id="plan-brief-rel", target=None, sources=None):
+        return compile_plan_brief(
+            project_id="plan-project", brief_id=brief_id,
+            author_planning_question="把关系中段改成责任分配持续变化的推进。",
+            planning_target=target or REL_TARGET,
+            planning_sources=sources if sources is not None else [{"kind": "approved_plan", "ref": "plan.rel.mid.v1"}],
+            intent=INTENT, state=state, semantic_interpretation={},
+        )
+
+    def context(self, state, brief, *, context_id="plan-context-rel"):
+        return build_plan_context(
+            context_id=context_id, brief=brief, intent=INTENT, state=state,
+            retrieval=fake_retrieve_must_not_be_called,
+        )
+
+    def modify_decision(self, *, state, brief, context, decision_id="plan-decision-modify", action="modify"):
+        candidate = create_plan_candidate(
+            candidate_id="plan-cand-rel-v2", brief=brief, context=context,
+            model_output={"proposal": "关系中段 v2：把未解决旧债改造成当前选择成本与关系判断。"},
+        )
+        return create_decision_record(
+            decision_id=decision_id, brief=brief, context=context, candidate=candidate,
+            author_action=action, author_confirmation_ref="author:TEST_ONLY/e2c-simulated-modify",
+            final_decision={"action": action, "note": "SIMULATED_DECISION_ONLY"}, simulation=True,
+        )
+
+    def chain(self, state, *, new_id, old_id, diff_id="plan-diff-rel", brief_id="plan-brief-rel"):
+        """一次同 target 局部替换：brief -> 0-BKP context -> modify Decision -> diff -> apply。"""
+        brief = self.brief(state, brief_id=brief_id)
+        context = self.context(state, brief, context_id=f"ctx-{brief_id}")
+        decision = self.modify_decision(state=state, brief=brief, context=context, decision_id=f"decision-{brief_id}")
+        diff = make_plan_diff(
+            diff_id=diff_id, state=state, intent=INTENT, decision=decision, brief=brief,
+            plans=[{"id": new_id, "description": f"关系中段新版本 {new_id}", "supersedes": [old_id]}],
+            allow_simulation=True,
+        )
+        return apply_diff(state, diff, decision, allow_simulation=True)
+
+    def unrelated_append(self, state, *, plan_id="plan.suspense.mid.extra", brief_id="plan-brief-suspense"):
+        """一条合法但完全无关的 sibling append，用于推进 state_rev。"""
+        suspense_target = {"target_id": "target.suspense.mid", "description": "悬念链补充",
+                           "scope_kind": "suspense", "scope": "只动悬念链"}
+        brief = compile_plan_brief(
+            project_id="plan-project", brief_id=brief_id,
+            author_planning_question="给悬念链补一条推进。",
+            planning_target=suspense_target,
+            planning_sources=[{"kind": "approved_plan", "ref": "plan.suspense.mid"}],
+            intent=INTENT, state=state,
+        )
+        context = build_plan_context(
+            context_id=f"ctx-{brief_id}", brief=brief, intent=INTENT, state=state,
+            retrieval=fake_retrieve_must_not_be_called,
+        )
+        decision = self.modify_decision(state=state, brief=brief, context=context, decision_id=f"decision-{brief_id}", action="choose")
+        diff = make_plan_diff(
+            diff_id=f"diff-{brief_id}", state=state, intent=INTENT, decision=decision, brief=brief,
+            plans=[{"id": plan_id, "description": "悬念链的无关补充条目。"}],
+            allow_simulation=True,
+        )
+        return apply_diff(state, diff, decision, allow_simulation=True)
+
+    # 1. 基本 activity projection
+    def test_basic_activity_projection(self):
+        state = dict(SANDBOX_STATE, approved_plan=SANDBOX_STATE["approved_plan"] + [
+            {"id": "plan.rel.mid.v2", "description": "v2", "target_ref": "target.rel.mid",
+             "authority": "author_decision:sim-rel-2", "occurred": False, "supersedes": ["plan.rel.mid.v1"]},
+        ])
+        activity = resolve_plan_activity(state)
+        self.assertNotIn("plan.rel.mid.v1", activity["active"])
+        self.assertIn("plan.rel.mid.v2", activity["active"])
+        self.assertEqual(activity["superseded"], ["plan.rel.mid.v1"])
+        self.assertEqual(activity["superseded_by"], {"plan.rel.mid.v1": ["plan.rel.mid.v2"]})
+
+    # 2 + 3 + 15. 真实 local replan 链：旧条目保留、superseded_by 正确、Canon ZERO pollution
+    def test_local_replan_chain_keeps_history_and_canon_clean(self):
+        before = {area: SANDBOX_STATE[area] for area in CANON_AREAS}
+        updated = self.chain(SANDBOX_STATE, new_id="plan.rel.mid.v2", old_id="plan.rel.mid.v1")
+        self.assertEqual(updated["state_rev"], 2)
+        ids = [plan["id"] for plan in updated["approved_plan"]]
+        self.assertIn("plan.rel.mid.v1", ids)  # 旧条目不删除、不改写
+        self.assertIn("plan.rel.mid.v2", ids)
+        self.assertEqual(
+            [plan for plan in updated["approved_plan"] if plan["id"] == "plan.rel.mid.v1"],
+            [plan for plan in SANDBOX_STATE["approved_plan"] if plan["id"] == "plan.rel.mid.v1"],
+        )
+        activity = resolve_plan_activity(updated)
+        self.assertEqual(activity["superseded_by"]["plan.rel.mid.v1"], ["plan.rel.mid.v2"])
+        self.assertIn("plan.rel.mid.v2", activity["active"])
+        self.assertTrue(all("status" not in plan and "active" not in plan for plan in updated["approved_plan"]))
+        for area in CANON_AREAS:  # CANON_POLLUTION = ZERO
+            self.assertEqual(updated[area], before[area], area)
+
+    # 4 + 5. sibling / ancestor 保持 active，不重算全书
+    def test_sibling_and_ancestor_stay_active(self):
+        updated = self.chain(SANDBOX_STATE, new_id="plan.rel.mid.v2", old_id="plan.rel.mid.v1")
+        activity = resolve_plan_activity(updated)
+        self.assertIn("plan.suspense.mid", activity["active"])
+        self.assertIn("plan.book.direction", activity["active"])
+        self.assertEqual(activity["superseded"], ["plan.rel.mid.v1"])
+
+    # 6. missing supersede ref 拒绝
+    def test_missing_supersede_ref_rejected(self):
+        brief = self.brief(SANDBOX_STATE)
+        context = self.context(SANDBOX_STATE, brief)
+        decision = self.modify_decision(state=SANDBOX_STATE, brief=brief, context=context)
+        with self.assertRaises(ContractError):
+            make_plan_diff(
+                diff_id="plan-diff-missing", state=SANDBOX_STATE, intent=INTENT, decision=decision, brief=brief,
+                plans=[{"id": "plan.rel.mid.v2", "description": "x", "supersedes": ["plan.not.exists"]}],
+                allow_simulation=True,
+            )
+
+    # 6b. self-supersede 与列表内重复也拒绝
+    def test_self_and_duplicate_supersede_refs_rejected(self):
+        brief = self.brief(SANDBOX_STATE)
+        context = self.context(SANDBOX_STATE, brief)
+        decision = self.modify_decision(state=SANDBOX_STATE, brief=brief, context=context)
+        for supersedes in (["plan.rel.mid.v2"], ["plan.rel.mid.v1", "plan.rel.mid.v1"]):
+            with self.assertRaises(ContractError):
+                make_plan_diff(
+                    diff_id="plan-diff-badref", state=SANDBOX_STATE, intent=INTENT, decision=decision, brief=brief,
+                    plans=[{"id": "plan.rel.mid.v2", "description": "x", "supersedes": supersedes}],
+                    allow_simulation=True,
+                )
+
+    # 7. cross-target supersede 拒绝（局部重规划不得影响无关区域）
+    def test_cross_target_supersede_rejected(self):
+        brief = self.brief(SANDBOX_STATE)
+        context = self.context(SANDBOX_STATE, brief)
+        decision = self.modify_decision(state=SANDBOX_STATE, brief=brief, context=context)
+        with self.assertRaises(ContractError):
+            make_plan_diff(
+                diff_id="plan-diff-cross", state=SANDBOX_STATE, intent=INTENT, decision=decision, brief=brief,
+                plans=[{"id": "plan.rel.mid.v2", "description": "x", "supersedes": ["plan.suspense.mid"]}],
+                allow_simulation=True,
+            )
+
+    # 8. 已 inactive 的旧 base 不得再作为 replacement base（v1→v2 后 v3 不得 supersede v1）
+    def test_inactive_base_rejected_and_chain_tip_accepted(self):
+        s2 = self.chain(SANDBOX_STATE, new_id="plan.rel.mid.v2", old_id="plan.rel.mid.v1")
+        brief = self.brief(s2, brief_id="plan-brief-rel-v3")
+        context = self.context(s2, brief, context_id="ctx-rel-v3")
+        decision = self.modify_decision(state=s2, brief=brief, context=context, decision_id="plan-decision-v3")
+        with self.assertRaises(ContractError):
+            make_plan_diff(
+                diff_id="plan-diff-v3-dead", state=s2, intent=INTENT, decision=decision, brief=brief,
+                plans=[{"id": "plan.rel.mid.v3", "description": "分叉旧版", "supersedes": ["plan.rel.mid.v1"]}],
+                allow_simulation=True,
+            )
+        # 9. 合法下一版：v3 supersedes v2 → v1→v2→v3 链成立
+        diff = make_plan_diff(
+            diff_id="plan-diff-v3", state=s2, intent=INTENT, decision=decision, brief=brief,
+            plans=[{"id": "plan.rel.mid.v3", "description": "链式新版", "supersedes": ["plan.rel.mid.v2"]}],
+            allow_simulation=True,
+        )
+        s3 = apply_diff(s2, diff, decision, allow_simulation=True)
+        activity = resolve_plan_activity(s3)
+        self.assertEqual(sorted(activity["superseded"]), ["plan.rel.mid.v1", "plan.rel.mid.v2"])
+        self.assertIn("plan.rel.mid.v3", activity["active"])
+        self.assertNotIn("plan.rel.mid.v2", activity["active"])
+
+    # 10. 1→N replacement：两条新 item 同时 supersede 同一旧条目
+    def test_one_to_many_replacement(self):
+        brief = self.brief(SANDBOX_STATE)
+        context = self.context(SANDBOX_STATE, brief)
+        decision = self.modify_decision(state=SANDBOX_STATE, brief=brief, context=context)
+        diff = make_plan_diff(
+            diff_id="plan-diff-split", state=SANDBOX_STATE, intent=INTENT, decision=decision, brief=brief,
+            plans=[
+                {"id": "plan.rel.mid.v2a", "description": "拆分上半段", "supersedes": ["plan.rel.mid.v1"]},
+                {"id": "plan.rel.mid.v2b", "description": "拆分下半段", "supersedes": ["plan.rel.mid.v1"]},
+            ],
+            allow_simulation=True,
+        )
+        updated = apply_diff(SANDBOX_STATE, diff, decision, allow_simulation=True)
+        activity = resolve_plan_activity(updated)
+        self.assertEqual(activity["superseded_by"]["plan.rel.mid.v1"], ["plan.rel.mid.v2a", "plan.rel.mid.v2b"])
+        self.assertIn("plan.rel.mid.v2a", activity["active"])
+        self.assertIn("plan.rel.mid.v2b", activity["active"])
+
+    # 11. 空 supersedes 保持 E2-A 普通 append
+    def test_empty_supersedes_keeps_plain_append(self):
+        brief = self.brief(SANDBOX_STATE)
+        context = self.context(SANDBOX_STATE, brief)
+        decision = self.modify_decision(state=SANDBOX_STATE, brief=brief, context=context)
+        diff = make_plan_diff(
+            diff_id="plan-diff-append", state=SANDBOX_STATE, intent=INTENT, decision=decision, brief=brief,
+            plans=[{"id": "plan.rel.mid.extra", "description": "普通新增", "supersedes": []}],
+            allow_simulation=True,
+        )
+        updated = apply_diff(SANDBOX_STATE, diff, decision, allow_simulation=True)
+        activity = resolve_plan_activity(updated)
+        self.assertEqual(activity["superseded"], [])
+        self.assertIn("plan.rel.mid.extra", activity["active"])
+        self.assertIn("plan.rel.mid.v1", activity["active"])
+
+    # 12. author_action=modify 写回路径：simulated authority，绝不记录“作者已接受”
+    def test_modify_decision_path_is_simulated_only(self):
+        brief = self.brief(SANDBOX_STATE)
+        context = self.context(SANDBOX_STATE, brief)
+        decision = self.modify_decision(state=SANDBOX_STATE, brief=brief, context=context)
+        self.assertEqual(decision["author_action"], "modify")
+        self.assertEqual(decision["status"], "simulated_confirmed_for_test")
+        self.assertTrue(decision["authority"].startswith("simulation_author_decision:"))
+        diff = make_plan_diff(
+            diff_id="plan-diff-modify", state=SANDBOX_STATE, intent=INTENT, decision=decision, brief=brief,
+            plans=[{"id": "plan.rel.mid.v2", "description": "modify 路径", "supersedes": ["plan.rel.mid.v1"]}],
+            allow_simulation=True,
+        )
+        self.assertTrue(diff["simulation_only"])
+        updated = apply_diff(SANDBOX_STATE, diff, decision, allow_simulation=True)
+        new_item = [plan for plan in updated["approved_plan"] if plan["id"] == "plan.rel.mid.v2"][0]
+        self.assertEqual(new_item["authority"], decision["authority"])
+        self.assertEqual(updated["last_authority_source"], decision["authority"])
+        # simulation Decision 在无 allow_simulation 的生产路径必须被拒绝
+        with self.assertRaises(ContractError):
+            make_plan_diff(
+                diff_id="plan-diff-nosim", state=SANDBOX_STATE, intent=INTENT, decision=decision, brief=brief,
+                plans=[{"id": "plan.rel.mid.v2b", "description": "生产路径", "supersedes": ["plan.rel.mid.v1"]}],
+                allow_simulation=False,
+            )
+
+    # 13 + 14. stale 真实场景：无关 append 推进 state_rev 后旧 Brief 拒绝；重编译 Brief 通过
+    def test_stale_replan_brief_rejected_then_recompiled_passes(self):
+        brief_a = self.brief(SANDBOX_STATE, brief_id="plan-brief-stale-a")
+        context_a = self.context(SANDBOX_STATE, brief_a, context_id="ctx-stale-a")
+        decision_a = self.modify_decision(state=SANDBOX_STATE, brief=brief_a, context=context_a,
+                                          decision_id="decision-stale-a")
+        self.assertEqual(brief_a["source_versions"]["state_rev"], 1)
+        # 另一条合法但无关的 sibling append 让 Story State 进入 N+1
+        state_n1 = self.unrelated_append(SANDBOX_STATE)
+        self.assertEqual(state_n1["state_rev"], 2)
+        self.assertIn("plan.suspense.mid.extra", [plan["id"] for plan in state_n1["approved_plan"]])
+        # STALE_REPLAN_BRIEF_REJECTED：旧 Brief A 不得在 N+1 上写回
+        with self.assertRaises(ContractError):
+            make_plan_diff(
+                diff_id="plan-diff-stale", state=state_n1, intent=INTENT, decision=decision_a, brief=brief_a,
+                plans=[{"id": "plan.rel.mid.v2", "description": "旧 Brief 写回", "supersedes": ["plan.rel.mid.v1"]}],
+                allow_simulation=True,
+            )
+        # RECOMPILED_CURRENT_BRIEF_PASS：同一 local replan 意图在 N+1 重编译后正常通过
+        brief_b = self.brief(state_n1, brief_id="plan-brief-stale-b")
+        context_b = self.context(state_n1, brief_b, context_id="ctx-stale-b")
+        decision_b = self.modify_decision(state=state_n1, brief=brief_b, context=context_b,
+                                          decision_id="decision-stale-b")
+        self.assertEqual(brief_b["source_versions"]["state_rev"], 2)
+        diff = make_plan_diff(
+            diff_id="plan-diff-recompiled", state=state_n1, intent=INTENT, decision=decision_b, brief=brief_b,
+            plans=[{"id": "plan.rel.mid.v2", "description": "重编译后的同一意图", "supersedes": ["plan.rel.mid.v1"]}],
+            allow_simulation=True,
+        )
+        updated = apply_diff(state_n1, diff, decision_b, allow_simulation=True)
+        self.assertEqual(updated["state_rev"], 3)
+        activity = resolve_plan_activity(updated)
+        self.assertEqual(activity["superseded"], ["plan.rel.mid.v1"])
+        self.assertIn("plan.suspense.mid.extra", activity["active"])
 
 
 if __name__ == "__main__":

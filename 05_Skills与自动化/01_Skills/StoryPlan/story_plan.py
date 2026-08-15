@@ -10,6 +10,17 @@ writeback) and adds only the planning-specific semantics:
 - Plan Candidate as opaque, proposal_noncanonical model content;
 - planning items with stable id / target_ref / optional supersedes /
   built_from so future local re-planning stays possible.
+
+E2-C-A adds minimal local re-plan semantics on top (see ADR E2-C):
+
+- approved_plan stays append-only history; superseded plans are never
+  deleted, overwritten in place or given a persistent status field;
+- which plans are currently active is a derived pure-function projection
+  (resolve_plan_activity) and is never stored back into Story State;
+- make_plan_diff validates supersedes refs narrowly: existing id, same
+  target_ref as the current Brief, still-active base, no self/duplicate
+  refs.  built_from stays plain provenance metadata: no dependency graph,
+  no stale propagation (deferred).
 """
 
 from __future__ import annotations
@@ -34,6 +45,7 @@ if _module is None:
     _spec.loader.exec_module(_module)
 
 ContractError = _module.ContractError
+CANON_AREAS = _module.CANON_AREAS
 validate_author_intent = _module.validate_author_intent
 validate_story_state = _module.validate_story_state
 build_context = _module.build_context
@@ -230,10 +242,78 @@ def normalize_planning_item(plan: dict[str, Any], *, target_ref: str) -> dict[st
         raise ContractError("planning 条目 target_ref 与 Plan Brief planning_target 不一致")
     for ref_field in ("supersedes", "built_from"):
         item.setdefault(ref_field, [])
-        if not isinstance(item[ref_field], list):
-            raise ContractError(f"planning 条目 {ref_field} 必须是 ref 列表")
+        if not isinstance(item[ref_field], list) or not all(isinstance(ref, str) and ref for ref in item[ref_field]):
+            raise ContractError(f"planning 条目 {ref_field} 必须是非空字符串 ref 列表")
     item["occurred"] = False
     return item
+
+
+def resolve_plan_activity(state: dict[str, Any]) -> dict[str, Any]:
+    """Pure, rebuildable projection of which approved_plan entries are
+    currently active versus superseded (E2-C-A).
+
+    A plan is superseded iff some later-appended plan's ``supersedes``
+    references its id.  Nothing is stored: this never writes derived
+    activity back into Story State, never deletes or mutates history, and
+    the result is recomputable from ``state["approved_plan"]`` alone.
+    """
+    superseded_by: dict[str, list[str]] = {}
+    for plan in state.get("approved_plan", []):
+        pid = plan.get("id")
+        if not pid:
+            continue
+        for ref in plan.get("supersedes", []) or []:
+            superseded_by.setdefault(ref, []).append(pid)
+    active_ids = [
+        plan["id"] for plan in state.get("approved_plan", [])
+        if plan.get("id") and plan["id"] not in superseded_by
+    ]
+    return {
+        "active": active_ids,
+        "superseded": sorted(superseded_by),
+        "superseded_by": superseded_by,
+    }
+
+
+def _check_supersedes(
+    *,
+    normalized: list[dict[str, Any]],
+    state: dict[str, Any],
+    target_ref: str,
+) -> None:
+    """E2-C-A narrow writeback guard for explicit supersedes refs.
+
+    Only explicit, same-target local replacement is allowed; there is no
+    built_from / dependency propagation and no subtree replacement.  A plan
+    that is already superseded (inactive) can never be used as a
+    replacement base again -- the next version must supersede the current
+    active tip of the chain.
+    """
+    plans_by_id = {plan.get("id"): plan for plan in state["approved_plan"]}
+    activity = resolve_plan_activity(state)
+    inactive = set(activity["superseded"])
+    for item in normalized:
+        supersedes = list(item.get("supersedes", []) or [])
+        if not supersedes:
+            continue  # 空 supersedes 保持 E2-A 普通 append 语义
+        if len(set(supersedes)) != len(supersedes):
+            raise ContractError(f"planning {item['id']} 的 supersedes 列表内部不得重复")
+        for ref in supersedes:
+            if ref == item["id"]:
+                raise ContractError(f"planning {item['id']} 不得 supersede 自身")
+            entry = plans_by_id.get(ref)
+            if entry is None:
+                raise ContractError(f"planning {item['id']} 的 supersedes ref 不存在于当前 approved_plan：{ref}")
+            if entry.get("target_ref") != target_ref:
+                raise ContractError(
+                    f"planning {item['id']} 不得跨 target supersede {ref}："
+                    f"被替换条目 target_ref={entry.get('target_ref')}，当前 Brief target={target_ref}"
+                )
+            if ref in inactive:
+                raise ContractError(
+                    f"planning {item['id']} 不得 supersede 已失效条目 {ref}（当前被 {activity['superseded_by'][ref]} 替换）；"
+                    "应 supersede 当前 active 的最新版本"
+                )
 
 
 def make_plan_diff(
@@ -254,8 +334,11 @@ def make_plan_diff(
     project; a Brief compiled against an older intent_rev OR state_rev may
     not write back on current authoritative sources (stale Brief rejection);
     planning ids must be non-empty, unique within the batch and unique
-    within the existing approved_plan namespace (supersedes always uses a
-    new id; there is no replacement/supersede execution semantics in E2-A).
+    within the existing approved_plan namespace.  E2-C-A additionally
+    validates supersedes refs (existing, same target, still active); the
+    writeback itself stays a pure approved_plan append -- old plans remain
+    stored and are only marked superseded through the derived activity
+    projection.
     """
     if not plans:
         raise ContractError("StoryPlan Diff 需要至少一条 planning 条目")
@@ -281,6 +364,7 @@ def make_plan_diff(
         raise ContractError(f"planning id 与现有 approved_plan id 重名：{collisions}；supersedes 也必须使用新 id")
     target_ref = brief["planning_target"]["target_id"]
     normalized = [normalize_planning_item(plan, target_ref=target_ref) for plan in plans]
+    _check_supersedes(normalized=normalized, state=state, target_ref=target_ref)
     diff = make_planning_diff(
         diff_id=diff_id, state=state, decision=decision,
         plan=normalized[0],
