@@ -92,7 +92,7 @@ E2-B 真实长篇规划纵切已完成并正式关闭（`E2B_VERTICAL_SLICE_PASS
 
 E2-C 局部重规划已完成并正式关闭（`E2C_PASS` / `E2C_STORYPLAN_LOCAL_REPLAN_CLOSED` / `STORYPLAN_PHASE_CLOSED`）：append-only local replan / supersede / active projection / stale recompile / modify / Canon isolation 均成立；最终门禁 StoryPlan 50 tests OK、StoryDesign 27 tests OK、E1 runtime 零修改。
 
-**E3-A Context Compiler 最小技术地基已完成并正式关闭（`E3A_PASS` / `E3A_CONTEXT_COMPILER_FOUNDATION_CLOSED`），已合入 main**。**NEXT_MAINLINE = STORYWRITE_REAL_VERTICAL_SLICE**（能力优先真实写作纵切）。原 E3-B 独立 Context Benchmark 取消 / 不执行：原因不是 Context Compiler 失败，而是 E3-A 已经证明其最小技术边界，现在必须由真实下游 consumer 验证价值；Context Compiler 进入 `CONTEXT_COMPILER_CONSUMER_DRIVEN_FREEZE`，只有 Writer / Review / State Writeback 等真实下游消费者暴露可重复、可验证 blocker 时才允许回来窄改。StoryPlan 当前停止扩展；future consumer 暴露真实缺口前不继续建设 replacement engine / dependency graph / final Plan Schema。
+**E3-A Context Compiler 最小技术地基已完成并正式关闭（`E3A_PASS` / `E3A_CONTEXT_COMPILER_FOUNDATION_CLOSED`），已合入 main**。**STORYWRITE_REAL_VERTICAL_SLICE 能力优先真实写作纵切已完成并正式关闭：`PASS_WITH_RESERVATIONS`**。正式口径：CURRENT_CHAIN_SUPPORTS_REAL_PROSE = PASS；CONTEXT_MISSING = 0；WRITER_RUNTIME_REQUIRED = NO；DEVELOPER_OR_AUTHOR_BURDEN_GAP = YES（后台逐场手工操作负担）；DO_NOT_BUILD 当前继续成立。Reservations：Context 本轮 9/9 State items 未验证小 Context 缩减价值；W1 未获作者 acceptance，`accepted_text → State → 下一场 Context` 闭环未验证；开发者手工负担为真实缺口。**NEXT_MAINLINE = LONGFORM_CONTINUITY_REAL_SLICE**（跨场景长期连续性真实纵切，shadow / test-only 状态结算）。原 E3-B 独立 Context Benchmark 维持取消 / 不执行；Context Compiler 继续维持 `CONTEXT_COMPILER_CONSUMER_DRIVEN_FREEZE`，只有 Writer / Review / State Writeback 等真实下游消费者暴露可重复、可验证 blocker 时才允许回来窄改。StoryPlan 继续冻结；future consumer 暴露真实缺口前不继续建设 replacement engine / dependency graph / final Plan Schema。
 
 原因：StoryDesign 在业务上发生在前，但它产生的人物、世界、冲突、关系和方向等内容需要有稳定的落点。先把“自己的小说事实怎样保存、哪些是权威、怎样更新”定稳，再实现 StoryDesign，可避免后续反复改接口。
 
@@ -107,7 +107,8 @@ E2-C 局部重规划已完成并正式关闭（`E2C_PASS` / `E2C_STORYPLAN_LOCAL
 5. ~~执行 E2-C 局部重规划验证~~（已合入 main，E2-C 关闭，STORYPLAN_PHASE_CLOSED）；
 6. ~~开发 Context Compiler 最小地基~~（E3-A 已合入 main，E3A_PASS / E3A_CONTEXT_COMPILER_FOUNDATION_CLOSED）；
 7. ~~执行 E3-B Context Compiler 独立真实纵切~~（取消 / 不执行：E3-A 已证明最小技术边界，价值验证改由真实下游消费者承担）；
-8. 执行 STORYWRITE_REAL_VERTICAL_SLICE 能力优先真实写作纵切（NEXT_MAINLINE）：用现有 StoryDesign / Story State / StoryPlan / Context Compiler 基础设施直接服务一段真实小说正文写作，验证已有能力链是否真的能服务小说写作，并反向暴露真实缺口。
+8. ~~执行 STORYWRITE_REAL_VERTICAL_SLICE 能力优先真实写作纵切~~（已完成并关闭：PASS_WITH_RESERVATIONS；正式 source code 零修改，CURRENT_CHAIN_SUPPORTS_REAL_PROSE = PASS）；
+9. 执行 LONGFORM_CONTINUITY_REAL_SLICE 跨场景长期连续性真实纵切（NEXT_MAINLINE）：验证“上一场正文 → 状态结算 → 下一轮 Context → 下一场正文”能否稳定保持事实、人物、关系、承诺、开放线索与语言连续性；本轮仅 shadow / test-only 结算，不写生产 Canon / Story State。
 
 尚未确认的具体 Canon 字段、Story State Schema、StoryDesign 输出结构不得提前写死。
 
@@ -290,4 +291,4 @@ E2-B 已证明：StoryPlan 能从权威状态出发做真实长篇规划（0-BKP
 
 # 10. 一句话总纲
 
-> **参考作品学习链已经完成结构冻结；StoryDesign 运行底座、StoryPlan 最小合同、真实长篇规划纵切（E2-B）与局部重规划（E2-C）均已通过并关闭（STORYPLAN_PHASE_CLOSED；append-only history、active projection、Canon 隔离零污染成立）；Context Compiler 最小技术地基已合入 main 并正式关闭（E3A_PASS / E3A_CONTEXT_COMPILER_FOUNDATION_CLOSED），并进入 CONTEXT_COMPILER_CONSUMER_DRIVEN_FREEZE（E3-B 独立 Context Benchmark 取消）；知识介入策略冻结为稀疏后置问题驱动；开发优先级：最终工作台能力 > 降低开发者压力 > 子系统工程完整性（CAPABILITY_FIRST_CONSUMER_DRIVEN）；NEXT_MAINLINE = STORYWRITE_REAL_VERTICAL_SLICE（能力优先真实写作纵切）。**
+> **参考作品学习链已经完成结构冻结；StoryDesign 运行底座、StoryPlan 最小合同、真实长篇规划纵切（E2-B）与局部重规划（E2-C）均已通过并关闭（STORYPLAN_PHASE_CLOSED；append-only history、active projection、Canon 隔离零污染成立）；Context Compiler 最小技术地基已合入 main 并正式关闭（E3A_PASS），维持 CONTEXT_COMPILER_CONSUMER_DRIVEN_FREEZE；STORYWRITE_REAL_VERTICAL_SLICE 已关闭（PASS_WITH_RESERVATIONS：现有能力链可服务真实正文、CONTEXT_MISSING = 0、无需 Writer runtime、开发者手工负担为真实缺口、DO_NOT_BUILD 继续成立）；知识介入策略冻结为稀疏后置问题驱动；开发优先级：最终工作台能力 > 降低开发者压力 > 子系统工程完整性（CAPABILITY_FIRST_CONSUMER_DRIVEN）；NEXT_MAINLINE = LONGFORM_CONTINUITY_REAL_SLICE（跨场景长期连续性真实纵切）。**
