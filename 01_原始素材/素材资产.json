@@ -943,7 +943,7 @@
       "notes": "选中来源：长安十二时辰（全2册）.epub（.epub）",
       "purification": {
         "evidence": "bkp_source_snapshot",
-        "input_fingerprint": "10da4c19ade7fbde7fc88a9139c4d776ce8beaad4f4ad27c4b24792326f55cc8",
+        "input_fingerprint": "27c0caa6e4f535eb0093f6bef0a8716e36d2ef8904eb55d223175cb08cc310e9",
         "source_sha256": "38b604e406bcb58b793a94446433c4a69b4a17de3c25125da4217ccc8f38d8d6",
         "status": "可用"
       },
@@ -1023,7 +1023,7 @@
       "notes": "",
       "purification": {
         "evidence": "bkp_source_snapshot",
-        "input_fingerprint": "794c9db86f981553d26ece0bd1f27929254a7ddeeafccf29f7121e691e1fac47",
+        "input_fingerprint": "7f54d0c95541ff5b08b622b722e2147ec4a8333be651fd8ab9a53f71ec8e7830",
         "source_sha256": "a426098082241b8260ee67112dd656e7677f3d90dab323083f2d0338322a5627",
         "status": "可用"
       },
@@ -1621,7 +1621,7 @@
       "notes": "",
       "purification": {
         "evidence": "bkp_source_snapshot",
-        "input_fingerprint": "2f4b38d9d927df6ddabfa5b7a086ad5faf109fb3e9d0a48ed51e1db742d0182d",
+        "input_fingerprint": "9e9a1f01c254551fa464e5d222b0501164849c4e48fbe033722686b9b42eff75",
         "source_sha256": "0fb3cde2dc4f8c9f4e5a2ba612f3d3d3eb049d67928cce4fcc8b2c94ea20c6a8",
         "status": "可用"
       },

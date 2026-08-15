@@ -75,9 +75,14 @@ MI 只负责「资产登记与状态推导」，不移动原著、不分配新 b
 
 持久化字段（canonical schema enrichment，schema_version 保持 1.0）：
 - `source_sha256`：有 selected_source 时保存其 SHA；
-- `input_fingerprint`：本次 SP 评估时 asset 全部 registered source files 的 deterministic fingerprint
-  （排序后的 `path:sha256` 行整体 SHA256）。
+- `input_fingerprint`：本次 SP 评估时 asset 全部 registered source files 的 SHA256 multiset
+  fingerprint（全部 `sha256` 排序后整体取 SHA256，保留重复；与路径无关）。
 不保存时间戳 / SourcePrepare 正文。
+
+**fingerprint 语义（Phase 2B1.2）**：目录移动 / 文件改名 → fingerprint 不变，不导致 stale；
+只有内容变化或来源文件集合变化（新增 / 删除 / 换版本）才导致 `需更新`。
+Phase 2B1.1 旧算法（`path:sha256`）写入的 record 在内容未变时自动迁移为 content fingerprint，
+状态与 `source_sha256` 不降级；迁移完成后仅使用 content fingerprint。
 
 **06_工作区/SourcePrepare 删除后**：ledger 中已结算的提纯事实仍存在——fingerprint 匹配 → 稳定恢复
 （可用/需复核/失败）；素材内容变化 → `需更新`（旧「可用」不覆盖已变化素材）。

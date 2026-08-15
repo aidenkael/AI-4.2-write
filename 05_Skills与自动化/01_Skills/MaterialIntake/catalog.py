@@ -212,31 +212,48 @@ def find_sp_metadata(sp_dir: Path, book_id: str) -> dict | None:
     return data
 
 
-def compute_input_fingerprint(files: list) -> str:
-    """对 asset 全部 registered source files 计算 deterministic input fingerprint。
+def content_fingerprint(files: list) -> str:
+    """对 asset 全部 registered source files 计算 content fingerprint（Phase 2B1.2）。
 
-    Phase 2B1.1：排序后的 'path:sha256' 行整体 SHA256。用于判断「本次评估时的素材」
-    与「当前磁盘素材」是否一致：一致 → 已结算 purification 状态可长期保持；
-    变化 → 需更新（旧「可用」不覆盖已变化素材）。
+    只基于内容 SHA256 集合计算：sorted(f["sha256"] for f in files) 保留重复，
+    整体取 SHA256 = SHA256 multiset fingerprint。与物理路径 / 文件名无关，
+    因此目录迁移、文件改名不导致 stale；内容变化、来源文件增删才导致 stale。
+    """
+    hashes = sorted(f["sha256"] for f in files)
+    return hashlib.sha256("\n".join(hashes).encode("utf-8")).hexdigest()
+
+
+def legacy_path_fingerprint(files: list) -> str:
+    """Phase 2B1.1 旧算法：排序后的 'path:sha256' 行整体 SHA256。
+
+    仅用于一次性兼容迁移：识别旧算法写入的 input_fingerprint record，
+    在内容未变时把 input_fingerprint 迁移为 content_fingerprint。不进入长期使用。
     """
     parts = sorted(f"{f['path']}:{f['sha256']}" for f in files)
     return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
 
 
 def derive_purification(sp_meta: dict | None, bkp: dict | None, file_shas: set,
-                        input_fp: str | None = None, prev: dict | None = None) -> dict:
-    """提纯状态推导（Phase 2B1.1 持久化版）。
+                        input_fp: str | None = None, prev: dict | None = None,
+                        legacy_fp: str | None = None) -> dict:
+    """提纯状态推导（Phase 2B1.1 持久化版；Phase 2B1.2 指纹与路径解耦）。
 
     优先级：
       1. 当前 SourcePrepare metadata（存在时）= 最新处理事实
-      2. 已持久化 ledger purification record（input_fingerprint 匹配）= 上一次已结算事实
+      2. 已持久化 ledger purification record（content fingerprint 匹配）= 上一次已结算事实
       3. FINALIZED BKP = 历史恢复证据
       4. 无证据 = 未处理
-    任何层级发现当前 input fingerprint 已变化 → 需更新。
+    任何层级发现当前 content fingerprint 已变化 → 需更新。
+
+    Phase 2B1.2 一次性兼容迁移：prev 的 input_fingerprint 若等于 legacy_fp
+    （旧 path:sha256 算法，且当前内容与之仍一致）→ 保持状态与 source_sha256，
+    仅把 input_fingerprint 迁移为 content_fingerprint，不标记需更新。
+    迁移完成后新 record 只使用 content fingerprint，不再产生 legacy record。
 
     持久化字段（canonical schema enrichment，schema_version 保持 1.0）：
       - source_sha256：有 selected_source 时保存其 SHA
-      - input_fingerprint：本次评估时 asset 全部 registered source files 的指纹
+      - input_fingerprint：本次评估时 asset 全部 registered source files 的
+        SHA256 multiset fingerprint（与路径无关）
     不保存时间戳 / SourcePrepare 正文。
 
     evidence 语义：
@@ -277,6 +294,14 @@ def derive_purification(sp_meta: dict | None, bkp: dict | None, file_shas: set,
     prev_fp = prev.get("input_fingerprint") if isinstance(prev, dict) else None
     if prev_fp:
         if input_fp is not None and input_fp != prev_fp:
+            # Phase 2B1.2 一次性兼容迁移：prev 为旧 path-based 算法 record 且当前内容
+            # 与其一致 → 保持状态/source_sha256，仅迁移 input_fingerprint，不判需更新。
+            if legacy_fp is not None and prev_fp == legacy_fp \
+                    and prev.get("status") in ("可用", "需复核", "失败"):
+                return {"status": prev["status"],
+                        "evidence": prev.get("evidence") or "sourceprepare_record",
+                        "source_sha256": prev.get("source_sha256"),
+                        "input_fingerprint": input_fp}
             rec = {"status": "需更新", "evidence": "sourceprepare_record_input_changed",
                    "input_fingerprint": prev_fp}
             if prev.get("source_sha256"):
@@ -340,7 +365,8 @@ def refresh_ledger(ledger: dict, mat_dir: Path, distill_dir: Path, sp_dir: Path)
             nf["sha256"] = scanned[rel]
             new_files.append(nf)
         file_shas = {f["sha256"] for f in new_files}
-        input_fp = compute_input_fingerprint(new_files)
+        input_fp = content_fingerprint(new_files)
+        legacy_fp = legacy_path_fingerprint(new_files)
         bkp = find_bkp(distill_dir, a["id"])
         sp_meta = find_sp_metadata(sp_dir, a["id"])
         new_assets.append({
@@ -352,7 +378,7 @@ def refresh_ledger(ledger: dict, mat_dir: Path, distill_dir: Path, sp_dir: Path)
             "notes": a.get("notes") or "",
             "files": new_files,
             "purification": derive_purification(sp_meta, bkp, file_shas, input_fp,
-                                                a.get("purification")),
+                                                a.get("purification"), legacy_fp),
             "knowledge": derive_knowledge(bkp, file_shas),
         })
 
@@ -629,7 +655,7 @@ def build_assets(rows: list, scanned: dict, distill_dir: Path, sp_dir: Path) -> 
             files.append(fe)
 
         file_shas = {f["sha256"] for f in files}
-        input_fp = compute_input_fingerprint(files)
+        input_fp = content_fingerprint(files)
         bkp = find_bkp(distill_dir, book_id)
         sp_meta = find_sp_metadata(sp_dir, book_id)
 
