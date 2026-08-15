@@ -1,15 +1,26 @@
 # -*- coding: utf-8 -*-
 """
-MaterialIntake catalog builder 测试（CATALOG_FOUNDATION_ONLY）。
+MaterialIntake catalog builder 测试（CANONICAL_CATALOG，Phase 2B1）。
 
-覆盖 A–G 七组：
+覆盖（原 A–H + Phase 2B1 cutover A–H + SP contract + 枚举）：
   A. BOOTSTRAP_COUNTS       141 assets / 182 registered files / 1 container
-  B. ID_PRESERVATION        全部 book_xxxx ID 与 legacy CSV 主来源一致、无 gap
+  B. ID_PRESERVATION        全部 book_xxxx ID 稳定、无 gap
   C. MULTI_SOURCE           book_0035 单 asset 双 file（含 source_container）；book_0072 双 file
   D. BKP_RECOVERY           book_0035/0038/0065 knowledge=可用 且 BKP source_sha256 在 files 中
-  E. LEGACY_STATUS_RECOVERY CSV SP 状态映射（一次性 migration bootstrap）+ B 优先于 C
+  E. EVIDENCE_PRIORITY      无证据 → 未处理；FINALIZED BKP 优先于无证据
   F. IDEMPOTENCY            同输入重建 byte-for-byte（真实 serialize + tmp_path 端到端两次）
-  G. VIEW_PARITY            preview 141 数据行 / 9 列；索引不含易变与敏感字段
+  G. VIEW_PARITY            9 列 CSV（142 行）/ 索引不含易变与敏感字段
+  H. SP_CONTRACT            真实目录 discovery + metadata schema（PASS/REVIEW/FAIL/缺失/歧义）
+
+Phase 2B1 cutover tests：
+  A. LEDGER_ONLY_REBUILD       删除 legacy CSV 后从 ledger 正常 refresh/render
+  B. SEMANTIC_FIELD_PRESERVATION 手工改 type/tags/notes/author → refresh 后保持
+  C. FILE_SHA_REFRESH          registered file 内容变化 → SHA 更新 + SP/BKP 变需更新
+  D. MISSING_REGISTERED_FILE   registered path 丢失 → fail 且原 ledger 不被半写
+  E. UNREGISTERED_FILE         磁盘多一个未知 EPUB → 报告；不创建 asset / 新 ID
+  F. CSV_VIEW                  正式 CSV 9 列、一 asset 一行、无 legacy 技术字段
+  G. CSV_IS_DERIVED            篡改 CSV 再 render → 被 ledger 重建，CSV 修改不反向污染 ledger
+  H. IDEMPOTENCY               连续 refresh/render 两次 → ledger/CSV/MD byte-for-byte 不变
 
 真实数据测试依赖仓库存在（HAS_REAL），不存在时自动 skip；
 纯逻辑测试（_pure / tmp_path）不依赖真实数据，任何环境可跑。
@@ -25,7 +36,7 @@ import pytest
 import catalog
 
 ROOT = Path(__file__).resolve().parents[3]
-HAS_REAL = (ROOT / catalog.MATERIAL_DIR_NAME / catalog.LEGACY_CSV_FILENAME).exists()
+HAS_REAL = (ROOT / catalog.MATERIAL_DIR_NAME / catalog.LEDGER_FILENAME).exists()
 
 BKP_SHA_EXPECT = {
     "book_0035": "38b604e406bcb58b793a94446433c4a69b4a17de3c25125da4217ccc8f38d8d6",
@@ -34,6 +45,8 @@ BKP_SHA_EXPECT = {
 }
 
 ALL_IDS = [f"book_{i:04d}" for i in range(1, 142)]
+
+CSV_HEADER = ["素材ID", "名称", "类型", "作者", "标签", "位置", "提纯", "知识", "备注"]
 
 
 def _asset(ledger, bid):
@@ -46,17 +59,14 @@ def _ledger_bytes(ledger):
 
 @pytest.fixture(scope="module")
 def ledger():
-    """真实数据一次性构建（含全量 SHA 扫描，模块级缓存）。"""
+    """真实数据：直接加载 canonical ledger（Phase 2B1 后 CSV/MD 均为 derived，不做输入）。
+    注意：不能再用 load_legacy_csv 重建——素材清单.csv 已是 9 列 derived 视图。
+    migration helper 路径由 _build_fake_ledger（tmp_path 自建 legacy 22 列 CSV）单独覆盖。
+    """
     if not HAS_REAL:
         pytest.skip("真实素材目录不存在，跳过真实数据测试")
     mat = ROOT / catalog.MATERIAL_DIR_NAME
-    scanned = catalog.scan_material_files(mat)
-    rows = catalog.load_legacy_csv(mat)
-    assets = catalog.build_assets(rows, scanned, ROOT / catalog.DISTILL_DIR_NAME,
-                                  ROOT / "06_工作区" / "SourcePrepare")
-    manifests = catalog.load_manifests(mat)
-    containers = catalog.build_containers(manifests, scanned)
-    return catalog.build_ledger(assets, containers)
+    return catalog.load_ledger(mat / catalog.LEDGER_FILENAME)
 
 
 def _make_fake_tree(root: Path) -> str:
@@ -106,6 +116,27 @@ def _make_fake_tree(root: Path) -> str:
     return epub_sha
 
 
+def _build_fake_ledger(root: Path) -> str:
+    """在 fake tree 上走 migration helper 生成并落盘 ledger；返回 epub_sha。
+
+    模拟 Phase 2A 产物：素材资产.json 已存在，legacy CSV 随后即可退役。
+    """
+    epub_sha = _make_fake_tree(root)
+    mat = root / catalog.MATERIAL_DIR_NAME
+    scanned = catalog.scan_material_files(mat)
+    rows = catalog.load_legacy_csv(mat)
+    assets = catalog.build_assets(rows, scanned, root / catalog.DISTILL_DIR_NAME,
+                                  root / "06_工作区" / "SourcePrepare")
+    containers = catalog.build_containers(catalog.load_manifests(mat), scanned)
+    catalog.write_ledger(catalog.build_ledger(assets, containers), mat / catalog.LEDGER_FILENAME)
+    return epub_sha
+
+
+def _read_ledger(root: Path) -> dict:
+    mat = root / catalog.MATERIAL_DIR_NAME
+    return json.loads((mat / catalog.LEDGER_FILENAME).read_text(encoding="utf-8"))
+
+
 # ---------- A. BOOTSTRAP_COUNTS ----------
 
 def test_bootstrap_counts(ledger):
@@ -119,9 +150,9 @@ def test_bootstrap_counts(ledger):
 
 def test_id_preservation(ledger):
     assert [a["id"] for a in ledger["assets"]] == ALL_IDS
-    rows = catalog.load_legacy_csv(ROOT / catalog.MATERIAL_DIR_NAME)
-    csv_ids = sorted({r["作品ID"] for r in rows})
-    assert sorted(a["id"] for a in ledger["assets"]) == csv_ids
+    # derived CSV 的素材ID 列与 ledger 一致
+    rows = catalog.render_catalog_csv(ledger)
+    assert [r[0] for r in rows[1:]] == ALL_IDS
 
 
 # ---------- C. MULTI_SOURCE ----------
@@ -155,21 +186,18 @@ def test_bkp_recovery(ledger):
         assert a["purification"]["evidence"] == "bkp_source_snapshot"
 
 
-# ---------- E. LEGACY_STATUS_RECOVERY ----------
+# ---------- E. EVIDENCE_PRIORITY ----------
 
-def test_legacy_status_recovery_pure():
-    assert catalog.derive_purification(None, None, "PASS", set()) == \
-        {"status": "可用", "evidence": "legacy_catalog"}
-    assert catalog.derive_purification(None, None, "REVIEW", set()) == \
-        {"status": "需复核", "evidence": "legacy_catalog"}
-    assert catalog.derive_purification(None, None, "FAIL", set()) == \
-        {"status": "失败", "evidence": "legacy_catalog"}
-    assert catalog.derive_purification(None, None, "", set()) == \
+def test_no_evidence_unprocessed_pure():
+    # legacy C 级证据已随 Phase 2B1 cutover 退役：无证据 → 未处理
+    assert catalog.derive_purification(None, None, set()) == \
+        {"status": "未处理", "evidence": None}
+    assert catalog.derive_purification(None, None, {"abc"}) == \
         {"status": "未处理", "evidence": None}
 
 
-def test_purification_priority_b_over_c(ledger):
-    # book_0035 同时具备 legacy PASS（C）与 FINALIZED BKP（B），B 优先
+def test_purification_priority_bkp_over_no_evidence(ledger):
+    # book_0035 无 SP metadata，但 FINALIZED BKP 存在 → B 级优先推导为可用
     a = _asset(ledger, "book_0035")
     assert a["purification"] == {"status": "可用", "evidence": "bkp_source_snapshot"}
 
@@ -183,31 +211,25 @@ def test_idempotency_serialize(ledger):
 
 
 def test_idempotency_end_to_end(tmp_path):
-    _make_fake_tree(tmp_path)
-    preview = tmp_path / "out"
-    preview.mkdir()
+    # H. IDEMPOTENCY：连续 refresh/render 两次 → ledger/CSV/MD byte-for-byte 不变
+    _build_fake_ledger(tmp_path)
+    mat = tmp_path / catalog.MATERIAL_DIR_NAME
 
     def snap():
-        files = [
-            tmp_path / catalog.MATERIAL_DIR_NAME / catalog.LEDGER_FILENAME,
-            tmp_path / catalog.MATERIAL_DIR_NAME / catalog.INDEX_FILENAME,
-            preview / catalog.PREVIEW_FILENAME,
-        ]
+        files = [mat / catalog.LEDGER_FILENAME, mat / catalog.LEGACY_CSV_FILENAME,
+                 mat / catalog.INDEX_FILENAME]
         return {p.name: p.read_bytes() for p in files}
 
-    assert catalog.main(["--root", str(tmp_path), "--preview-dir", str(preview)]) == 0
+    assert catalog.main(["--root", str(tmp_path)]) == 0
     first = snap()
-    assert catalog.main(["--root", str(tmp_path), "--preview-dir", str(preview)]) == 0
+    assert catalog.main(["--root", str(tmp_path)]) == 0
     assert snap() == first
 
 
 def test_fake_tree_recovery(tmp_path):
-    epub_sha = _make_fake_tree(tmp_path)
-    preview = tmp_path / "out"
-    preview.mkdir()
-    assert catalog.main(["--root", str(tmp_path), "--preview-dir", str(preview)]) == 0
-    ledger = json.loads(
-        (tmp_path / catalog.MATERIAL_DIR_NAME / catalog.LEDGER_FILENAME).read_text(encoding="utf-8"))
+    epub_sha = _build_fake_ledger(tmp_path)
+    assert catalog.main(["--root", str(tmp_path)]) == 0
+    ledger = _read_ledger(tmp_path)
     a = next(x for x in ledger["assets"] if x["id"] == "book_0001")
     # BKP FINALIZED + SHA 匹配 → 可用；作者从 BKP identity 恢复
     assert a["knowledge"] == {"status": "可用", "path": "02_原著蒸馏/book_0001_Alpha",
@@ -222,15 +244,25 @@ def test_fake_tree_recovery(tmp_path):
 # ---------- G. VIEW_PARITY ----------
 
 def test_view_parity(ledger):
-    rows = catalog.generate_preview_rows(ledger)
-    assert rows[0] == ["素材ID", "名称", "类型", "作者", "标签", "位置", "提纯", "知识", "备注"]
+    rows = catalog.render_catalog_csv(ledger)
+    assert rows[0] == CSV_HEADER
     assert len(rows) == 142  # 1 表头 + 141 数据行
     assert all(len(r) == 9 for r in rows)
     assert [r[0] for r in rows[1:]] == ALL_IDS
 
 
+def test_csv_excludes_legacy_fields(ledger):
+    # 正式 CSV 不含 legacy 技术字段 / 时间戳（legacy 列名 / 字段名）
+    # 注意：banned 用精确字段名（如 "来源网站"），不能是宽泛子串（如 "来源"）——
+    # notes 是 canonical 字段，可含 "选中来源：…" 等自然文本，不应被误伤。
+    text = "\n".join(",".join(r) for r in catalog.render_catalog_csv(ledger))
+    for banned in ("SHA", "文件大小", "文件格式", "来源网站", "SourcePrepare版本", "章节数",
+                   "BookDistill", "更新时间", "本地相对路径", "是否主来源"):
+        assert banned not in text
+
+
 def test_index_generation(ledger):
-    text = catalog.generate_index(ledger)
+    text = catalog.render_index_md(ledger)
     assert "素材总数：141" in text
     assert "## 参考作品（REFERENCE_WORK）" in text
     assert "## 研究资料（RESEARCH）" in text
@@ -246,6 +278,114 @@ def test_container(ledger):
     assert "book_0035" in c["split_book_ids"]
     assert c["original"]["sha256"] == \
         "26f9d85186cc0afac16a144d48de8a4c931bc29a518078492a392b2122c074ee"
+
+
+# ---------- Phase 2B1 cutover tests ----------
+
+def test_ledger_only_rebuild(tmp_path):
+    # A. LEDGER_ONLY_REBUILD：删除/不存在 legacy 22 列输入也能从 ledger 正常 refresh/render
+    _build_fake_ledger(tmp_path)
+    mat = tmp_path / catalog.MATERIAL_DIR_NAME
+    (mat / catalog.LEGACY_CSV_FILENAME).unlink()
+    assert catalog.main(["--root", str(tmp_path)]) == 0
+    assert (mat / catalog.LEDGER_FILENAME).exists()
+    assert (mat / catalog.LEGACY_CSV_FILENAME).exists()  # 重建为 9 列 derived CSV
+    assert (mat / catalog.INDEX_FILENAME).exists()
+    ledger = _read_ledger(tmp_path)
+    assert len(ledger["assets"]) == 2
+    rows = list(csv.reader(open(mat / catalog.LEGACY_CSV_FILENAME, encoding="utf-8-sig")))
+    assert rows[0] == CSV_HEADER
+    assert len(rows) == 3  # 表头 + 2 数据行
+
+
+def test_semantic_field_preservation(tmp_path):
+    # B. SEMANTIC_FIELD_PRESERVATION：作者已确认的 type/tags/notes/author 不被 refresh 覆盖
+    _build_fake_ledger(tmp_path)
+    mat = tmp_path / catalog.MATERIAL_DIR_NAME
+    ledger_path = mat / catalog.LEDGER_FILENAME
+    ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    a = next(x for x in ledger["assets"] if x["id"] == "book_0001")
+    a["type"] = "RESEARCH"          # 作者手工确认的语义字段
+    a["tags"] = ["作者确认标签"]
+    a["notes"] = "作者确认备注"
+    a["author"] = "作者确认"
+    catalog.write_ledger(ledger, ledger_path)
+    assert catalog.main(["--root", str(tmp_path)]) == 0
+    a2 = _asset(_read_ledger(tmp_path), "book_0001")
+    assert a2["type"] == "RESEARCH"
+    assert a2["tags"] == ["作者确认标签"]
+    assert a2["notes"] == "作者确认备注"
+    assert a2["author"] == "作者确认"
+
+
+def test_file_sha_refresh(tmp_path):
+    # C. FILE_SHA_REFRESH：registered file 原地内容变化 → SHA 更新 + SP/BKP 变需更新
+    _build_fake_ledger(tmp_path)
+    mat = tmp_path / catalog.MATERIAL_DIR_NAME
+    epub = mat / "01_网络小说" / "Alpha" / "Alpha (作者A) (z-library.sk, 1lib.sk, z-lib.sk).epub"
+    epub.write_bytes(b"new fake epub content")  # 原地内容变化
+    assert catalog.main(["--root", str(tmp_path)]) == 0
+    ledger = _read_ledger(tmp_path)
+    a = _asset(ledger, "book_0001")
+    new_sha = hashlib.sha256(b"new fake epub content").hexdigest()
+    epub_file = next(f for f in a["files"] if f["path"].endswith(".epub"))
+    assert epub_file["sha256"] == new_sha
+    # 旧 BKP fingerprint ≠ 当前文件 SHA → 需更新（不自动改 knowledge path）
+    assert a["knowledge"]["status"] == "需更新"
+    assert a["purification"]["status"] == "需更新"
+
+
+def test_missing_registered_file(tmp_path):
+    # D. MISSING_REGISTERED_FILE：registered path 丢失 → fail 且原 ledger 不被半写
+    _build_fake_ledger(tmp_path)
+    mat = tmp_path / catalog.MATERIAL_DIR_NAME
+    (mat / "01_网络小说" / "Alpha" / "Alpha(作者A).txt").unlink()
+    before = (mat / catalog.LEDGER_FILENAME).read_bytes()
+    rc = catalog.main(["--root", str(tmp_path)])
+    assert rc == 1
+    after = (mat / catalog.LEDGER_FILENAME).read_bytes()
+    assert before == after  # 原 ledger 保持原样
+    # CSV / MD 也未写入（保持缺失状态 → 无半写产物）
+    assert not (mat / catalog.INDEX_FILENAME).exists()
+
+
+def test_unregistered_file(tmp_path):
+    # E. UNREGISTERED_FILE：磁盘多一个未知 EPUB → 报告；不创建 asset / 新 ID
+    _build_fake_ledger(tmp_path)
+    mat = tmp_path / catalog.MATERIAL_DIR_NAME
+    extra = mat / "05_其他参考资料" / "unknown_new.epub"
+    extra.parent.mkdir(parents=True)
+    extra.write_bytes(b"unregistered epub")
+    assert catalog.main(["--root", str(tmp_path)]) == 0
+    ledger = _read_ledger(tmp_path)
+    assert len(ledger["assets"]) == 2  # 不创建新 asset
+    assert {a["id"] for a in ledger["assets"]} == {"book_0001", "book_0002"}
+
+
+def test_csv_view(ledger):
+    # F. CSV_VIEW：正式 CSV 9 列、一 asset 一行（真实数据 141 数据行）
+    rows = catalog.render_catalog_csv(ledger)
+    assert rows[0] == CSV_HEADER
+    assert len(rows) == 142
+    assert all(len(r) == 9 for r in rows)
+    # book_0035 单 asset 仅一行
+    assert sum(1 for r in rows[1:] if r[0] == "book_0035") == 1
+
+
+def test_csv_is_derived(tmp_path):
+    # G. CSV_IS_DERIVED：篡改 CSV 再 render → 被 ledger 重建；CSV 修改不反向污染 ledger
+    _build_fake_ledger(tmp_path)
+    mat = tmp_path / catalog.MATERIAL_DIR_NAME
+    assert catalog.main(["--root", str(tmp_path)]) == 0
+    csv_path = mat / catalog.LEGACY_CSV_FILENAME
+    rows = list(csv.reader(open(csv_path, encoding="utf-8-sig")))
+    rows[1][1] = "被篡改的名称"
+    with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:
+        csv.writer(f).writerows(rows)
+    assert catalog.main(["--root", str(tmp_path)]) == 0
+    rows2 = list(csv.reader(open(csv_path, encoding="utf-8-sig")))
+    assert rows2[1][1] == "Alpha"  # 被 ledger 重建
+    assert _asset(_read_ledger(tmp_path), "book_0001")["name"] == "Alpha"  # ledger 未被污染
 
 
 # ---------- 纯逻辑单元测试（不依赖真实数据） ----------
@@ -289,6 +429,20 @@ def test_derive_knowledge_pure():
     assert catalog.derive_knowledge(not_final, {"abc"}) == {"status": "未开始"}
 
 
+def test_refresh_preserves_canonical_fields_pure(tmp_path):
+    # refresh 必须保留 canonical 字段（含 files[].primary / source_container）
+    _build_fake_ledger(tmp_path)
+    mat = tmp_path / catalog.MATERIAL_DIR_NAME
+    ledger = json.loads((mat / catalog.LEDGER_FILENAME).read_text(encoding="utf-8"))
+    new_ledger, report = catalog.refresh_ledger(
+        ledger, mat, tmp_path / catalog.DISTILL_DIR_NAME, tmp_path / "06_工作区" / "SourcePrepare")
+    assert report["missing"] == []
+    assert report["unregistered"] == []
+    a = _asset(new_ledger, "book_0001")
+    assert [f["primary"] for f in a["files"]] == [True, False]
+    assert "source_container" not in a["files"][0]  # 无容器来源不虚构该字段
+
+
 # ---------- H. SourcePrepare contract（真实目录 discovery + metadata schema） ----------
 
 def _write_sp_metadata(sp_dir: Path, book_id: str, status: str, sha: str,
@@ -317,7 +471,7 @@ def test_sp_contract_pass_sha_match(tmp_path):
     _write_sp_metadata(sp_dir, "book_0001", "PASS", sha)
     meta = _sp_meta(sp_dir, "book_0001")
     assert meta is not None and meta["status"] == "PASS"
-    assert catalog.derive_purification(meta, None, "", {sha}) == \
+    assert catalog.derive_purification(meta, None, {sha}) == \
         {"status": "可用", "evidence": "sourceprepare_metadata"}
 
 
@@ -326,7 +480,7 @@ def test_sp_contract_review_sha_match(tmp_path):
     sha = "2" * 64
     _write_sp_metadata(sp_dir, "book_0001", "REVIEW", sha)
     meta = _sp_meta(sp_dir, "book_0001")
-    assert catalog.derive_purification(meta, None, "", {sha}) == \
+    assert catalog.derive_purification(meta, None, {sha}) == \
         {"status": "需复核", "evidence": "sourceprepare_metadata"}
 
 
@@ -335,7 +489,7 @@ def test_sp_contract_fail_sha_match(tmp_path):
     sha = "3" * 64
     _write_sp_metadata(sp_dir, "book_0001", "FAIL", sha)
     meta = _sp_meta(sp_dir, "book_0001")
-    assert catalog.derive_purification(meta, None, "", {sha}) == \
+    assert catalog.derive_purification(meta, None, {sha}) == \
         {"status": "失败", "evidence": "sourceprepare_metadata"}
 
 
@@ -344,8 +498,21 @@ def test_sp_contract_pass_sha_mismatch(tmp_path):
     _write_sp_metadata(sp_dir, "book_0001", "PASS", "4" * 64)
     meta = _sp_meta(sp_dir, "book_0001")
     # 即使 status=PASS，source 已不属于当前 asset → 需更新，不标记可用
-    assert catalog.derive_purification(meta, None, "", {"5" * 64}) == \
+    assert catalog.derive_purification(meta, None, {"5" * 64}) == \
         {"status": "需更新", "evidence": "sourceprepare_metadata_sha_mismatch"}
+
+
+def test_sp_contract_fail_no_selected_source(tmp_path):
+    # SP 已形成正式结果但无选中来源（FAIL 无可用来源）→ 失败，而非需复核
+    sp_dir = tmp_path / "06_工作区" / "SourcePrepare"
+    d = sp_dir / "book_0001_Alpha"
+    d.mkdir(parents=True)
+    (d / "metadata.json").write_text(json.dumps(
+        {"status": "FAIL", "book_id": "book_0001", "selected_source": None},
+        ensure_ascii=False), encoding="utf-8")
+    meta = _sp_meta(sp_dir, "book_0001")
+    assert catalog.derive_purification(meta, None, {"abc"}) == \
+        {"status": "失败", "evidence": "sourceprepare_metadata"}
 
 
 def test_sp_contract_book_id_mismatch_reject(tmp_path):
@@ -371,7 +538,7 @@ def test_sp_contract_incomplete_metadata(tmp_path):
     (d / "metadata.json").write_text(json.dumps({"status": "PASS"}), encoding="utf-8")
     meta = _sp_meta(sp_dir, "book_0001")
     # 缺 selected_source.sha256 → 不判可用，进入需复核
-    assert catalog.derive_purification(meta, None, "", {"abc"}) == \
+    assert catalog.derive_purification(meta, None, {"abc"}) == \
         {"status": "需复核", "evidence": "sourceprepare_metadata_incomplete"}
 
 

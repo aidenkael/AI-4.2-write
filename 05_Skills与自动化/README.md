@@ -18,8 +18,8 @@
 
 | Skill | 职责 | 状态 |
 |---|---|---|
-| MaterialIntake | 素材资产账本 / 入库基础 | foundation |
-| SourcePrepare | 原著 EPUB/TXT → 纯净 Markdown | freeze / available |
+| MaterialIntake | 素材资产 canonical ledger（素材资产.json）+ 9 列 CSV / 索引 derived views | **CANONICAL_CATALOG_AVAILABLE** |
+| SourcePrepare | 原著 EPUB/TXT → 纯净 Markdown（canonical ledger consumer） | available |
 | BookDistill | 参考作品知识提取（BKP + evidence） | freeze / available |
 | KnowledgeRetrieve | BKP 多轴检索 | freeze / available |
 | StoryDesign | 故事设计运行底座 | closed / frozen |

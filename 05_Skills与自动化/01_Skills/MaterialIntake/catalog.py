@@ -1,19 +1,31 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MaterialIntake catalog builder —— 素材资产 canonical ledger 构建器（CATALOG_FOUNDATION_ONLY）。
+MaterialIntake catalog —— 素材资产 canonical ledger 的 refresh 与 derived view 渲染器。
 
-输入（全部只读，绝不修改）：
-  - 01_原始素材/ 磁盘全量扫描（SHA256，by-file）
-  - 01_原始素材/素材清单.csv（legacy 22 列，仅作 migration/bootstrap 输入）
-  - 02_原著蒸馏/book_xxxx_*/bkp/identity.json（knowledge evidence，FINALIZED 状态）
-  - 01_原始素材/**/collection_manifest.json（container evidence，Local Only）
-  - 06_工作区/SourcePrepare/<book_id>_<书名>/metadata.json（A 级提纯证据，SP 正式合同路径）
+Phase 2B1（CANONICAL_CATALOG）运行模型（默认）：
+  已有素材资产.json
+      ↓ load + schema validation
+      ↓ 验证磁盘 registered files（MISSING_REGISTERED_FILE → 停止且不写盘）
+      ↓ 读取 SourcePrepare / BKP evidence
+      ↓ 刷新机器事实（files SHA）与 derived status（purification / knowledge）
+      ↓ 保存素材资产.json
+      ↓ 生成素材清单.csv（9 列 derived author view）
+      ↓ 生成素材总索引.md（derived human/GitHub view）
 
-输出：
-  - 01_原始素材/素材资产.json        machine canonical ledger（tracked）
-  - 01_原始素材/素材总索引.md        人类/GitHub 总览（tracked）
-  - %TEMP%/素材清单_v1_preview.csv   9 列作者视图 preview（不 tracked）
+默认运行不读取 legacy 22 列 CSV。
+
+MIGRATION_ONLY：load_legacy_csv / build_assets / bootstrap_type / parse_author_from_filename
+等函数是 legacy 22 列 → ledger 的一次性迁移 / 测试 fixture helper（Phase 2A），
+绝不被 production main / refresh 路径调用。Phase 2B2 起由 inbox intake 取代。
+
+设计原则：
+  - 素材资产.json = 唯一 canonical material registry；素材清单.csv / 素材总索引.md = derived views。
+  - 禁止 CSV / MD 反向生成 ledger；SourcePrepare 不维护第二套 book_id / category registry。
+  - refresh 保留 canonical / human semantic 字段（id/name/type/author/tags/notes/
+    files[].path/primary/source_container/container membership），不被文件名/旧分类/AI 自动覆盖。
+  - files[].sha256 是机器事实快照：registered path 存在则重算；缺失 → MISSING_REGISTERED_FILE。
+  - 未登记磁盘文件只报告 UNREGISTERED_FILE，不自动建 asset / 分类 / 分配 ID / 移动。
 
 确定性保证：
   - 无时间戳 / 无 volatile 字段
@@ -21,10 +33,12 @@ MaterialIntake catalog builder —— 素材资产 canonical ledger 构建器（
   - 同输入重复执行 byte-for-byte 幂等
 
 用法：
-  python catalog.py --root E:/AI-Write [--preview-dir DIR]
+  python catalog.py --root E:/AI-Write           # 默认 refresh + render（写 ledger/CSV/MD）
+  python catalog.py --root E:/AI-Write --check   # 只校验，不写盘
 """
 
 import argparse
+import copy
 import csv
 import hashlib
 import json
@@ -38,11 +52,15 @@ DISTILL_DIR_NAME = "02_原著蒸馏"
 LEGACY_CSV_FILENAME = "素材清单.csv"
 LEDGER_FILENAME = "素材资产.json"
 INDEX_FILENAME = "素材总索引.md"
-PREVIEW_FILENAME = "素材清单_v1_preview.csv"
 MANIFEST_FILENAME = "collection_manifest.json"
 SCHEMA_VERSION = "1.0"
 
-# 边界案例（中文文学中需要人工确认角色的作品 → NEEDS_REVIEW）
+# 已知系统文件：不算未登记新素材
+SYSTEM_FILES = {
+    "README.md", LEDGER_FILENAME, LEGACY_CSV_FILENAME, INDEX_FILENAME, ".gitkeep",
+}
+
+# 边界案例（中文文学中需要人工确认角色的作品 → NEEDS_REVIEW）【migration bootstrap 用】
 BOUNDARY_REVIEW_NAMES = {
     "明朝那些事儿",
     "我读书少你可别骗我",
@@ -53,17 +71,14 @@ BOUNDARY_REVIEW_NAMES = {
     "事实证明人民永远是最可爱的",  # 无逗号变体（防御）
 }
 
-# 文件名作者解析时的噪声词（z-library 痕迹 / 版本 / 系列标注等）
+# 文件名作者解析时的噪声词（z-library 痕迹 / 版本 / 系列标注等）【migration bootstrap 用】
 NOISE_KW = (
     "z-library", "1lib", "z-lib", "译文", "译", "经典", "出版", "版", "全集", "精排",
     "校对", "全本", "纪念", "作者", "原著", "合集", "丛书", "共", "册", "著",
 )
 
-# 单字候选（册标记 / 方位标记），几乎不可能是作者名
+# 单字候选（册标记 / 方位标记），几乎不可能是作者名 【migration bootstrap 用】
 SINGLE_CHAR_REJECT = ("上", "下", "中", "全")
-
-# legacy CSV SourcePrepare 状态 → 提纯状态（仅 migration bootstrap 用）
-SP_STATUS_MAP = {"PASS": "可用", "REVIEW": "需复核", "FAIL": "失败"}
 
 # 提纯状态（含 Phase 2B 预留：不适用）
 PURIFICATION_STATUS = ("未处理", "可用", "需复核", "需更新", "失败", "不适用")
@@ -96,56 +111,43 @@ def scan_material_files(mat_dir: Path) -> dict:
     return scanned
 
 
-def load_legacy_csv(mat_dir: Path) -> list:
-    """读取 legacy 22 列素材清单.csv（UTF-8-sig），返回 DictReader 行列表。"""
-    csv_path = mat_dir / LEGACY_CSV_FILENAME
-    with open(csv_path, encoding="utf-8-sig", newline="") as f:
-        return list(csv.DictReader(f))
+def load_ledger(path: Path) -> dict:
+    """读取素材资产.json（canonical ledger），校验 schema_version 与顶层结构。"""
+    if not path.exists():
+        raise FileNotFoundError(f"canonical ledger 不存在: {path}")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"ledger 解析失败: {exc}") from exc
+    if data.get("schema_version") != SCHEMA_VERSION:
+        raise RuntimeError(
+            f"ledger schema_version 不兼容: {data.get('schema_version')!r} != {SCHEMA_VERSION!r}")
+    if not isinstance(data.get("assets"), list) or not isinstance(data.get("containers"), list):
+        raise RuntimeError("ledger 结构无效：缺少 assets / containers 列表")
+    return data
 
 
-def strip_material_prefix(path_value: str) -> str:
-    """去掉 CSV 本地相对路径中的 '01_原始素材/' 前缀，得到相对 01_原始素材 的 posix 路径。"""
-    p = path_value.replace("\\", "/").strip()
-    prefix = MATERIAL_DIR_NAME + "/"
-    if p.startswith(prefix):
-        return p[len(prefix):]
-    return p
-
-
-def bootstrap_type(category: str, name: str) -> str:
-    """类型初始化：现代专业资料 → RESEARCH；边界案例 → NEEDS_REVIEW；其余 → REFERENCE_WORK。"""
-    if category == "现代专业资料":
-        return "RESEARCH"
-    if name in BOUNDARY_REVIEW_NAMES:
-        return "NEEDS_REVIEW"
-    return "REFERENCE_WORK"
-
-
-def parse_author_from_filename(filename: str) -> str:
-    """
-    从文件名保守解析作者：取括号（半角/全角）内候选，过滤噪声词；
-    仅当恰好剩下一个可信候选（无空格、长度 ≤ 12）才返回，否则空串。
-    """
-    stem = Path(filename).stem
-    pairs = re.findall(r"\(([^()]*)\)|（([^（）]*)）", stem)
-    cleaned = []
-    for half, full in pairs:
-        c = (half or full).strip()
-        if not c:
-            continue
-        low = c.lower()
-        if any(k in low for k in NOISE_KW):
-            continue
-        if c in SINGLE_CHAR_REJECT:
-            continue
-        if " " in c or "\u3000" in c:
-            continue
-        if len(c) > 12:
-            continue
-        cleaned.append(c)
-    if len(cleaned) == 1:
-        return cleaned[0]
-    return ""
+def validate_ledger(ledger: dict) -> list[str]:
+    """schema 级校验，返回错误信息列表（空 = 合法）。"""
+    errors = []
+    seen_ids = set()
+    for a in ledger["assets"]:
+        if a["id"] in seen_ids:
+            errors.append(f"重复 asset id: {a['id']}")
+        seen_ids.add(a["id"])
+        if a["type"] not in VALID_TYPES:
+            errors.append(f"{a['id']}: 非法 type {a['type']!r}")
+        if a["purification"]["status"] not in PURIFICATION_STATUS:
+            errors.append(f"{a['id']}: 非法 purification {a['purification']['status']!r}")
+        if a["knowledge"]["status"] not in KNOWLEDGE_STATUS:
+            errors.append(f"{a['id']}: 非法 knowledge {a['knowledge']['status']!r}")
+        paths = [f["path"] for f in a["files"]]
+        if len(paths) != len(set(paths)):
+            errors.append(f"{a['id']}: files 路径重复")
+        for f in a["files"]:
+            if not re.fullmatch(r"[0-9a-f]{64}", f.get("sha256") or ""):
+                errors.append(f"{a['id']}: {f['path']} SHA256 非法")
+    return errors
 
 
 def find_bkp(distill_dir: Path, book_id: str) -> dict | None:
@@ -207,26 +209,31 @@ def find_sp_metadata(sp_dir: Path, book_id: str) -> dict | None:
     return data
 
 
-def derive_purification(sp_meta: dict | None, bkp: dict | None,
-                        legacy_status: str, file_shas: set) -> dict:
+def derive_purification(sp_meta: dict | None, bkp: dict | None, file_shas: set) -> dict:
     """
-    提纯状态推导（优先级 A > B > C > D > E）：
+    提纯状态推导（A > B > E；legacy C 级已随 Phase 2B1 cutover 退役）：
       A. SourcePrepare metadata.json（A 级证据，合同路径 <book_id>_<书名>/metadata.json）
          schema: status / book_id / selected_source.sha256
-         - selected_source.sha256 匹配 files：
-             status=PASS → 可用；REVIEW → 需复核；FAIL → 失败
+         - status 缺失或未知 → 需复核（明确异常，不静默判可用）
+         - status=PASS/REVIEW/FAIL 但 selected_source.sha256 缺失：
+             FAIL → 失败（SP 已形成正式结果但无选中来源）；PASS/REVIEW → 需复核（数据不完整）
+         - SHA 匹配 files：PASS → 可用；REVIEW → 需复核；FAIL → 失败
          - SHA 已不属于当前 asset → 需更新（即使 status=PASS 也不标记可用）
-         - 缺关键字段 / 未知 status → 需复核（明确异常，不静默判可用）
-      B. BKP FINALIZED 且 source_sha256 在 files 中 → 可用（bkp_source_snapshot）
-      C. legacy CSV SP 状态（一次性 migration bootstrap，legacy_catalog）
-      D. SHA 不匹配 → 需更新
-      E. 无任何证据 → 未处理
+      B. BKP FINALIZED 且 source_sha256 在 files 中 → 可用（bkp_source_snapshot）；
+         有 FINALIZED BKP 但 SHA 不匹配 → 需更新
+      E. 无任何证据 → 未处理（evidence=None）
     """
     if sp_meta is not None:
         sp_status = sp_meta.get("status")
         sel = sp_meta.get("selected_source")
         sha = sel.get("sha256") if isinstance(sel, dict) else None
-        if not sp_status or not sha:
+        if not sp_status:
+            return {"status": "需复核", "evidence": "sourceprepare_metadata_incomplete"}
+        if sp_status not in ("PASS", "REVIEW", "FAIL"):
+            return {"status": "需复核", "evidence": "sourceprepare_metadata_unknown_status"}
+        if not sha:
+            if sp_status == "FAIL":
+                return {"status": "失败", "evidence": "sourceprepare_metadata"}
             return {"status": "需复核", "evidence": "sourceprepare_metadata_incomplete"}
         if sha not in file_shas:
             return {"status": "需更新", "evidence": "sourceprepare_metadata_sha_mismatch"}
@@ -234,15 +241,11 @@ def derive_purification(sp_meta: dict | None, bkp: dict | None,
             return {"status": "可用", "evidence": "sourceprepare_metadata"}
         if sp_status == "REVIEW":
             return {"status": "需复核", "evidence": "sourceprepare_metadata"}
-        if sp_status == "FAIL":
-            return {"status": "失败", "evidence": "sourceprepare_metadata"}
-        return {"status": "需复核", "evidence": "sourceprepare_metadata_unknown_status"}
+        return {"status": "失败", "evidence": "sourceprepare_metadata"}
     if bkp is not None and bkp["finalized"]:
         if bkp["source_sha256"] and bkp["source_sha256"] in file_shas:
             return {"status": "可用", "evidence": "bkp_source_snapshot"}
         return {"status": "需更新", "evidence": "bkp_source_sha_mismatch"}
-    if legacy_status in SP_STATUS_MAP:
-        return {"status": SP_STATUS_MAP[legacy_status], "evidence": "legacy_catalog"}
     return {"status": "未处理", "evidence": None}
 
 
@@ -255,112 +258,104 @@ def derive_knowledge(bkp: dict | None, file_shas: set) -> dict:
     return base
 
 
-def split_tags(raw: str) -> list:
-    """标签列非空时按常见分隔符拆分；空 → []。"""
-    raw = (raw or "").strip()
-    if not raw:
-        return []
-    return [t.strip() for t in re.split(r"[;；,，、/|]", raw) if t.strip()]
+def refresh_ledger(ledger: dict, mat_dir: Path, distill_dir: Path, sp_dir: Path) -> tuple[dict, dict]:
+    """基于磁盘事实与证据刷新 ledger；返回 (new_ledger, report)。
 
+    report = {"missing": [...], "unregistered": [...]}
+    - canonical / human semantic 字段全部保留（id/name/type/author/tags/notes/
+      files[].path/primary/source_container/container membership）。
+    - files[].sha256 重新计算（机器事实快照）。
+    - registered path 缺失 → 记入 missing（调用方应停止写盘，保持原 ledger 不被半写）。
+    - 未登记新文件 → 记入 unregistered（不自动建 asset / 分类 / 分配 ID）。
+    """
+    scanned = scan_material_files(mat_dir)
+    report = {"missing": [], "unregistered": []}
 
-def build_assets(rows: list, scanned: dict, distill_dir: Path, sp_dir: Path) -> list:
-    """按作品ID 分组构建 assets：id/name/type/author/tags/notes/files/purification/knowledge。"""
-    by_id = {}
-    for r in rows:
-        by_id.setdefault(r["作品ID"], []).append(r)
-
-    assets = []
-    for book_id in sorted(by_id):
-        group = by_id[book_id]
-        primary = next((r for r in group if r["是否主来源"] == "是"), group[0])
-        name = (primary["作品名"] or "").strip()
-        category = (primary["资料大类"] or "").strip()
-
-        files = []
-        for r in sorted(group, key=lambda x: strip_material_prefix(x["本地相对路径"])):
-            rel = strip_material_prefix(r["本地相对路径"])
+    new_assets = []
+    for a in ledger["assets"]:
+        new_files = []
+        for f in a["files"]:
+            rel = f["path"]
             if rel not in scanned:
-                raise RuntimeError(f"磁盘缺失（CSV 已注册但文件不存在）: {rel}")
-            fe = {"path": rel, "sha256": scanned[rel], "primary": r["是否主来源"] == "是"}
-            cont = (r["来源容器"] or "").strip()
-            if cont:
-                fe["source_container"] = cont
-            files.append(fe)
-
-        file_shas = {f["sha256"] for f in files}
-        bkp = find_bkp(distill_dir, book_id)
-        sp_meta = find_sp_metadata(sp_dir, book_id)
-
-        # 作者：CSV > BKP identity > 主来源文件名保守解析 > 空
-        author = (primary["作者"] or "").strip()
-        if not author and bkp is not None and bkp["author"]:
-            author = bkp["author"]
-        if not author:
-            author = parse_author_from_filename(primary["文件名"] or "")
-
-        notes = (primary["备注"] or "").strip()
-
-        assets.append({
-            "id": book_id,
-            "name": name,
-            "type": bootstrap_type(category, name),
-            "author": author,
-            "tags": split_tags(primary["标签"]),
-            "notes": notes,
-            "files": files,
-            "purification": derive_purification(
-                sp_meta, bkp, (primary["SourcePrepare状态"] or "").strip(), file_shas),
+                report["missing"].append(rel)
+                continue
+            nf = dict(f)
+            nf["sha256"] = scanned[rel]
+            new_files.append(nf)
+        file_shas = {f["sha256"] for f in new_files}
+        bkp = find_bkp(distill_dir, a["id"])
+        sp_meta = find_sp_metadata(sp_dir, a["id"])
+        new_assets.append({
+            "id": a["id"],
+            "name": a["name"],
+            "type": a["type"],
+            "author": a["author"],
+            "tags": list(a.get("tags") or []),
+            "notes": a.get("notes") or "",
+            "files": new_files,
+            "purification": derive_purification(sp_meta, bkp, file_shas),
             "knowledge": derive_knowledge(bkp, file_shas),
         })
-    return assets
 
+    # containers：结构保留；original.sha256 以磁盘扫描为准重算（机器事实）
+    new_containers = []
+    for c in ledger["containers"]:
+        nc = copy.deepcopy(c)
+        op = nc.get("original") or {}
+        if op.get("path") and op["path"] in scanned:
+            op["sha256"] = scanned[op["path"]]
+        new_containers.append(nc)
 
-def load_manifests(mat_dir: Path) -> list:
-    """读取 01_原始素材 下所有 collection_manifest.json（Local Only 证据）。"""
-    manifests = []
-    for mf in sorted(mat_dir.rglob(MANIFEST_FILENAME)):
-        try:
-            data = json.loads(mf.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        manifests.append(data)
-    return manifests
-
-
-def build_containers(manifests: list, scanned: dict) -> list:
-    """由 manifest 构建 containers（original 为容器原始文件，SHA 以磁盘扫描为准）。"""
-    containers = []
-    for mf in manifests:
-        rel_dir = (mf.get("container_dir") or "").replace("\\", "/").strip("/")
-        original = mf.get("original") or {}
-        filename = original.get("filename") or ""
-        orig_path = f"{rel_dir}/{filename}" if filename else ""
-        splits = mf.get("splits") or []
-        containers.append({
-            "id": mf.get("container") or rel_dir,
-            "container_dir": rel_dir,
-            "category": mf.get("category") or "",
-            "source_format": mf.get("source_format") or "",
-            "manifest_path": f"{rel_dir}/{MANIFEST_FILENAME}" if rel_dir else MANIFEST_FILENAME,
-            "original": {
-                "path": orig_path,
-                "filename": filename,
-                "sha256": scanned.get(orig_path) or original.get("sha256") or "",
-            },
-            "split_count": len(splits),
-            "split_book_ids": [s.get("book_id") for s in splits if s.get("book_id")],
-        })
-    containers.sort(key=lambda c: c["id"])
-    return containers
-
-
-def build_ledger(assets: list, containers: list) -> dict:
-    """组装 ledger（schema_version / assets / containers）。"""
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "assets": assets,
-        "containers": containers,
+    # unregistered 检测：排除系统文件 / 已登记 container original
+    registered = {f["path"] for a in new_assets for f in a["files"]}
+    container_originals = {
+        c["original"]["path"] for c in new_containers if c.get("original", {}).get("path")
     }
+    for rel in sorted(set(scanned) - registered - container_originals):
+        if Path(rel).name in SYSTEM_FILES:
+            continue
+        report["unregistered"].append(rel)
+
+    new_ledger = {
+        "schema_version": ledger["schema_version"],
+        "assets": new_assets,
+        "containers": new_containers,
+    }
+    return new_ledger, report
+
+
+def render_catalog_csv(ledger: dict) -> list:
+    """渲染 9 列作者视图（含表头）：素材ID/名称/类型/作者/标签/位置/提纯/知识/备注。
+
+    完全由 ledger 派生；一项逻辑素材 = 一行；位置 = primary file 所在目录（相对 01_原始素材）。
+    禁止任何 CSV → ledger 反向同步入口。
+    """
+    header = ["素材ID", "名称", "类型", "作者", "标签", "位置", "提纯", "知识", "备注"]
+    rows = [header]
+    for a in ledger["assets"]:
+        primary_files = [f for f in a["files"] if f["primary"]]
+        loc_src = primary_files[0] if primary_files else a["files"][0]
+        location = str(Path(loc_src["path"]).parent.as_posix())
+        if location == ".":
+            location = ""
+        rows.append([
+            a["id"],
+            a["name"],
+            a["type"],
+            a["author"],
+            "、".join(a["tags"]),
+            location,
+            a["purification"]["status"],
+            a["knowledge"]["status"],
+            a["notes"],
+        ])
+    return rows
+
+
+def write_csv(rows: list, out_path: Path) -> None:
+    """写 derived CSV（utf-8-sig，Excel 友好）。"""
+    with open(out_path, "w", encoding="utf-8-sig", newline="") as f:
+        csv.writer(f).writerows(rows)
 
 
 def write_ledger(ledger: dict, out_path: Path) -> None:
@@ -369,8 +364,8 @@ def write_ledger(ledger: dict, out_path: Path) -> None:
     out_path.write_text(text, encoding="utf-8", newline="\n")
 
 
-def generate_index(ledger: dict) -> str:
-    """生成素材总索引.md（总览 + 参考作品表 + 研究资料表 + 待确认表；不含 SHA/大小/文件名/来源网站等）。"""
+def render_index_md(ledger: dict) -> str:
+    """渲染素材总索引.md（总览 + 参考作品表 + 研究资料表 + 待确认表；不含 SHA/大小/文件名/来源网站等）。"""
     assets = ledger["assets"]
     n = len(assets)
     by_type = {}
@@ -424,82 +419,229 @@ def generate_index(ledger: dict) -> str:
     return "\n".join(lines)
 
 
-def generate_preview_rows(ledger: dict) -> list:
-    """生成 9 列 preview 行（含表头）：素材ID/名称/类型/作者/标签/位置/提纯/知识/备注。"""
-    header = ["素材ID", "名称", "类型", "作者", "标签", "位置", "提纯", "知识", "备注"]
-    rows = [header]
-    for a in ledger["assets"]:
-        primary_files = [f for f in a["files"] if f["primary"]]
-        loc_src = primary_files[0] if primary_files else a["files"][0]
-        location = str(Path(loc_src["path"]).parent.as_posix())
-        if location == ".":
-            location = ""
-        rows.append([
-            a["id"],
-            a["name"],
-            a["type"],
-            a["author"],
-            "、".join(a["tags"]),
-            location,
-            a["purification"]["status"],
-            a["knowledge"]["status"],
-            a["notes"],
-        ])
-    return rows
+def refresh_and_render(root: Path, check_only: bool = False) -> int:
+    """canonical 默认流程：load ledger → refresh → validate →（check_only 停止）→ 写三视图。
 
-
-def write_preview(rows: list, out_path: Path) -> None:
-    """写 preview CSV（utf-8-sig，Excel 友好）。"""
-    with open(out_path, "w", encoding="utf-8-sig", newline="") as f:
-        csv.writer(f).writerows(rows)
-
-
-def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="素材资产 ledger 构建器（CATALOG_FOUNDATION_ONLY）")
-    parser.add_argument("--root", default=os.getcwd(), help="仓库根目录（默认当前目录）")
-    parser.add_argument("--preview-dir", default=None, help="preview CSV 输出目录（默认 %TEMP%）")
-    args = parser.parse_args(argv)
-
-    root = Path(args.root)
+    供 CLI 与 SourcePrepare local writeback 复用；任何 MISSING 都停止且不写盘。
+    """
     mat_dir = root / MATERIAL_DIR_NAME
     distill_dir = root / DISTILL_DIR_NAME
     sp_dir = root / "06_工作区" / "SourcePrepare"
-
-    print("[catalog] scanning material files (SHA256) ...")
-    scanned = scan_material_files(mat_dir)
-    print(f"[catalog] scanned {len(scanned)} files")
-
-    rows = load_legacy_csv(mat_dir)
-    print(f"[catalog] legacy CSV rows: {len(rows)}")
-
-    assets = build_assets(rows, scanned, distill_dir, sp_dir)
-    manifests = load_manifests(mat_dir)
-    containers = build_containers(manifests, scanned)
-    ledger = build_ledger(assets, containers)
-
     ledger_path = mat_dir / LEDGER_FILENAME
-    index_path = mat_dir / INDEX_FILENAME
-    write_ledger(ledger, ledger_path)
-    index_path.write_text(generate_index(ledger), encoding="utf-8", newline="\n")
 
-    preview_dir = Path(args.preview_dir) if args.preview_dir else Path(os.environ.get("TEMP", "."))
-    preview_path = preview_dir / PREVIEW_FILENAME
-    write_preview(generate_preview_rows(ledger), preview_path)
+    if not ledger_path.exists():
+        print(f"[catalog] ERROR: canonical ledger 不存在: {ledger_path}")
+        print("[catalog] 默认流程从 ledger 加载；legacy CSV bootstrap 仅限迁移 helper / 测试使用")
+        return 2
 
-    print(f"[catalog] assets: {len(assets)} | containers: {len(containers)}")
+    ledger = load_ledger(ledger_path)
+    new_ledger, report = refresh_ledger(ledger, mat_dir, distill_dir, sp_dir)
+
+    if report["missing"]:
+        print(f"[catalog] MISSING_REGISTERED_FILE × {len(report['missing'])}：")
+        for rel in report["missing"]:
+            print(f"  - {rel}")
+        print("[catalog] refresh 已停止，未写入任何文件（原 ledger 保持原样）")
+        return 1
+
+    errors = validate_ledger(new_ledger)
+    if errors:
+        print(f"[catalog] 校验失败 × {len(errors)}：")
+        for e in errors:
+            print(f"  - {e}")
+        return 1
+
+    n_assets = len(new_ledger["assets"])
+    n_files = sum(len(a["files"]) for a in new_ledger["assets"])
+    if check_only:
+        print(f"[catalog] CHECK OK: {n_assets} assets / {n_files} files "
+              f"/ {len(new_ledger['containers'])} containers（未写入）")
+        return 0
+
+    write_ledger(new_ledger, ledger_path)
+    write_csv(render_catalog_csv(new_ledger), mat_dir / LEGACY_CSV_FILENAME)
+    (mat_dir / INDEX_FILENAME).write_text(render_index_md(new_ledger), encoding="utf-8", newline="\n")
+
+    if report["unregistered"]:
+        print(f"[catalog] UNREGISTERED_FILE × {len(report['unregistered'])}（仅报告，不自动登记）：")
+        for rel in report["unregistered"]:
+            print(f"  - {rel}")
+
+    print(f"[catalog] assets: {n_assets} | files: {n_files} | containers: {len(new_ledger['containers'])}")
     print(f"[catalog] wrote {ledger_path}")
-    print(f"[catalog] wrote {index_path}")
-    print(f"[catalog] wrote {preview_path}")
-
-    # 自检：schema 级不变式（类型/状态合法性；数量级由调用方/测试断言）
-    for a in assets:
-        assert a["type"] in VALID_TYPES, a["id"]
-        assert a["purification"]["status"] in PURIFICATION_STATUS, a["id"]
-        assert a["knowledge"]["status"] in KNOWLEDGE_STATUS, a["id"]
-        assert len({f["path"] for f in a["files"]}) == len(a["files"]), f"{a['id']} 重复文件路径"
-    print(f"[catalog] self-checks passed ({len(assets)} assets / "
-          f"{sum(len(a['files']) for a in assets)} files / valid statuses)")
+    print(f"[catalog] wrote {mat_dir / LEGACY_CSV_FILENAME}（9 列 derived view）")
+    print(f"[catalog] wrote {mat_dir / INDEX_FILENAME}")
     return 0
+
+
+# =========================================================================== #
+# MIGRATION_ONLY：legacy 22 列 CSV → ledger 的一次性迁移 / 测试 fixture helper。
+# 以下函数不被 production main / refresh 路径调用；Phase 2B2 起由 inbox intake 取代。
+# =========================================================================== #
+
+def load_legacy_csv(mat_dir: Path) -> list:
+    """[MIGRATION_ONLY] 读取 legacy 22 列素材清单.csv（UTF-8-sig），返回 DictReader 行列表。"""
+    csv_path = mat_dir / LEGACY_CSV_FILENAME
+    with open(csv_path, encoding="utf-8-sig", newline="") as f:
+        return list(csv.DictReader(f))
+
+
+def strip_material_prefix(path_value: str) -> str:
+    """[MIGRATION_ONLY] 去掉 CSV 本地相对路径中的 '01_原始素材/' 前缀，得到相对 01_原始素材 的 posix 路径。"""
+    p = path_value.replace("\\", "/").strip()
+    prefix = MATERIAL_DIR_NAME + "/"
+    if p.startswith(prefix):
+        return p[len(prefix):]
+    return p
+
+
+def bootstrap_type(category: str, name: str) -> str:
+    """[MIGRATION_ONLY] 类型初始化：现代专业资料 → RESEARCH；边界案例 → NEEDS_REVIEW；其余 → REFERENCE_WORK。"""
+    if category == "现代专业资料":
+        return "RESEARCH"
+    if name in BOUNDARY_REVIEW_NAMES:
+        return "NEEDS_REVIEW"
+    return "REFERENCE_WORK"
+
+
+def parse_author_from_filename(filename: str) -> str:
+    """[MIGRATION_ONLY] 从文件名保守解析作者：取括号（半角/全角）内候选，过滤噪声词；
+    仅当恰好剩下一个可信候选（无空格、长度 ≤ 12）才返回，否则空串。"""
+    stem = Path(filename).stem
+    pairs = re.findall(r"\(([^()]*)\)|（([^（）]*)）", stem)
+    cleaned = []
+    for half, full in pairs:
+        c = (half or full).strip()
+        if not c:
+            continue
+        low = c.lower()
+        if any(k in low for k in NOISE_KW):
+            continue
+        if c in SINGLE_CHAR_REJECT:
+            continue
+        if " " in c or "\u3000" in c:
+            continue
+        if len(c) > 12:
+            continue
+        cleaned.append(c)
+    if len(cleaned) == 1:
+        return cleaned[0]
+    return ""
+
+
+def split_tags(raw: str) -> list:
+    """[MIGRATION_ONLY] 标签列非空时按常见分隔符拆分；空 → []。"""
+    raw = (raw or "").strip()
+    if not raw:
+        return []
+    return [t.strip() for t in re.split(r"[;；,，、/|]", raw) if t.strip()]
+
+
+def build_assets(rows: list, scanned: dict, distill_dir: Path, sp_dir: Path) -> list:
+    """[MIGRATION_ONLY] 按作品ID 分组构建 assets：id/name/type/author/tags/notes/files/purification/knowledge。
+
+    一次性迁移 / 测试 fixture 用；不进入 production main。作者优先级 CSV > BKP > 文件名解析。
+    """
+    by_id = {}
+    for r in rows:
+        by_id.setdefault(r["作品ID"], []).append(r)
+
+    assets = []
+    for book_id in sorted(by_id):
+        group = by_id[book_id]
+        primary = next((r for r in group if r["是否主来源"] == "是"), group[0])
+        name = (primary["作品名"] or "").strip()
+        category = (primary["资料大类"] or "").strip()
+
+        files = []
+        for r in sorted(group, key=lambda x: strip_material_prefix(x["本地相对路径"])):
+            rel = strip_material_prefix(r["本地相对路径"])
+            if rel not in scanned:
+                raise RuntimeError(f"磁盘缺失（CSV 已注册但文件不存在）: {rel}")
+            fe = {"path": rel, "sha256": scanned[rel], "primary": r["是否主来源"] == "是"}
+            cont = (r["来源容器"] or "").strip()
+            if cont:
+                fe["source_container"] = cont
+            files.append(fe)
+
+        file_shas = {f["sha256"] for f in files}
+        bkp = find_bkp(distill_dir, book_id)
+        sp_meta = find_sp_metadata(sp_dir, book_id)
+
+        author = (primary["作者"] or "").strip()
+        if not author and bkp is not None and bkp["author"]:
+            author = bkp["author"]
+        if not author:
+            author = parse_author_from_filename(primary["文件名"] or "")
+
+        assets.append({
+            "id": book_id,
+            "name": name,
+            "type": bootstrap_type(category, name),
+            "author": author,
+            "tags": split_tags(primary["标签"]),
+            "notes": (primary["备注"] or "").strip(),
+            "files": files,
+            "purification": derive_purification(sp_meta, bkp, file_shas),
+            "knowledge": derive_knowledge(bkp, file_shas),
+        })
+    return assets
+
+
+def load_manifests(mat_dir: Path) -> list:
+    """[MIGRATION_ONLY] 读取 01_原始素材 下所有 collection_manifest.json（Local Only 证据）。"""
+    manifests = []
+    for mf in sorted(mat_dir.rglob(MANIFEST_FILENAME)):
+        try:
+            data = json.loads(mf.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        manifests.append(data)
+    return manifests
+
+
+def build_containers(manifests: list, scanned: dict) -> list:
+    """[MIGRATION_ONLY] 由 manifest 构建 containers（original 为容器原始文件，SHA 以磁盘扫描为准）。"""
+    containers = []
+    for mf in manifests:
+        rel_dir = (mf.get("container_dir") or "").replace("\\", "/").strip("/")
+        original = mf.get("original") or {}
+        filename = original.get("filename") or ""
+        orig_path = f"{rel_dir}/{filename}" if filename else ""
+        splits = mf.get("splits") or []
+        containers.append({
+            "id": mf.get("container") or rel_dir,
+            "container_dir": rel_dir,
+            "category": mf.get("category") or "",
+            "source_format": mf.get("source_format") or "",
+            "manifest_path": f"{rel_dir}/{MANIFEST_FILENAME}" if rel_dir else MANIFEST_FILENAME,
+            "original": {
+                "path": orig_path,
+                "filename": filename,
+                "sha256": scanned.get(orig_path) or original.get("sha256") or "",
+            },
+            "split_count": len(splits),
+            "split_book_ids": [s.get("book_id") for s in splits if s.get("book_id")],
+        })
+    containers.sort(key=lambda c: c["id"])
+    return containers
+
+
+def build_ledger(assets: list, containers: list) -> dict:
+    """[MIGRATION_ONLY] 组装 ledger（schema_version / assets / containers）。"""
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "assets": assets,
+        "containers": containers,
+    }
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description="素材资产 canonical ledger refresh + derived views")
+    parser.add_argument("--root", default=os.getcwd(), help="仓库根目录（默认当前目录）")
+    parser.add_argument("--check", action="store_true", help="仅校验 ledger/磁盘/视图，不写盘")
+    args = parser.parse_args(argv)
+    return refresh_and_render(Path(args.root), check_only=args.check)
 
 
 if __name__ == "__main__":

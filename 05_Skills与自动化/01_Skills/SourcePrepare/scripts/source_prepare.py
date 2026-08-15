@@ -5,12 +5,16 @@ source_prepare.py — AI-Write 原著源文件标准化（SourcePrepare / SP）
 设计目标：
 - 把 01_原始素材 中的第三方原著，**只读**标准化为可供后续 BookDistill 使用的
   纯净 Markdown 工作副本。SP 只做“输入标准化”，不分析、不蒸馏、不改写正文。
-- 直接扫描作品目录根层（不再依赖 00_原始文件 嵌套子目录）。
-- 支持 6 大分类；05_现代专业资料 为非书籍类专业资料，标记 NOT_APPLICABLE，不转换。
+- 候选来源来自 canonical ledger（01_原始素材/素材资产.json，MaterialIntake 维护）：
+  不再扫描六分类目录、不再读取 legacy 22 列 CSV、不再依赖 index_builder 身份发现。
+- asset.type 决定处理策略：REFERENCE_WORK 正常处理、NEEDS_REVIEW 跳过、
+  RESEARCH 保守处理（结果不进参考作品链）、LOOSE_MATERIAL 不适用。
+  目录名不再决定 SP 行为。
 - 来源选择优先级：完整性 > 准确性 > 章节 > 格式（不再“EPUB 永远最好”；
   单 EPUB 只要通过质检即可 PASS）。
 - EPUB 跑 14 项质量检测（结构 + 转换 + 正文质量）。
-- 每跑完一部作品，自动回写中央索引（素材清单.csv / 素材总索引.md）。
+- 跑完后调用 MaterialIntake refresh_and_render 做 local writeback
+  （刷新 素材资产.json / 素材清单.csv / 素材总索引.md；不 git）。
 
 输出位置：
   06_工作区/SourcePrepare/<作品ID>_<作品>/
@@ -39,27 +43,28 @@ from pathlib import Path
 from typing import Iterable, Optional
 import xml.etree.ElementTree as ET
 
-# 同目录下的索引工具：SP 跑完一本书后回写中央索引
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import index_builder  # noqa: E402
+# MaterialIntake canonical catalog：ledger 是 SP 的唯一素材真源（不复制第二套 registry）
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "MaterialIntake"))
+import catalog as material_catalog  # noqa: E402
 
-SKILL_VERSION = "0.2.1"
+SKILL_VERSION = "0.3.0"
 RAW = "01_原始素材"
 SUPPORTED = {".epub", ".txt", ".pdf", ".zip", ".azw3", ".mobi"}
 SOURCE_PRIORITY = {".epub": 0, ".txt": 1, ".pdf": 2}
 
-# 6 大分类（目录名），与 index_builder.CATEGORY_LABEL 对应
-CATEGORY_DIRS = [
-    "01_网络小说", "02_中文文学", "03_外国文学",
-    "04_历史与古代资料", "05_现代专业资料", "06_其他参考资料",
-]
-CAT_DIR_TO_LABEL = {d: index_builder.CATEGORY_LABEL[d] for d in CATEGORY_DIRS}
-# 非书籍类专业资料：SP 不适用，标记 NOT_APPLICABLE，不转换、不进 06_工作区
-NOT_APPLICABLE_CATEGORIES = {"05_现代专业资料"}
-# 待人工核验目录：SP 不自动处理
-SKIP_DIRS = {"00_待核验"}
-# 合集容器目录内标记文件（Local Only，不上传 GitHub）
-COLLECTION_MANIFEST = "collection_manifest.json"
+# asset.type → 报告标签 / 处理策略（与 MaterialIntake VALID_TYPES 对应）
+TYPE_LABEL = {
+    "REFERENCE_WORK": "参考作品",
+    "RESEARCH": "研究资料",
+    "LOOSE_MATERIAL": "松散素材",
+    "NEEDS_REVIEW": "待确认",
+}
+TYPE_HANDLING = {
+    "REFERENCE_WORK": "process",
+    "NEEDS_REVIEW": "skip",
+    "RESEARCH": "conservative",
+    "LOOSE_MATERIAL": "not_applicable",
+}
 
 MIN_VISIBLE_CHARS = 5000
 CHAPTER_MIN = 3
@@ -525,126 +530,78 @@ def choose_candidate(cands: list[Candidate]) -> tuple[Optional[Candidate], list[
 
 
 # --------------------------------------------------------------------------- #
-# 作品扫描（直接扫根层，无 00_原始文件 依赖）
+# 作品发现（canonical ledger 驱动，不再扫描六分类目录）
 # --------------------------------------------------------------------------- #
-def load_collection_manifests(root: Path) -> dict:
-    """扫描 01_原始素材 下所有含 collection_manifest.json 的“合集容器”目录。
+def load_ledger_assets(root: Path) -> dict:
+    """读取 canonical ledger（MaterialIntake 合同），SP 的唯一素材真源。
 
-    返回 {容器目录Path: manifest字典}。合集目录只登记 manifest 中列出的拆分单书，
-    不入原始合集本身，也不把它当成“一个作品”。
+    ledger 缺失 / schema 不兼容时抛异常，SP 拒绝在无真源状态下运行。
     """
-    raw = root / RAW
-    result: dict = {}
-    for cat in CATEGORY_DIRS:
-        cdir = raw / cat
-        if not cdir.exists():
-            continue
-        for entry in sorted(cdir.iterdir()):
-            if entry.is_dir():
-                mpath = entry / COLLECTION_MANIFEST
-                if mpath.exists():
-                    try:
-                        result[entry] = json.loads(mpath.read_text(encoding="utf-8"))
-                    except Exception:
-                        pass
-    return result
+    return material_catalog.load_ledger(root / RAW / material_catalog.LEDGER_FILENAME)
 
 
 @dataclass
 class CandidateRec:
-    cat_dir: str
+    book_id: str
     work_name: str
-    source_container: str
+    asset_type: str
     path: Path
-    manifest_book_id: Optional[str] = None
+    source_container: str
+    primary: bool = False
 
 
-def collect_candidates(root: Path) -> list[CandidateRec]:
-    """收集所有候选源文件，且“合集容器”感知。
+def collect_candidates(ledger: dict, root: Path) -> list[CandidateRec]:
+    """从 canonical ledger 读取候选源（不再扫描六分类目录 / manifest）。
 
-    - 普通作品目录：目录内每个支持文件 = 一个候选（来源容器为空）。
-    - 合集容器目录（含 collection_manifest.json）：只登记 manifest 中列出的拆分单书，
-      来源容器 = 容器名；原始合集 EPUB 等其余文件跳过。
-    - 作品身份不直接由“文件夹名”决定；book ID 由索引 / manifest 解析（见 group_works）。
+    - asset.files[].path 相对 01_原始素材；source_container / primary 原样带出。
+    - NEEDS_REVIEW / LOOSE_MATERIAL 在 process_book 阶段按 asset.type 处理；
+      这里照常列出，便于 dry-run 展示与 SKIP / NOT_APPLICABLE 提示。
+    - 作品身份完全来自 ledger（book_id 唯一真源），文件夹名不参与身份判定。
     """
     raw = root / RAW
-    collections = load_collection_manifests(root)
-    collection_dirs = set(collections.keys())
     out: list[CandidateRec] = []
-    for cat in CATEGORY_DIRS:
-        cdir = raw / cat
-        if not cdir.exists():
-            continue
-        for entry in sorted(cdir.iterdir()):
-            if entry in collection_dirs:
-                man = collections[entry]
-                cname = man.get("container", entry.name)
-                cat_for_splits = man.get("category", cat)
-                for s in man.get("splits", []):
-                    fn = s.get("filename")
-                    p = entry / fn if fn else None
-                    if p and p.exists():
-                        out.append(CandidateRec(
-                            cat_dir=cat_for_splits,
-                            work_name=s.get("work_name", p.stem),
-                            source_container=cname,
-                            path=p,
-                            manifest_book_id=s.get("book_id")))
-                # 原始合集及其他文件不入索引
-                continue
-            if entry.is_dir():
-                if entry.name in SKIP_DIRS:
-                    continue
-                for f in entry.iterdir():
-                    if f.is_file() and f.suffix.lower() in SUPPORTED:
-                        out.append(CandidateRec(cat_dir=cat, work_name=entry.name,
-                                                source_container="", path=f))
-            elif entry.is_file() and entry.suffix.lower() in SUPPORTED:
-                out.append(CandidateRec(cat_dir=cat, work_name=entry.stem,
-                                        source_container="", path=entry))
+    for a in ledger["assets"]:
+        for f in a["files"]:
+            out.append(CandidateRec(
+                book_id=a["id"], work_name=a["name"], asset_type=a["type"],
+                path=raw / f["path"],
+                source_container=f.get("source_container", ""),
+                primary=bool(f.get("primary"))))
     return out
 
 
-def build_book_map(root: Path) -> tuple[dict[tuple[str, str], str], dict[str, str]]:
-    """CSV 索引：返回 ((分类label, 作品名)->作品ID, 仅作品名->作品ID)。
+def build_book_map(ledger: dict) -> tuple[dict[str, str], dict[str, str]]:
+    """ledger 索引：返回 (作品名->作品ID, 作品ID->作品名)。
 
-    - 主键 (分类label, 作品名) 用于正常单本。
-    - 仅作品名 映射作为兜底：当作品因“分类平移 / 合集拆分”导致物理分类与
-      索引分类不一致时（如 长安十二时辰 旧 txt 在 网络小说、索引归类为 中文文学），
-      仍能靠作品名归并到同一 book_id。
-    作品身份最终以 book_id + 中央索引为准。
+    用于 --book 的按名 / 按 ID 定位。ledger 是唯一 book_id 真源，
+    不维护、不派生第二套 registry。
     """
-    rows = index_builder.load_csv(root)
-    by_key: dict[tuple[str, str], str] = {}
-    by_name: dict[str, str] = {}
-    for r in rows:
-        by_key.setdefault((r["资料大类"], r["作品名"]), r["作品ID"])
-        by_name.setdefault(r["作品名"], r["作品ID"])
-    return by_key, by_name
+    name_map: dict[str, str] = {}
+    id_map: dict[str, str] = {}
+    for a in ledger["assets"]:
+        name_map.setdefault(a["name"], a["id"])
+        id_map[a["id"]] = a["name"]
+    return name_map, id_map
 
 
-def group_candidates(cands: list[CandidateRec], book_map: dict, name_map: dict) -> list[dict]:
-    """把候选源按作品身份聚类：manifest book_id > (分类label, 作品名) > 作品名。
+def group_candidates(cands: list[CandidateRec]) -> list[dict]:
+    """按 book_id 聚类候选源：一个 asset 一组（ledger 即权威分组）。
 
-    合集拆分单书的 book_id 来自 manifest；普通作品来自 CSV 索引（优先按
-    分类+作品名，再按作品名兜底，兼容分类平移）。这样同一作品的不同物理来源
-    （例如 01_网络小说/长安十二时辰/ 与 02_中文文学/马伯庸作品合集/长安十二时辰.epub）
-    会归到同一 book_id，SourcePrepare 处理该作品时能看见并交叉校验全部候选来源。
+    同一 asset 的多来源文件（如 book_0035 的双 file）天然同组，
+    SP 处理该作品时能看见并交叉校验全部候选来源。
     """
-    groups: dict = {}
+    groups: dict[str, dict] = {}
     for c in cands:
-        cat_label = CAT_DIR_TO_LABEL.get(c.cat_dir, c.cat_dir)
-        bid = (c.manifest_book_id
-               or book_map.get((cat_label, c.work_name))
-               or name_map.get(c.work_name))
-        key = bid if bid else (cat_label, c.work_name)
-        g = groups.get(key)
+        g = groups.get(c.book_id)
         if g is None:
-            g = {"cat_dir": c.cat_dir, "work_name": c.work_name,
-                 "book_id": bid, "files": [], "containers": set()}
-            groups[key] = g
+            g = {"book_id": c.book_id, "work_name": c.work_name,
+                 "asset_type": c.asset_type, "files": [], "containers": set(),
+                 "primary_files": set()}
+            groups[c.book_id] = g
         g["files"].append(c.path)
         g["containers"].add(c.source_container)
+        if c.primary:
+            g["primary_files"].add(c.path)
     return list(groups.values())
 
 
@@ -706,21 +663,18 @@ def report_markdown(book: str, category: str, book_id: str, cands: list[Candidat
 # --------------------------------------------------------------------------- #
 # 处理单部作品
 # --------------------------------------------------------------------------- #
-def process_book(root: Path, cat_dir: str, work_name: str, is_loose: bool,
-                 files: list[Path], book_id: Optional[str],
+def process_book(root: Path, work_name: str, asset_type: str,
+                 files: list[Path], book_id: str | None,
                  pandoc: Optional[str], force: bool) -> str:
-    category = CAT_DIR_TO_LABEL[cat_dir]
+    label = TYPE_LABEL.get(asset_type, asset_type)
 
-    # 非书籍类专业资料：直接标记 NOT_APPLICABLE，不进 06_工作区
-    if cat_dir in NOT_APPLICABLE_CATEGORIES:
-        if book_id:
-            index_builder.update_book(
-                root, book_id, sp_status="NOT_APPLICABLE", sp_version=SKILL_VERSION,
-                note="非书籍类专业资料，SourcePrepare 不适用")
-        return f"NOT_APPLICABLE {work_name}（{category}）"
-
+    # asset.type 处理策略（目录名不再决定行为）
+    if asset_type == "NEEDS_REVIEW":
+        return f"SKIP {work_name}: NEEDS_REVIEW 待人工确认，不自动处理"
+    if asset_type == "LOOSE_MATERIAL":
+        return f"NOT_APPLICABLE {work_name}（{label}）"
     if not book_id:
-        return f"SKIP {work_name}: 未在中央索引找到作品ID（请先运行 index_builder.py）"
+        return f"SKIP {work_name}: ledger 中无 book_id"
 
     out_dir = root / "06_工作区" / "SourcePrepare" / f"{book_id}_{safe_name(work_name)}"
     full_md = out_dir / "full.md"
@@ -751,16 +705,14 @@ def process_book(root: Path, cat_dir: str, work_name: str, is_loose: bool,
         selected, cross_warnings = choose_candidate(cands)
         if not selected:
             overall = "FAIL"
-            report.write_text(report_markdown(work_name, category, book_id, cands,
+            report.write_text(report_markdown(work_name, label, book_id, cands,
                                               None, overall, cross_warnings, pandoc),
                               encoding="utf-8")
             meta.write_text(json.dumps({
                 "skill_version": SKILL_VERSION, "book_id": book_id, "book": work_name,
-                "category": category, "status": overall, "selected_source": None,
+                "category": asset_type, "status": overall, "selected_source": None,
                 "candidates": [_cand_json(c) for c in cands],
             }, ensure_ascii=False, indent=2), encoding="utf-8")
-            index_builder.update_book(root, book_id, sp_status=overall,
-                                      sp_version=SKILL_VERSION, note="无可用来源")
             return f"FAIL {work_name}"
 
         text = Path(selected.temp_md).read_text(encoding="utf-8")
@@ -772,13 +724,18 @@ def process_book(root: Path, cat_dir: str, work_name: str, is_loose: bool,
             overall = "REVIEW"
         if split_count == 0:
             cross_warnings.append("未生成 chapters/ 分章文件；full.md 已保留")
+        if asset_type == "RESEARCH":
+            # 研究资料保守处理：标准化产物不进参考作品链，需人工决策
+            if overall == "PASS":
+                overall = "REVIEW"
+            cross_warnings.append("研究资料（RESEARCH）：标准化产物不进参考作品链，需人工决策")
 
-        report.write_text(report_markdown(work_name, category, book_id, cands,
+        report.write_text(report_markdown(work_name, label, book_id, cands,
                                           selected, overall, cross_warnings, pandoc),
                           encoding="utf-8")
         meta.write_text(json.dumps({
             "skill_version": SKILL_VERSION, "book_id": book_id, "book": work_name,
-            "category": category, "status": overall,
+            "category": asset_type, "status": overall,
             "selected_source": {
                 "path": selected.path, "format": selected.ext,
                 "sha256": selected.sha256, "char_count": selected.char_count,
@@ -788,10 +745,7 @@ def process_book(root: Path, cat_dir: str, work_name: str, is_loose: bool,
             "candidates": [_cand_json(c) for c in cands],
         }, ensure_ascii=False, indent=2), encoding="utf-8")
 
-        index_builder.update_book(
-            root, book_id, sp_status=overall, sp_version=SKILL_VERSION,
-            char_count=selected.char_count, chapter_count=split_count,
-            note=f"选中来源：{Path(selected.path).name}（{selected.ext}）")
+        # 主来源提示（仅信息）：ledger files[].primary，不参与选源决策
         return f"{overall} {work_name}: {Path(selected.path).name}, chapters={split_count}"
 
 
@@ -814,15 +768,14 @@ def _cand_json(c: Candidate) -> dict:
 # --------------------------------------------------------------------------- #
 # 入口
 # --------------------------------------------------------------------------- #
-def locate(root: Path, name: Optional[str], all_books: bool, book_map: dict, name_map: dict) -> list[dict]:
-    """定位要处理的作品分组。支持按作品名 或 作品ID（如 book_0035）匹配。
+def locate(root: Path, name: Optional[str], all_books: bool, ledger: dict) -> list[dict]:
+    """定位要处理的作品分组（候选来自 canonical ledger，按 book_id 聚类）。
 
-    不再假定“文件夹=作品”：候选来源来自 collect_candidates（合集感知），
-    再按 book_id/作品名 聚类（group_candidates）。因此同一作品即使来源
-    分散在多个物理目录，也能被一起选中。
+    候选来源按 ledger assets 展开；一个 asset 即一个作品分组，多来源文件
+    天然同组。支持按作品名 或 作品ID（如 book_0035）匹配。
     """
-    cands = collect_candidates(root)
-    groups = group_candidates(cands, book_map, name_map)
+    cands = collect_candidates(ledger, root)
+    groups = group_candidates(cands)
     if all_books:
         return groups
     if not name:
@@ -860,25 +813,28 @@ def main() -> int:
     if not (root / "01_原始素材").exists():
         raise SystemExit("项目根目录不正确：缺少 01_原始素材")
     pandoc = find_pandoc(root)
-    book_map, name_map = build_book_map(root)
-    targets = locate(root, args.book, args.all, book_map, name_map)
+    try:
+        ledger = load_ledger_assets(root)
+    except (FileNotFoundError, RuntimeError) as exc:
+        raise SystemExit(f"canonical ledger 读取失败：{exc}")
+    targets = locate(root, args.book, args.all, ledger)
 
     if args.dry_run:
         print(f"[DRY-RUN] Pandoc: {pandoc or '未找到'}  目标作品数：{len(targets)}")
         for g in targets:
-            label = CAT_DIR_TO_LABEL.get(g["cat_dir"], g["cat_dir"])
-            na = " [NOT_APPLICABLE]" if g["cat_dir"] in NOT_APPLICABLE_CATEGORIES else ""
+            label = TYPE_LABEL.get(g["asset_type"], g["asset_type"])
+            handle = TYPE_HANDLING.get(g["asset_type"], "process")
             fmts = ", ".join(sorted({f.suffix.lower() for f in g["files"]}))
             conts = "、".join(sorted(("独立来源" if not c else c) for c in g["containers"])) or "独立来源"
             print(f"  - {label}/{g['work_name']}  id={g['book_id']}  "
-                  f"formats=[{fmts}]  来源容器=[{conts}]{na}")
+                  f"formats=[{fmts}]  来源容器=[{conts}]  type={g['asset_type']}"
+                  f"  → {handle}")
         return 0
 
     results = []
     for g in targets:
-        is_loose = "" in g["containers"]  # 含独立（非合集）来源
         try:
-            results.append(process_book(root, g["cat_dir"], g["work_name"], is_loose,
+            results.append(process_book(root, g["work_name"], g["asset_type"],
                                         g["files"], g["book_id"], pandoc, args.force))
         except Exception as exc:  # 单书异常不应中断整个批次
             msg = f"ERROR {g['work_name']}({g['book_id']}): {type(exc).__name__}: {exc}"
@@ -886,9 +842,18 @@ def main() -> int:
             print(msg, file=sys.stderr)
     for r in results:
         print(r)
+
+    # local writeback：SP 完成后刷新 ledger / CSV / MD（MaterialIntake contract，不 git）
+    try:
+        rc = material_catalog.refresh_and_render(root)
+    except Exception as exc:
+        print(f"WARN writeback 失败（refresh_and_render）：{exc}", file=sys.stderr)
+        rc = 1
     # FAIL / ERROR 均视为批次中存在失败项，退出码非 0
     failed = any(r.startswith(("FAIL", "ERROR")) for r in results)
-    return 0 if not failed else 2
+    if failed:
+        return 2
+    return 0 if rc == 0 else 1
 
 
 if __name__ == "__main__":

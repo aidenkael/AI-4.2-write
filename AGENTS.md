@@ -16,7 +16,7 @@
 
 | 目录 | 职责 | Authority |
 |---|---|---|
-| 01_原始素材 | 未经 AI 加工的原始来源 | 原始文件真相 |
+| 01_原始素材 | 未经 AI 加工的原始来源 + 素材资产.json（canonical ledger） | 原始文件真相 + canonical registry |
 | 02_原著蒸馏 | 参考作品结构化知识（BKP） | 参考知识 |
 | 03_作品工程 | 原创小说作品 | **原创最高 authority** |
 | 04_写作知识库 | 经多作品验证的长期写作知识 | 跨作品经验 |
@@ -37,7 +37,8 @@ Context/Brief/recent prose 是 derivative，不得成为事实 authority。
 
 | 子系统 | 状态 |
 |---|---|
-| SourcePrepare | AVAILABLE / FROZEN |
+| MaterialIntake | CANONICAL_CATALOG_AVAILABLE（素材资产.json = 唯一 canonical 真源；CSV/MD derived） |
+| SourcePrepare | AVAILABLE（canonical ledger consumer；index_builder 已退役） |
 | BookDistill | AVAILABLE / FROZEN |
 | KnowledgeRetrieve | AVAILABLE / FROZEN |
 | StoryDesign | CLOSED / FROZEN |
