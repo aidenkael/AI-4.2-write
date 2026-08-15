@@ -109,7 +109,8 @@ E2-C 局部重规划已完成并正式关闭（`E2C_PASS` / `E2C_STORYPLAN_LOCAL
 7. ~~执行 E3-B Context Compiler 独立真实纵切~~（取消 / 不执行：E3-A 已证明最小技术边界，价值验证改由真实下游消费者承担）；
 8. ~~执行 STORYWRITE_REAL_VERTICAL_SLICE 能力优先真实写作纵切~~（已完成并关闭：PASS_WITH_RESERVATIONS；正式 source code 零修改，CURRENT_CHAIN_SUPPORTS_REAL_PROSE = PASS）；
 9. ~~执行 LONGFORM_CONTINUITY_REAL_SLICE 跨场景长期连续性真实纵切~~（已完成并关闭：PASS_WITH_RESERVATIONS；正式 source code 零修改，跨场景 shadow continuity 成立、selection 真实缩减成立、settlement 三分类可行、负担 REPEATED）；
-10. 执行 THIN_STORYWRITE_CONSUMER_SLICE（NEXT_MAINLINE）：开发最薄 StoryWrite 操作层（只复用现有合同：P0 settlement assist / P1 Brief+Context preparation / P2 recent prose window），然后用第三场真实纵切作为其 consumer test；仍仅 shadow / test-only 结算，不写生产 Canon / Story State。
+10. ~~执行 THIN_STORYWRITE_CONSUMER_SLICE 最薄 StoryWrite 操作层 + 第三场 consumer test~~（已完成并关闭：PASS_WITH_RESERVATIONS；PRIMITIVES = KEEP_AND_FREEZE、MECHANICAL_SETTLEMENT_ASSIST = KEEP_AND_FREEZE、AUTHOR_FACING_ONE_SENTENCE_ENTRY = NOT_YET_PROVEN、WRITER_PLATFORM_REQUIRED = NO、NO_FURTHER_STORYWRITE_BUILD = TRUE）；
+11. REAL_WRITING_USAGE（NEXT_MAINLINE）：停止为了验证而制造正文；回到真实创作需求；当用户第一次明确接受一段真正要保留的正文时，再自然验证 author acceptance → accepted_text → production Story State → next Context。
 
 尚未确认的具体 Canon 字段、Story State Schema、StoryDesign 输出结构不得提前写死。
 
@@ -294,4 +295,4 @@ E2-B 已证明：StoryPlan 能从权威状态出发做真实长篇规划（0-BKP
 
 # 10. 一句话总纲
 
-> **参考作品学习链已经完成结构冻结；StoryDesign 运行底座、StoryPlan 最小合同、真实长篇规划纵切（E2-B）与局部重规划（E2-C）均已通过并关闭（STORYPLAN_PHASE_CLOSED；append-only history、active projection、Canon 隔离零污染成立）；Context Compiler 最小技术地基已合入 main 并正式关闭（E3A_PASS），维持 CONTEXT_COMPILER_CONSUMER_DRIVEN_FREEZE；STORYWRITE_REAL_VERTICAL_SLICE 已关闭（PASS_WITH_RESERVATIONS）；LONGFORM_CONTINUITY_REAL_SLICE 已关闭（PASS_WITH_RESERVATIONS：跨场景 shadow continuity 成立、selection 真实缩减成立、settlement 三分类可行、负担 REPEATED；当前结果证明的是 shadow continuity，不是生产闭环）；开发决策口径 DO_NOT_BUILD 收窄为 THIN_ORCHESTRATION_BUILD_ALLOWED（仅复用现有合同的薄操作层，不代表 Writer runtime / platform 获批，不新 Final Schema，不重开冻结子系统）；知识介入策略冻结为稀疏后置问题驱动；开发优先级：最终工作台能力 > 降低开发者压力 > 子系统工程完整性（CAPABILITY_FIRST_CONSUMER_DRIVEN）；NEXT_MAINLINE = THIN_STORYWRITE_CONSUMER_SLICE（最薄操作封装 + 第三场 consumer test）。**
+> **参考作品学习链已经完成结构冻结；StoryDesign 运行底座、StoryPlan 最小合同、真实长篇规划纵切（E2-B）与局部重规划（E2-C）均已通过并关闭（STORYPLAN_PHASE_CLOSED；append-only history、active projection、Canon 隔离零污染成立）；Context Compiler 最小技术地基已合入 main 并正式关闭（E3A_PASS），维持 CONTEXT_COMPILER_CONSUMER_DRIVEN_FREEZE；STORYWRITE_REAL_VERTICAL_SLICE 已关闭（PASS_WITH_RESERVATIONS）；LONGFORM_CONTINUITY_REAL_SLICE 已关闭（PASS_WITH_RESERVATIONS）；THIN_STORYWRITE_CONSUMER_SLICE 已关闭（PASS_WITH_RESERVATIONS：PRIMITIVES = KEEP_AND_FREEZE、MECHANICAL_SETTLEMENT_ASSIST = KEEP_AND_FREEZE、AUTHOR_FACING_ONE_SENTENCE_ENTRY = NOT_YET_PROVEN、WRITER_PLATFORM_REQUIRED = NO、NO_FURTHER_STORYWRITE_BUILD = TRUE）；知识介入策略冻结为稀疏后置问题驱动；开发优先级：最终工作台能力 > 降低开发者压力 > 子系统工程完整性（CAPABILITY_FIRST_CONSUMER_DRIVEN）；NEXT_MAINLINE = REAL_WRITING_USAGE。**
