@@ -1,0 +1,49 @@
+{
+  "artifact_type": "creation_brief",
+  "brief_id": "longform-brief-003",
+  "brief_rev": 1,
+  "project_id": "e2b-sea-road",
+  "status": "CURRENT",
+  "author_input": "写第三场：宋宁在三天期限内算完末梢账，并给出是否接受三方末梢条件的答复。",
+  "scope": "scene_writing",
+  "objective": "宋宁算完末梢账并给出答复；她第一次成为把条件摆上桌面的人",
+  "focal_entities": [
+    "宋宁",
+    "宋乔",
+    "周昌顺",
+    "郑国栋"
+  ],
+  "desired_reader_experience": [],
+  "inherited_obligations": [
+    "五项 open space 保持开放",
+    "三天期限内给出答复",
+    "月底期限被推进但不收口"
+  ],
+  "hard_constraints": [
+    "不写大公司黑幕阴谋",
+    "不靠凶杀案升级剧情",
+    "不出现豪门身份反转",
+    "不使用超自然",
+    "不把父亲塑造成隐藏巨恶",
+    "冲突主要来自生计、家庭旧债、不同人生选择、地方变化和人物自己做出的决定"
+  ],
+  "freedom_zone": [
+    "父亲那笔债真正的用途",
+    "姐姐十年前离开的全部原因",
+    "姐姐这次回来是否还有未说出口的私人目的",
+    "姐妹最终合作、决裂还是形成第三种关系",
+    "物流站最终是否保留"
+  ],
+  "knowledge_needs": [],
+  "assumptions": [
+    {
+      "text": "除作者原话外，系统未把任何补全内容写成 Canon 或作者事实。",
+      "source": "runtime_guardrail"
+    }
+  ],
+  "source_versions": {
+    "intent_rev": 1,
+    "state_rev": 4
+  },
+  "created_at": "2026-08-15T16:54:37Z"
+}

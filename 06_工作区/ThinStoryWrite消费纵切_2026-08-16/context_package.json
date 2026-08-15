@@ -1,0 +1,202 @@
+{
+  "artifact_type": "context_package",
+  "context_id": "longform-ctx-003",
+  "project_id": "e2b-sea-road",
+  "status": "CURRENT",
+  "built_from": {
+    "brief_id": "longform-brief-003",
+    "brief_rev": 1,
+    "intent_rev": 1,
+    "state_rev": 4
+  },
+  "selected_intent": {
+    "work_direction": "沿海县城跨海旧路关闭前一年，经营家族小型物流站的宋宁，与失联十年后归来、代表区域物流公司竞标大宗配送合同的姐姐宋乔，在现实合作与利益对立之间被不断推向无法两全的选择。",
+    "reader_promise": "读者看到一个正在消失的地方性运输生态，如何不断逼迫两姐妹做出越来越无法两全的选择；家庭旧债不是单纯谜底，而要持续改变她们今天的关系和利益。",
+    "hard_constraints": [
+      "不写大公司黑幕阴谋",
+      "不靠凶杀案升级剧情",
+      "不出现豪门身份反转",
+      "不使用超自然",
+      "不把父亲塑造成隐藏巨恶",
+      "冲突主要来自生计、家庭旧债、不同人生选择、地方变化和人物自己做出的决定"
+    ],
+    "open_space": [
+      "父亲那笔债真正的用途",
+      "姐姐十年前离开的全部原因",
+      "姐姐这次回来是否还有未说出口的私人目的",
+      "姐妹最终合作、决裂还是形成第三种关系",
+      "物流站最终是否保留"
+    ]
+  },
+  "selected_story_state": {
+    "canon_facts": [
+      {
+        "id": "canon.seed.road",
+        "fact": "沿海县城将在一年后永久封闭一条连接本岛与旧港区的跨海旧路。",
+        "authority": "manual_import:e2b-seed"
+      },
+      {
+        "id": "canon.seed.debt",
+        "fact": "父亲去世前留下过一笔来源和用途都说不清的债。",
+        "authority": "manual_import:e2b-seed"
+      },
+      {
+        "id": "canon.w1.thirdparties",
+        "fact": "岛上关键第三方：周昌顺经营五金建材店，是物流站最大宗客户之一；秀兰经营超市，与宋宁有小额赊账往来；郑国栋在新接驳点旁租仓做仓储生意。",
+        "authority": "manual_import:experiment_shadow_from_W1"
+      },
+      {
+        "id": "canon.w1.hailu",
+        "fact": "宋乔所代表的区域物流公司在本地以“海路物流”名义运作，其岛区方案为统一定价、定时班次、赔付标准三层结构，急单单独计价，不设赊账科目。",
+        "authority": "manual_import:experiment_shadow_from_W1"
+      }
+    ],
+    "relationship_state": [
+      {
+        "id": "rel.state.sisters",
+        "state": "随着旧路关闭日期逼近，两姐妹既不得不合作处理现实问题，又越来越可能站到彼此利益的对立面。",
+        "authority": "manual_import:e2b-seed"
+      }
+    ],
+    "character_state": [
+      {
+        "id": "char.state.songning.belief",
+        "belief": "宋宁认为姐姐当年的离开和这笔债有关。",
+        "authority": "manual_import:e2b-seed"
+      }
+    ],
+    "occurred_events": [
+      {
+        "id": "event.w2.three-party-condition",
+        "description": "周昌顺为走海路开出条件：岛上末梢、进岛的货由宋宁的站接，价格按明价写进合同，三方都签、缺一不行。",
+        "authority": "manual_import:experiment_shadow_from_W2"
+      },
+      {
+        "id": "event.w2.songning-three-day",
+        "description": "宋宁当众承诺：末梢的价格她要算，三天以内给周昌顺话。",
+        "authority": "manual_import:experiment_shadow_from_W2"
+      },
+      {
+        "id": "event.w2.songqiao-framework",
+        "description": "宋乔承诺：末梢计价和账期的框架明天中午以前送到站里，并陪宋宁对数字。",
+        "authority": "manual_import:experiment_shadow_from_W2"
+      },
+      {
+        "id": "event.w2.zheng-month-end",
+        "description": "郑国栋接受'大宗跟着拼、末梢给宋宁'的安排，月底等价格与准话，并表示两人的准话他都记着。",
+        "authority": "manual_import:experiment_shadow_from_W2"
+      }
+    ],
+    "open_threads": [
+      {
+        "id": "thread.songning.three-day-answer",
+        "description": "宋宁须在三日内算完末梢账并给周昌顺与宋乔准话（接或不接）。",
+        "authority": "manual_import:experiment_shadow_from_W2"
+      },
+      {
+        "id": "thread.contract.three-party",
+        "description": "三方末梢合同待成立：明价条款、三方签署缺一不行；未签前末梢安排不生效。",
+        "authority": "manual_import:experiment_shadow_from_W2"
+      },
+      {
+        "id": "thread.zheng.month-end",
+        "description": "月底前郑国栋等的是末梢价格与双方准话（指向 thread.songning.three-day-answer 与 thread.contract.three-party）。",
+        "authority": "manual_import:experiment_shadow_from_W2"
+      }
+    ],
+    "approved_plan": [
+      {
+        "id": "plan.design.direction.island",
+        "description": "作者已确认的 StoryDesign 方向：旧路关闭形成一年倒计时；姐妹代表两种不同生存方案；每解决一个现实物流问题，都让双方合作更必要，同时利益冲突更明显；父亲旧债持续进入现实选择，但真相未确定。",
+        "authority": "author_decision:storydesign-simulated",
+        "occurred": false,
+        "target_ref": "design.direction.island",
+        "supersedes": [],
+        "built_from": []
+      }
+    ]
+  },
+  "selected_bkp_hits": [],
+  "selection_reason": [
+    {
+      "source_ref": "canon_facts:canon.seed.road",
+      "reason": "四个月倒计时是末梢账所有数字的时间边界"
+    },
+    {
+      "source_ref": "canon_facts:canon.seed.debt",
+      "reason": "旧债只以信用/融资后果在场：宋宁垫资能力受限是本场的真实成本项"
+    },
+    {
+      "source_ref": "canon_facts:canon.w1.thirdparties",
+      "reason": "秀兰盘点单与郑国栋月底都在本场运转"
+    },
+    {
+      "source_ref": "canon_facts:canon.w1.hailu",
+      "reason": "宋乔框架（统一定价/账期/急单计价）是末梢对价的直接输入"
+    },
+    {
+      "source_ref": "relationship_state:rel.state.sisters",
+      "reason": "本场必须继续兑现：合作更必要与冲突更明显同时发生"
+    },
+    {
+      "source_ref": "character_state:char.state.songning.belief",
+      "reason": "连续两次第一稿缺席的条目，本场创作约束要求正面触碰"
+    },
+    {
+      "source_ref": "occurred_events:event.w2.three-party-condition",
+      "reason": "本场答复的直接对象：三方末梢条件的原文"
+    },
+    {
+      "source_ref": "occurred_events:event.w2.songning-three-day",
+      "reason": "三天期限的出处，本场必须兑现"
+    },
+    {
+      "source_ref": "occurred_events:event.w2.songqiao-framework",
+      "reason": "宋乔框架中午送达是本场的第一个动作"
+    },
+    {
+      "source_ref": "occurred_events:event.w2.zheng-month-end",
+      "reason": "月底外部时钟：宋宁的答复必须给郑国栋一个取向"
+    },
+    {
+      "source_ref": "open_threads:thread.songning.three-day-answer",
+      "reason": "本场必须收口的线"
+    },
+    {
+      "source_ref": "open_threads:thread.contract.three-party",
+      "reason": "答复之后合同的成立条件仍在前面，结尾必须保持开放"
+    },
+    {
+      "source_ref": "open_threads:thread.zheng.month-end",
+      "reason": "月底期限本场不收，只被答复推进"
+    },
+    {
+      "source_ref": "approved_plan:plan.design.direction.island",
+      "reason": "作者确认方向：每解决一个现实问题，合作更必要、冲突更明显；旧债进现实但不揭真相"
+    }
+  ],
+  "conflicts_or_tensions": [],
+  "size_summary": {
+    "total_state_items": 30,
+    "selected_state_items": 14,
+    "total_active_plans": 2,
+    "selected_active_plans": 1,
+    "selected_bkp_hits": 0,
+    "by_area": {
+      "canon_facts": 4,
+      "relationship_state": 1,
+      "character_state": 1,
+      "occurred_events": 4,
+      "open_threads": 3,
+      "approved_plan": 1
+    }
+  },
+  "retrieval": {
+    "query": null,
+    "status": "SKIPPED_NO_KNOWLEDGE_NEED",
+    "gaps": [],
+    "candidate_count": 0
+  },
+  "created_at": "2026-08-15T16:54:37Z",
+  "experiment_note": "THIN_STORYWRITE_CONSUMER_SLICE 一次性实验 Context：基于 simulation_only shadow state rev4（scene2 W1 为 FROZEN EXPERIMENT DRAFT，未获作者 acceptance）；本 Context 由薄层prepare_context 编译（复用冻结 E3-A，零新 Schema）；Context Package 非权威，永不写回 Canon / Story State。"
+}

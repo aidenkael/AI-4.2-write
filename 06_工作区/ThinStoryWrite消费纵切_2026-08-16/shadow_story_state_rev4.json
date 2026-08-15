@@ -1,0 +1,185 @@
+{
+  "project_id": "e2b-sea-road",
+  "state_rev": 4,
+  "shadow_metadata": {
+    "simulation_only": true,
+    "not_production_state": true,
+    "not_author_accepted": true,
+    "purpose": "LONGFORM_CONTINUITY_REAL_SLICE continuity sandbox only",
+    "source_scene": "06_工作区/LongformContinuity真实纵切_2026-08-16/scene2_W1.md (FROZEN EXPERIMENT DRAFT)",
+    "note": "本文件不是生产 Story State，不得被引用为 Canon；新增结算项仅机械提取自 W1 正文明确成立的事实（见 settlement_candidate.md），未获作者 acceptance，不使用 accepted_text: authority。"
+  },
+  "canon_facts": [
+    {
+      "id": "canon.seed.road",
+      "fact": "沿海县城将在一年后永久封闭一条连接本岛与旧港区的跨海旧路。",
+      "authority": "manual_import:e2b-seed"
+    },
+    {
+      "id": "canon.seed.songning",
+      "fact": "37 岁的宋宁经营父亲留下的小型物流站，长期靠这条旧路给岛上的商户、住户和小工厂送货。",
+      "authority": "manual_import:e2b-seed"
+    },
+    {
+      "id": "canon.seed.songqiao",
+      "fact": "失联十年的姐姐宋乔突然回来，并代表一家新的区域物流公司竞标岛上未来唯一的大宗配送合同。",
+      "authority": "manual_import:e2b-seed"
+    },
+    {
+      "id": "canon.seed.debt",
+      "fact": "父亲去世前留下过一笔来源和用途都说不清的债。",
+      "authority": "manual_import:e2b-seed"
+    },
+    {
+      "id": "canon.w1.hailu",
+      "fact": "宋乔所代表的区域物流公司在本地以“海路物流”名义运作，其岛区方案为统一定价、定时班次、赔付标准三层结构，急单单独计价，不设赊账科目。",
+      "authority": "manual_import:experiment_shadow_from_W1"
+    },
+    {
+      "id": "canon.w1.thirdparties",
+      "fact": "岛上关键第三方：周昌顺经营五金建材店，是物流站最大宗客户之一；秀兰经营超市，与宋宁有小额赊账往来；郑国栋在新接驳点旁租仓做仓储生意。",
+      "authority": "manual_import:experiment_shadow_from_W1"
+    }
+  ],
+  "character_state": [
+    {
+      "id": "char.state.songning.belief",
+      "belief": "宋宁认为姐姐当年的离开和这笔债有关。",
+      "authority": "manual_import:e2b-seed"
+    },
+    {
+      "id": "char.state.songqiao.stance",
+      "stance": "宋乔拒绝解释当年的离开，却坚持父亲留下的物流站已经没有继续存在的价值。",
+      "authority": "manual_import:e2b-seed"
+    }
+  ],
+  "relationship_state": [
+    {
+      "id": "rel.state.sisters",
+      "state": "随着旧路关闭日期逼近，两姐妹既不得不合作处理现实问题，又越来越可能站到彼此利益的对立面。",
+      "authority": "manual_import:e2b-seed"
+    }
+  ],
+  "occurred_events": [
+    {
+      "id": "event.w1.negotiation",
+      "description": "旧路关闭前约四个月，宋宁在物流站办公室召集周昌顺、秀兰、郑国栋与宋乔公开谈判：她提出小批量/加单/赊账照旧、过渡期涨价不超过八个点写进合同，换取每月最低货量承诺一签半年，且该货量合同期内不计入海路物流主配送；宋乔公布海路三层方案并当场答复条款疑问。",
+      "authority": "manual_import:experiment_shadow_from_W1"
+    },
+    {
+      "id": "event.w1.public-admission",
+      "description": "姐妹当着第三方公开承认：两边都要同一批货，不能再假装这件事不存在；给宋宁的量不进宋乔方案；不能再用私下方式补回来。冲突正式公开化，但散场后礼拜四联运照旧（宋乔送到接驳点，宋宁一方接）。",
+      "authority": "manual_import:experiment_shadow_from_W1"
+    },
+    {
+      "id": "event.w1.recalc-commitment",
+      "description": "宋乔当众承诺：最低量一旦给了宋宁，岛区方案货量按剩余重算，大件从专线改拼线或单独计价；重算模型她将提交公司，后果自担。",
+      "authority": "manual_import:experiment_shadow_from_W1"
+    },
+    {
+      "id": "event.w1.zhou-takeaway",
+      "description": "周昌顺把宋宁与宋乔的两份方案都折好带走，承诺回去算到礼拜四，届时给出他的货量决定。",
+      "authority": "manual_import:experiment_shadow_from_W1"
+    },
+    {
+      "id": "event.w1.zheng-deadline",
+      "description": "郑国栋要求姐妹无论哪边月底前给他准话（仓库租约不等人），并表示礼拜四来物流站听周昌顺的账。",
+      "authority": "manual_import:experiment_shadow_from_W1"
+    },
+    {
+      "id": "event.w1.xiulan-urgent",
+      "description": "谈判当晚秀兰来消息，次日一早急单交宋宁；宋宁接；秀兰表态先把货送到、别的话以后讲。",
+      "authority": "manual_import:experiment_shadow_from_W1"
+    },
+    {
+      "id": "event.w1.advice-appendix",
+      "description": "散会后宋乔在门口提醒宋宁：若旧债走到对账那一步，先看后面两页附页，别直接签；宋宁未回答她关于对账进度的问话。",
+      "authority": "manual_import:experiment_shadow_from_W1"
+    },
+    {
+      "id": "event.w2.zhou-decision",
+      "description": "周昌顺当众决定：他的大宗下个月起走海路拼线；宋乔的重算可以算，模型里有他这一份。",
+      "authority": "manual_import:experiment_shadow_from_W2"
+    },
+    {
+      "id": "event.w2.three-party-condition",
+      "description": "周昌顺为走海路开出条件：岛上末梢、进岛的货由宋宁的站接，价格按明价写进合同，三方都签、缺一不行。",
+      "authority": "manual_import:experiment_shadow_from_W2"
+    },
+    {
+      "id": "event.w2.songning-three-day",
+      "description": "宋宁当众承诺：末梢的价格她要算，三天以内给周昌顺话。",
+      "authority": "manual_import:experiment_shadow_from_W2"
+    },
+    {
+      "id": "event.w2.songqiao-framework",
+      "description": "宋乔承诺：末梢计价和账期的框架明天中午以前送到站里，并陪宋宁对数字。",
+      "authority": "manual_import:experiment_shadow_from_W2"
+    },
+    {
+      "id": "event.w2.zheng-month-end",
+      "description": "郑国栋接受'大宗跟着拼、末梢给宋宁'的安排，月底等价格与准话，并表示两人的准话他都记着。",
+      "authority": "manual_import:experiment_shadow_from_W2"
+    },
+    {
+      "id": "event.w2.xiulan-stocktake",
+      "description": "秀兰来消息：下礼拜店里盘点，两天的货都交宋宁；宋宁答复排得开。",
+      "authority": "manual_import:experiment_shadow_from_W2"
+    }
+  ],
+  "open_threads": [
+    {
+      "id": "thread.zhou.thursday-decision",
+      "description": "已兑现：周昌顺礼拜四已当众给出决定（见 event.w2.zhou-decision 与 event.w2.three-party-condition），该线不再悬置。",
+      "authority": "manual_import:experiment_shadow_from_W2"
+    },
+    {
+      "id": "thread.zheng.month-end",
+      "description": "月底前郑国栋等的是末梢价格与双方准话（指向 thread.songning.three-day-answer 与 thread.contract.three-party）。",
+      "authority": "manual_import:experiment_shadow_from_W2"
+    },
+    {
+      "id": "thread.songqiao.recalc-model",
+      "description": "宋乔的重算模型尚未提交公司；实际货量归属确定后才会触发。",
+      "authority": "manual_import:experiment_shadow_from_W1"
+    },
+    {
+      "id": "thread.debt.reconciliation",
+      "description": "旧债何时走到对账那一步仍未定；宋乔提醒先看附页再签。",
+      "authority": "manual_import:experiment_shadow_from_W1"
+    },
+    {
+      "id": "thread.songning.three-day-answer",
+      "description": "宋宁须在三日内算完末梢账并给周昌顺与宋乔准话（接或不接）。",
+      "authority": "manual_import:experiment_shadow_from_W2"
+    },
+    {
+      "id": "thread.contract.three-party",
+      "description": "三方末梢合同待成立：明价条款、三方签署缺一不行；未签前末梢安排不生效。",
+      "authority": "manual_import:experiment_shadow_from_W2"
+    }
+  ],
+  "approved_plan": [
+    {
+      "id": "plan.design.direction.island",
+      "description": "作者已确认的 StoryDesign 方向：旧路关闭形成一年倒计时；姐妹代表两种不同生存方案；每解决一个现实物流问题，都让双方合作更必要，同时利益冲突更明显；父亲旧债持续进入现实选择，但真相未确定。",
+      "authority": "author_decision:storydesign-simulated",
+      "occurred": false,
+      "target_ref": "design.direction.island",
+      "supersedes": [],
+      "built_from": []
+    },
+    {
+      "id": "plan.e2b.simulated.first-half",
+      "description": "E2-B simulated writeback：P0 前半程规划，仅用于权限与 Canon 隔离验证。",
+      "built_from": [
+        "plan-candidate-e2b-p0"
+      ],
+      "supersedes": [],
+      "target_ref": "pt.first-half.unilateral-harm",
+      "occurred": false,
+      "authority": "simulation_author_decision:decision-e2b-simulated-p0"
+    }
+  ],
+  "last_authority_source": "manual_import:experiment_shadow_from_W2"
+}
