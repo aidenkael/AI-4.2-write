@@ -4,7 +4,7 @@
 
 ## 放什么
 
-- 正式 Skill 目录（SourcePrepare / BookDistill / KnowledgeRetrieve / StoryDesign / StoryPlan / ContextCompiler / StoryWrite）
+- 正式 Skill 目录（MaterialIntake / SourcePrepare / BookDistill / KnowledgeRetrieve / StoryDesign / StoryPlan / ContextCompiler / StoryWrite）
 - 运行时必要工具（如 pandoc，仅本地使用）
 
 ## 不放什么
@@ -18,6 +18,7 @@
 
 | Skill | 职责 | 状态 |
 |---|---|---|
+| MaterialIntake | 素材资产账本 / 入库基础 | foundation |
 | SourcePrepare | 原著 EPUB/TXT → 纯净 Markdown | freeze / available |
 | BookDistill | 参考作品知识提取（BKP + evidence） | freeze / available |
 | KnowledgeRetrieve | BKP 多轴检索 | freeze / available |
