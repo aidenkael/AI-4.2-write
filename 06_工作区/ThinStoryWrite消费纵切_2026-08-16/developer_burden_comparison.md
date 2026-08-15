@@ -18,9 +18,9 @@
 
 ## 2. 量化
 
-- 手工机械工件：第二轮 4 件（shadow state JSON / brief JSON / compile 脚本 / recent prose MD）→ 第三轮 0 件（全部由一次 `run_scene3_thin_chain.py` 运行生成）。
-- 易错点结构性消失：authority 拼写、state_rev 计算、id 查重、source_versions 对齐、窗口元数据——全部由有测试的 runtime 承担（9 新测试锁定）。
-- 第三轮新增手工动作：无。
+- 合同级机械拼装显著消除：State JSON / authority / rev / id guard / Brief source_versions / recent prose metadata 均由薄层承担。第二轮的 4 件手工机械工件（shadow state JSON / brief JSON / 一次性编译脚本 / recent prose MD）在第三轮均通过一次 `run_scene3_thin_chain.py` 运行生成，合同逻辑全部在薄层内。
+- 易错点结构性消失：authority 拼写、state_rev 计算、id 查重、source_versions 对齐、窗口元数据——全部由有测试的 runtime 承担（10 新测试锁定，含 F0-1 no-op rev 测试）。
+- Reservation：第三场仍使用一次性 `run_scene3_thin_chain.py`，其中 settlement candidates / semantic brief interpretation / Context selections 均由模型生成。当前证明的是 **THIN_STORYWRITE_PRIMITIVES = USEFUL、MECHANICAL_SETTLEMENT_ASSIST = USEFUL；AUTHOR_FACING_ONE_SENTENCE_ENTRY = NOT_YET_PROVEN**。不得因此继续开发作者入口；形态等真实写作 consumer 再暴露。
 
 ## 3. 作者侧
 

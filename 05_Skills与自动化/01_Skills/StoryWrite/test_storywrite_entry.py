@@ -138,7 +138,9 @@ class SettlementGateTests(unittest.TestCase):
             shadow_authority="manual_import:experiment_shadow_from_W2",
         )
         self.assertEqual(report["status"], "APPLIED_NO_MECHANICAL")
-        self.assertEqual(report["new_state"]["state_rev"], 4)
+        # F0-1: no mechanical -> no revision bump
+        self.assertEqual(report["new_state"]["state_rev"], 3)
+        self.assertIsNone(report["authority"])
         self.assertNotIn("canon.debt.used-for-hospital",
                          [i["id"] for i in report["new_state"]["canon_facts"]])
         self.assertEqual(report["not_writable"][0]["classification"], "creative")
@@ -254,6 +256,44 @@ class SettlementGateTests(unittest.TestCase):
         with self.assertRaises(ContractError):
             apply_settlement(state=state, settlement=bad, mode="shadow",
                              shadow_authority="manual_import:x")
+
+    def test_noop_settlement_does_not_bump_revision(self):
+        """F0-1: pure ambiguous/creative settlement must not change state_rev
+        or last_authority_source; new_state stays identical to the original."""
+        state = make_state()
+        original_rev = state["state_rev"]
+        original_last = state.get("last_authority_source")
+        settlement = {
+            "scene_ref": "scene2-W1-frozen",
+            "candidates": [
+                {"classification": "ambiguous", "target_area": "relationship_state",
+                 "entry": {"id": "rel.sisters.broken", "status": "姐妹彻底决裂。"},
+                 "operation": "append", "reason": "需要解释。"},
+                {"classification": "creative", "target_area": "canon_facts",
+                 "entry": {"id": "canon.debt.used", "fact": "旧债用于医院。"},
+                 "operation": "append", "reason": "重大方向。"},
+            ],
+        }
+        report = apply_settlement(
+            state=state, settlement=settlement, mode="shadow",
+            shadow_authority="manual_import:experiment_shadow_from_W2",
+        )
+        self.assertEqual(report["status"], "APPLIED_NO_MECHANICAL")
+        # revision untouched
+        self.assertEqual(report["new_state_rev"], original_rev)
+        self.assertEqual(report["base_state_rev"], original_rev)
+        # no phantom authority update
+        self.assertIsNone(report["authority"])
+        self.assertEqual(report["new_state"].get("last_authority_source"), original_last)
+        # State content identical (deepcopy, but semantically equal)
+        self.assertEqual(report["new_state"]["state_rev"], original_rev)
+        for area in ("canon_facts", "character_state", "relationship_state",
+                     "occurred_events", "open_threads", "approved_plan"):
+            self.assertEqual(report["new_state"][area], state[area])
+        # ambiguous + creative still reported
+        self.assertEqual(len(report["not_writable"]), 2)
+        classifications = {n["classification"] for n in report["not_writable"]}
+        self.assertEqual(classifications, {"ambiguous", "creative"})
 
 
 class RecentProseWindowTests(unittest.TestCase):

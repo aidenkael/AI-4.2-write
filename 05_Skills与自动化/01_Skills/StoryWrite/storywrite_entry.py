@@ -250,15 +250,20 @@ def apply_settlement(
             "reason": reason,
         })
 
-    result["state_rev"] = state["state_rev"] + 1
-    result["last_authority_source"] = authority
+    # F0-1: only bump state_rev / authority when at least one mechanical
+    # candidate was actually written.  A pure-ambiguous / pure-creative
+    # settlement must not produce a phantom revision change, because
+    # state_rev participates in Brief / Context stale detection.
+    if applied:
+        result["state_rev"] = state["state_rev"] + 1
+        result["last_authority_source"] = authority
     validate_story_state(result)
     return {
         "artifact_type": "settlement_report",
         "scene_ref": scene_ref,
         "mode": mode,
         "status": "APPLIED" if applied else "APPLIED_NO_MECHANICAL",
-        "authority": authority,
+        "authority": authority if applied else None,
         "base_state_rev": state["state_rev"],
         "new_state_rev": result["state_rev"],
         "applied": applied,

@@ -30,7 +30,7 @@ CONTEXT_MISSING = 0：16 条未选条目事后核对无一应选（附页忠告�
 
 判断与前两轮一致：recent prose 承载短时连续性（语气、意象、句式余波），不是事实；窗口（2000 字尾部）恰好覆盖。**维持形态建议：简单 recent-text window，不是全文 RAG。** 薄层已把它实现为 `prepare_recent_prose_window`（自动尾部截取 + 非权威元数据 + writing_hint）。
 
-新观察（窗口盲区）：scene2 前段的数字细节（“压两个月”账期）不在尾部窗口内，本场 W0 因此产生账期数字冲突。两个低成本解法：① 关键数字事实结算时进 State（mechanical 项可含数字）；② 写作前模型可补读上一场全文。不建议为此扩大窗口或引入检索。
+新观察（结算覆盖遗漏）：“压两个月”账期是 scene2 中 continuity-critical 的 hard anchor，但模型 settlement 时未将其列入 mechanical candidates。该数字不在 State、不在 recent prose 窗口（位于 scene2 前段，超出尾部 2000 字），导致本场 W0 产生数字冲突。根因是 STATE_SETTLEMENT_OMISSION，不是 Context Compiler selection failure，也不是 recent prose 窗口设计缺陷。已在 SKILL.md 补模型侧 hard-anchor 检查纪律（F0-2），防止此类遗漏复现。
 
 ## 3. 结算质量反向验证
 
@@ -42,12 +42,12 @@ CONTEXT_MISSING = 0：16 条未选条目事后核对无一应选（附页忠告�
 
 | 问题 | 归因 |
 | --- | --- |
-| 末梢账期“四十天”与 scene2“压两个月”冲突（Editor-1） | **WRITING_JUDGMENT + 窗口覆盖观察**：该数字既不在 State（未被结算为事实），也不在 recent prose 窗口（位于 scene2 前段，超出尾部 2000 字），只能从上一场全文获得；说明关键数字类事实应结算进 State，或接受窗口盲区 |
+| 末梢账期“四十天”与 scene2“压两个月”冲突（Editor-1） | **STATE_SETTLEMENT_OMISSION**：该数字是 continuity-critical hard anchor（账期/价格），但模型 settlement 时未列入 mechanical candidates；它不在 State、不在 recent prose 窗口，导致 W0 无法获得该事实。这是模型结算覆盖遗漏，不是 runtime gate 失败，也不是 Context Compiler selection failure |
 | belief beat 前半句逐字重复 scene2（Character-1） | **OTHER（recent-prose 副作用）**：连续第三次证明强吸收需要自觉变奏；writing_hint 存在但不足以自动消除 |
 | 结尾主题双说（Reader-1） | **WRITING_JUDGMENT** |
 | 长桌句字面歧义（Editor-2） | **WRITING_JUDGMENT** |
 
-分布：CONTEXT_MISSING 0｜STATE_SETTLEMENT_ERROR 0｜WRITING_JUDGMENT 3｜OTHER 1（与前两轮同构，比例稳定）。
+分布：CONTEXT_MISSING 0｜STATE_SETTLEMENT_OMISSION 1（hard-anchor 结算遗漏，非 runtime gate 失败）｜WRITING_JUDGMENT 2｜OTHER 1。
 
 ## 5. 薄层自身检查（consumer test 专项）
 

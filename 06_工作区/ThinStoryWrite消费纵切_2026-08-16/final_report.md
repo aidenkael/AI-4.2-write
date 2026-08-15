@@ -65,19 +65,19 @@ main 上另有关闭文档两文件（当前工作索引.md、AI-write_长期开
 
 ## 13. CONTEXT_MISSING 是否仍为 0
 
-是。16 条未选条目事后逐条核对，无一应选；第三场事实依赖全部由 14 条选中项覆盖。
+是（带限定）。16 条未选条目事后逐条核对，无一应选；第三场事实依赖全部由 14 条选中项覆盖。限定：CONTEXT_MISSING 仅指“已进入 Story State 的条目中，没有应选而漏选的条目”。不得用它推导“整个前文事实没有遗漏”——本场暴露的“两个月账期”数字冲突即属 STATE_SETTLEMENT_OMISSION（该事实根本未进入 State，因此不在 CONTEXT_MISSING 的管辖范围内）。
 
 ## 14. recent prose 的收益和副作用
 
-收益：句式回声变奏（"接，站能活"）、路灯意象的主动拒绝（"她没有再去数"）、"两个月"账期从听账到自己账上的重量递进、器物节奏延续。副作用：belief beat 前半句逐字重复 scene2（连续第三次证明强吸收需自觉变奏；writing_hint 存在但不足以自动消除）。新观察（窗口盲区）：scene2 前段的账期数字不在尾部窗口内，导致 W0 一次数字冲突；解法是结算纪律（关键数字进 State）或补读全文，不建议扩窗口/引检索。
+收益：句式回声变奏（“接，站能活”）、路灯意象的主动拒绝（“她没有再去数”）、器物节奏延续、称呼/对话节奏延续。副作用：belief beat 前半句逐字重复 scene2（连续第三次证明强吸收需自觉变奏）。注意：“两个月”账期的重量递进感实际来自 recent prose 的语气吸收，但该数字本身不在窗口内；W0 产生数字冲突的根因是 STATE_SETTLEMENT_OMISSION，不是 recent prose 窗口缺陷。
 
 ## 15. 第三场连续性结果
 
-7 项连续性专项全部通过（见 scene3_review.md）：事实继承、戏剧动作不同构、人物声音延续、三天期限兑现、五项 open space 均未偷关、State 无遗漏、recent prose 价值成立。W0 的 4 个问题均为执行层，一轮 W1 修订解决。
+7 项连续性专项全部通过（见 scene3_review.md）：事实继承、戏剧动作不同构、人物声音延续、三天期限兑现、五项 open space 均未偷关、State 无遗漏、recent prose 价值成立。W0 的 4 个问题中 1 项为 STATE_SETTLEMENT_OMISSION（已在 SKILL.md 补 hard-anchor 检查纪律），3 项执行层，一轮 W1 修订全部解决。
 
 ## 16. W0 问题分类
 
-CONTEXT_MISSING 0｜STATE_SETTLEMENT_ERROR 0｜WRITING_JUDGMENT 3（账期数字冲突、主题双说、长桌句歧义）｜OTHER 1（recent-prose 逐字回声）。与前两轮同构。
+CONTEXT_MISSING 0（限定口径：仅指已进入 State 的条目中无应选而漏选）｜STATE_SETTLEMENT_OMISSION 1（“两个月账期”hard-anchor 未进入 mechanical；非 runtime gate 失败）｜WRITING_JUDGMENT 2（主题双说、长桌句歧义）｜OTHER 1（recent-prose 逐字回声）。
 
 ## 17. BKP 是否真正需要
 
@@ -85,7 +85,7 @@ CONTEXT_MISSING 0｜STATE_SETTLEMENT_ERROR 0｜WRITING_JUDGMENT 3（账期数字
 
 ## 18. 开发者逐场机械负担相比第二轮下降了哪些
 
-四项重复机械摇柄全部消除（详见 developer_burden_comparison.md）：手工构造 shadow State JSON（最重最易错）、手写 creation_brief.json、手写携带合同知识的编译脚本、手工截取并定位 recent prose。易错点（authority 拼写 / rev 计算 / id 查重 / source_versions 对齐）由有测试的 runtime 承担。
+合同级机械拼装显著消除（详见 developer_burden_comparison.md）：State JSON / authority / rev / id guard / Brief source_versions / recent prose metadata 均由薄层承担，易错点由有测试的 runtime 保证。Reservation：第三场仍使用一次性 `run_scene3_thin_chain.py`，其中 settlement candidates / semantic brief interpretation / Context selections 均由模型生成。当前证明的是 THIN_STORYWRITE_PRIMITIVES = USEFUL、MECHANICAL_SETTLEMENT_ASSIST = USEFUL；AUTHOR_FACING_ONE_SENTENCE_ENTRY = NOT_YET_PROVEN。
 
 ## 19. 有没有出现新的作者操作负担
 
@@ -93,7 +93,7 @@ CONTEXT_MISSING 0｜STATE_SETTLEMENT_ERROR 0｜WRITING_JUDGMENT 3（账期数字
 
 ## 20. THIN_STORYWRITE_ENTRY 是否值得保留
 
-值得。consumer test 即其证明：P0/P1/P2 三个摇柄在第三场全部真实使用，机械工件从 4 件降到 0，且未制造新 Schema、新 authority 漏洞或隐藏状态。
+值得。consumer test 即其证明：P0/P1/P2 三个摇柄在第三场全部真实使用，合同级机械拼装显著消除，且未制造新 Schema、新 authority 漏洞或隐藏状态。当前证明 THIN_STORYWRITE_PRIMITIVES = KEEP_AND_FREEZE，不是最终作者 UI/入口。
 
 ## 21. MECHANICAL_SETTLEMENT_ASSIST 是否值得保留
 

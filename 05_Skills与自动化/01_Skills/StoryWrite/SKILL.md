@@ -39,6 +39,21 @@
   `author_decision:` / `accepted_text:` 前缀且含 simulation/test 标记的一律拒绝
   （历史 `author_decision:storydesign-simulated` 仅作历史证据，不回改）。
 
+### 模型侧 hard-anchor 检查（F0-2 补强）
+
+完成 mechanical / ambiguous / creative 分类后，模型必须额外扫描正文中的**continuity-critical hard anchors**：
+
+- 明确数字（价格、账期、数量、比例、期限）；
+- 日期 / 时间 / deadline；
+- 合同条件；
+- 明确承诺（“我会……”、“三天以内……”）。
+
+只有正文明确成立且未来可能约束连续性的 hard anchor 才进入 mechanical。
+这类事实不在 State、不在 recent prose 窗口时，下一场正文就会产生数字冲突。
+
+**这不是规则引擎 / NLP 提取器**——是模型判断时的额外检查步骤，不增加任何
+runtime 代码。第三场暴露的“两个月账期”结算遗漏即此类型。
+
 ## recent prose 窗口（P2 纪律）
 
 - 简单尾部窗口，目标量级约 1000–2000 中文字，优先最近一场末段；
