@@ -19,7 +19,12 @@ E2-C-A adds minimal local re-plan semantics on top (see ADR E2-C):
   (resolve_plan_activity) and is never stored back into Story State;
 - make_plan_diff validates supersedes refs narrowly: existing id, same
   target_ref as the current Brief, still-active base, no self/duplicate
-  refs.  built_from stays plain provenance metadata: no dependency graph,
+  refs, and the ref must appear in the current Brief's verified
+  planning_sources (deterministic source binding).  compile_plan_brief
+  additionally rejects planning sources that are already inactive
+  (superseded); old plans remain in append-only history but cannot serve
+  as the "currently confirmed planning source" for a new Brief.
+  built_from stays plain provenance metadata: no dependency graph,
   no stale propagation (deferred).
 """
 
@@ -78,7 +83,7 @@ CAPABILITY = {
 SUPPORTED_PLANNING_SOURCE_KINDS = ("approved_plan",)
 DEFERRED_PLANNING_SOURCE_KINDS = ("design_decision", "author_decision")
 FORBIDDEN_PLANNING_SOURCE_KINDS = ("proposal", "context", "bkp", "ai_candidate")
-TRUSTED_PLANNING_SOURCE_AUTHORITIES = ("author_decision:", "manual_import:")
+TRUSTED_PLANNING_SOURCE_AUTHORITIES = ("author_decision:", "manual_import:", "simulation_author_decision:")
 
 
 def compile_plan_brief(
@@ -135,6 +140,12 @@ def compile_plan_brief(
         entry = plans_by_id.get(source["ref"])
         if entry is None:
             raise ContractError(f"planning source ref 不存在于当前 Story State approved_plan：{source['ref']}")
+        activity = resolve_plan_activity(state)
+        if source["ref"] not in activity["active"]:
+            raise ContractError(
+                f"planning source {source['ref']} 当前不是 active（已被 supersede）；"
+                "旧 planning 保留在 append-only history 中，但不得作为当前已确认规划来源编译新 Plan Brief"
+            )
         if entry.get("occurred") is True:
             raise ContractError(f"planning source {source['ref']} 不得是已发生内容")
         authority = str(entry.get("authority", ""))
@@ -280,6 +291,7 @@ def _check_supersedes(
     normalized: list[dict[str, Any]],
     state: dict[str, Any],
     target_ref: str,
+    verified_source_refs: set[str] | None = None,
 ) -> None:
     """E2-C-A narrow writeback guard for explicit supersedes refs.
 
@@ -287,7 +299,10 @@ def _check_supersedes(
     built_from / dependency propagation and no subtree replacement.  A plan
     that is already superseded (inactive) can never be used as a
     replacement base again -- the next version must supersede the current
-    active tip of the chain.
+    active tip of the chain.  Additionally, every superseded ref must
+    appear in the current Brief's verified planning_sources (deterministic
+    source binding): a Decision may only supersede planning that its Brief
+    explicitly declares it is based on or modifying.
     """
     plans_by_id = {plan.get("id"): plan for plan in state["approved_plan"]}
     activity = resolve_plan_activity(state)
@@ -314,6 +329,11 @@ def _check_supersedes(
                     f"planning {item['id']} 不得 supersede 已失效条目 {ref}（当前被 {activity['superseded_by'][ref]} 替换）；"
                     "应 supersede 当前 active 的最新版本"
                 )
+            if verified_source_refs is not None and ref not in verified_source_refs:
+                raise ContractError(
+                    f"planning {item['id']} 的 supersedes ref {ref} 不在当前 Plan Brief 声明的 planning_sources 中；"
+                    "Decision 只能 supersede 其绑定 Brief 明确引用且当前 active 的 planning source"
+                )
 
 
 def make_plan_diff(
@@ -335,7 +355,8 @@ def make_plan_diff(
     not write back on current authoritative sources (stale Brief rejection);
     planning ids must be non-empty, unique within the batch and unique
     within the existing approved_plan namespace.  E2-C-A additionally
-    validates supersedes refs (existing, same target, still active); the
+    validates supersedes refs (existing, same target, still active, and
+    explicitly declared in the Brief's planning_sources); the
     writeback itself stays a pure approved_plan append -- old plans remain
     stored and are only marked superseded through the derived activity
     projection.
@@ -364,7 +385,12 @@ def make_plan_diff(
         raise ContractError(f"planning id 与现有 approved_plan id 重名：{collisions}；supersedes 也必须使用新 id")
     target_ref = brief["planning_target"]["target_id"]
     normalized = [normalize_planning_item(plan, target_ref=target_ref) for plan in plans]
-    _check_supersedes(normalized=normalized, state=state, target_ref=target_ref)
+    verified_source_refs = {
+        s["ref"] for s in brief.get("planning_sources", [])
+        if s.get("kind") == "approved_plan"
+    }
+    _check_supersedes(normalized=normalized, state=state, target_ref=target_ref,
+                      verified_source_refs=verified_source_refs)
     diff = make_planning_diff(
         diff_id=diff_id, state=state, decision=decision,
         plan=normalized[0],

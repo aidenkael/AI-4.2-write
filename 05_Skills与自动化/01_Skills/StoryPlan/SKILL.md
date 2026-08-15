@@ -29,7 +29,7 @@ reader promise / reader expectation、人物欲望与选择、关系变化、冲
 3. 作者未决定的死亡、背叛、谜底、关系归宿、最终反派、世界规则等保持 deliberate ambiguity；不为结构完整自动补成事实。
 4. 不默认生成全书章纲、卷名、章数、高潮位点等固定结构；作者可见内容优先保留人物动机、关系变化和具体后果。
 5. 专业 stance（character / reader / structure / continuity / research）只在具体缺陷触发时使用，不默认全开，不固化为多 Agent 流水线。
-6. 把所有未来安排保留在 proposal，直到作者 Decision；局部重规划通过新 Decision + 携带 supersedes 的 planning 条目表达，不全书重算。E2-C-A 起 `approved_plan` 保持 append-only 历史：旧 planning 不删除、不原地改写、不加持久 status 字段；当前是否有效由纯函数投影 `resolve_plan_activity(state)` 派生（active / superseded / superseded_by），可随时重建，不写回 Story State。supersedes 写回 guard：ref 必须真实存在、与当前 Brief 同 target_ref、被替换条目必须仍 active（已失效条目不能再当 replacement base）、不得自引用/列表内重复；replacement 允许 1→N。`built_from` 仍是纯 provenance 元数据，不承担 dependency stale 传播（deferred，见 ADR E2-C）。
+6. 把所有未来安排保留在 proposal，直到作者 Decision；局部重规划通过新 Decision + 携带 supersedes 的 planning 条目表达，不全书重算。E2-C-A 起 `approved_plan` 保持 append-only 历史：旧 planning 不删除、不原地改写、不加持久 status 字段；当前是否有效由纯函数投影 `resolve_plan_activity(state)` 派生（active / superseded / superseded_by），可随时重建，不写回 Story State。supersedes 写回 guard：ref 必须真实存在、与当前 Brief 同 target_ref、被替换条目必须仍 active（已失效条目不能再当 replacement base）、不得自引用/列表内重复，且 ref 必须出现在当前 Brief 经过验证的 `planning_sources` 中（deterministic source binding：same target 只是必要条件，不足以构成 replacement authority）；`compile_plan_brief` 同样拒绝已 inactive 的 planning source。replacement 允许 1→N；多 source Brief 支持 N→1 consolidation。`built_from` 仍是纯 provenance 元数据，不承担 dependency stale 传播（deferred，见 ADR E2-C）。
 7. planning id 在当前 approved_plan namespace 内必须唯一（批次内不重复、不与现有 id 重名；supersedes 也必须使用新 id）；Brief writeback 同时受 intent_rev 与 state_rev 双 stale guard 约束。
 
 ## CLI

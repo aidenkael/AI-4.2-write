@@ -13,9 +13,9 @@
 
 1. **approved_plan 继续 append-only**。supersede 是追加携带 `supersedes` 的新条目，不是物理删除、不是原地修改。
 2. **superseded 是 derived activity，不是存储状态**。旧 planning 不加持久 `status` 字段；当前有效性由纯函数投影 `resolve_plan_activity(state)` 从 `approved_plan` 重建（输出 active ids / superseded ids / 每个 superseded 的 superseded_by），非权威存储层，永不写回 Story State。
-3. **supersedes 只允许显式、同 target 的局部替换**。写回 guard：每个 ref 必须真实存在于当前 `approved_plan`；不得自引用；列表内不得重复；被替换条目 `target_ref` 必须等于当前 Plan Brief 的 `planning_target.target_id`（局部 relationship 重规划不能顺手替换 suspense / world / book-level target）。
-4. **replacement 可以 1→N**。多条新 item 可同时引用同一 `supersedes` ref；不强制 1:1。
-5. **已 inactive 的 planning 不能再作为 replacement base**。v1→v2 之后 `v3 supersedes v1` 被拒绝；合法下一版是 `v3 supersedes v2`（沿当前 active 链尖前进）。
+3. **supersedes 只允许显式、同 target 的局部替换，且必须由当前 Brief 显式引用**。写回 guard：每个 ref 必须真实存在于当前 `approved_plan`；不得自引用；列表内不得重复；被替换条目 `target_ref` 必须等于当前 Plan Brief 的 `planning_target.target_id`；且每个 ref 必须出现在当前 Brief 经过验证的 `planning_sources` 中（deterministic source binding）。same target 只是必要条件，不足以构成 replacement authority。
+4. **replacement 可以 1→N；多 source Brief 支持 N→1 consolidation**。多条新 item 可同时引用同一 `supersedes` ref；若 Brief 显式引用多个 approved_plan source，则单条新 item 可同时 supersede 多个 active base。
+5. **已 inactive 的 planning 不能再作为 replacement base，也不得作为当前已确认规划来源编译新 Brief**。v1→v2 之后 `v3 supersedes v1` 被拒绝；`compile_plan_brief(planning_sources=[v1])` 同样被拒绝；合法下一版是 `v3 supersedes v2`（沿当前 active 链尖前进）。旧 planning 保留在 append-only history 中，不删除、不写 status。
 6. **sibling / ancestor 默认不受影响**。activity 投影只改变被显式引用条目的状态；未重算全书。
 7. **built_from 不承担 dependency stale 传播**。它仍可能是 provenance 也可能引用 candidate / 规划来源，语义尚未稳定；不据此自动 stale descendant。
 8. **full dependency graph / subtree invalidation / 递归失效传播 deferred**。E2-C-A 只处理显式 supersedes。
@@ -28,4 +28,4 @@
 
 ## 4. 验证方式
 
-StoryPlan 测试保留 E2-A 全部 29 tests 并新增局部重规划测试（共 40 tests）；StoryDesign 27 tests 回归不变；disposable sandbox 走真实 Brief→Context→noncanonical Candidate→modify Decision（TEST_ONLY simulation）→Diff→apply 链。**SIMULATED_DECISION_ONLY**：本阶段所有 Decision 均为测试模拟，不得表述为作者已接受任何规划。
+StoryPlan 测试保留 E2-A 全部 29 tests 并新增局部重规划测试（共 45 tests，含 F1 source binding 测试）；StoryDesign 27 tests 回归不变；disposable sandbox 走真实 Brief→Context→noncanonical Candidate→modify Decision（TEST_ONLY simulation）→Diff→apply 链。**SIMULATED_DECISION_ONLY**：本阶段所有 Decision 均为测试模拟，不得表述为作者已接受任何规划。
