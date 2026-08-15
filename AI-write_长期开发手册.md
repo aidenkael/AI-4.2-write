@@ -82,7 +82,9 @@ Canon / Story State 最小权威协议、StoryDesign 运行底座（E1-A～E1-M�
 
 E2-B 真实长篇规划纵切已完成并正式关闭（`E2B_VERTICAL_SLICE_PASS` / `E2B_STORYPLAN_REAL_VERTICAL_SLICE_CLOSED`）：0 张 BKP 的自由规划形成了可用长篇发动机，local relationship scope 局部规划成立且未重算全书，simulated writeback 的 Canon 隔离为零污染。八项结论与保留缺口以 `06_工作区/E2B_StoryPlan真实纵切_2026-08-15/final_report.md` 为准。
 
-**NEXT_MAINLINE = E2-C_STORYPLAN_LOCAL_REPLAN_VALIDATION**（尚未启动）：只验证作者修改/否定已确认的局部 planning 时，能否只替换目标 planning、旧 planning 如何标记 superseded/stale、无关 sibling 与 ancestor 是否保持、已发生 Canon 是否保持、是否不因局部修改重算全书；不设计完整 replacement engine。
+E2-C 局部重规划已完成并正式关闭（`E2C_PASS` / `E2C_STORYPLAN_LOCAL_REPLAN_CLOSED` / `STORYPLAN_PHASE_CLOSED`）：append-only local replan / supersede / active projection / stale recompile / modify / Canon isolation 均成立；最终门禁 StoryPlan 50 tests OK、StoryDesign 27 tests OK、E1 runtime 零修改。
+
+**NEXT_MAINLINE = CONTEXT_COMPILER**（尚未启动，不创建代码/目录；Context Compiler 最小地基由 ChatGPT 单独设计）。StoryPlan 当前停止扩展；future consumer 暴露真实缺口前不继续建设 replacement engine / dependency graph / final Plan Schema。
 
 原因：StoryDesign 在业务上发生在前，但它产生的人物、世界、冲突、关系和方向等内容需要有稳定的落点。先把“自己的小说事实怎样保存、哪些是权威、怎样更新”定稳，再实现 StoryDesign，可避免后续反复改接口。
 
@@ -94,8 +96,8 @@ E2-B 真实长篇规划纵切已完成并正式关闭（`E2B_VERTICAL_SLICE_PASS
 2. ~~开发 StoryDesign~~（已合入 main）；
 3. ~~开发 StoryPlan 最小合同~~（E2-A 已合入 main）；
 4. ~~执行 E2-B StoryPlan 真实长篇规划纵切~~（已合入 main，E2-B 关闭）；
-5. 执行 E2-C 局部重规划验证：局部 planning 的替换 / supersede / stale / replacement 边界；
-6. 开发 Context Compiler，把当前创作任务需要的自身小说状态与相关 BKP 知识编译成克制上下文。
+5. ~~执行 E2-C 局部重规划验证~~（已合入 main，E2-C 关闭，STORYPLAN_PHASE_CLOSED）；
+6. 开发 Context Compiler（NEXT_MAINLINE，尚未启动）：把当前创作任务需要的自身小说状态与相关 BKP 知识编译成克制上下文。
 
 尚未确认的具体 Canon 字段、Story State Schema、StoryDesign 输出结构不得提前写死。
 
@@ -187,6 +189,24 @@ future planning 与 Canon 的隔离也真实通过：simulated writeback 的 `CA
 - `FREE_PLAN_QUALITY = PASS_WITH_RESERVATIONS`：P0 有轻度“策划委员会感”；初版父亲旧债存在“可拆除”问题；local relationship scope 说明该问题可通过更聚焦任务改善，但不能据此声称所有长篇规划质量问题已经解决。
 - Retrieval 观察：当前检索对“责任 / 选择 / 后果”语义召回正常，但对“未解过去如何持续通过现在改变人物关系判断”的细粒度机制匹配不足。这是观察，不是现在重开 KnowledgeRetrieve / BookDistill 的理由。
 
+## 6.11 StoryPlan 长期冻结原则
+
+StoryPlan 已完成 E2-A（最小技术合同 / stable id / stale / Decision binding）、E2-B（真实长篇 planning vertical slice）与 E2-C（append-only local replan / supersede / active projection / stale recompile / modify / Canon isolation），阶段正式关闭（`STORYPLAN_PHASE_CLOSED`）。长期冻结以下原则：
+
+1. 不使用固定 book/volume/arc/chapter/scene 层级作为 StoryPlan 基础架构；
+2. `approved_plan` 保留 append-only history；
+3. 当前有效 planning 是 derived view，不修改历史；
+4. 局部重规划通过显式 supersedes 表达；
+5. supersede 必须绑定当前 Brief 明确引用的 active planning source；
+6. sibling / ancestor 默认不因局部重规划失效；
+7. `built_from` 暂不承担 dependency graph / recursive stale propagation；
+8. planning 永远不等于 Canon；
+9. stale Brief 必须重新编译；
+10. TEST_ONLY simulation authority 永远不等于作者真实确认；
+11. StoryPlan 当前停止扩展；future consumer 暴露真实缺口前不继续建设 replacement engine / dependency graph / final Plan Schema。
+
+`FREE_PLAN_QUALITY = PASS_WITH_RESERVATIONS` 仍保留 E2-B 的真实 reservation（见 6.10），不得改写为“长篇规划质量已经完全解决”。
+
 ---
 
 # 7. 当前不做什么
@@ -233,4 +253,4 @@ E2-B 已证明：StoryPlan 能从权威状态出发做真实长篇规划（0-BKP
 
 # 10. 一句话总纲
 
-> **参考作品学习链已经完成结构冻结；StoryDesign 运行底座与 StoryPlan 最小合同均已合入 main，StoryPlan 真实长篇规划纵切（E2-B）已通过并关闭（0-BKP 长篇发动机成立、局部 scope 成立、Canon 隔离零污染）；知识介入策略冻结为稀疏后置问题驱动；下一主线是 E2-C 局部重规划验证（尚未启动）。**
+> **参考作品学习链已经完成结构冻结；StoryDesign 运行底座与 StoryPlan 最小合同均已合入 main，StoryPlan 真实长篇规划纵切（E2-B）与局部重规划（E2-C）均已通过并关闭（STORYPLAN_PHASE_CLOSED；append-only history、active projection、Canon 隔离零污染成立）；知识介入策略冻结为稀疏后置问题驱动；下一主线是 Context Compiler（尚未启动）。**

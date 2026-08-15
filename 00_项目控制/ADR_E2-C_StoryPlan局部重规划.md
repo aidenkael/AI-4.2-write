@@ -1,6 +1,6 @@
 # ADR E2-C｜StoryPlan 局部重规划
 
-- 状态：**E2-C-A implementation candidate / awaiting review**（不是 PASS；等待真实 GitHub diff 审查后才可能记录 `E2C_PASS` / `E2C_STORYPLAN_LOCAL_REPLAN_CLOSED`）。
+- 状态：**`E2C_PASS` / `E2C_STORYPLAN_LOCAL_REPLAN_CLOSED` / `STORYPLAN_PHASE_CLOSED`**（2026-08-15 正式关闭；经 F1 traceability 与 F2 simulation authority isolation 两轮真实 GitHub diff 审查后合入 main）。
 - 范围：Phase E 的 E2-C-A；只做 accepted planning 的局部 supersede / stale / modify 边界验证。不实现完整 replacement engine、dependency graph、Context Compiler、Writer。
 - 实现位置：`05_Skills与自动化/01_Skills/StoryPlan/`（`story_plan.py` / `test_story_plan.py` / `SKILL.md`）。
 - 证据：`06_工作区/E2C_StoryPlan局部重规划_2026-08-15/`（`validate_e2c_local_replan.py`、`local_replan_sandbox_result.md`、`e2c_sandbox_result.json`）。
