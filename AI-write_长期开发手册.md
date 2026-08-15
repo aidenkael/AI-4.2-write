@@ -33,6 +33,14 @@ AI-write 是**作者主导、AI 辅助**的中文长篇小说创作工作台，�
 
 判断任何新开发是否值得做，首先问：**它是否让未来真实写作更好或更省事？如果成熟上游已经解决，就优先吸收。**
 
+## 1.2 项目开发优先级
+
+1. **第一：最终工作台能力**（作者可感知的真实创作能力）；
+2. **第二：降低开发者维护 / 操作 / 验证 / 决策压力**；
+3. **第三：子系统工程完整性**。
+
+不得把“降低开发压力”解释为降低作品质量要求。
+
 ---
 
 # 2. 已完成地基：参考作品进入 BKP
@@ -84,7 +92,7 @@ E2-B 真实长篇规划纵切已完成并正式关闭（`E2B_VERTICAL_SLICE_PASS
 
 E2-C 局部重规划已完成并正式关闭（`E2C_PASS` / `E2C_STORYPLAN_LOCAL_REPLAN_CLOSED` / `STORYPLAN_PHASE_CLOSED`）：append-only local replan / supersede / active projection / stale recompile / modify / Canon isolation 均成立；最终门禁 StoryPlan 50 tests OK、StoryDesign 27 tests OK、E1 runtime 零修改。
 
-**E3-A Context Compiler 最小技术地基已完成并正式关闭（`E3A_PASS` / `E3A_CONTEXT_COMPILER_FOUNDATION_CLOSED`），已合入 main**。**NEXT_MAINLINE = E3-B_CONTEXT_COMPILER_REAL_VERTICAL_SLICE**（尚未启动，不创建代码/目录）。StoryPlan 当前停止扩展；future consumer 暴露真实缺口前不继续建设 replacement engine / dependency graph / final Plan Schema。
+**E3-A Context Compiler 最小技术地基已完成并正式关闭（`E3A_PASS` / `E3A_CONTEXT_COMPILER_FOUNDATION_CLOSED`），已合入 main**。**NEXT_MAINLINE = STORYWRITE_REAL_VERTICAL_SLICE**（能力优先真实写作纵切）。原 E3-B 独立 Context Benchmark 取消 / 不执行：原因不是 Context Compiler 失败，而是 E3-A 已经证明其最小技术边界，现在必须由真实下游 consumer 验证价值；Context Compiler 进入 `CONTEXT_COMPILER_CONSUMER_DRIVEN_FREEZE`，只有 Writer / Review / State Writeback 等真实下游消费者暴露可重复、可验证 blocker 时才允许回来窄改。StoryPlan 当前停止扩展；future consumer 暴露真实缺口前不继续建设 replacement engine / dependency graph / final Plan Schema。
 
 原因：StoryDesign 在业务上发生在前，但它产生的人物、世界、冲突、关系和方向等内容需要有稳定的落点。先把“自己的小说事实怎样保存、哪些是权威、怎样更新”定稳，再实现 StoryDesign，可避免后续反复改接口。
 
@@ -98,7 +106,8 @@ E2-C 局部重规划已完成并正式关闭（`E2C_PASS` / `E2C_STORYPLAN_LOCAL
 4. ~~执行 E2-B StoryPlan 真实长篇规划纵切~~（已合入 main，E2-B 关闭）；
 5. ~~执行 E2-C 局部重规划验证~~（已合入 main，E2-C 关闭，STORYPLAN_PHASE_CLOSED）；
 6. ~~开发 Context Compiler 最小地基~~（E3-A 已合入 main，E3A_PASS / E3A_CONTEXT_COMPILER_FOUNDATION_CLOSED）；
-7. 执行 E3-B Context Compiler 真实“小上下文 vs 全量上下文”纵切（NEXT_MAINLINE，尚未启动）：验证小上下文是否真的减少噪声而不漏关键约束。
+7. ~~执行 E3-B Context Compiler 独立真实纵切~~（取消 / 不执行：E3-A 已证明最小技术边界，价值验证改由真实下游消费者承担）；
+8. 执行 STORYWRITE_REAL_VERTICAL_SLICE 能力优先真实写作纵切（NEXT_MAINLINE）：用现有 StoryDesign / Story State / StoryPlan / Context Compiler 基础设施直接服务一段真实小说正文写作，验证已有能力链是否真的能服务小说写作，并反向暴露真实缺口。
 
 尚未确认的具体 Canon 字段、Story State Schema、StoryDesign 输出结构不得提前写死。
 
@@ -147,19 +156,29 @@ E2-C 局部重规划已完成并正式关闭（`E2C_PASS` / `E2C_STORYPLAN_LOCAL
 
 能通过真实创作任务快速判断的问题，不升级成研究型 Benchmark；能在真实使用中暴露的问题，不提前过度设计。
 
-## 6.3 案例只暴露问题，不决定架构
+## 6.3 CAPABILITY_FIRST_CONSUMER_DRIVEN（能力优先、消费者驱动）
+
+- 最终作者可感知工作台能力优先于单个子系统完善度；
+- 子系统达到最小合同并经过真实验证后默认冻结；
+- 后续缺口由真实下游消费者暴露；
+- 不为假设性未来需求提前 harden；
+- 同等能力路线中，优先开发者维护压力更低的方案。
+
+开发决策规则：只有同时满足（1）真实正文 / 真实使用暴露问题；（2）问题重复或足够严重；（3）直接模型 / 现有能力不能低成本解决；（4）新代码能明显降低长期作者 / 开发者负担，才允许建议开发新 runtime；否则 DO_NOT_BUILD。
+
+## 6.4 案例只暴露问题，不决定架构
 
 单本书、单个场景或一次模型表现不能直接升级成永久 Schema / Skill。
 
-## 6.4 参考知识与原创事实分层
+## 6.5 参考知识与原创事实分层
 
 BKP 与 Canon / Story State 永远分开；自己的小说事实与作者要求优先。
 
-## 6.5 作者控制 ≠ 作者审批
+## 6.6 作者控制 ≠ 作者审批
 
 重要创作方向由作者控制；机械工作后台自动完成。只有真正存在创作歧义、冲突或高风险不可逆操作时才需要作者确认。
 
-## 6.6 执行者适配优先
+## 6.7 执行者适配优先
 
 默认不固定必须由 ChatGPT、Agent 或用户本人完成任务。用户未指定时，根据成功率、操作简单度和合理成本选择执行者。
 
@@ -169,15 +188,15 @@ BKP 与 Canon / Story State 永远分开；自己的小说事实与作者要求�
 
 执行优先级：**操作简单与成功率 > 理论上的模型最优 > 过度细分工。**
 
-## 6.7 基础模型创作能力优先，外部知识按需稀疏介入
+## 6.8 基础模型创作能力优先，外部知识按需稀疏介入
 
 AI-write 应优先发挥基础模型自身的综合创作能力。外部知识、BKP 和专业能力默认按需、稀疏、问题驱动地介入；只有真实创作问题暴露出明确知识缺口，且检索结果能提供额外价值时才调用。知识用于挑战、补洞、深化和边界提醒，而不是默认替模型搭建创作骨架。0 个知识命中/采用是合法结果。
 
-## 6.8 新增能力必须证明边际价值
+## 6.9 新增能力必须证明边际价值
 
 新增复杂能力必须证明边际价值；不能因为系统具备某项能力，就默认让所有任务经过它。
 
-## 6.9 自由规划优先与 BKP 后置策略得到真实纵切支持
+## 6.10 自由规划优先与 BKP 后置策略得到真实纵切支持
 
 E2-B 真实长篇规划纵切验证：强模型自由规划优先原则继续成立——第一轮 0 张 BKP 即可形成可用长篇发动机；BKP 后置策略得到支持——Retrieval status=OK 时仍允许因为无独立增益而采用 0 张。
 
@@ -185,12 +204,12 @@ E2-B 真实长篇规划纵切验证：强模型自由规划优先原则继续成
 
 future planning 与 Canon 的隔离也真实通过：simulated writeback 的 `CANON_POLLUTION = ZERO`。
 
-## 6.10 E2-B 保留的真实缺口
+## 6.11 E2-B 保留的真实缺口
 
 - `FREE_PLAN_QUALITY = PASS_WITH_RESERVATIONS`：P0 有轻度“策划委员会感”；初版父亲旧债存在“可拆除”问题；local relationship scope 说明该问题可通过更聚焦任务改善，但不能据此声称所有长篇规划质量问题已经解决。
 - Retrieval 观察：当前检索对“责任 / 选择 / 后果”语义召回正常，但对“未解过去如何持续通过现在改变人物关系判断”的细粒度机制匹配不足。这是观察，不是现在重开 KnowledgeRetrieve / BookDistill 的理由。
 
-## 6.11 StoryPlan 长期冻结原则
+## 6.12 StoryPlan 长期冻结原则
 
 StoryPlan 已完成 E2-A（最小技术合同 / stable id / stale / Decision binding）、E2-B（真实长篇 planning vertical slice）与 E2-C（append-only local replan / supersede / active projection / stale recompile / modify / Canon isolation），阶段正式关闭（`STORYPLAN_PHASE_CLOSED`）。长期冻结以下原则：
 
@@ -206,9 +225,9 @@ StoryPlan 已完成 E2-A（最小技术合同 / stable id / stale / Decision bin
 10. TEST_ONLY simulation authority 永远不等于作者真实确认；
 11. StoryPlan 当前停止扩展；future consumer 暴露真实缺口前不继续建设 replacement engine / dependency graph / final Plan Schema。
 
-`FREE_PLAN_QUALITY = PASS_WITH_RESERVATIONS` 仍保留 E2-B 的真实 reservation（见 6.10），不得改写为“长篇规划质量已经完全解决”。
+`FREE_PLAN_QUALITY = PASS_WITH_RESERVATIONS` 仍保留 E2-B 的真实 reservation（见 6.11），不得改写为“长篇规划质量已经完全解决”。
 
-## 6.12 Context Compiler 长期冻结原则
+## 6.13 Context Compiler 长期冻结原则
 
 E3-A Context Compiler 最小技术地基已完成并正式关闭（`E3A_PASS` / `E3A_CONTEXT_COMPILER_FOUNDATION_CLOSED`）。长期冻结以下原则：
 
@@ -221,7 +240,9 @@ E3-A Context Compiler 最小技术地基已完成并正式关闭（`E3A_PASS` / 
 7. Context Package 是可重建派生层，不是 Canon authority，永不写回 Story State；
 8. Context stale 依赖 `brief_id` / `brief_rev` / `intent_rev` / `state_rev`；
 9. 当前不做：最终 Context Schema、token budget optimizer、embeddings、vector DB、graph DB、Router、Writer prompt packing；
-10. E3-A 只证明“可以安全地选少量上下文”，尚未证明“小上下文一定比全量上下文创作效果更好”；因此下一步需要 E3-B 真实价值纵切。
+10. E3-A 只证明“可以安全地选少量上下文”，尚未证明“小上下文一定比全量上下文创作效果更好”；该问题不再通过独立 Benchmark 验证，而是并入真实下游创作消费者（STORYWRITE_REAL_VERTICAL_SLICE 起）的真实使用中反向验证。
+
+Context Compiler 自 2026-08-15 起进入 `CONTEXT_COMPILER_CONSUMER_DRIVEN_FREEZE`：独立的 E3-B Context Benchmark 取消 / 不执行；原因不是 Context Compiler 失败，而是其最小技术边界已由 E3-A 证明，继续价值必须由真实下游消费者（Writer / Review / State Writeback）暴露的可重复、可验证 blocker 驱动，才允许回来窄改。
 
 ---
 
@@ -269,4 +290,4 @@ E2-B 已证明：StoryPlan 能从权威状态出发做真实长篇规划（0-BKP
 
 # 10. 一句话总纲
 
-> **参考作品学习链已经完成结构冻结；StoryDesign 运行底座、StoryPlan 最小合同、真实长篇规划纵切（E2-B）与局部重规划（E2-C）均已通过并关闭（STORYPLAN_PHASE_CLOSED；append-only history、active projection、Canon 隔离零污染成立）；Context Compiler 最小技术地基已合入 main 并正式关闭（E3A_PASS / E3A_CONTEXT_COMPILER_FOUNDATION_CLOSED）；知识介入策略冻结为稀疏后置问题驱动；NEXT_MAINLINE = E3-B 真实“小上下文 vs 全量上下文”纵切（尚未启动）。**
+> **参考作品学习链已经完成结构冻结；StoryDesign 运行底座、StoryPlan 最小合同、真实长篇规划纵切（E2-B）与局部重规划（E2-C）均已通过并关闭（STORYPLAN_PHASE_CLOSED；append-only history、active projection、Canon 隔离零污染成立）；Context Compiler 最小技术地基已合入 main 并正式关闭（E3A_PASS / E3A_CONTEXT_COMPILER_FOUNDATION_CLOSED），并进入 CONTEXT_COMPILER_CONSUMER_DRIVEN_FREEZE（E3-B 独立 Context Benchmark 取消）；知识介入策略冻结为稀疏后置问题驱动；开发优先级：最终工作台能力 > 降低开发者压力 > 子系统工程完整性（CAPABILITY_FIRST_CONSUMER_DRIVEN）；NEXT_MAINLINE = STORYWRITE_REAL_VERTICAL_SLICE（能力优先真实写作纵切）。**
