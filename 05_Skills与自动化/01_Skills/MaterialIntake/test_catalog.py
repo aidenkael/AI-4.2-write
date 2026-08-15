@@ -22,6 +22,15 @@ Phase 2B1 cutover tests：
   G. CSV_IS_DERIVED            篡改 CSV 再 render → 被 ledger 重建，CSV 修改不反向污染 ledger
   H. IDEMPOTENCY               连续 refresh/render 两次 → ledger/CSV/MD byte-for-byte 不变
 
+Phase 2B1.1 persistence tests：
+  A. SP_PASS_SURVIVES_WORKSPACE_CLEANUP    PASS 结算 → 删 workspace → 仍可用；改素材 → 需更新
+  B. SP_REVIEW_SURVIVES_WORKSPACE_CLEANUP  REVIEW 结算 → 删 workspace → 仍需复核
+  C. SP_FAIL_SURVIVES_WORKSPACE_CLEANUP    FAIL 结算 → 删 workspace → 仍失败
+  D. SOURCE_CHANGE_MARKS_STALE             素材变化 → 需更新（旧可用不覆盖已变化素材）
+  E. MISSING_CONTAINER_ORIGINAL_FAILS_SAFE container original 缺失 → rc!=0 且三文件不被半写
+  F. PERSISTENT_RECORD_PURE                持久 record 匹配保持 / 变化判需更新（纯逻辑）
+  G. REAL_LEDGER_COMPAT                    真实 ledger refresh 后不降级 + BKP record 补写
+
 真实数据测试依赖仓库存在（HAS_REAL），不存在时自动 skip；
 纯逻辑测试（_pure / tmp_path）不依赖真实数据，任何环境可跑。
 """
@@ -29,6 +38,7 @@ Phase 2B1 cutover tests：
 import csv
 import hashlib
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -196,10 +206,15 @@ def test_no_evidence_unprocessed_pure():
         {"status": "未处理", "evidence": None}
 
 
-def test_purification_priority_bkp_over_no_evidence(ledger):
-    # book_0035 无 SP metadata，但 FINALIZED BKP 存在 → B 级优先推导为可用
-    a = _asset(ledger, "book_0035")
-    assert a["purification"] == {"status": "可用", "evidence": "bkp_source_snapshot"}
+def test_purification_priority_bkp_over_no_evidence(tmp_path):
+    # 无 SP metadata + FINALIZED BKP + SHA 匹配 → B 级推导为可用，并补写长期 record
+    epub_sha = _build_fake_ledger(tmp_path)
+    assert catalog.main(["--root", str(tmp_path)]) == 0
+    a = _asset(_read_ledger(tmp_path), "book_0001")
+    assert a["purification"]["status"] == "可用"
+    assert a["purification"]["evidence"] == "bkp_source_snapshot"
+    assert a["purification"]["source_sha256"] == epub_sha
+    assert "input_fingerprint" in a["purification"]  # BKP 恢复项补写持久 record
 
 
 # ---------- F. IDEMPOTENCY ----------
@@ -231,10 +246,13 @@ def test_fake_tree_recovery(tmp_path):
     assert catalog.main(["--root", str(tmp_path)]) == 0
     ledger = _read_ledger(tmp_path)
     a = next(x for x in ledger["assets"] if x["id"] == "book_0001")
-    # BKP FINALIZED + SHA 匹配 → 可用；作者从 BKP identity 恢复
+    # BKP FINALIZED + SHA 匹配 → 可用；作者从 BKP identity 恢复；purification 补写持久字段
     assert a["knowledge"] == {"status": "可用", "path": "02_原著蒸馏/book_0001_Alpha",
                               "source_sha256": epub_sha}
-    assert a["purification"] == {"status": "可用", "evidence": "bkp_source_snapshot"}
+    assert a["purification"]["status"] == "可用"
+    assert a["purification"]["evidence"] == "bkp_source_snapshot"
+    assert a["purification"]["source_sha256"] == epub_sha
+    assert "input_fingerprint" in a["purification"]
     assert a["author"] == "作者A"
     b = next(x for x in ledger["assets"] if x["id"] == "book_0002")
     assert b["type"] == "RESEARCH"
@@ -388,7 +406,153 @@ def test_csv_is_derived(tmp_path):
     assert _asset(_read_ledger(tmp_path), "book_0001")["name"] == "Alpha"  # ledger 未被污染
 
 
+# ---------- Phase 2B1.1 persistence tests ----------
+
+def test_sp_pass_survives_workspace_cleanup(tmp_path):
+    # A. SP_PASS_SURVIVES_WORKSPACE_CLEANUP：正式 PASS 结算进 ledger → 删 workspace → 仍可用
+    _build_fake_ledger(tmp_path)
+    mat = tmp_path / catalog.MATERIAL_DIR_NAME
+    sp_dir = tmp_path / "06_工作区" / "SourcePrepare"
+    epub = mat / "01_网络小说" / "Alpha" / "Alpha (作者A) (z-library.sk, 1lib.sk, z-lib.sk).epub"
+    epub_sha = hashlib.sha256(b"fake epub content").hexdigest()
+    _write_sp_metadata(sp_dir, "book_0001", "PASS", epub_sha)
+    assert catalog.main(["--root", str(tmp_path)]) == 0
+    p = _asset(_read_ledger(tmp_path), "book_0001")["purification"]
+    assert p["status"] == "可用"
+    assert p["evidence"] == "sourceprepare_metadata"
+    assert p["source_sha256"] == epub_sha
+    assert "input_fingerprint" in p
+    fp_after_pass = p["input_fingerprint"]
+    # 删除整个 06_工作区/SourcePrepare/<book_id>_<书名>/ → 再 refresh → 仍可用（不得退回未处理）
+    shutil.rmtree(sp_dir)
+    assert catalog.main(["--root", str(tmp_path)]) == 0
+    p2 = _asset(_read_ledger(tmp_path), "book_0001")["purification"]
+    assert p2["status"] == "可用"
+    assert p2["input_fingerprint"] == fp_after_pass
+    # 素材内容变化 → 再 refresh → 需更新（旧可用不覆盖已变化素材）
+    epub.write_bytes(b"changed fake epub content")
+    assert catalog.main(["--root", str(tmp_path)]) == 0
+    p3 = _asset(_read_ledger(tmp_path), "book_0001")["purification"]
+    assert p3["status"] == "需更新"
+    assert p3["evidence"] == "sourceprepare_record_input_changed"
+
+
+def test_sp_review_survives_workspace_cleanup(tmp_path):
+    # B. SP_REVIEW_SURVIVES_WORKSPACE_CLEANUP：REVIEW 结算 → 删 workspace → 仍需复核
+    _build_fake_ledger(tmp_path)
+    mat = tmp_path / catalog.MATERIAL_DIR_NAME
+    sp_dir = tmp_path / "06_工作区" / "SourcePrepare"
+    epub_sha = hashlib.sha256(b"fake epub content").hexdigest()
+    _write_sp_metadata(sp_dir, "book_0001", "REVIEW", epub_sha)
+    assert catalog.main(["--root", str(tmp_path)]) == 0
+    p = _asset(_read_ledger(tmp_path), "book_0001")["purification"]
+    assert p["status"] == "需复核"
+    shutil.rmtree(sp_dir)
+    assert catalog.main(["--root", str(tmp_path)]) == 0
+    p2 = _asset(_read_ledger(tmp_path), "book_0001")["purification"]
+    assert p2["status"] == "需复核"  # 不因 workspace 清理丢失正式结果
+
+
+def test_sp_fail_survives_workspace_cleanup(tmp_path):
+    # C. SP_FAIL_SURVIVES_WORKSPACE_CLEANUP：FAIL 结算 → 删 workspace → 仍失败
+    _build_fake_ledger(tmp_path)
+    mat = tmp_path / catalog.MATERIAL_DIR_NAME
+    sp_dir = tmp_path / "06_工作区" / "SourcePrepare"
+    epub_sha = hashlib.sha256(b"fake epub content").hexdigest()
+    _write_sp_metadata(sp_dir, "book_0001", "FAIL", epub_sha)
+    assert catalog.main(["--root", str(tmp_path)]) == 0
+    p = _asset(_read_ledger(tmp_path), "book_0001")["purification"]
+    assert p["status"] == "失败"
+    shutil.rmtree(sp_dir)
+    assert catalog.main(["--root", str(tmp_path)]) == 0
+    p2 = _asset(_read_ledger(tmp_path), "book_0001")["purification"]
+    assert p2["status"] == "失败"  # 正式失败结果同样持久
+
+
+def test_container_original_missing_fails_safe(tmp_path):
+    # E. MISSING_CONTAINER_ORIGINAL_FAILS_SAFE：container original 缺失 → rc!=0 且三文件不被半写
+    _build_fake_ledger(tmp_path)
+    mat = tmp_path / catalog.MATERIAL_DIR_NAME
+    orig = mat / "01_网络小说" / "Alpha" / "Alpha合集原始.epub"
+    orig.write_bytes(b"original container epub")
+    orig_sha = hashlib.sha256(b"original container epub").hexdigest()
+    ledger_path = mat / catalog.LEDGER_FILENAME
+    ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    ledger["containers"] = [{
+        "id": "Alpha合集", "container_dir": "01_网络小说/Alpha", "category": "",
+        "source_format": "epub",
+        "manifest_path": "01_网络小说/Alpha/collection_manifest.json",
+        "original": {"path": "01_网络小说/Alpha/Alpha合集原始.epub",
+                     "filename": "Alpha合集原始.epub", "sha256": orig_sha},
+        "split_count": 0, "split_book_ids": [],
+    }]
+    catalog.write_ledger(ledger, ledger_path)
+    # original 存在时 refresh 正常（container original 已登记 → 不算 unregistered）
+    assert catalog.main(["--root", str(tmp_path)]) == 0
+    # 删除 original → refresh 必须失败（不得静默保留旧 SHA 并返回成功），三文件不被半写
+    orig.unlink()
+    before = ledger_path.read_bytes()
+    csv_before = (mat / catalog.LEGACY_CSV_FILENAME).read_bytes()
+    idx_before = (mat / catalog.INDEX_FILENAME).read_bytes()
+    rc = catalog.main(["--root", str(tmp_path)])
+    assert rc == 1
+    assert ledger_path.read_bytes() == before
+    assert (mat / catalog.LEGACY_CSV_FILENAME).read_bytes() == csv_before
+    assert (mat / catalog.INDEX_FILENAME).read_bytes() == idx_before
+
+
+def test_real_ledger_refresh_compat(ledger):
+    # G. REAL_LEDGER_COMPAT：真实 ledger refresh 后不降级 + BKP record 补写（只读，不写盘）
+    mat = ROOT / catalog.MATERIAL_DIR_NAME
+    new_ledger, report = catalog.refresh_ledger(
+        ledger, mat, ROOT / catalog.DISTILL_DIR_NAME, ROOT / "06_工作区" / "SourcePrepare")
+    assert report["missing"] == []
+    assert [a["id"] for a in new_ledger["assets"]] == ALL_IDS
+    assert sum(len(a["files"]) for a in new_ledger["assets"]) == 182
+    assert len(new_ledger["containers"]) == 1
+    statuses = [a["purification"]["status"] for a in new_ledger["assets"]]
+    assert statuses.count("可用") == 3
+    assert statuses.count("未处理") == 138
+    for bid, expect_sha in BKP_SHA_EXPECT.items():
+        p = _asset(new_ledger, bid)["purification"]
+        assert p["status"] == "可用"  # 0035/0038/0065 不得降级
+        assert p["evidence"] == "bkp_source_snapshot"
+        assert p["source_sha256"] == expect_sha
+        assert "input_fingerprint" in p  # BKP 恢复项补写长期 record
+
+
 # ---------- 纯逻辑单元测试（不依赖真实数据） ----------
+
+def test_compute_input_fingerprint_deterministic_pure():
+    files1 = [{"path": "b.txt", "sha256": "s2"}, {"path": "a.epub", "sha256": "s1"}]
+    files2 = [{"path": "a.epub", "sha256": "s1"}, {"path": "b.txt", "sha256": "s2"}]
+    fp1 = catalog.compute_input_fingerprint(files1)
+    assert fp1 == catalog.compute_input_fingerprint(files2)  # 顺序无关（按 path 排序）
+    assert len(fp1) == 64
+    # 任一文件内容变化 → 指纹变化
+    assert catalog.compute_input_fingerprint(
+        [{"path": "a.epub", "sha256": "s1-new"}, {"path": "b.txt", "sha256": "s2"}]) != fp1
+
+
+def test_persistent_record_survives_no_workspace_pure():
+    # 无 SP metadata，但 ledger 有持久 record 且 fingerprint 匹配 → 保持上次正式状态
+    fp = catalog.compute_input_fingerprint([{"path": "a.epub", "sha256": "s1"}])
+    prev = {"status": "可用", "evidence": "sourceprepare_metadata",
+            "source_sha256": "s1", "input_fingerprint": fp}
+    assert catalog.derive_purification(None, None, {"s1"}, fp, prev) == prev
+
+
+def test_persistent_record_input_changed_pure():
+    # 持久 record 的 input fingerprint 已变化 → 需更新，且保留结算时指纹（不丢长期事实）
+    fp1 = catalog.compute_input_fingerprint([{"path": "a.epub", "sha256": "s1"}])
+    fp2 = catalog.compute_input_fingerprint([{"path": "a.epub", "sha256": "s2"}])
+    prev = {"status": "可用", "evidence": "sourceprepare_metadata",
+            "source_sha256": "s1", "input_fingerprint": fp1}
+    rec = catalog.derive_purification(None, None, {"s2"}, fp2, prev)
+    assert rec["status"] == "需更新"
+    assert rec["evidence"] == "sourceprepare_record_input_changed"
+    assert rec["input_fingerprint"] == fp1
+    assert rec["source_sha256"] == "s1"
 
 def test_bootstrap_type_pure():
     assert catalog.bootstrap_type("网络小说", "任意") == "REFERENCE_WORK"
@@ -472,7 +636,7 @@ def test_sp_contract_pass_sha_match(tmp_path):
     meta = _sp_meta(sp_dir, "book_0001")
     assert meta is not None and meta["status"] == "PASS"
     assert catalog.derive_purification(meta, None, {sha}) == \
-        {"status": "可用", "evidence": "sourceprepare_metadata"}
+        {"status": "可用", "evidence": "sourceprepare_metadata", "source_sha256": sha}
 
 
 def test_sp_contract_review_sha_match(tmp_path):
@@ -481,7 +645,7 @@ def test_sp_contract_review_sha_match(tmp_path):
     _write_sp_metadata(sp_dir, "book_0001", "REVIEW", sha)
     meta = _sp_meta(sp_dir, "book_0001")
     assert catalog.derive_purification(meta, None, {sha}) == \
-        {"status": "需复核", "evidence": "sourceprepare_metadata"}
+        {"status": "需复核", "evidence": "sourceprepare_metadata", "source_sha256": sha}
 
 
 def test_sp_contract_fail_sha_match(tmp_path):
@@ -490,7 +654,7 @@ def test_sp_contract_fail_sha_match(tmp_path):
     _write_sp_metadata(sp_dir, "book_0001", "FAIL", sha)
     meta = _sp_meta(sp_dir, "book_0001")
     assert catalog.derive_purification(meta, None, {sha}) == \
-        {"status": "失败", "evidence": "sourceprepare_metadata"}
+        {"status": "失败", "evidence": "sourceprepare_metadata", "source_sha256": sha}
 
 
 def test_sp_contract_pass_sha_mismatch(tmp_path):

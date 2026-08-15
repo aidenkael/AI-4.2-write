@@ -59,17 +59,28 @@ MI 只负责「资产登记与状态推导」，不移动原著、不分配新 b
 - `REFERENCE_WORK`（参考作品，当前 130）/ `RESEARCH`（研究资料，当前 5）/ `NEEDS_REVIEW`（待确认，当前 6）。
 - `LOOSE_MATERIAL` 为未来枚举，当前 ledger 不产出（分布仍为 130 / 5 / 6）。
 
-### 提纯状态推导优先级（A > B > E；legacy C 级已随 Phase 2B1 退役）
+### 提纯状态推导（Phase 2B1.1 持久化版：SP 证据 + ledger 持久 record）
 
-1. **A** SourcePrepare `metadata.json`（合同路径 `<book_id>_<书名>/metadata.json`，schema：
-   `status / book_id / selected_source.sha256`）。`selected_source.sha256` 匹配素材文件时：
+优先级：
+1. **当前 SourcePrepare metadata**（存在时）= 最新处理事实。`selected_source.sha256` 匹配素材文件时：
    `status=PASS → 可用`、`REVIEW → 需复核`、`FAIL → 失败`（evidence=`sourceprepare_metadata`）；
-   `FAIL` 且无 `selected_source` → `失败`（SP 已形成正式结果但无选中来源）；
-   `PASS/REVIEW` 缺 `sha256` / status 缺失或未知 → `需复核`（明确异常，不静默判可用）；
+   `FAIL` 且无 `selected_source` → `失败`；`PASS/REVIEW` 缺 `sha256` / status 缺失或未知 → `需复核`；
    SHA 已不属于当前 asset → `需更新`（即使 status=PASS 也不标记可用）。
-2. **B** BKP FINALIZED 且 `source_sha256` 在素材文件中 → `可用`（evidence=`bkp_source_snapshot`）；
-   有 FINALIZED BKP 但 SHA 不匹配 → `需更新`。
-3. **E** 无任何证据 → `未处理`（evidence=`null`）。
+2. **已持久化 ledger purification record**（含 `input_fingerprint`）= 上一次已结算处理事实。
+   当前素材 fingerprint == record fingerprint → 保持上次正式状态（可用/需复核/失败）；
+   已变化 → `需更新`（evidence=`sourceprepare_record_input_changed`）。
+3. **FINALIZED BKP** 且 `source_sha256` 在素材文件中 → `可用`（evidence=`bkp_source_snapshot`，
+   可同时补写长期 record）；SHA 不匹配 → `需更新`。
+4. **无任何证据** → `未处理`（evidence=`null`）。
+
+持久化字段（canonical schema enrichment，schema_version 保持 1.0）：
+- `source_sha256`：有 selected_source 时保存其 SHA；
+- `input_fingerprint`：本次 SP 评估时 asset 全部 registered source files 的 deterministic fingerprint
+  （排序后的 `path:sha256` 行整体 SHA256）。
+不保存时间戳 / SourcePrepare 正文。
+
+**06_工作区/SourcePrepare 删除后**：ledger 中已结算的提纯事实仍存在——fingerprint 匹配 → 稳定恢复
+（可用/需复核/失败）；素材内容变化 → `需更新`（旧「可用」不覆盖已变化素材）。
 
 ### 知识状态推导
 
@@ -83,11 +94,13 @@ JSON 以 `sort_keys + ensure_ascii=False + indent=2 + 末尾换行` 写出；ass
 containers 按 id 排序；不含时间戳等 volatile 字段。**同一输入重复 refresh/render 产出 byte-for-byte 相同**
 （ledger / CSV / MD 三文件均幂等；真实数据验证 IDEMPOTENCY=True）。
 
-## 阶段边界（Phase 2B1 完成）
+## 阶段边界（Phase 2B1 完成；Phase 2B1.1 correctness fix）
 
 - `素材资产.json` 是唯一 canonical 输入；legacy 22 列 CSV 已**正式退役为 derived 9 列视图**。
 - 6 个 `NEEDS_REVIEW` 资产（马伯庸笑翻中国简史 / 殷商玛雅征服史 / 她死在QQ上 /
   事实证明，人民永远是最可爱的 / 明朝那些事儿 / 我读书少你可别骗我）不自动处理。
+- Phase 2B1.1：提纯结果持久化进 ledger（`source_sha256` / `input_fingerprint`）；
+  06_工作区 清理后已结算提纯事实不消失；container `original.path` 缺失 → MISSING 且不写盘。
 - 本阶段不实施新素材自动入库（inbox intake 在 Phase 2B2）。
 
 ## 运行方式
@@ -101,11 +114,12 @@ python "05_Skills与自动化/01_Skills/MaterialIntake/catalog.py" --root E:\AI-
 python -m pytest "05_Skills与自动化/01_Skills/MaterialIntake/test_catalog.py" -q
 ```
 
-## 当前真实状态（cutover 时点）
+## 当前真实状态（Phase 2B1.1 时点）
 
 - 141 assets（REFERENCE_WORK 130 / RESEARCH 5 / NEEDS_REVIEW 6）、182 files、1 container（马伯庸作品合集，21 splits）。
-- purification：可用 3 / 未处理 138；knowledge：可用 3 / 未开始 138（book_0035/0038/0065 从真实 BKP 自动恢复）。
-- cutover 验证：素材资产.json 与 素材总索引.md 在 refresh 后 byte-for-byte 无变化（业务状态零变化）。
+- purification：可用 3 / 未处理 138；knowledge：可用 3 / 未开始 138（book_0035/0038/0065 从真实 BKP 自动恢复，
+  并补写长期 record：`source_sha256` + `input_fingerprint`）。
+- 幂等验证：连续 refresh 两次 ledger/CSV/MD 三文件 byte-for-byte 不变；record 补写后 CSV/MD 零变化。
 
 ## 未实现（Phase 2B2 及以后，禁止臆造）
 

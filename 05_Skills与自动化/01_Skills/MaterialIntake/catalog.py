@@ -26,6 +26,9 @@ MIGRATION_ONLY：load_legacy_csv / build_assets / bootstrap_type / parse_author_
     files[].path/primary/source_container/container membership），不被文件名/旧分类/AI 自动覆盖。
   - files[].sha256 是机器事实快照：registered path 存在则重算；缺失 → MISSING_REGISTERED_FILE。
   - 未登记磁盘文件只报告 UNREGISTERED_FILE，不自动建 asset / 分类 / 分配 ID / 移动。
+  - Phase 2B1.1：purification 是长期持久记录。SP metadata 是证据来源、ledger 是已结算事实的
+    canonical 存储；06_工作区 删除后，已结算提纯事实仍保留（input_fingerprint 匹配时稳定恢复，
+    素材变化时判需更新）。containers[].original.path 也是正式登记事实，缺失必须报 MISSING。
 
 确定性保证：
   - 无时间戳 / 无 volatile 字段
@@ -209,20 +212,39 @@ def find_sp_metadata(sp_dir: Path, book_id: str) -> dict | None:
     return data
 
 
-def derive_purification(sp_meta: dict | None, bkp: dict | None, file_shas: set) -> dict:
+def compute_input_fingerprint(files: list) -> str:
+    """对 asset 全部 registered source files 计算 deterministic input fingerprint。
+
+    Phase 2B1.1：排序后的 'path:sha256' 行整体 SHA256。用于判断「本次评估时的素材」
+    与「当前磁盘素材」是否一致：一致 → 已结算 purification 状态可长期保持；
+    变化 → 需更新（旧「可用」不覆盖已变化素材）。
     """
-    提纯状态推导（A > B > E；legacy C 级已随 Phase 2B1 cutover 退役）：
-      A. SourcePrepare metadata.json（A 级证据，合同路径 <book_id>_<书名>/metadata.json）
-         schema: status / book_id / selected_source.sha256
-         - status 缺失或未知 → 需复核（明确异常，不静默判可用）
-         - status=PASS/REVIEW/FAIL 但 selected_source.sha256 缺失：
-             FAIL → 失败（SP 已形成正式结果但无选中来源）；PASS/REVIEW → 需复核（数据不完整）
-         - SHA 匹配 files：PASS → 可用；REVIEW → 需复核；FAIL → 失败
-         - SHA 已不属于当前 asset → 需更新（即使 status=PASS 也不标记可用）
-      B. BKP FINALIZED 且 source_sha256 在 files 中 → 可用（bkp_source_snapshot）；
-         有 FINALIZED BKP 但 SHA 不匹配 → 需更新
-      E. 无任何证据 → 未处理（evidence=None）
+    parts = sorted(f"{f['path']}:{f['sha256']}" for f in files)
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
+
+
+def derive_purification(sp_meta: dict | None, bkp: dict | None, file_shas: set,
+                        input_fp: str | None = None, prev: dict | None = None) -> dict:
+    """提纯状态推导（Phase 2B1.1 持久化版）。
+
+    优先级：
+      1. 当前 SourcePrepare metadata（存在时）= 最新处理事实
+      2. 已持久化 ledger purification record（input_fingerprint 匹配）= 上一次已结算事实
+      3. FINALIZED BKP = 历史恢复证据
+      4. 无证据 = 未处理
+    任何层级发现当前 input fingerprint 已变化 → 需更新。
+
+    持久化字段（canonical schema enrichment，schema_version 保持 1.0）：
+      - source_sha256：有 selected_source 时保存其 SHA
+      - input_fingerprint：本次评估时 asset 全部 registered source files 的指纹
+    不保存时间戳 / SourcePrepare 正文。
+
+    evidence 语义：
+      - sourceprepare_metadata / sourceprepare_metadata_*：由当前 SP metadata 直接推导
+      - sourceprepare_record / sourceprepare_record_input_changed：ledger 持久 record 结算/判定
+      - bkp_source_snapshot / bkp_source_sha_mismatch：BKP 历史恢复证据
     """
+    # 1. 当前 SourcePrepare metadata = 最新处理事实
     if sp_meta is not None:
         sp_status = sp_meta.get("status")
         sel = sp_meta.get("selected_source")
@@ -233,19 +255,54 @@ def derive_purification(sp_meta: dict | None, bkp: dict | None, file_shas: set) 
             return {"status": "需复核", "evidence": "sourceprepare_metadata_unknown_status"}
         if not sha:
             if sp_status == "FAIL":
-                return {"status": "失败", "evidence": "sourceprepare_metadata"}
+                rec = {"status": "失败", "evidence": "sourceprepare_metadata"}
+                if input_fp is not None:
+                    rec["input_fingerprint"] = input_fp
+                return rec
             return {"status": "需复核", "evidence": "sourceprepare_metadata_incomplete"}
         if sha not in file_shas:
+            # SP 结果不属于当前素材 → 需更新；保留上次已结算 record（如有）
+            if isinstance(prev, dict) and prev.get("input_fingerprint"):
+                return {"status": "需更新", "evidence": "sourceprepare_metadata_sha_mismatch",
+                        "source_sha256": prev.get("source_sha256"),
+                        "input_fingerprint": prev["input_fingerprint"]}
             return {"status": "需更新", "evidence": "sourceprepare_metadata_sha_mismatch"}
-        if sp_status == "PASS":
-            return {"status": "可用", "evidence": "sourceprepare_metadata"}
-        if sp_status == "REVIEW":
-            return {"status": "需复核", "evidence": "sourceprepare_metadata"}
-        return {"status": "失败", "evidence": "sourceprepare_metadata"}
+        status = {"PASS": "可用", "REVIEW": "需复核", "FAIL": "失败"}[sp_status]
+        rec = {"status": status, "evidence": "sourceprepare_metadata", "source_sha256": sha}
+        if input_fp is not None:
+            rec["input_fingerprint"] = input_fp
+        return rec
+
+    # 2. 已持久化 ledger record = 上一次已结算处理事实
+    prev_fp = prev.get("input_fingerprint") if isinstance(prev, dict) else None
+    if prev_fp:
+        if input_fp is not None and input_fp != prev_fp:
+            rec = {"status": "需更新", "evidence": "sourceprepare_record_input_changed",
+                   "input_fingerprint": prev_fp}
+            if prev.get("source_sha256"):
+                rec["source_sha256"] = prev["source_sha256"]
+            return rec
+        if prev.get("status") in ("可用", "需复核", "失败"):
+            rec = {"status": prev["status"],
+                   "evidence": prev.get("evidence") or "sourceprepare_record",
+                   "input_fingerprint": prev_fp}
+            if prev.get("source_sha256"):
+                rec["source_sha256"] = prev["source_sha256"]
+            return rec
+        # prev 是非正式状态（需更新/未处理/不适用）→ 保持原状
+        return dict(prev)
+
+    # 3. FINALIZED BKP = 历史恢复证据（可补写长期 record）
     if bkp is not None and bkp["finalized"]:
         if bkp["source_sha256"] and bkp["source_sha256"] in file_shas:
-            return {"status": "可用", "evidence": "bkp_source_snapshot"}
+            rec = {"status": "可用", "evidence": "bkp_source_snapshot",
+                   "source_sha256": bkp["source_sha256"]}
+            if input_fp is not None:
+                rec["input_fingerprint"] = input_fp
+            return rec
         return {"status": "需更新", "evidence": "bkp_source_sha_mismatch"}
+
+    # 4. 无证据
     return {"status": "未处理", "evidence": None}
 
 
@@ -283,6 +340,7 @@ def refresh_ledger(ledger: dict, mat_dir: Path, distill_dir: Path, sp_dir: Path)
             nf["sha256"] = scanned[rel]
             new_files.append(nf)
         file_shas = {f["sha256"] for f in new_files}
+        input_fp = compute_input_fingerprint(new_files)
         bkp = find_bkp(distill_dir, a["id"])
         sp_meta = find_sp_metadata(sp_dir, a["id"])
         new_assets.append({
@@ -293,17 +351,23 @@ def refresh_ledger(ledger: dict, mat_dir: Path, distill_dir: Path, sp_dir: Path)
             "tags": list(a.get("tags") or []),
             "notes": a.get("notes") or "",
             "files": new_files,
-            "purification": derive_purification(sp_meta, bkp, file_shas),
+            "purification": derive_purification(sp_meta, bkp, file_shas, input_fp,
+                                                a.get("purification")),
             "knowledge": derive_knowledge(bkp, file_shas),
         })
 
-    # containers：结构保留；original.sha256 以磁盘扫描为准重算（机器事实）
+    # containers：结构保留；original.sha256 以磁盘扫描为准重算（机器事实）。
+    # original.path 非空但磁盘缺失 → 必须报 MISSING（不得静默保留旧 SHA 并返回成功）。
+    # collection_manifest.json 是 Local Only 证据，不是 tracked canonical source，缺失不判坏。
     new_containers = []
     for c in ledger["containers"]:
         nc = copy.deepcopy(c)
         op = nc.get("original") or {}
-        if op.get("path") and op["path"] in scanned:
-            op["sha256"] = scanned[op["path"]]
+        if op.get("path"):
+            if op["path"] in scanned:
+                op["sha256"] = scanned[op["path"]]
+            else:
+                report["missing"].append(f"container:{c.get('id')}:{op['path']}")
         new_containers.append(nc)
 
     # unregistered 检测：排除系统文件 / 已登记 container original
@@ -565,6 +629,7 @@ def build_assets(rows: list, scanned: dict, distill_dir: Path, sp_dir: Path) -> 
             files.append(fe)
 
         file_shas = {f["sha256"] for f in files}
+        input_fp = compute_input_fingerprint(files)
         bkp = find_bkp(distill_dir, book_id)
         sp_meta = find_sp_metadata(sp_dir, book_id)
 
@@ -582,7 +647,7 @@ def build_assets(rows: list, scanned: dict, distill_dir: Path, sp_dir: Path) -> 
             "tags": split_tags(primary["标签"]),
             "notes": (primary["备注"] or "").strip(),
             "files": files,
-            "purification": derive_purification(sp_meta, bkp, file_shas),
+            "purification": derive_purification(sp_meta, bkp, file_shas, input_fp),
             "knowledge": derive_knowledge(bkp, file_shas),
         })
     return assets

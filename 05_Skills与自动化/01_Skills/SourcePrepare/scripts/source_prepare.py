@@ -23,7 +23,9 @@ source_prepare.py — AI-Write 原著源文件标准化（SourcePrepare / SP）
       ├─ metadata.json
       └─ conversion_report.md
 
-注意：01_原始素材 与 06_工作区 均 Local Only（不上 GitHub）。
+注意：原著正文/版权源文件 与 06_工作区 均 Local Only（不上 GitHub）；
+01_原始素材 下的 素材资产.json / 素材清单.csv / 素材总索引.md / README.md
+属于可同步的工作台元数据（MaterialIntake canonical ledger 及其 derived views）。
 """
 from __future__ import annotations
 
