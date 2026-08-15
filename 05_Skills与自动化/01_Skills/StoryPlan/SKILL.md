@@ -16,7 +16,7 @@
 
 - Plan Candidate 一律 `proposal_noncanonical`；作者明确 choose/modify 后才创建 Decision Record，确认的 planning 只能 append 进 `approved_plan` 且 `occurred=false`。
 - “第三卷计划让甲死亡”永远只是 planning；只有正文写到并被接受后，“甲已经死亡”才经 accepted_text / State Writeback 进入 Canon。
-- 无已验证规划来源时，runtime 拒绝编译 Plan Brief——不假装已有作者方向。E2-A v0 的 planning source 只接受当前 Story State `approved_plan` 中真实存在的条目（ref 必须可查、`occurred` 非 true、authority 为 `author_decision:` / `manual_import:`）；直接 Decision ref 待未来有正式 Decision resolver/store 后再开放。
+- 无已验证规划来源时，runtime 拒绝编译 Plan Brief——不假装已有作者方向。E2-A v0 的 planning source 只接受当前 Story State `approved_plan` 中真实存在的条目（ref 必须可查、`occurred` 非 true、authority 为 `author_decision:` / `manual_import:`）；`simulation_author_decision:` 不是生产可信来源，仅显式 `allow_simulation_sources=True` 的测试/sandbox 路径可以读取。直接 Decision ref 待未来有正式 Decision resolver/store 后再开放。
 
 ## 规划判断维度（模型判断，不是必填字段）
 

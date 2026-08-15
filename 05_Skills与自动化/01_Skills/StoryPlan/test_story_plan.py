@@ -433,13 +433,15 @@ REL_TARGET = {"target_id": "target.rel.mid", "description": "关系中段局部�
 
 
 class StoryPlanLocalReplanTest(unittest.TestCase):
-    def brief(self, state, *, brief_id="plan-brief-rel", target=None, sources=None):
+    def brief(self, state, *, brief_id="plan-brief-rel", target=None, sources=None,
+              allow_simulation_sources=False):
         return compile_plan_brief(
             project_id="plan-project", brief_id=brief_id,
             author_planning_question="把关系中段改成责任分配持续变化的推进。",
             planning_target=target or REL_TARGET,
             planning_sources=sources if sources is not None else [{"kind": "approved_plan", "ref": "plan.rel.mid.v1"}],
             intent=INTENT, state=state, semantic_interpretation={},
+            allow_simulation_sources=allow_simulation_sources,
         )
 
     def context(self, state, brief, *, context_id="plan-context-rel"):
@@ -459,14 +461,16 @@ class StoryPlanLocalReplanTest(unittest.TestCase):
             final_decision={"action": action, "note": "SIMULATED_DECISION_ONLY"}, simulation=True,
         )
 
-    def chain(self, state, *, new_id, old_id, diff_id="plan-diff-rel", brief_id="plan-brief-rel"):
+    def chain(self, state, *, new_id, old_id, diff_id="plan-diff-rel", brief_id="plan-brief-rel",
+              allow_simulation_sources=False):
         """一次同 target 局部替换：brief -> 0-BKP context -> modify Decision -> diff -> apply。
 
         Brief 明确引用 old_id 作为当前 active planning source，确保
         supersede binding 与 Brief declared sources 一致。
         """
         brief = self.brief(state, brief_id=brief_id,
-                           sources=[{"kind": "approved_plan", "ref": old_id}])
+                           sources=[{"kind": "approved_plan", "ref": old_id}],
+                           allow_simulation_sources=allow_simulation_sources)
         context = self.context(state, brief, context_id=f"ctx-{brief_id}")
         decision = self.modify_decision(state=state, brief=brief, context=context, decision_id=f"decision-{brief_id}")
         diff = make_plan_diff(
@@ -578,9 +582,10 @@ class StoryPlanLocalReplanTest(unittest.TestCase):
     # 8. 已 inactive 的旧 base 不得再作为 replacement base（v1→v2 后 v3 不得 supersede v1）
     def test_inactive_base_rejected_and_chain_tip_accepted(self):
         s2 = self.chain(SANDBOX_STATE, new_id="plan.rel.mid.v2", old_id="plan.rel.mid.v1")
-        # Brief 明确引用当前 active source v2
+        # Brief 明确引用当前 active source v2（simulation authority，需显式 gate）
         brief = self.brief(s2, brief_id="plan-brief-rel-v3",
-                           sources=[{"kind": "approved_plan", "ref": "plan.rel.mid.v2"}])
+                           sources=[{"kind": "approved_plan", "ref": "plan.rel.mid.v2"}],
+                           allow_simulation_sources=True)
         context = self.context(s2, brief, context_id="ctx-rel-v3")
         decision = self.modify_decision(state=s2, brief=brief, context=context, decision_id="plan-decision-v3")
         with self.assertRaises(ContractError):
@@ -715,21 +720,24 @@ class StoryPlanLocalReplanTest(unittest.TestCase):
     # F1-2. current active source accepted after supersede chain
     def test_current_active_source_accepted_after_supersede(self):
         s2 = self.chain(SANDBOX_STATE, new_id="plan.rel.mid.v2", old_id="plan.rel.mid.v1")
-        # v2 是当前 active source，应正常编译
+        # v2 是当前 active source，应正常编译（simulation authority 需显式 gate）
         brief = compile_plan_brief(
             project_id="plan-project", brief_id="plan-brief-active",
             author_planning_question="规划",
             planning_target=REL_TARGET,
             planning_sources=[{"kind": "approved_plan", "ref": "plan.rel.mid.v2"}],
             intent=INTENT, state=s2,
+            allow_simulation_sources=True,
         )
         self.assertEqual(brief["planning_sources"][0]["ref"], "plan.rel.mid.v2")
 
     # F1-3. v1→v2→v3 链：每轮 Brief 明确使用当前 active source
     def test_v1_v2_v3_chain_each_step_uses_active_source(self):
         s2 = self.chain(SANDBOX_STATE, new_id="plan.rel.mid.v2", old_id="plan.rel.mid.v1")
+        # 第二轮 chain：v2 是 simulation authority，需显式 gate
         s3 = self.chain(s2, new_id="plan.rel.mid.v3", old_id="plan.rel.mid.v2",
-                        diff_id="plan-diff-v3", brief_id="plan-brief-v3")
+                        diff_id="plan-diff-v3", brief_id="plan-brief-v3",
+                        allow_simulation_sources=True)
         activity = resolve_plan_activity(s3)
         self.assertEqual(sorted(activity["superseded"]),
                          ["plan.rel.mid.v1", "plan.rel.mid.v2"])
@@ -752,9 +760,10 @@ class StoryPlanLocalReplanTest(unittest.TestCase):
             allow_simulation=True,
         )
         s2 = apply_diff(SANDBOX_STATE, diff, decision, allow_simulation=True)
-        # Brief 只引用 v2a，尝试 supersede v2b（同 target 且 active，但未在 Brief sources 中声明）
+        # Brief 只引用 v2a（simulation authority，需显式 gate），尝试 supersede v2b
         brief_v2a = self.brief(s2, brief_id="plan-brief-v2a-only",
-                               sources=[{"kind": "approved_plan", "ref": "plan.rel.mid.v2a"}])
+                               sources=[{"kind": "approved_plan", "ref": "plan.rel.mid.v2a"}],
+                               allow_simulation_sources=True)
         context_v2a = self.context(s2, brief_v2a, context_id="ctx-v2a-only")
         decision_v2a = self.modify_decision(
             state=s2, brief=brief_v2a, context=context_v2a, decision_id="decision-v2a-only",
@@ -789,7 +798,8 @@ class StoryPlanLocalReplanTest(unittest.TestCase):
             {"kind": "approved_plan", "ref": "plan.rel.mid.v2b"},
         ]
         brief_multi = self.brief(s2, brief_id="plan-brief-multi",
-                                 sources=multi_sources)
+                                 sources=multi_sources,
+                                 allow_simulation_sources=True)
         context_multi = self.context(s2, brief_multi, context_id="ctx-multi")
         decision_multi = self.modify_decision(
             state=s2, brief=brief_multi, context=context_multi, decision_id="decision-multi",
@@ -806,6 +816,72 @@ class StoryPlanLocalReplanTest(unittest.TestCase):
         self.assertIn("plan.rel.mid.v3", activity["active"])
         self.assertNotIn("plan.rel.mid.v2a", activity["active"])
         self.assertNotIn("plan.rel.mid.v2b", activity["active"])
+
+    # --- E2-C-A F2: simulation authority isolation ---
+
+    # F2-1. 默认生产 Brief 拒绝 simulation planning source
+    def test_production_brief_rejects_simulation_source(self):
+        s2 = self.chain(SANDBOX_STATE, new_id="plan.rel.mid.v2", old_id="plan.rel.mid.v1")
+        # v2 的 authority 是 simulation_author_decision:*，默认生产路径必须拒绝
+        with self.assertRaises(ContractError):
+            compile_plan_brief(
+                project_id="plan-project", brief_id="plan-brief-prod",
+                author_planning_question="规划",
+                planning_target=REL_TARGET,
+                planning_sources=[{"kind": "approved_plan", "ref": "plan.rel.mid.v2"}],
+                intent=INTENT, state=s2,
+            )
+
+    # F2-2. 显式 simulation gate 接受 simulation source
+    def test_explicit_simulation_gate_accepts_simulation_source(self):
+        s2 = self.chain(SANDBOX_STATE, new_id="plan.rel.mid.v2", old_id="plan.rel.mid.v1")
+        brief = compile_plan_brief(
+            project_id="plan-project", brief_id="plan-brief-sim",
+            author_planning_question="规划",
+            planning_target=REL_TARGET,
+            planning_sources=[{"kind": "approved_plan", "ref": "plan.rel.mid.v2"}],
+            intent=INTENT, state=s2,
+            allow_simulation_sources=True,
+        )
+        self.assertEqual(brief["planning_sources"][0]["ref"], "plan.rel.mid.v2")
+
+    # F2-3. author_decision 默认生产路径继续 PASS
+    def test_author_decision_source_passes_production_default(self):
+        brief = self.brief(SANDBOX_STATE)  # default allow_simulation_sources=False
+        self.assertEqual(brief["planning_sources"][0]["ref"], "plan.rel.mid.v1")
+        self.assertTrue(brief["planning_sources"][0]["verified_authority"].startswith("author_decision:"))
+
+    # F2-4. manual_import 默认生产路径继续 PASS
+    def test_manual_import_source_passes_production_default(self):
+        manual_state = dict(STATE, approved_plan=STATE["approved_plan"] + [
+            {"id": "plan.manual", "description": "手动导入", "target_ref": "target.front-half",
+             "authority": "manual_import:seed", "occurred": False},
+        ])
+        brief = compile_plan_brief(
+            project_id="plan-project", brief_id="plan-brief-manual",
+            author_planning_question="规划",
+            planning_target=TARGET,
+            planning_sources=[{"kind": "approved_plan", "ref": "plan.manual"}],
+            intent=INTENT, state=manual_state,
+        )
+        self.assertEqual(brief["planning_sources"][0]["verified_authority"], "manual_import:seed")
+
+    # F2-5. inactive simulation source 即使 allow_simulation_sources=True 仍拒绝
+    def test_inactive_simulation_source_rejected_even_with_gate(self):
+        s2 = self.chain(SANDBOX_STATE, new_id="plan.rel.mid.v2", old_id="plan.rel.mid.v1")
+        s3 = self.chain(s2, new_id="plan.rel.mid.v3", old_id="plan.rel.mid.v2",
+                        diff_id="plan-diff-v3", brief_id="plan-brief-v3",
+                        allow_simulation_sources=True)
+        # v2 已被 v3 supersede，现在是 inactive；即使开 simulation gate 也必须拒绝
+        with self.assertRaises(ContractError):
+            compile_plan_brief(
+                project_id="plan-project", brief_id="plan-brief-dead-sim",
+                author_planning_question="规划",
+                planning_target=REL_TARGET,
+                planning_sources=[{"kind": "approved_plan", "ref": "plan.rel.mid.v2"}],
+                intent=INTENT, state=s3,
+                allow_simulation_sources=True,
+            )
 
 
 if __name__ == "__main__":

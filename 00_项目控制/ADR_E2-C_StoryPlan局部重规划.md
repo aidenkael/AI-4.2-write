@@ -21,6 +21,7 @@
 8. **full dependency graph / subtree invalidation / 递归失效传播 deferred**。E2-C-A 只处理显式 supersedes。
 9. **Canon 永远不被 planning replacement 修改**。写回仍只有 approved_plan append + state_rev 增加 + last_authority_source 更新；E1 `apply_diff` 未改动；sandbox 验证 CANON_POLLUTION=ZERO。
 10. **stale Brief 必须重新编译后才能写回**。局部 replan 期间 Story State 被任何合法 append 推进后，旧 Brief 因 `source_versions.state_rev` 不匹配被拒绝；基于新 rev 重编译的 Brief 让同一意图正常通过（sandbox 记录 STALE_REPLAN_BRIEF_REJECTED / RECOMPILED_CURRENT_BRIEF_PASS）。
+11. **`simulation_author_decision:*` 不是生产可信 planning source**。生产可信 authority 只有 `author_decision:` 与 `manual_import:`；`compile_plan_brief` 默认拒绝 simulation authority。仅显式 `allow_simulation_sources=True` 的测试/sandbox 路径可以读取；TEST_ONLY planning 不等于作者确认。
 
 ## 3. 明确不做
 
@@ -28,4 +29,4 @@
 
 ## 4. 验证方式
 
-StoryPlan 测试保留 E2-A 全部 29 tests 并新增局部重规划测试（共 45 tests，含 F1 source binding 测试）；StoryDesign 27 tests 回归不变；disposable sandbox 走真实 Brief→Context→noncanonical Candidate→modify Decision（TEST_ONLY simulation）→Diff→apply 链。**SIMULATED_DECISION_ONLY**：本阶段所有 Decision 均为测试模拟，不得表述为作者已接受任何规划。
+StoryPlan 测试保留 E2-A 全部 29 tests 并新增局部重规划测试（共 50 tests，含 F1 source binding 与 F2 simulation authority 隔离测试）；StoryDesign 27 tests 回归不变；disposable sandbox 走真实 Brief→Context→noncanonical Candidate→modify Decision（TEST_ONLY simulation）→Diff→apply 链。**SIMULATED_DECISION_ONLY**：本阶段所有 Decision 均为测试模拟，不得表述为作者已接受任何规划。

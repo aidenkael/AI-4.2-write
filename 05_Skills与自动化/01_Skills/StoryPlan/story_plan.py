@@ -83,7 +83,10 @@ CAPABILITY = {
 SUPPORTED_PLANNING_SOURCE_KINDS = ("approved_plan",)
 DEFERRED_PLANNING_SOURCE_KINDS = ("design_decision", "author_decision")
 FORBIDDEN_PLANNING_SOURCE_KINDS = ("proposal", "context", "bkp", "ai_candidate")
-TRUSTED_PLANNING_SOURCE_AUTHORITIES = ("author_decision:", "manual_import:", "simulation_author_decision:")
+TRUSTED_PLANNING_SOURCE_AUTHORITIES = ("author_decision:", "manual_import:")
+# F2: simulation_author_decision 不是生产可信 planning source；
+# 仅显式 allow_simulation_sources=True 的测试/sandbox 路径可以读取。
+SIMULATION_ONLY_AUTHORITIES = ("simulation_author_decision:",)
 
 
 def compile_plan_brief(
@@ -96,6 +99,7 @@ def compile_plan_brief(
     intent: dict[str, Any],
     state: dict[str, Any],
     semantic_interpretation: dict[str, Any] | None = None,
+    allow_simulation_sources: bool = False,
 ) -> dict[str, Any]:
     """Compile the planning task contract.
 
@@ -149,7 +153,10 @@ def compile_plan_brief(
         if entry.get("occurred") is True:
             raise ContractError(f"planning source {source['ref']} 不得是已发生内容")
         authority = str(entry.get("authority", ""))
-        if not authority.startswith(TRUSTED_PLANNING_SOURCE_AUTHORITIES):
+        effective_trusted = TRUSTED_PLANNING_SOURCE_AUTHORITIES
+        if allow_simulation_sources:
+            effective_trusted = effective_trusted + SIMULATION_ONLY_AUTHORITIES
+        if not authority.startswith(effective_trusted):
             raise ContractError(f"planning source {source['ref']} 的 authority 不是可信规划来源：{authority}")
         verified_sources.append({"kind": kind, "ref": source["ref"], "verified_authority": authority})
     if not verified_sources:
