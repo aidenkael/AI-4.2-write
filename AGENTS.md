@@ -84,8 +84,9 @@ BKP 长期保存作品身份、作品地图、BookProfile、Observation、Infere
 
 ## 当前禁止
 
-- 不修改正式小说
-- 不修改 Story State
+- 未获得作者明确 acceptance / decision 时，不得修改 production 正文或 Story State
+- 作者明确接受正文或作出创作决定后，允许按照现有 authority / writeback 合同更新
+- AI 自己的草稿、推测、candidate、Context、Brief 不得自动升级为 production authority
 - 不批量蒸馏新书
 - 不升级 Retrieval/RAG/KG
 - 不实现完整 Writer/Reader/Editor/Controller/UI 平台
