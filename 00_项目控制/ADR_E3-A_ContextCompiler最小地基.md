@@ -14,9 +14,9 @@
 1. **runtime 不做文学相关性判断**。`AI = semantic brain；code = deterministic guardrail`。runtime 只做 ref 存在、来源真实、active/inactive、revision freshness、authority 隔离、provenance、dedupe、可重建性。
 2. **Story State 精确选择，不整包注入**。`selected_story_state` 只复制 semantic selection 点名的权威条目（deepcopy 原始内容）；空 selection 合法，绝不 fallback 到全 State。
 3. **selection 形式为 `area + id + reason`**。允许 area：`canon_facts / character_state / relationship_state / occurred_events / open_threads / approved_plan`；不支持任意 dict 路径。每个 selection 必须有非空 reason（可追溯）。
-4. **确定性 ref 解析**。找不到 → ContractError；同 area 重复 id 歧义 → ContractError；同一 area:id 重复选择 → ContractError（不隐藏调用方错误）。
+4. **确定性 ref 解析**。找不到 → ContractError；同 area 重复 id 歧义 → ContractError；同一 area:id 重复选择 → ContractError（不隐藏调用方错误）。approved_plan 用确定性索引构建：条目缺 id 或同 id 第二次出现 → ContractError（不静默取第一个/最后一个/dedupe），与 Canon area duplicate-id ambiguity 保持一致。
 5. **approved_plan 只允许 active planning**。复用 StoryPlan `resolve_plan_activity`；已 superseded 的历史 planning 不进入 Context（保留 append-only history，不删除、不重实现 activity 算法）。
-6. **simulation authority 隔离**。`simulation_author_decision:` 的 planning 默认不注入；仅显式 `allow_simulation_sources=True` 的 sandbox/test 可用。语义与 StoryPlan F2 一致；TEST_ONLY 状态不得流入未来 Writer Context。
+6. **production planning authority 可信性 + simulation 隔离**。默认允许 `author_decision:` / `manual_import:`（直接复用 StoryPlan 冻结常量 `TRUSTED_PLANNING_SOURCE_AUTHORITIES`，不另建白名单）；`simulation_author_decision:` 仅显式 `allow_simulation_sources=True` 的 sandbox/test 可用。`accepted_text:` 是合法 Canon authority 但不是合法 future planning authority，选入 approved_plan 必须拒绝。语义与 StoryPlan F2 一致；TEST_ONLY 状态不得流入未来 Writer Context。
 7. **Intent 只复制真实存在的核心字段**。`work_direction / reader_promise / hard_constraints / open_space` 及可选 `current_priority / current_focus / avoidances`；不让模型伪造 Intent 值。
 8. **BKP 复用冻结 E1 gate**。调用 E1 `build_context` 只提取 `selected_bkp_hits / retrieval / selection reason`，不重新实现 KnowledgeRetrieve，不修改 E1。
 9. **BKP / Story State 结构隔离**。`selected_bkp_hits` 与 `selected_story_state` 永远两个独立区域；BKP 不获得 Canon authority、不覆盖 Story State、不伪装为原创事实。State 与 BKP 的张力只进 `conflicts_or_tensions`（`analysis_noncanonical`）。
@@ -31,4 +31,4 @@ Writer；Router；大型 RAG；embeddings；Vector DB；Graph DB；semantic sear
 
 ## 4. 验证方式
 
-ContextCompiler 28 tests（真实最小 sandbox + 15 负例边界 + stale + 结构隔离）；StoryPlan 50 tests 回归不变；StoryDesign 27 tests 回归不变。sandbox 验证 `selected_state_items (6) << total_state_items (26)`、空 selection 不 fallback 全 State、State/Intent ZERO mutation、BKP 与 Story State 结构隔离。**SIMULATED / TEST_ONLY 仅用于测试 gate，不得表述为作者已确认任何状态。**
+ContextCompiler 34 tests（真实最小 sandbox + 15 负例边界 + stale + 结构隔离 + planning authority/duplicate-id guard）；StoryPlan 50 tests 回归不变；StoryDesign 27 tests 回归不变。sandbox 验证 `selected_state_items (6) << total_state_items (26)`、空 selection 不 fallback 全 State、State/Intent ZERO mutation、BKP 与 Story State 结构隔离。**SIMULATED / TEST_ONLY 仅用于测试 gate，不得表述为作者已确认任何状态。**

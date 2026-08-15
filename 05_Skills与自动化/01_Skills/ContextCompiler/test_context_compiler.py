@@ -244,6 +244,19 @@ class ContextCompilerNegativeTest(unittest.TestCase):
         with self.assertRaises(ContractError):
             self.compile([{"area": "open_threads", "id": "th.negotiation", "reason": "x"}], state=polluted)
 
+    # 3b. duplicate approved_plan id -> reject.  Must be the duplicate-id
+    # ambiguity guard, not superseded / simulation / missing.
+    def test_approved_plan_duplicate_id_rejected(self):
+        polluted = copy.deepcopy(STATE)
+        polluted["approved_plan"].append(
+            {"id": "plan.sisters-task", "description": "同 id 的重复条目（内容不同）",
+             "target_ref": "rel.sisters.arc", "authority": "author_decision:d-dup",
+             "occurred": False, "supersedes": [], "built_from": []},
+        )
+        with self.assertRaises(ContractError) as cm:
+            self.compile([{"area": "approved_plan", "id": "plan.sisters-task", "reason": "x"}], state=polluted)
+        self.assertIn("duplicate-id ambiguity", str(cm.exception))
+
     # 4. unsupported area -> reject
     def test_unsupported_area_rejected(self):
         with self.assertRaises(ContractError):
@@ -408,6 +421,76 @@ class ContextCompilerStaleTest(unittest.TestCase):
                 context_id="ctx-xproj", brief=make_brief(), intent=INTENT, state=other_state,
                 state_selections=[], retrieval=fake_retrieve_must_not_be_called,
             )
+
+
+class ContextCompilerAuthorityTest(unittest.TestCase):
+    """approved_plan production authority authenticity (E3-A-R1).
+
+    Default trusted future planning authorities come from the frozen StoryPlan
+    semantic: author_decision: / manual_import:; simulation_author_decision:
+    only under the explicit test/sandbox gate.  accepted_text: is a legal
+    Canon authority but NOT a legal future planning authority.
+    """
+
+    def compile(self, selections, **kwargs):
+        return compile_context(
+            context_id="ctx-auth",
+            brief=kwargs.pop("brief", make_brief()),
+            intent=kwargs.pop("intent", INTENT),
+            state=kwargs.pop("state", STATE),
+            state_selections=selections,
+            retrieval=kwargs.pop("retrieval", fake_retrieve_must_not_be_called),
+            **kwargs,
+        )
+
+    def _state_with_plan(self, plan):
+        polluted = copy.deepcopy(STATE)
+        polluted["approved_plan"].append(plan)
+        return polluted
+
+    # 1. author_decision planning -> production PASS
+    def test_author_decision_planning_production_pass(self):
+        ctx = self.compile([{"area": "approved_plan", "id": "plan.sisters-task", "reason": "x"}])
+        self.assertEqual([p["id"] for p in ctx["selected_story_state"]["approved_plan"]], ["plan.sisters-task"])
+
+    # 2. manual_import planning -> production PASS
+    def test_manual_import_planning_production_pass(self):
+        polluted = self._state_with_plan(
+            {"id": "plan.imported", "description": "manual-imported 的规划线", "target_ref": "book.imported",
+             "authority": "manual_import:seed-arc", "occurred": False, "supersedes": [], "built_from": []},
+        )
+        ctx = self.compile([{"area": "approved_plan", "id": "plan.imported", "reason": "x"}], state=polluted)
+        self.assertEqual([p["id"] for p in ctx["selected_story_state"]["approved_plan"]], ["plan.imported"])
+
+    # 3/4. simulation default reject + explicit gate pass are kept in
+    # ContextCompilerNegativeTest (#6 / #7).
+
+    # 5. accepted_text planning -> reject: legal Canon authority, but not a
+    #    legal future planning authority.
+    def test_accepted_text_planning_rejected(self):
+        polluted = self._state_with_plan(
+            {"id": "plan.accepted", "description": "以正文为 authority 的规划", "target_ref": "t",
+             "authority": "accepted_text:ch10", "occurred": False, "supersedes": [], "built_from": []},
+        )
+        with self.assertRaises(ContractError) as cm:
+            self.compile([{"area": "approved_plan", "id": "plan.accepted", "reason": "x"}], state=polluted)
+        self.assertIn("authority", str(cm.exception))
+
+    # 6. arbitrary / untrusted planning authority -> reject
+    def test_arbitrary_planning_authority_rejected(self):
+        polluted = self._state_with_plan(
+            {"id": "plan.guess", "description": "不可信来源的规划", "target_ref": "t",
+             "authority": "external_guess:x", "occurred": False, "supersedes": [], "built_from": []},
+        )
+        with self.assertRaises(ContractError) as cm:
+            self.compile([{"area": "approved_plan", "id": "plan.guess", "reason": "x"}], state=polluted)
+        self.assertIn("authority", str(cm.exception))
+
+    # The planning whitelist never applies to Canon areas: accepted_text stays
+    # a legal Canon source.
+    def test_canon_accepted_text_still_legal(self):
+        ctx = self.compile([{"area": "canon_facts", "id": "canon.family-business", "reason": "x"}])
+        self.assertEqual(ctx["selected_story_state"]["canon_facts"][0]["authority"], "accepted_text:ch1")
 
 
 if __name__ == "__main__":

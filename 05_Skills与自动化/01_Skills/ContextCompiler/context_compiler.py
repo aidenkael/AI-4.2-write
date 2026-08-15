@@ -61,6 +61,10 @@ validate_story_state = _sp.validate_story_state
 build_context = _sp.build_context  # E1 gate, reused read-only for the frozen BKP policy
 resolve_plan_activity = _sp.resolve_plan_activity
 SIMULATION_ONLY_AUTHORITIES = _sp.SIMULATION_ONLY_AUTHORITIES
+# Production-trusted future planning authorities, reused verbatim from the
+# frozen StoryPlan semantic (E2-A / E2-C): author decisions and manual imports
+# are trusted; simulation is not.  No second, parallel whitelist is kept here.
+TRUSTED_PLANNING_SOURCE_AUTHORITIES = _sp.TRUSTED_PLANNING_SOURCE_AUTHORITIES
 utc_now = _sp.utc_now
 
 
@@ -118,7 +122,23 @@ def _resolve_state_selections(
     """
     activity = resolve_plan_activity(state)
     active_ids = set(activity["active"])
-    plans_by_id = {plan.get("id"): plan for plan in state.get("approved_plan", [])}
+
+    # Deterministic approved_plan index: a selection ref must resolve to exactly
+    # one authoritative planning entry.  A missing id or a duplicate id would
+    # make the ref ambiguous, so both are ContractErrors -- never silent
+    # first/last/dedupe.  This mirrors the same-area duplicate-id ambiguity
+    # rejection of the Canon areas and is defensive on top of E1
+    # validate_story_state (which already requires plan ids).
+    plans_by_id: dict[str, dict[str, Any]] = {}
+    for plan in state.get("approved_plan", []):
+        pid = plan.get("id")
+        if not pid:
+            raise ContractError("approved_plan 条目缺少 id，无法确定性解析 selection ref")
+        if pid in plans_by_id:
+            raise ContractError(
+                f"approved_plan 中 id={pid} 重复，selection ref 指向不明确（duplicate-id ambiguity）"
+            )
+        plans_by_id[pid] = plan
 
     selected_by_area: dict[str, list[dict[str, Any]]] = {}
     reasons: list[dict[str, str]] = []
@@ -152,11 +172,20 @@ def _resolve_state_selections(
                     "历史 planning 保留在 append-only history 中，但不进入当前执行 Context"
                 )
             authority = str(plan.get("authority", ""))
-            if authority.startswith(SIMULATION_ONLY_AUTHORITIES) and not allow_simulation_sources:
+            # Production planning authority authenticity, aligned with the
+            # frozen StoryPlan semantic: default trust = author_decision: /
+            # manual_import:; simulation_author_decision: is allowed ONLY under
+            # the explicit test/sandbox gate.  "Not simulation" is NOT enough:
+            # accepted_text: is a legal Canon authority but not a legal future
+            # planning authority.
+            effective_trusted = TRUSTED_PLANNING_SOURCE_AUTHORITIES
+            if allow_simulation_sources:
+                effective_trusted = effective_trusted + SIMULATION_ONLY_AUTHORITIES
+            if not authority.startswith(effective_trusted):
                 raise ContractError(
-                    f"approved_plan {sel_id} 来自 simulation authority（{authority}）；"
-                    "生产 Context Compiler 默认不注入 TEST_ONLY planning，"
-                    "仅显式 allow_simulation_sources=True 的 sandbox/test 可用"
+                    f"approved_plan {sel_id} 的 authority 不是可信未来规划来源：{authority}；"
+                    "生产 Context 只允许 author_decision: / manual_import:"
+                    "（simulation_author_decision: 仅显式 allow_simulation_sources=True 可用）"
                 )
             item = deepcopy(plan)
             selected_plan_count += 1

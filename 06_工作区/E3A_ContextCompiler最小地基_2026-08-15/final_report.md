@@ -29,11 +29,13 @@ Context Compiler public API：
 - BKP 复用冻结 E1 gate（调用 E1 `build_context` 只提取 selected_bkp_hits / retrieval / selection reason，不重新实现 KnowledgeRetrieve，不修改 E1）；BKP 与 Story State 结构隔离；
 - Context Package 非权威、零写回；构建过程对 State / Intent ZERO mutation。
 
+E3-A-R1 修复（2026-08-15，真实 diff 审查后）：approved_plan 改为确定性索引构建（缺 id / duplicate id → ContractError，与 Canon area duplicate-id ambiguity 一致）；production planning authority 白名单直接复用 StoryPlan 冻结常量 `TRUSTED_PLANNING_SOURCE_AUTHORITIES`（`author_decision:` / `manual_import:`），`simulation_author_decision:` 仅显式 gate 可用，`accepted_text:` 等非 planning authority 拒绝；Canon area authority 仍由 E1 `validate_story_state` 负责（`accepted_text:` 依旧合法 Canon source）。
+
 ## 3. 测试与回归
 
 | 目标 | 结果 |
 |---|---|
-| ContextCompiler（真实 sandbox + 15 负例 + stale + 结构隔离） | 28 tests OK |
+| ContextCompiler（真实 sandbox + 15 负例 + stale + 结构隔离 + planning authority/duplicate-id guard） | 34 tests OK |
 | StoryPlan 回归 | 50 tests OK |
 | StoryDesign 回归 | 27 tests OK |
 | KnowledgeRetrieve 回归 | 4 tests OK |
