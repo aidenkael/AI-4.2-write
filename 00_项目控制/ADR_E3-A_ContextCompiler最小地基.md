@@ -1,6 +1,6 @@
 # ADR E3-A｜Context Compiler 最小地基
 
-- 状态：**`E3-A implementation candidate / awaiting review`**（2026-08-15 提交；等待真实 GitHub diff 审查，不提前 PASS）。
+- 状态：**`E3A_PASS` / `E3A_CONTEXT_COMPILER_FOUNDATION_CLOSED`**（2026-08-15 合入 main 并正式关闭）。
 - 范围：Phase E 的 E3-A；只做 Context Compiler 最小技术地基——“任务相关原创状态选择层”。不实现 Writer、Router、大型 RAG、embeddings、Vector/Graph DB、最终 Context Schema、最终 Canon Schema。
 - 实现位置：`05_Skills与自动化/01_Skills/ContextCompiler/`（`context_compiler.py` / `test_context_compiler.py` / `SKILL.md` / `__init__.py`）。
 - 证据：`06_工作区/E3A_ContextCompiler最小地基_2026-08-15/`（`validate_e3a_context.py`、`e3a_sandbox_result.json`、`final_report.md`）。

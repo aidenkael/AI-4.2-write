@@ -84,7 +84,7 @@ E2-B 真实长篇规划纵切已完成并正式关闭（`E2B_VERTICAL_SLICE_PASS
 
 E2-C 局部重规划已完成并正式关闭（`E2C_PASS` / `E2C_STORYPLAN_LOCAL_REPLAN_CLOSED` / `STORYPLAN_PHASE_CLOSED`）：append-only local replan / supersede / active projection / stale recompile / modify / Canon isolation 均成立；最终门禁 StoryPlan 50 tests OK、StoryDesign 27 tests OK、E1 runtime 零修改。
 
-**NEXT_MAINLINE = CONTEXT_COMPILER**（尚未启动，不创建代码/目录；Context Compiler 最小地基由 ChatGPT 单独设计）。StoryPlan 当前停止扩展；future consumer 暴露真实缺口前不继续建设 replacement engine / dependency graph / final Plan Schema。
+**E3-A Context Compiler 最小技术地基已完成并正式关闭（`E3A_PASS` / `E3A_CONTEXT_COMPILER_FOUNDATION_CLOSED`），已合入 main**。**NEXT_MAINLINE = E3-B_CONTEXT_COMPILER_REAL_VERTICAL_SLICE**（尚未启动，不创建代码/目录）。StoryPlan 当前停止扩展；future consumer 暴露真实缺口前不继续建设 replacement engine / dependency graph / final Plan Schema。
 
 原因：StoryDesign 在业务上发生在前，但它产生的人物、世界、冲突、关系和方向等内容需要有稳定的落点。先把“自己的小说事实怎样保存、哪些是权威、怎样更新”定稳，再实现 StoryDesign，可避免后续反复改接口。
 
@@ -97,7 +97,8 @@ E2-C 局部重规划已完成并正式关闭（`E2C_PASS` / `E2C_STORYPLAN_LOCAL
 3. ~~开发 StoryPlan 最小合同~~（E2-A 已合入 main）；
 4. ~~执行 E2-B StoryPlan 真实长篇规划纵切~~（已合入 main，E2-B 关闭）；
 5. ~~执行 E2-C 局部重规划验证~~（已合入 main，E2-C 关闭，STORYPLAN_PHASE_CLOSED）；
-6. 开发 Context Compiler（NEXT_MAINLINE，尚未启动）：把当前创作任务需要的自身小说状态与相关 BKP 知识编译成克制上下文。
+6. ~~开发 Context Compiler 最小地基~~（E3-A 已合入 main，E3A_PASS / E3A_CONTEXT_COMPILER_FOUNDATION_CLOSED）；
+7. 执行 E3-B Context Compiler 真实“小上下文 vs 全量上下文”纵切（NEXT_MAINLINE，尚未启动）：验证小上下文是否真的减少噪声而不漏关键约束。
 
 尚未确认的具体 Canon 字段、Story State Schema、StoryDesign 输出结构不得提前写死。
 
@@ -207,6 +208,21 @@ StoryPlan 已完成 E2-A（最小技术合同 / stable id / stale / Decision bin
 
 `FREE_PLAN_QUALITY = PASS_WITH_RESERVATIONS` 仍保留 E2-B 的真实 reservation（见 6.10），不得改写为“长篇规划质量已经完全解决”。
 
+## 6.12 Context Compiler 长期冻结原则
+
+E3-A Context Compiler 最小技术地基已完成并正式关闭（`E3A_PASS` / `E3A_CONTEXT_COMPILER_FOUNDATION_CLOSED`）。长期冻结以下原则：
+
+1. Context Compiler 不默认注入整个 Story State；
+2. 模型/Skill 做 semantic relevance 判断；runtime 只验证引用真实性、当前性、authority、active/stale；
+3. State selection 必须 explicit；空 selection 不得 fallback 全量 State；
+4. `selected_story_state` 与 `selected_bkp_hits` 永远分区；
+5. `approved_plan` 只能使用当前 active planning（superseded 历史保留在 append-only history 但不进 Context）；
+6. planning source authenticity 延续 StoryPlan 边界：production 仅 `author_decision:` / `manual_import:`；simulation（`simulation_author_decision:`）仅 TEST_ONLY gate 可用；
+7. Context Package 是可重建派生层，不是 Canon authority，永不写回 Story State；
+8. Context stale 依赖 `brief_id` / `brief_rev` / `intent_rev` / `state_rev`；
+9. 当前不做：最终 Context Schema、token budget optimizer、embeddings、vector DB、graph DB、Router、Writer prompt packing；
+10. E3-A 只证明“可以安全地选少量上下文”，尚未证明“小上下文一定比全量上下文创作效果更好”；因此下一步需要 E3-B 真实价值纵切。
+
 ---
 
 # 7. 当前不做什么
@@ -253,4 +269,4 @@ E2-B 已证明：StoryPlan 能从权威状态出发做真实长篇规划（0-BKP
 
 # 10. 一句话总纲
 
-> **参考作品学习链已经完成结构冻结；StoryDesign 运行底座与 StoryPlan 最小合同均已合入 main，StoryPlan 真实长篇规划纵切（E2-B）与局部重规划（E2-C）均已通过并关闭（STORYPLAN_PHASE_CLOSED；append-only history、active projection、Canon 隔离零污染成立）；知识介入策略冻结为稀疏后置问题驱动；下一主线是 Context Compiler（尚未启动）。**
+> **参考作品学习链已经完成结构冻结；StoryDesign 运行底座、StoryPlan 最小合同、真实长篇规划纵切（E2-B）与局部重规划（E2-C）均已通过并关闭（STORYPLAN_PHASE_CLOSED；append-only history、active projection、Canon 隔离零污染成立）；Context Compiler 最小技术地基已合入 main 并正式关闭（E3A_PASS / E3A_CONTEXT_COMPILER_FOUNDATION_CLOSED）；知识介入策略冻结为稀疏后置问题驱动；NEXT_MAINLINE = E3-B 真实“小上下文 vs 全量上下文”纵切（尚未启动）。**
