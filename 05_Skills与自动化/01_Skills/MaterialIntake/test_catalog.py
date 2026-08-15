@@ -287,3 +287,98 @@ def test_derive_knowledge_pure():
     assert catalog.derive_knowledge(None, {"abc"}) == {"status": "未开始"}
     not_final = dict(bkp_ok, finalized=False)
     assert catalog.derive_knowledge(not_final, {"abc"}) == {"status": "未开始"}
+
+
+# ---------- H. SourcePrepare contract（真实目录 discovery + metadata schema） ----------
+
+def _write_sp_metadata(sp_dir: Path, book_id: str, status: str, sha: str,
+                       suffix: str = "_Alpha", meta_book_id: str | None = None) -> Path:
+    """按 SourcePrepare 正式合同写入 metadata.json：<book_id>_<书名>/metadata.json。"""
+    d = sp_dir / f"{book_id}{suffix}"
+    d.mkdir(parents=True, exist_ok=True)
+    meta = {
+        "status": status,
+        "book_id": meta_book_id if meta_book_id is not None else book_id,
+        "selected_source": {"sha256": sha},
+    }
+    p = d / "metadata.json"
+    p.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    return p
+
+
+def _sp_meta(sp_dir: Path, book_id: str):
+    """真实目录 discovery：走 find_sp_metadata 读磁盘，不手搓参数。"""
+    return catalog.find_sp_metadata(sp_dir, book_id)
+
+
+def test_sp_contract_pass_sha_match(tmp_path):
+    sp_dir = tmp_path / "06_工作区" / "SourcePrepare"
+    sha = "1" * 64
+    _write_sp_metadata(sp_dir, "book_0001", "PASS", sha)
+    meta = _sp_meta(sp_dir, "book_0001")
+    assert meta is not None and meta["status"] == "PASS"
+    assert catalog.derive_purification(meta, None, "", {sha}) == \
+        {"status": "可用", "evidence": "sourceprepare_metadata"}
+
+
+def test_sp_contract_review_sha_match(tmp_path):
+    sp_dir = tmp_path / "06_工作区" / "SourcePrepare"
+    sha = "2" * 64
+    _write_sp_metadata(sp_dir, "book_0001", "REVIEW", sha)
+    meta = _sp_meta(sp_dir, "book_0001")
+    assert catalog.derive_purification(meta, None, "", {sha}) == \
+        {"status": "需复核", "evidence": "sourceprepare_metadata"}
+
+
+def test_sp_contract_fail_sha_match(tmp_path):
+    sp_dir = tmp_path / "06_工作区" / "SourcePrepare"
+    sha = "3" * 64
+    _write_sp_metadata(sp_dir, "book_0001", "FAIL", sha)
+    meta = _sp_meta(sp_dir, "book_0001")
+    assert catalog.derive_purification(meta, None, "", {sha}) == \
+        {"status": "失败", "evidence": "sourceprepare_metadata"}
+
+
+def test_sp_contract_pass_sha_mismatch(tmp_path):
+    sp_dir = tmp_path / "06_工作区" / "SourcePrepare"
+    _write_sp_metadata(sp_dir, "book_0001", "PASS", "4" * 64)
+    meta = _sp_meta(sp_dir, "book_0001")
+    # 即使 status=PASS，source 已不属于当前 asset → 需更新，不标记可用
+    assert catalog.derive_purification(meta, None, "", {"5" * 64}) == \
+        {"status": "需更新", "evidence": "sourceprepare_metadata_sha_mismatch"}
+
+
+def test_sp_contract_book_id_mismatch_reject(tmp_path):
+    sp_dir = tmp_path / "06_工作区" / "SourcePrepare"
+    _write_sp_metadata(sp_dir, "book_0001", "PASS", "6" * 64, meta_book_id="book_9999")
+    with pytest.raises(RuntimeError, match="book_id"):
+        catalog.find_sp_metadata(sp_dir, "book_0001")
+
+
+def test_sp_contract_ambiguity_reject(tmp_path):
+    sp_dir = tmp_path / "06_工作区" / "SourcePrepare"
+    sha = "7" * 64
+    _write_sp_metadata(sp_dir, "book_0001", "PASS", sha, suffix="_Alpha")
+    _write_sp_metadata(sp_dir, "book_0001", "REVIEW", sha, suffix="_Beta")
+    with pytest.raises(RuntimeError, match="歧义"):
+        catalog.find_sp_metadata(sp_dir, "book_0001")
+
+
+def test_sp_contract_incomplete_metadata(tmp_path):
+    sp_dir = tmp_path / "06_工作区" / "SourcePrepare"
+    d = sp_dir / "book_0001_Alpha"
+    d.mkdir(parents=True)
+    (d / "metadata.json").write_text(json.dumps({"status": "PASS"}), encoding="utf-8")
+    meta = _sp_meta(sp_dir, "book_0001")
+    # 缺 selected_source.sha256 → 不判可用，进入需复核
+    assert catalog.derive_purification(meta, None, "", {"abc"}) == \
+        {"status": "需复核", "evidence": "sourceprepare_metadata_incomplete"}
+
+
+def test_future_enums_pure():
+    # Phase 2B 预留枚举：schema 必须允许，但当前 ledger 不产出
+    assert "LOOSE_MATERIAL" in catalog.VALID_TYPES
+    assert "不适用" in catalog.PURIFICATION_STATUS
+    assert "失败" in catalog.PURIFICATION_STATUS
+    assert "失败" in catalog.KNOWLEDGE_STATUS
+    assert "不适用" in catalog.KNOWLEDGE_STATUS

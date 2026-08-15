@@ -5,9 +5,10 @@ MaterialIntake catalog builder —— 素材资产 canonical ledger 构建器（
 
 输入（全部只读，绝不修改）：
   - 01_原始素材/ 磁盘全量扫描（SHA256，by-file）
-  - 01_原始素材/素材清单.csv（legacy 22 列，仅作一次性 migration 输入）
+  - 01_原始素材/素材清单.csv（legacy 22 列，仅作 migration/bootstrap 输入）
   - 02_原著蒸馏/book_xxxx_*/bkp/identity.json（knowledge evidence，FINALIZED 状态）
   - 01_原始素材/**/collection_manifest.json（container evidence，Local Only）
+  - 06_工作区/SourcePrepare/<book_id>_<书名>/metadata.json（A 级提纯证据，SP 正式合同路径）
 
 输出：
   - 01_原始素材/素材资产.json        machine canonical ledger（tracked）
@@ -20,7 +21,7 @@ MaterialIntake catalog builder —— 素材资产 canonical ledger 构建器（
   - 同输入重复执行 byte-for-byte 幂等
 
 用法：
-  python catalog.py --root E:/AI-Write [--preview-dir DIR] [--no-scan]
+  python catalog.py --root E:/AI-Write [--preview-dir DIR]
 """
 
 import argparse
@@ -64,11 +65,13 @@ SINGLE_CHAR_REJECT = ("上", "下", "中", "全")
 # legacy CSV SourcePrepare 状态 → 提纯状态（仅 migration bootstrap 用）
 SP_STATUS_MAP = {"PASS": "可用", "REVIEW": "需复核", "FAIL": "失败"}
 
-PURIFICATION_STATUS = ("可用", "需更新", "未处理", "需复核", "失败")
-KNOWLEDGE_STATUS = ("可用", "需更新", "未开始")
+# 提纯状态（含 Phase 2B 预留：不适用）
+PURIFICATION_STATUS = ("未处理", "可用", "需复核", "需更新", "失败", "不适用")
+# 知识状态（含 Phase 2B 预留：失败 / 不适用）
+KNOWLEDGE_STATUS = ("未开始", "可用", "需更新", "失败", "不适用")
 
-# 合法类型
-VALID_TYPES = ("REFERENCE_WORK", "RESEARCH", "NEEDS_REVIEW")
+# 合法类型（LOOSE_MATERIAL 为 Phase 2B 预留，当前 ledger 不产出）
+VALID_TYPES = ("REFERENCE_WORK", "RESEARCH", "LOOSE_MATERIAL", "NEEDS_REVIEW")
 
 
 def sha256_file(path: Path) -> str:
@@ -171,33 +174,69 @@ def find_bkp(distill_dir: Path, book_id: str) -> dict | None:
 
 
 def find_sp_metadata(sp_dir: Path, book_id: str) -> dict | None:
-    """查找 SourcePrepare metadata.json（A 级提纯证据）。SP 工作区清理后通常不存在。"""
+    """按 SourcePrepare 正式合同查找 A 级提纯证据。
+
+    合同路径：06_工作区/SourcePrepare/<book_id>_<书名>/metadata.json。
+    规则：
+      - 目录名前缀 <book_id>_ 恰好匹配 1 个 → 读取该目录 metadata.json；
+      - 0 个 → None（无 A 级证据）；
+      - >1 个 → RuntimeError（目录歧义，不静默选第一个）；
+      - metadata.book_id 与 book_id 不一致 → RuntimeError（拒绝脏数据）。
+    """
     if sp_dir is None or not sp_dir.exists():
         return None
-    m = sp_dir / book_id / "metadata.json"
+    matches = [d for d in sorted(sp_dir.iterdir())
+               if d.is_dir() and d.name.startswith(book_id + "_")]
+    if not matches:
+        return None
+    if len(matches) > 1:
+        raise RuntimeError(
+            f"SourcePrepare 目录歧义: {book_id} 匹配多个目录 {[d.name for d in matches]}")
+    m = matches[0] / "metadata.json"
     if not m.exists():
         return None
     try:
-        return json.loads(m.read_text(encoding="utf-8"))
+        data = json.loads(m.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+    meta_book_id = data.get("book_id")
+    if meta_book_id and meta_book_id != book_id:
+        raise RuntimeError(
+            f"SourcePrepare metadata book_id 不一致: {matches[0].name} 内 "
+            f"book_id={meta_book_id!r} != {book_id!r}")
+    return data
 
 
 def derive_purification(sp_meta: dict | None, bkp: dict | None,
                         legacy_status: str, file_shas: set) -> dict:
     """
     提纯状态推导（优先级 A > B > C > D > E）：
-      A. SP metadata.json 存在且 SHA 匹配 → 可用（sourceprepare_metadata）
+      A. SourcePrepare metadata.json（A 级证据，合同路径 <book_id>_<书名>/metadata.json）
+         schema: status / book_id / selected_source.sha256
+         - selected_source.sha256 匹配 files：
+             status=PASS → 可用；REVIEW → 需复核；FAIL → 失败
+         - SHA 已不属于当前 asset → 需更新（即使 status=PASS 也不标记可用）
+         - 缺关键字段 / 未知 status → 需复核（明确异常，不静默判可用）
       B. BKP FINALIZED 且 source_sha256 在 files 中 → 可用（bkp_source_snapshot）
       C. legacy CSV SP 状态（一次性 migration bootstrap，legacy_catalog）
       D. SHA 不匹配 → 需更新
       E. 无任何证据 → 未处理
     """
     if sp_meta is not None:
-        sha = sp_meta.get("source_sha256") or sp_meta.get("sha256") or ""
-        if sha and sha in file_shas:
+        sp_status = sp_meta.get("status")
+        sel = sp_meta.get("selected_source")
+        sha = sel.get("sha256") if isinstance(sel, dict) else None
+        if not sp_status or not sha:
+            return {"status": "需复核", "evidence": "sourceprepare_metadata_incomplete"}
+        if sha not in file_shas:
+            return {"status": "需更新", "evidence": "sourceprepare_metadata_sha_mismatch"}
+        if sp_status == "PASS":
             return {"status": "可用", "evidence": "sourceprepare_metadata"}
-        return {"status": "需更新", "evidence": "sourceprepare_metadata_sha_mismatch"}
+        if sp_status == "REVIEW":
+            return {"status": "需复核", "evidence": "sourceprepare_metadata"}
+        if sp_status == "FAIL":
+            return {"status": "失败", "evidence": "sourceprepare_metadata"}
+        return {"status": "需复核", "evidence": "sourceprepare_metadata_unknown_status"}
     if bkp is not None and bkp["finalized"]:
         if bkp["source_sha256"] and bkp["source_sha256"] in file_shas:
             return {"status": "可用", "evidence": "bkp_source_snapshot"}
