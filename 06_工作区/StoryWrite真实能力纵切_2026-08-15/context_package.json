@@ -1,0 +1,165 @@
+{
+  "artifact_type": "context_package",
+  "context_id": "storywrite-ctx-001",
+  "project_id": "e2b-sea-road",
+  "status": "CURRENT",
+  "built_from": {
+    "brief_id": "storywrite-brief-001",
+    "brief_rev": 1,
+    "intent_rev": 1,
+    "state_rev": 2
+  },
+  "selected_intent": {
+    "work_direction": "沿海县城跨海旧路关闭前一年，经营家族小型物流站的宋宁，与失联十年后归来、代表区域物流公司竞标大宗配送合同的姐姐宋乔，在现实合作与利益对立之间被不断推向无法两全的选择。",
+    "reader_promise": "读者看到一个正在消失的地方性运输生态，如何不断逼迫两姐妹做出越来越无法两全的选择；家庭旧债不是单纯谜底，而要持续改变她们今天的关系和利益。",
+    "hard_constraints": [
+      "不写大公司黑幕阴谋",
+      "不靠凶杀案升级剧情",
+      "不出现豪门身份反转",
+      "不使用超自然",
+      "不把父亲塑造成隐藏巨恶",
+      "冲突主要来自生计、家庭旧债、不同人生选择、地方变化和人物自己做出的决定"
+    ],
+    "open_space": [
+      "父亲那笔债真正的用途",
+      "姐姐十年前离开的全部原因",
+      "姐姐这次回来是否还有未说出口的私人目的",
+      "姐妹最终合作、决裂还是形成第三种关系",
+      "物流站最终是否保留"
+    ]
+  },
+  "selected_story_state": {
+    "canon_facts": [
+      {
+        "id": "canon.seed.road",
+        "fact": "沿海县城将在一年后永久封闭一条连接本岛与旧港区的跨海旧路。",
+        "authority": "manual_import:e2b-seed"
+      },
+      {
+        "id": "canon.seed.songning",
+        "fact": "37 岁的宋宁经营父亲留下的小型物流站，长期靠这条旧路给岛上的商户、住户和小工厂送货。",
+        "authority": "manual_import:e2b-seed"
+      },
+      {
+        "id": "canon.seed.songqiao",
+        "fact": "失联十年的姐姐宋乔突然回来，并代表一家新的区域物流公司竞标岛上未来唯一的大宗配送合同。",
+        "authority": "manual_import:e2b-seed"
+      },
+      {
+        "id": "canon.seed.debt",
+        "fact": "父亲去世前留下过一笔来源和用途都说不清的债。",
+        "authority": "manual_import:e2b-seed"
+      }
+    ],
+    "character_state": [
+      {
+        "id": "char.state.songning.belief",
+        "belief": "宋宁认为姐姐当年的离开和这笔债有关。",
+        "authority": "manual_import:e2b-seed"
+      },
+      {
+        "id": "char.state.songqiao.stance",
+        "stance": "宋乔拒绝解释当年的离开，却坚持父亲留下的物流站已经没有继续存在的价值。",
+        "authority": "manual_import:e2b-seed"
+      }
+    ],
+    "relationship_state": [
+      {
+        "id": "rel.state.sisters",
+        "state": "随着旧路关闭日期逼近，两姐妹既不得不合作处理现实问题，又越来越可能站到彼此利益的对立面。",
+        "authority": "manual_import:e2b-seed"
+      }
+    ],
+    "approved_plan": [
+      {
+        "id": "plan.design.direction.island",
+        "description": "作者已确认的 StoryDesign 方向：旧路关闭形成一年倒计时；姐妹代表两种不同生存方案；每解决一个现实物流问题，都让双方合作更必要，同时利益冲突更明显；父亲旧债持续进入现实选择，但真相未确定。",
+        "authority": "author_decision:storydesign-simulated",
+        "occurred": false,
+        "target_ref": "design.direction.island",
+        "supersedes": [],
+        "built_from": []
+      },
+      {
+        "id": "plan.e2b.simulated.first-half",
+        "description": "E2-B simulated writeback：P0 前半程规划，仅用于权限与 Canon 隔离验证。",
+        "built_from": [
+          "plan-candidate-e2b-p0"
+        ],
+        "supersedes": [],
+        "target_ref": "pt.first-half.unilateral-harm",
+        "occurred": false,
+        "authority": "simulation_author_decision:decision-e2b-simulated-p0"
+      }
+    ]
+  },
+  "selected_bkp_hits": [],
+  "selection_reason": [
+    {
+      "source_ref": "canon_facts:canon.seed.road",
+      "reason": "旧路关闭倒计时是本场谈判的直接压力源"
+    },
+    {
+      "source_ref": "canon_facts:canon.seed.songning",
+      "reason": "物流站是宋宁要保住的谈判标的，也是宋乔方案要重新定位的对象"
+    },
+    {
+      "source_ref": "canon_facts:canon.seed.songqiao",
+      "reason": "宋乔代表区域公司竞标大宗配送合同，是对立方方案的事实基础"
+    },
+    {
+      "source_ref": "canon_facts:canon.seed.debt",
+      "reason": "旧债以融资难/现金紧的后果进入本场景，是责任观分歧的载体"
+    },
+    {
+      "source_ref": "character_state:char.state.songning.belief",
+      "reason": "宋宁认定姐姐离开与债有关，支配她的防御与潜台词"
+    },
+    {
+      "source_ref": "character_state:char.state.songqiao.stance",
+      "reason": "宋乔坚持物流站没有继续存在的价值，是宋宁公开反驳的直接对象"
+    },
+    {
+      "source_ref": "relationship_state:rel.state.sisters",
+      "reason": "不得不合作又利益互斥的关系轴正是本场景要完成性质变化的对象"
+    },
+    {
+      "source_ref": "approved_plan:plan.design.direction.island",
+      "reason": "作者确认方向：合作更必要与利益冲突更明显必须同时兑现，旧债进入现实选择但真相不揭"
+    },
+    {
+      "source_ref": "approved_plan:plan.e2b.simulated.first-half",
+      "reason": "本场景是 P0 前半程终点场景，planning obligation 直接来自它（TEST_ONLY simulation gate）"
+    }
+  ],
+  "conflicts_or_tensions": [],
+  "size_summary": {
+    "total_state_items": 9,
+    "selected_state_items": 9,
+    "total_active_plans": 2,
+    "selected_active_plans": 2,
+    "selected_bkp_hits": 0,
+    "by_area": {
+      "canon_facts": 4,
+      "character_state": 2,
+      "relationship_state": 1,
+      "approved_plan": 2
+    }
+  },
+  "retrieval": {
+    "query": null,
+    "status": "SKIPPED_NO_KNOWLEDGE_NEED",
+    "gaps": [],
+    "candidate_count": 0
+  },
+  "created_at": "2026-08-15T15:51:39Z",
+  "experiment_note": "一次性实验 Context：复用 E2-B 模拟工件，allow_simulation_sources=True 仅 TEST_ONLY；Context Package 非权威，永不写回 Canon / Story State。",
+  "approved_plan_activity_snapshot": {
+    "active": [
+      "plan.design.direction.island",
+      "plan.e2b.simulated.first-half"
+    ],
+    "superseded": [],
+    "superseded_by": {}
+  }
+}
