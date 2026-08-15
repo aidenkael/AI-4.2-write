@@ -3,8 +3,8 @@
 index_builder.py — 原始素材索引生成与更新工具
 
 扫描 01_原始素材，生成两份长期维护文件（均上传 GitHub，不含第三方全文）：
-  1. 00_项目控制/原始素材清单.csv   —— 给 Agent / 自动化用，一部作品可对应多条文件记录。
-  2. 00_项目控制/原始素材总索引.md —— 给人阅读，按分类列出作品与状态。
+  1. 01_原始素材/素材清单.csv   —— 给 Agent / 自动化用，一部作品可对应多条文件记录。
+  2. 01_原始素材/素材总索引.md —— 给人阅读，按分类列出作品与状态。
 
 同时为 SourcePrepare 提供 update_book()：SP 跑完一本书后回写主源 / SP状态 / 字符数等。
 
@@ -28,6 +28,8 @@ from typing import Optional
 ROOT_DEFAULT = Path(r"E:\AI-Write")
 RAW = "01_原始素材"
 CTRL = "00_项目控制"
+IDX_CSV = "素材清单.csv"
+IDX_MD = "素材总索引.md"
 SUPPORTED = {".epub", ".txt", ".pdf", ".zip", ".azw3", ".mobi"}
 
 CATEGORY_ORDER = [
@@ -285,7 +287,7 @@ def discover(root: Path) -> list[FileRec]:
 
 
 def write_csv(root: Path, recs: list[FileRec]) -> Path:
-    out = root / CTRL / "原始素材清单.csv"
+    out = root / RAW / "素材清单.csv"
     with out.open("w", encoding="utf-8-sig", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=CSV_COLUMNS)
         w.writeheader()
@@ -318,11 +320,11 @@ def write_csv(root: Path, recs: list[FileRec]) -> Path:
 
 
 def write_md(root: Path, recs: list[FileRec]) -> Path:
-    out = root / CTRL / "原始素材总索引.md"
+    out = root / RAW / "素材总索引.md"
     by_cat: dict[str, list[FileRec]] = {}
     for r in recs:
         by_cat.setdefault(r.category, []).append(r)
-    lines = ["# 原始素材总索引", "",
+    lines = ["# 素材总索引", "",
              f"> 本文件由 `SourcePrepare/scripts/index_builder.py` 自动生成，反映本地 `01_原始素材` 的真实情况。",
              "> 第三方原著全文 **Local Only，不上传 GitHub**；本索引仅含元数据与处理状态。",
              "", f"更新时间：{datetime.now().strftime('%Y-%m-%d')}  ",
@@ -353,7 +355,7 @@ def write_md(root: Path, recs: list[FileRec]) -> Path:
 
 
 def load_csv(root: Path) -> list[dict]:
-    path = root / CTRL / "原始素材清单.csv"
+    path = root / RAW / "素材清单.csv"
     if not path.exists():
         return []
     with path.open("r", encoding="utf-8-sig", newline="") as fh:
@@ -361,7 +363,7 @@ def load_csv(root: Path) -> list[dict]:
 
 
 def save_csv(root: Path, rows: list[dict]) -> None:
-    path = root / CTRL / "原始素材清单.csv"
+    path = root / RAW / "素材清单.csv"
     with path.open("w", encoding="utf-8-sig", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=CSV_COLUMNS)
         w.writeheader()

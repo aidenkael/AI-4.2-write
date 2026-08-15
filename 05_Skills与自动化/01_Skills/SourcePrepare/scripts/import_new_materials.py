@@ -7,7 +7,7 @@ import_new_materials.py — 把“新素材源目录”里的图书安全入库�
 
 流程：
   1. 扫描源目录，逐个计算 SHA256；
-  2. 与现有 原始素材清单.csv 的 SHA256 对账，完全重复则跳过；
+  2. 与现有 素材清单.csv 的 SHA256 对账，完全重复则跳过；
   3. 解析书名/作者/译者/版本，按分类字典归到对应物理目录；
   4. 复制入库（保留原文件名），复制后重算 SHA256 校验一致；
   5. 追加 CSV 记录（继承/新建作品ID，稳定编号）；
@@ -30,8 +30,8 @@ from pathlib import Path
 BASE = Path(r"E:\AI-Write")
 CTRL = BASE / "00_项目控制"
 RAW = BASE / "01_原始素材"
-CSV_PATH = CTRL / "原始素材清单.csv"
-MD_PATH = CTRL / "原始素材总索引.md"
+CSV_PATH = RAW / "素材清单.csv"
+MD_PATH = RAW / "素材总索引.md"
 
 # 物理分类目录
 CAT_DIR = {

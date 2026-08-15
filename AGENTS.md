@@ -1,112 +1,108 @@
-# AI-write Agent 长期规则
+# AI-Write Agent 长期规则
 
-> 目标：让复杂后台服务作者，而不是让作者服务系统。
+> 面向进入仓库工作的 Agent。目标是让后台复杂度服务作者，作者不管理系统。
 
-## 1. 当前阶段
+## 当前阶段
 
-**当前唯一主线：原著知识提取与蒸馏。**
+**CURRENT_PHASE = REAL_WRITING_USAGE**
 
-G0–G4 已关闭。G5｜正文诊断与修订最小闭环：**PAUSED**。不得继续要求作者评价 G5 测试正文。
+工作台已从开发验证期进入真实使用期。主目标是辅助作者进行长篇小说创作。
 
-开始任务前读：目录说明、AGENTS、长期手册、当前索引、项目记忆、阶段门禁和当前专项文件。
+## 核心目标
 
-## 2. 当前方法链
+让后台复杂度服务作者。作者不管理 Prompt / Agent / Skill / Schema / Context ID。
 
-`SourcePrepare → 初步作品识别/BookProfile → 多视角直接原著 Discovery → 按需 Deep Dive → BookDistill 总编辑收敛 → BKP → KnowledgeRetrieve`
+## 目录 authority
 
-当前固定的是职责链，不是 Skill 数量、Pass 数量或作者操作次数。
+| 目录 | 职责 | Authority |
+|---|---|---|
+| 01_原始素材 | 未经 AI 加工的原始来源 | 原始文件真相 |
+| 02_原著蒸馏 | 参考作品结构化知识（BKP） | 参考知识 |
+| 03_作品工程 | 原创小说作品 | **原创最高 authority** |
+| 04_写作知识库 | 经多作品验证的长期写作知识 | 跨作品经验 |
+| 05_Skills与自动化 | 工作台可调用能力 | capability |
+| 06_工作区 | 临时运行空间 | derivative/temp |
 
-### SourcePrepare
+## 创作 authority 顺序
 
-只做作品身份、来源/版本、完整性、章节与标准输入。已有 PASS 可复用；REVIEW/FAIL 才停下报告。不得修改 `01_原始素材`。
+1. 作者当前明确决定
+2. 作者接受正文 / production Story State
+3. 当前有效规划（active planning）
+4. 参考知识 BKP / 04 knowledge
 
-### 初步 BookProfile
+**BKP 不得成为原创 Canon。** 未接受文本不得进入 production 正文/State。
+Context/Brief/recent prose 是 derivative，不得成为事实 authority。
 
-先建立结构、阶段、reader promise、显著/潜在强项与不确定项，用于导航后续阅读。Profile 可以随着后续原著阅读修订；不得把初步识别变成过滤器。
+## 正式能力状态
 
-### Discovery
+| 子系统 | 状态 |
+|---|---|
+| SourcePrepare | AVAILABLE / FROZEN |
+| BookDistill | AVAILABLE / FROZEN |
+| KnowledgeRetrieve | AVAILABLE / FROZEN |
+| StoryDesign | CLOSED / FROZEN |
+| StoryPlan | CLOSED / FROZEN |
+| ContextCompiler | CONSUMER_DRIVEN_FREEZE |
+| StoryWrite primitives | KEEP_AND_FREEZE |
+| Mechanical settlement assist | KEEP_AND_FREEZE |
+| AUTHOR_FACING_ONE_SENTENCE_ENTRY | NOT_YET_PROVEN |
+| WRITER_PLATFORM_REQUIRED | NO |
 
-重要观察镜头必须直接读或回查原著，不只消费摘要。
+## 方法链
 
-默认两个互补方法源：
+`SourcePrepare → BookProfile → 多视角 Discovery → 按需 Deep Dive → BookDistill 收敛 → BKP → KnowledgeRetrieve`
 
-- `worldwonderer/oh-story-claudecode` + `AI-Novel-Writing-Assistant`：长篇运行、期待/兑现、情绪、信息释放、人物/关系、跨章回收；
-- `haowjy/creative-writing-skills`：Reader / Page Craft、人物心智、POV、声音、句法、对话、动作、感官、留白和微观体验。
+## BKP 边界
 
-这两个只是默认镜头，不是固定“两次蒸馏”。作品需要更多视角可增加，明显无关可调整。Base Scan 的 MAP / Evidence / Observation / Boundary 属于阅读中的证据记录层。
+BKP 长期保存作品身份、作品地图、BookProfile、Observation、Inference、Pattern、Deep Dive 和可追溯 Evidence。
 
-### Deep Dive
+单书 BKP 不自动升级为普遍写作规则。BKP 策略：`BKP_POSTHOC_SPARSE_PROBLEM_DRIVEN`。
 
-只对真实高价值或高不确定问题触发。优先借 `anotherpanacea-eng/apodictic` 等成熟 Developmental Editing 镜头。次数不冻结。
+## Context 规则
 
-### BookDistill
+- 仅显式选择，空 selection 不 fallback 整包
+- State selection 必须 explicit
+- Context Package 是可重建派生层，不是 authority
 
-核心职责是总编辑式收敛：回原著核证、去重、识别跨尺度组合效果、区分 Observation / Inference、降级过度抽象、补 scope / boundary / counterevidence / confidence，再 Finalize BKP。
+## 开发原则
 
-## 3. Borrow-first
+`CAPABILITY_FIRST_CONSUMER_DRIVEN`：冻结子系统没有真实 consumer blocker 不重开。
 
-当前优先直接借成熟上游，不继续泛搜：
+开发决策规则：只有同时满足（1）真实使用暴露问题；（2）问题重复或严重；（3）现有能力不能低成本解决；（4）新代码能明显降低长期负担，才允许建议新 runtime。否则 DO_NOT_BUILD。
 
-- oh-story：拆文、逐章处理、聚合、章节边界与恢复；
-- AI-Novel-Writing-Assistant：拆书工作台、范围定向、token 预算、增量/分档分析、证据回溯；
-- creative-writing-skills：Reader / Craft；
-- Apodictic：专项发展编辑；
-- ani-book-skill：evidence-first、权威工件、确定性校验、恢复状态。
+窄口径：`THIN_ORCHESTRATION_BUILD_ALLOWED`——只允许复用现有合同的薄操作层；不代表 Writer platform 获批。
 
-当前私人项目中许可证只做 provenance 记录，不作为技术路线阻塞。
+## Borrow-first
 
-“自研”指掌握架构、知识协议、数据边界、集成方式和验收标准，不要求每个具体能力由本项目重新实现。成熟能力优先复制、改造或组合后接入统一协议。
+`真实问题 → 查成熟上游 → 能借就借 → 最小适配 → 真实运行`
 
-## 4. BKP 边界
+当前优先参照：
+- oh-story / AI-Novel-Writing-Assistant：长篇运行、拆文
+- creative-writing-skills：Reader / Craft
+- Apodictic：Developmental Editing
+- ani-book-skill：evidence-first、权威工件
 
-BKP 长期保存作品身份、作品地图、BookProfile、Observation、重要 Inference、Work-specific Pattern、Deep Dive 最终知识，以及可追溯 Evidence / scope / boundary / counterevidence / confidence。
+## 当前禁止
 
-单书 BKP 不自动升级为普遍写作规则。正常写作阶段检索 BKP，不重新蒸馏原著。
+- 不修改正式小说
+- 不修改 Story State
+- 不批量蒸馏新书
+- 不升级 Retrieval/RAG/KG
+- 不实现完整 Writer/Reader/Editor/Controller/UI 平台
+- 不为了测试主动制造小说
+- 不为一次任务新造长期 Skill
 
-## 5. 当前任务判断
-
-当前优先解决原著提取质量，而不是先做一个统一 orchestrator 或单体 Skill。可以多流程、多 Pass、多 Skill；只有真实运行证明“操作碎片化本身阻碍提取质量/恢复”时，才优先做统一编排。
-
-下一轮应使用一部尚未蒸馏的新书，真实检查初步识别、多视角提取、专项深挖和最终收敛各自的质量与遗漏。
-
-## 6. 执行者 / 模型选择纪律
-
-默认**不固定必须由 ChatGPT、Agent 或用户本人完成任务**。用户明确指定执行者时优先遵从；未指定时，直接按任务性质选择成功率高、操作简单、成本合理的执行方式，不把执行者选择重新丢给用户。
-
-- ChatGPT 更适合：架构判断、方案设计、能力比较、Prompt / Skill / 协议 / Schema 设计、安全的小型 GitHub 修改、结果审查、知识压缩、跨来源综合、BKP Chief Editor，以及不依赖长时间本地运行的任务；
-- Agent 更适合：本地多文件开发、长时间连续执行、大量逐章/逐文件处理、pytest / build / CLI / 日志调试、本地数据库和文件系统、批处理、checkpoint / resume，以及需要持续“执行 → 观察 → 修复 → 再执行”的任务；
-- 混合任务可由 ChatGPT 锁定目标、协议、验收标准和最终审查，由 Agent 本地执行；但不是强制流程，单一执行者能更简单可靠完成时不要额外拆分；
-- 用户主要负责：创作方向、审美和重要业务规则，UI 视觉验收，账号/权限/付款/API Key，高风险或不可逆操作确认，以及真正存在创作歧义时的选择。
-
-模型选择仍按主任务：
-
-- 代码、架构、脚本调试、Git/CI、本地运行占主导：可以推荐 Codex；
-- 正文阅读、文本提取、总结归纳、章节分析、BKP 蒸馏、文学诊断占主导：不要优先推荐 Codex，选更适合中文长文本理解的模型；
-- 混合任务按主任务选择一个模型，不做无必要细拆。
-
-执行优先级：**操作简单与成功率 > 理论上的模型最优 > 过度细分工。** 不为了证明“自研”而自己实现已有成熟能力；不为了使用 Agent 而把简单任务复杂化；也不为了由 ChatGPT 完成而回避更适合 Agent 的本地长任务。
-
-需要推荐时写清：执行者、模型、思考强度、备选/升级条件。
-
-## 7. 当前禁止
-
-- 不继续 G5 正文诊断/修订实验；
-- 不要求作者阅读测试小说；
-- 不把“一次操作 / 一个 Skill / 固定两遍”写成方法硬约束；
-- 不固定所有作品相同 Discovery / Deep Dive 数量；
-- 不批量蒸馏全部素材；
-- 不升级 Retrieval/RAG/KG；
-- 不开发 Writer/Reader/Editor/Controller/UI/大型数据库/多 Agent 平台；
-- 不因为单本书一个特殊问题扩张长期架构。
-
-## 8. Git 安全
+## Git 安全
 
 无明确授权禁止：`reset / restore / clean / force push / rebase / merge`。
 
-未知或历史 local dirty / untracked / `stash@{0}` 不清理、不覆盖、不自动 pop/drop。普通同步保持单一 `main`，不要为了临时保护留下无意义长期分支。
+临时 worktree 默认进入系统 TEMP，不在 E:\ 根留下 AI-Write-*。任务完成后删除 worktree。
 
-## 9. 当前验收标准
+## NEXT
 
-选一部此前未蒸馏的新书，跑完整“识别 → 多视角原著提取 → 必要深挖 → 总编辑收敛 → BKP”链。验收重点是知识质量、证据链、跨尺度发现、遗漏与最终可检索性，不要求一键化。
+真实 author acceptance：
+- 作者接受正文 → accepted_text
+- 进入 production Story State
+- 生成 next Context
 
-专项入口：`06_工作区/原著提取与蒸馏_当前目标.md`。
+不以 Benchmark / Gate / Phase 编号驱动。以真实创作产出驱动。

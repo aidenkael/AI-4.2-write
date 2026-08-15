@@ -37,10 +37,10 @@ __pycache__/
 # WorkBuddy 项目数据（非小说内容，不上传）
 .workbuddy/
 
-# 大型工具/二进制（不上传 GitHub：pandoc.exe 231MB 超 100MB 限制；本地保留）
+# 大型工具/二进制（不上传 GitHub：pandoc.exe 超 100MB 限制；本地保留）
 05_Skills与自动化/pandoc/
 
-# 原始素材二进制不传 GitHub（本地保留，避免上传受版权保护的小说/资料）
+# 原始素材不传 GitHub（本地保留，避免上传受版权保护的小说/资料）
 01_原始素材/**/*.epub
 01_原始素材/**/*.txt
 01_原始素材/**/*.zip
@@ -48,28 +48,12 @@ __pycache__/
 01_原始素材/**/*.azw3
 01_原始素材/**/*.mobi
 
-# SourcePrepare 为本地来源预处理工作区，可能含由原著生成的完整/近完整派生正文；整体不上传
+# SourcePrepare 本地工作区（运行时生成，含原著派生正文；不上传）
 06_工作区/SourcePrepare/
 
-# BookDistill Observer discovery 是逐章发现阶段 staging；正式长期资产由 evidence/BKP 收敛后保存，staging 不上传
+# BookDistill Observer discovery staging（正式长期资产由 evidence/BKP 收敛后保存）
 02_原著蒸馏/*/discovery/
 
-# B09 原著蒸馏 Benchmark 本地运行数据（含源路径、冻结范围、Runner 输出；不上传）
-06_工作区/01_待处理/B09_原著蒸馏Benchmark/_local_manifests/
-06_工作区/01_待处理/B09_原著蒸馏Benchmark/_local_runs/
-
-# B02 情绪传递 Benchmark 上游冻结副本（本地只读；含第三方仓库快照，不上传）
-06_工作区/01_待处理/B02_情绪传递Benchmark/_upstream_freeze/
-
-# B02 情绪传递 Benchmark 本地运行数据（Runner 输出、运行顺序、匿名映射；不上传）
-06_工作区/01_待处理/B02_情绪传递Benchmark/_local_runs/
-
-# B02 情绪传递 Benchmark 匿名映射与运行顺序（Local Only，作者评审前不公开）
-06_工作区/01_待处理/B02_情绪传递Benchmark/blind_map_presealed_r2a.json
-06_工作区/01_待处理/B02_情绪传递Benchmark/run_order_r2a.json
-
-# 杂项：解压残留书签 + 内部移动日志（本地保留）
+# 杂项
 *.url
-
-# 杂项：解压残留书签 + 内部移动日志（本地保留）
 _move_results.json
