@@ -1,0 +1,15 @@
+{
+  "artifact_type": "creation_brief",
+  "brief_id": "longform-brief-002",
+  "brief_rev": 1,
+  "project_id": "e2b-sea-road",
+  "status": "CURRENT",
+  "author_input": "写周昌顺礼拜四把账算完，给出他的货量决定。",
+  "knowledge_needs": [],
+  "source_versions": {
+    "intent_rev": 1,
+    "state_rev": 3
+  },
+  "created_at": "2026-08-16T00:00:00Z",
+  "experiment_note": "state_rev=3 指向 shadow_story_state.json（simulation_only / not_production_state / not_author_accepted）；本 brief 仅用于 LONGFORM_CONTINUITY_REAL_SLICE 连续性沙盒。"
+}

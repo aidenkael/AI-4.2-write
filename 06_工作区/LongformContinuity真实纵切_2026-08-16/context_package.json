@@ -1,0 +1,207 @@
+{
+  "artifact_type": "context_package",
+  "context_id": "longform-ctx-002",
+  "project_id": "e2b-sea-road",
+  "status": "CURRENT",
+  "built_from": {
+    "brief_id": "longform-brief-002",
+    "brief_rev": 1,
+    "intent_rev": 1,
+    "state_rev": 3
+  },
+  "selected_intent": {
+    "work_direction": "沿海县城跨海旧路关闭前一年，经营家族小型物流站的宋宁，与失联十年后归来、代表区域物流公司竞标大宗配送合同的姐姐宋乔，在现实合作与利益对立之间被不断推向无法两全的选择。",
+    "reader_promise": "读者看到一个正在消失的地方性运输生态，如何不断逼迫两姐妹做出越来越无法两全的选择；家庭旧债不是单纯谜底，而要持续改变她们今天的关系和利益。",
+    "hard_constraints": [
+      "不写大公司黑幕阴谋",
+      "不靠凶杀案升级剧情",
+      "不出现豪门身份反转",
+      "不使用超自然",
+      "不把父亲塑造成隐藏巨恶",
+      "冲突主要来自生计、家庭旧债、不同人生选择、地方变化和人物自己做出的决定"
+    ],
+    "open_space": [
+      "父亲那笔债真正的用途",
+      "姐姐十年前离开的全部原因",
+      "姐姐这次回来是否还有未说出口的私人目的",
+      "姐妹最终合作、决裂还是形成第三种关系",
+      "物流站最终是否保留"
+    ]
+  },
+  "selected_story_state": {
+    "canon_facts": [
+      {
+        "id": "canon.seed.road",
+        "fact": "沿海县城将在一年后永久封闭一条连接本岛与旧港区的跨海旧路。",
+        "authority": "manual_import:e2b-seed"
+      },
+      {
+        "id": "canon.seed.debt",
+        "fact": "父亲去世前留下过一笔来源和用途都说不清的债。",
+        "authority": "manual_import:e2b-seed"
+      },
+      {
+        "id": "canon.w1.thirdparties",
+        "fact": "岛上关键第三方：周昌顺经营五金建材店，是物流站最大宗客户之一；秀兰经营超市，与宋宁有小额赊账往来；郑国栋在新接驳点旁租仓做仓储生意。",
+        "authority": "manual_import:experiment_shadow_from_W1"
+      }
+    ],
+    "relationship_state": [
+      {
+        "id": "rel.state.sisters",
+        "state": "随着旧路关闭日期逼近，两姐妹既不得不合作处理现实问题，又越来越可能站到彼此利益的对立面。",
+        "authority": "manual_import:e2b-seed"
+      }
+    ],
+    "character_state": [
+      {
+        "id": "char.state.songning.belief",
+        "belief": "宋宁认为姐姐当年的离开和这笔债有关。",
+        "authority": "manual_import:e2b-seed"
+      }
+    ],
+    "occurred_events": [
+      {
+        "id": "event.w1.public-admission",
+        "description": "姐妹当着第三方公开承认：两边都要同一批货，不能再假装这件事不存在；给宋宁的量不进宋乔方案；不能再用私下方式补回来。冲突正式公开化，但散场后礼拜四联运照旧（宋乔送到接驳点，宋宁一方接）。",
+        "authority": "manual_import:experiment_shadow_from_W1"
+      },
+      {
+        "id": "event.w1.recalc-commitment",
+        "description": "宋乔当众承诺：最低量一旦给了宋宁，岛区方案货量按剩余重算，大件从专线改拼线或单独计价；重算模型她将提交公司，后果自担。",
+        "authority": "manual_import:experiment_shadow_from_W1"
+      },
+      {
+        "id": "event.w1.zhou-takeaway",
+        "description": "周昌顺把宋宁与宋乔的两份方案都折好带走，承诺回去算到礼拜四，届时给出他的货量决定。",
+        "authority": "manual_import:experiment_shadow_from_W1"
+      },
+      {
+        "id": "event.w1.zheng-deadline",
+        "description": "郑国栋要求姐妹无论哪边月底前给他准话（仓库租约不等人），并表示礼拜四来物流站听周昌顺的账。",
+        "authority": "manual_import:experiment_shadow_from_W1"
+      }
+    ],
+    "open_threads": [
+      {
+        "id": "thread.zhou.thursday-decision",
+        "description": "周昌顺将在礼拜四给出他的货量决定；郑国栋表示到场听账。",
+        "authority": "manual_import:experiment_shadow_from_W1"
+      },
+      {
+        "id": "thread.zheng.month-end",
+        "description": "月底前姐妹任何一方须给郑国栋准话，决定他仓库租约的取向。",
+        "authority": "manual_import:experiment_shadow_from_W1"
+      }
+    ],
+    "approved_plan": [
+      {
+        "id": "plan.design.direction.island",
+        "description": "作者已确认的 StoryDesign 方向：旧路关闭形成一年倒计时；姐妹代表两种不同生存方案；每解决一个现实物流问题，都让双方合作更必要，同时利益冲突更明显；父亲旧债持续进入现实选择，但真相未确定。",
+        "authority": "author_decision:storydesign-simulated",
+        "occurred": false,
+        "target_ref": "design.direction.island",
+        "supersedes": [],
+        "built_from": []
+      },
+      {
+        "id": "plan.e2b.simulated.first-half",
+        "description": "E2-B simulated writeback：P0 前半程规划，仅用于权限与 Canon 隔离验证。",
+        "built_from": [
+          "plan-candidate-e2b-p0"
+        ],
+        "supersedes": [],
+        "target_ref": "pt.first-half.unilateral-harm",
+        "occurred": false,
+        "authority": "simulation_author_decision:decision-e2b-simulated-p0"
+      }
+    ]
+  },
+  "selected_bkp_hits": [],
+  "selection_reason": [
+    {
+      "source_ref": "canon_facts:canon.seed.road",
+      "reason": "四个月后旧路关闭，是周昌顺必须此刻算账的时间压力源"
+    },
+    {
+      "source_ref": "canon_facts:canon.seed.debt",
+      "reason": "旧债以融资/押金后果进入本场：周昌顺的账会算到宋宁的信用"
+    },
+    {
+      "source_ref": "canon_facts:canon.w1.thirdparties",
+      "reason": "周昌顺、郑国栋的身份与利益是本场的直接素材"
+    },
+    {
+      "source_ref": "relationship_state:rel.state.sisters",
+      "reason": "本场要继续推动的关系轴：合作更必要与冲突更明显必须同时兑现"
+    },
+    {
+      "source_ref": "character_state:char.state.songning.belief",
+      "reason": "宋宁面对姐姐方案赢的结果时，旧判断会作为潜台词在场"
+    },
+    {
+      "source_ref": "occurred_events:event.w1.public-admission",
+      "reason": "冲突已公开化的既定事实：本场不得退回'大家还没说开'，联运照旧是合作机器存量"
+    },
+    {
+      "source_ref": "occurred_events:event.w1.recalc-commitment",
+      "reason": "宋乔的重算承诺以本场结果为触发条件，是她本场动作的依据"
+    },
+    {
+      "source_ref": "occurred_events:event.w1.zhou-takeaway",
+      "reason": "本场直接前情：两份方案都被周昌顺带走，他欠岛上所有人一个账"
+    },
+    {
+      "source_ref": "occurred_events:event.w1.zheng-deadline",
+      "reason": "郑国栋月底期限与'礼拜四来听账'都在本场兑现"
+    },
+    {
+      "source_ref": "open_threads:thread.zhou.thursday-decision",
+      "reason": "本场必须兑现的线：周昌顺的货量决定"
+    },
+    {
+      "source_ref": "open_threads:thread.zheng.month-end",
+      "reason": "未收线的外部时钟，决定本场结尾把压力交给谁"
+    },
+    {
+      "source_ref": "approved_plan:plan.design.direction.island",
+      "reason": "作者确认方向：每解决一个现实问题，合作更必要、冲突更明显；旧债进现实但不揭真相"
+    },
+    {
+      "source_ref": "approved_plan:plan.e2b.simulated.first-half",
+      "reason": "P0 前半程规划义务来源（TEST_ONLY simulation gate）"
+    }
+  ],
+  "conflicts_or_tensions": [],
+  "size_summary": {
+    "total_state_items": 22,
+    "selected_state_items": 13,
+    "total_active_plans": 2,
+    "selected_active_plans": 2,
+    "selected_bkp_hits": 0,
+    "by_area": {
+      "canon_facts": 3,
+      "relationship_state": 1,
+      "character_state": 1,
+      "occurred_events": 4,
+      "open_threads": 2,
+      "approved_plan": 2
+    }
+  },
+  "retrieval": {
+    "query": null,
+    "status": "SKIPPED_NO_KNOWLEDGE_NEED",
+    "gaps": [],
+    "candidate_count": 0
+  },
+  "created_at": "2026-08-15T16:28:47Z",
+  "experiment_note": "一次性实验 Context：基于 simulation_only shadow state（W1 为 FROZEN EXPERIMENT DRAFT，未获作者 acceptance）；allow_simulation_sources=True 仅 TEST_ONLY；Context Package 非权威，永不写回 Canon / Story State。",
+  "approved_plan_activity_snapshot": {
+    "active": [
+      "plan.design.direction.island",
+      "plan.e2b.simulated.first-half"
+    ],
+    "superseded": [],
+    "superseded_by": {}
+  }
+}
