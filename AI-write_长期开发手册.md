@@ -108,7 +108,8 @@ E2-C 局部重规划已完成并正式关闭（`E2C_PASS` / `E2C_STORYPLAN_LOCAL
 6. ~~开发 Context Compiler 最小地基~~（E3-A 已合入 main，E3A_PASS / E3A_CONTEXT_COMPILER_FOUNDATION_CLOSED）；
 7. ~~执行 E3-B Context Compiler 独立真实纵切~~（取消 / 不执行：E3-A 已证明最小技术边界，价值验证改由真实下游消费者承担）；
 8. ~~执行 STORYWRITE_REAL_VERTICAL_SLICE 能力优先真实写作纵切~~（已完成并关闭：PASS_WITH_RESERVATIONS；正式 source code 零修改，CURRENT_CHAIN_SUPPORTS_REAL_PROSE = PASS）；
-9. 执行 LONGFORM_CONTINUITY_REAL_SLICE 跨场景长期连续性真实纵切（NEXT_MAINLINE）：验证“上一场正文 → 状态结算 → 下一轮 Context → 下一场正文”能否稳定保持事实、人物、关系、承诺、开放线索与语言连续性；本轮仅 shadow / test-only 结算，不写生产 Canon / Story State。
+9. ~~执行 LONGFORM_CONTINUITY_REAL_SLICE 跨场景长期连续性真实纵切~~（已完成并关闭：PASS_WITH_RESERVATIONS；正式 source code 零修改，跨场景 shadow continuity 成立、selection 真实缩减成立、settlement 三分类可行、负担 REPEATED）；
+10. 执行 THIN_STORYWRITE_CONSUMER_SLICE（NEXT_MAINLINE）：开发最薄 StoryWrite 操作层（只复用现有合同：P0 settlement assist / P1 Brief+Context preparation / P2 recent prose window），然后用第三场真实纵切作为其 consumer test；仍仅 shadow / test-only 结算，不写生产 Canon / Story State。
 
 尚未确认的具体 Canon 字段、Story State Schema、StoryDesign 输出结构不得提前写死。
 
@@ -166,6 +167,8 @@ E2-C 局部重规划已完成并正式关闭（`E2C_PASS` / `E2C_STORYPLAN_LOCAL
 - 同等能力路线中，优先开发者维护压力更低的方案。
 
 开发决策规则：只有同时满足（1）真实正文 / 真实使用暴露问题；（2）问题重复或足够严重；（3）直接模型 / 现有能力不能低成本解决；（4）新代码能明显降低长期作者 / 开发者负担，才允许建议开发新 runtime；否则 DO_NOT_BUILD。
+
+窄口径更新（2026-08-16，基于两轮真实纵切的 REPEATED 负担证据）：`DO_NOT_BUILD` 收窄为 `THIN_ORCHESTRATION_BUILD_ALLOWED`——只允许复用现有合同的薄操作层（消除已两轮重复出现的机械摇柄）；不代表 Writer runtime / Writer platform 获批；不允许新 Final Schema；不允许重开 StoryPlan / Context Compiler / BookDistill / KnowledgeRetrieve。
 
 ## 6.4 案例只暴露问题，不决定架构
 
@@ -291,4 +294,4 @@ E2-B 已证明：StoryPlan 能从权威状态出发做真实长篇规划（0-BKP
 
 # 10. 一句话总纲
 
-> **参考作品学习链已经完成结构冻结；StoryDesign 运行底座、StoryPlan 最小合同、真实长篇规划纵切（E2-B）与局部重规划（E2-C）均已通过并关闭（STORYPLAN_PHASE_CLOSED；append-only history、active projection、Canon 隔离零污染成立）；Context Compiler 最小技术地基已合入 main 并正式关闭（E3A_PASS），维持 CONTEXT_COMPILER_CONSUMER_DRIVEN_FREEZE；STORYWRITE_REAL_VERTICAL_SLICE 已关闭（PASS_WITH_RESERVATIONS：现有能力链可服务真实正文、CONTEXT_MISSING = 0、无需 Writer runtime、开发者手工负担为真实缺口、DO_NOT_BUILD 继续成立）；知识介入策略冻结为稀疏后置问题驱动；开发优先级：最终工作台能力 > 降低开发者压力 > 子系统工程完整性（CAPABILITY_FIRST_CONSUMER_DRIVEN）；NEXT_MAINLINE = LONGFORM_CONTINUITY_REAL_SLICE（跨场景长期连续性真实纵切）。**
+> **参考作品学习链已经完成结构冻结；StoryDesign 运行底座、StoryPlan 最小合同、真实长篇规划纵切（E2-B）与局部重规划（E2-C）均已通过并关闭（STORYPLAN_PHASE_CLOSED；append-only history、active projection、Canon 隔离零污染成立）；Context Compiler 最小技术地基已合入 main 并正式关闭（E3A_PASS），维持 CONTEXT_COMPILER_CONSUMER_DRIVEN_FREEZE；STORYWRITE_REAL_VERTICAL_SLICE 已关闭（PASS_WITH_RESERVATIONS）；LONGFORM_CONTINUITY_REAL_SLICE 已关闭（PASS_WITH_RESERVATIONS：跨场景 shadow continuity 成立、selection 真实缩减成立、settlement 三分类可行、负担 REPEATED；当前结果证明的是 shadow continuity，不是生产闭环）；开发决策口径 DO_NOT_BUILD 收窄为 THIN_ORCHESTRATION_BUILD_ALLOWED（仅复用现有合同的薄操作层，不代表 Writer runtime / platform 获批，不新 Final Schema，不重开冻结子系统）；知识介入策略冻结为稀疏后置问题驱动；开发优先级：最终工作台能力 > 降低开发者压力 > 子系统工程完整性（CAPABILITY_FIRST_CONSUMER_DRIVEN）；NEXT_MAINLINE = THIN_STORYWRITE_CONSUMER_SLICE（最薄操作封装 + 第三场 consumer test）。**
