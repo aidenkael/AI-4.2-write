@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
-"""ProjectWorkspace — 最小真实项目接线层。
+"""ProjectWorkspace — 最小真实项目接线层（F0.1）。
 
 不负责文学判断，只做：
-- 项目创建/解析
-- project_id 隔离
-- production 文件落盘
-- accepted prose 索引
-- Story State 安全持久化
-- recent prose 定位
+- 项目创建/解析（author_intent 必需并通过 frozen validate_author_intent）
+- project_id 隔离与跨项目拒绝
+- production 文件落盘（正式正文、Story State、accepted_text_index）
+- accepted prose 索引维护
+- persist_state_transition：通用 state 安全持久化（stale/cross-project guard）
+- recent prose 定位（基于正式正文 + accepted_text_index）
+- acceptance 必须经过 frozen StoryWrite.apply_settlement gate
 - 多项目防串书
 """
 from __future__ import annotations
@@ -15,27 +16,39 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
-# Import frozen runtime contracts
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent / "StoryWrite"))
-from storywrite_entry import apply_settlement, validate_story_state
+# ---------------------------------------------------------------------------
+# Frozen runtime imports — NEVER copy their rules; always call them directly.
+# ---------------------------------------------------------------------------
+_SKILLS_ROOT = Path(__file__).resolve().parent.parent
 
-# Import from StoryDesign/StoryPlan if needed for validation
-# (will be added as needed)
+if str(_SKILLS_ROOT / "StoryDesign") not in sys.path:
+    sys.path.insert(0, str(_SKILLS_ROOT / "StoryDesign"))
+if str(_SKILLS_ROOT / "StoryWrite") not in sys.path:
+    sys.path.insert(0, str(_SKILLS_ROOT / "StoryWrite"))
+
+from story_runtime import (  # noqa: E402  # StoryDesign frozen runtime
+    ContractError as FrozenContractError,
+    validate_author_intent,
+    validate_story_state,
+    create_decision_record,
+    make_planning_diff,
+    apply_diff as storydesign_apply_diff,
+)
+
+from storywrite_entry import apply_settlement  # noqa: E402  # StoryWrite frozen runtime
 
 
 class WorkspaceError(Exception):
     """ProjectWorkspace 操作错误。"""
-    pass
 
 
 class ContractError(WorkspaceError):
     """合同违反错误。"""
-    pass
 
 
 def _safe_write_file(path: Path, content: str | bytes) -> None:
@@ -43,11 +56,14 @@ def _safe_write_file(path: Path, content: str | bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(dir=path.parent, prefix=".tmp_")
     try:
-        with os.fdopen(fd, "wb" if isinstance(content, bytes) else "w", encoding="utf-8" if isinstance(content, str) else None) as f:
-            f.write(content)
+        if isinstance(content, bytes):
+            with os.fdopen(fd, "wb") as f:
+                f.write(content)
+        else:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
         os.replace(tmp_path, str(path))
     except Exception:
-        # Clean up temp file on failure
         try:
             os.unlink(tmp_path)
         except OSError:
@@ -55,24 +71,16 @@ def _safe_write_file(path: Path, content: str | bytes) -> None:
         raise
 
 
-def _read_file_bytes(path: Path) -> bytes | None:
-    """读取文件字节，不存在返回 None。"""
-    if not path.exists():
-        return None
-    return path.read_bytes()
+def _read_json(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _sha256(data: bytes) -> str:
-    """计算 SHA256。"""
     return hashlib.sha256(data).hexdigest()
 
 
 def generate_project_id(name: str) -> str:
-    """生成稳定 project_id。
-    
-    基于作品名生成 deterministic ID，确保同一名称始终得到相同 ID。
-    """
-    # 使用 name 的 hash 作为 project_id 基础
+    """生成稳定 project_id（deterministic）。"""
     name_hash = hashlib.sha256(name.encode("utf-8")).hexdigest()[:16]
     return f"proj_{name_hash}"
 
@@ -81,148 +89,65 @@ def validate_project_name(name: str) -> None:
     """验证项目名称合法性。"""
     if not name or not name.strip():
         raise ContractError("作品名不能为空")
-    
-    # 拒绝危险名称
     dangerous = {".", ".."}
     if name.strip() in dangerous:
         raise ContractError(f"非法作品名：{name}")
-    
-    # 拒绝路径分隔符注入
     if "/" in name or "\\" in name:
         raise ContractError(f"作品名不能包含路径分隔符：{name}")
-    
-    # 拒绝空字符
     if "\x00" in name:
         raise ContractError("作品名不能包含空字符")
 
 
 def get_projects_root() -> Path:
     """获取 03_作品工程 根目录。"""
-    return Path(__file__).parent.parent.parent.parent / "03_作品工程"
+    return Path(__file__).resolve().parent.parent.parent.parent / "03_作品工程"
 
 
 def list_projects() -> list[dict[str, Any]]:
-    """列出所有项目。
-    
-    Returns:
-        项目列表，每个项目包含 name, project_id, project_dir
-    """
+    """列出所有项目。"""
     root = get_projects_root()
     if not root.exists():
         return []
-    
-    projects = []
+    projects: list[dict[str, Any]] = []
     for item in sorted(root.iterdir()):
         if item.is_dir() and not item.name.startswith("_"):
             state_dir = item / "_工作台状态"
-            if state_dir.exists():
-                state_file = state_dir / "story_state.json"
-                if state_file.exists():
-                    state = json.loads(state_file.read_text(encoding="utf-8"))
+            state_file = state_dir / "story_state.json"
+            intent_file = state_dir / "author_intent.json"
+            index_file = state_dir / "accepted_text_index.json"
+            if state_file.exists() and intent_file.exists() and index_file.exists():
+                try:
+                    state = _read_json(state_file)
                     projects.append({
                         "name": item.name,
                         "project_id": state.get("project_id"),
                         "project_dir": str(item),
                     })
-    
+                except Exception:
+                    continue
     return projects
 
 
 def resolve_project(selector: str | None = None) -> dict[str, Any]:
-    """解析项目。
-    
-    Args:
-        selector: 作品名或 project_id。None 时尝试唯一解析。
-    
-    Returns:
-        项目信息字典
-    
-    Raises:
-        ContractError: 无法解析或歧义
-    """
+    """解析项目。selector=None 时仅当唯一项目才成功。"""
     projects = list_projects()
-    
     if not projects:
         raise ContractError("没有可用项目")
-    
     if selector is None:
         if len(projects) == 1:
             return projects[0]
-        else:
-            raise ContractError(
-                f"存在 {len(projects)} 个项目，必须明确指定作品名或 project_id"
-            )
-    
-    # 精确匹配作品名或 project_id
+        raise ContractError(
+            f"存在 {len(projects)} 个项目，必须明确指定作品名或 project_id"
+        )
     for proj in projects:
         if proj["name"] == selector or proj["project_id"] == selector:
             return proj
-    
     raise ContractError(f"未找到项目: {selector}")
 
 
-def create_project(
-    name: str,
-    author_intent: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """创建新项目。
-    
-    Args:
-        name: 作品名
-        author_intent: 作者意图（可选）
-    
-    Returns:
-        项目信息
-    
-    Raises:
-        ContractError: 名称非法或项目已存在
-    """
-    validate_project_name(name)
-    
-    root = get_projects_root()
-    project_dir = root / name
-    
-    if project_dir.exists():
-        raise ContractError(f"项目已存在：{name}")
-    
-    project_id = generate_project_id(name)
-    
-    # 创建目录结构
-    subdirs = [
-        "01_设定与人物",
-        "02_规划",
-        "03_正文",
-        "04_资料与灵感",
-        "_工作台状态",
-    ]
-    for subdir in subdirs:
-        (project_dir / subdir).mkdir(parents=True, exist_ok=True)
-    
-    # 创建 README
-    readme_content = f"# {name}\n\n原创小说作品。\n"
-    _safe_write_file(project_dir / "README.md", readme_content)
-    
-    # 初始化 Author Intent
-    intent_data = {
-        "schema_version": "0.1",
-        "project_id": project_id,
-        "intent_rev": 1,
-        "name": name,
-    }
-    if author_intent:
-        # 合并用户提供的 intent
-        intent_data.update(author_intent)
-        # 确保 project_id 一致
-        intent_data["project_id"] = project_id
-    
-    _safe_write_file(
-        project_dir / "_工作台状态" / "author_intent.json",
-        json.dumps(intent_data, ensure_ascii=False, indent=2),
-    )
-    
-    # 初始化 Story State
-    state_data = {
-        "schema_version": "0.1",
+def _initial_story_state(project_id: str) -> dict[str, Any]:
+    """构造初始 Story State（通过 frozen validate_story_state）。"""
+    state = {
         "project_id": project_id,
         "state_rev": 1,
         "canon_facts": [],
@@ -231,27 +156,75 @@ def create_project(
         "occurred_events": [],
         "open_threads": [],
         "approved_plan": [],
+        "last_authority_source": "workspace:init",
     }
-    
-    # Validate before writing
-    validate_story_state(state_data)
-    
-    _safe_write_file(
-        project_dir / "_工作台状态" / "story_state.json",
-        json.dumps(state_data, ensure_ascii=False, indent=2),
-    )
-    
-    # 初始化 accepted_text_index
-    index_data = {
-        "schema_version": "0.1",
-        "project_id": project_id,
-        "entries": [],
-    }
-    _safe_write_file(
-        project_dir / "_工作台状态" / "accepted_text_index.json",
-        json.dumps(index_data, ensure_ascii=False, indent=2),
-    )
-    
+    validate_story_state(state)
+    return state
+
+
+def _initial_accepted_index(project_id: str) -> dict[str, Any]:
+    return {"project_id": project_id, "entries": []}
+
+
+def create_project(
+    name: str,
+    author_intent: dict[str, Any],
+) -> dict[str, Any]:
+    """创建新项目。author_intent 必填且必须通过 frozen validate_author_intent。
+
+    Agent 提供语义字段；ProjectWorkspace 负责注入 project_id + intent_rev=1，
+    然后调用 validate_author_intent。caller 传入的 project_id 若与生成值不一致则拒绝。
+    """
+    if author_intent is None or not isinstance(author_intent, dict):
+        raise ContractError("create_project 需要完整 author_intent")
+
+    validate_project_name(name)
+    root = get_projects_root()
+    project_dir = root / name
+    if project_dir.exists():
+        raise ContractError(f"项目已存在：{name}")
+
+    project_id = generate_project_id(name)
+
+    # Caller must not silently inject a mismatched project_id.
+    caller_pid = author_intent.get("project_id")
+    if caller_pid is not None and caller_pid != project_id:
+        raise ContractError(
+            f"author_intent.project_id 与生成值不一致（{caller_pid} vs {project_id}）"
+        )
+
+    # Workspace injects project_id + intent_rev; agent supplies semantic fields.
+    intent = dict(author_intent)
+    intent["project_id"] = project_id
+    intent.setdefault("intent_rev", 1)
+
+    # Frozen gate: incomplete / illegal intent is rejected before any write.
+    try:
+        validate_author_intent(intent)
+    except FrozenContractError as e:
+        raise ContractError(f"author_intent 未通过 frozen validate_author_intent: {e}") from e
+
+    state = _initial_story_state(project_id)
+    index = _initial_accepted_index(project_id)
+
+    # Create directory tree.
+    subdirs = [
+        "01_设定与人物",
+        "02_规划",
+        "03_正文",
+        "04_资料与灵感",
+        "_工作台状态",
+    ]
+    for sub in subdirs:
+        (project_dir / sub).mkdir(parents=True, exist_ok=False)
+
+    # Persist canonical workspace files atomically.
+    state_dir = project_dir / "_工作台状态"
+    _safe_write_file(state_dir / "author_intent.json", json.dumps(intent, ensure_ascii=False, indent=2))
+    _safe_write_file(state_dir / "story_state.json", json.dumps(state, ensure_ascii=False, indent=2))
+    _safe_write_file(state_dir / "accepted_text_index.json", json.dumps(index, ensure_ascii=False, indent=2))
+    _safe_write_file(project_dir / "README.md", f"# {name}\n\n作品工程。\n")
+
     return {
         "name": name,
         "project_id": project_id,
@@ -260,167 +233,168 @@ def create_project(
 
 
 def load_project(project_dir: str | Path) -> dict[str, Any]:
-    """加载项目状态。
-    
-    Args:
-        project_dir: 项目目录路径
-    
-    Returns:
-        包含 project_id, state, intent, index 的字典
-    """
+    """加载项目并执行 frozen contract 校验 + project_id 一致性检查。"""
     project_dir = Path(project_dir)
     state_dir = project_dir / "_工作台状态"
-    
-    if not state_dir.exists():
-        raise ContractError(f"项目状态目录不存在：{state_dir}")
-    
-    # 加载 Story State
-    state_file = state_dir / "story_state.json"
-    if not state_file.exists():
-        raise ContractError(f"Story State 不存在：{state_file}")
-    
-    state = json.loads(state_file.read_text(encoding="utf-8"))
-    validate_story_state(state)
-    
-    # 加载 Author Intent
     intent_file = state_dir / "author_intent.json"
-    intent = None
-    if intent_file.exists():
-        intent = json.loads(intent_file.read_text(encoding="utf-8"))
-    
-    # 加载 accepted_text_index
+    state_file = state_dir / "story_state.json"
     index_file = state_dir / "accepted_text_index.json"
-    index = None
-    if index_file.exists():
-        index = json.loads(index_file.read_text(encoding="utf-8"))
-    
+
+    if not intent_file.exists():
+        raise ContractError(f"缺少 author_intent.json：{project_dir}")
+    if not state_file.exists():
+        raise ContractError(f"缺少 story_state.json：{project_dir}")
+    if not index_file.exists():
+        raise ContractError(f"缺少 accepted_text_index.json：{project_dir}")
+
+    try:
+        intent = _read_json(intent_file)
+        state = _read_json(state_file)
+        index = _read_json(index_file)
+    except json.JSONDecodeError as e:
+        raise ContractError(f"项目 JSON 非法：{e}") from e
+
+    # Frozen gates.
+    try:
+        validate_author_intent(intent)
+        validate_story_state(state)
+    except FrozenContractError as e:
+        raise ContractError(f"frozen contract 校验失败：{e}") from e
+
+    # Cross-artifact project_id consistency.
+    pid_intent = intent.get("project_id")
+    pid_state = state.get("project_id")
+    pid_index = index.get("project_id")
+    if not (pid_intent and pid_state and pid_index):
+        raise ContractError("项目工件缺少 project_id")
+    if not (pid_intent == pid_state == pid_index):
+        raise ContractError(
+            f"project_id 不一致：intent={pid_intent}, state={pid_state}, index={pid_index}"
+        )
+
     return {
-        "project_id": state["project_id"],
+        "name": project_dir.name,
+        "project_id": pid_state,
         "project_dir": str(project_dir),
-        "state": state,
         "intent": intent,
+        "state": state,
         "index": index,
     }
 
 
+def persist_state_transition(
+    project_dir: str | Path,
+    expected_base_state: dict[str, Any],
+    new_state: dict[str, Any],
+) -> dict[str, Any]:
+    """通用 state 安全持久化。
+
+    - 磁盘 current.project_id == expected_base_state.project_id == new_state.project_id
+    - current.state_rev == expected_base_state.state_rev（stale base 拒绝）
+    - frozen validate_story_state(new_state)
+    - 不允许绕过 frozen runtime 写入任意 JSON
+    - 不判断 Decision 是否正确；只持久化 frozen runtime 已生成的合法 new_state
+    - 原子写入（temp + os.replace）
+    """
+    project_dir = Path(project_dir)
+    state_file = project_dir / "_工作台状态" / "story_state.json"
+    if not state_file.exists():
+        raise ContractError(f"缺少 story_state.json：{project_dir}")
+
+    current = _read_json(state_file)
+
+    pid_current = current.get("project_id")
+    pid_expected = expected_base_state.get("project_id")
+    pid_new = new_state.get("project_id")
+    if not (pid_current and pid_expected and pid_new):
+        raise ContractError("persist_state_transition 需要完整 project_id")
+    if not (pid_current == pid_expected == pid_new):
+        raise ContractError(
+            f"persist_state_transition project_id 不一致：current={pid_current}, "
+            f"expected={pid_expected}, new={pid_new}"
+        )
+
+    if current.get("state_rev") != expected_base_state.get("state_rev"):
+        raise ContractError(
+            f"stale base state_rev：disk={current.get('state_rev')}, "
+            f"expected={expected_base_state.get('state_rev')}"
+        )
+
+    try:
+        validate_story_state(new_state)
+    except FrozenContractError as e:
+        raise ContractError(f"new_state 未通过 frozen validate_story_state: {e}") from e
+
+    _safe_write_file(state_file, json.dumps(new_state, ensure_ascii=False, indent=2))
+    return {"success": True, "state_rev": new_state.get("state_rev"), "project_id": pid_new}
+
+
 def accept_prose(
+    *,
     project_dir: str | Path,
     chapter_number: int,
     scene_ref: str,
     accepted_text: str,
-    settlement: dict[str, Any] | None = None,
+    settlement: dict[str, Any],
     author_accepted: bool = False,
 ) -> dict[str, Any]:
-    """接受正文并持久化。
-    
-    Args:
-        project_dir: 项目目录
-        chapter_number: 章节号
-        scene_ref: 场景引用
-        accepted_text: 接受的正文
-        settlement: settlement candidates（可选）
-        author_accepted: 作者是否接受（必须为 True）
-    
-    Returns:
-        操作结果
-    
-    Raises:
-        ContractError: 验证失败
-    """
+    """接受正文。settlement 必需；每次 acceptance 必须经过 frozen apply_settlement gate。"""
     if not author_accepted:
-        raise ContractError("必须设置 author_accepted=True 才能接受正文")
-    
-    if not scene_ref:
-        raise ContractError("scene_ref 不能为空")
-    
+        raise ContractError("accept_prose 必须设置 author_accepted=True")
+    if not isinstance(settlement, dict):
+        raise ContractError("accept_prose 需要 settlement（可为 {'scene_ref':..., 'candidates':[]}）")
+    if not settlement.get("scene_ref"):
+        raise ContractError("settlement.scene_ref 不能为空")
+    if not isinstance(settlement.get("candidates"), list):
+        raise ContractError("settlement.candidates 必须是列表")
+
     project_dir = Path(project_dir)
     proj = load_project(project_dir)
-    project_id = proj["project_id"]
     state = proj["state"]
-    index = proj["index"] or {"schema_version": "0.1", "project_id": project_id, "entries": []}
-    
-    # 验证 project_id 一致性
-    if state["project_id"] != project_id:
-        raise ContractError("Story State project_id 不匹配")
-    
-    if index["project_id"] != project_id:
-        raise ContractError("accepted_text_index project_id 不匹配")
-    
-    # 检查 scene_ref 是否已使用
-    existing_refs = {e["scene_ref"] for e in index.get("entries", [])}
-    if scene_ref in existing_refs:
-        raise ContractError(f"scene_ref 已使用：{scene_ref}")
-    
-    # 验证 settlement（如果提供）
-    if settlement:
-        if settlement.get("scene_ref") != scene_ref:
-            raise ContractError("settlement.scene_ref 必须等于 scene_ref")
-        
-        # 检查 settlement candidate 的 project_id（如果携带）
-        for candidate in settlement.get("candidates", []):
-            cand_proj_id = candidate.get("project_id")
-            if cand_proj_id and cand_proj_id != project_id:
-                raise ContractError("settlement candidate project_id 不匹配")
-    
-    # 准备文件路径
-    chapter_dir = project_dir / "03_正文"
-    chapter_file = chapter_dir / f"第{chapter_number:03d}章.md"
-    
-    # === 事务开始 ===
-    # 1. 保存原始 snapshot
-    snapshots = {}
-    new_files = []
-    
-    # Snapshot: chapter file
-    if chapter_file.exists():
-        snapshots["chapter"] = _read_file_bytes(chapter_file)
-    else:
-        new_files.append(chapter_file)
-    
-    # Snapshot: index
-    index_file = project_dir / "_工作台状态" / "accepted_text_index.json"
-    snapshots["index"] = _read_file_bytes(index_file)
-    
-    # Snapshot: state
-    state_file = project_dir / "_工作台状态" / "story_state.json"
-    snapshots["state"] = _read_file_bytes(state_file)
-    
+    index = proj["index"]
+
+    # Frozen gate: every acceptance goes through StoryWrite.apply_settlement.
     try:
-        # 2. 在内存中完成所有操作
-        
-        # 2a. 应用 settlement（如果提供且有效）
-        new_state = state
-        if settlement:
-            # 绑定 project_id 到 settlement candidates（如果缺失）
-            settlement_copy = json.loads(json.dumps(settlement))
-            for candidate in settlement_copy.get("candidates", []):
-                if "project_id" not in candidate:
-                    candidate["project_id"] = project_id
-            
-            # 调用 frozen apply_settlement
-            settlement_result = apply_settlement(
-                state=state,
-                settlement=settlement_copy,
-                mode="production",
-                author_accepted=True,
-                accepted_scene_ref=scene_ref,
-            )
-            new_state = settlement_result.get("new_state", state)
-            validate_story_state(new_state)
-        
-        # 2b. 准备章节内容
+        settlement_result = apply_settlement(
+            state=state,
+            settlement=settlement,
+            mode="production",
+            author_accepted=True,
+            accepted_scene_ref=scene_ref,
+        )
+    except FrozenContractError as e:
+        raise ContractError(f"frozen apply_settlement 拒绝：{e}") from e
+
+    new_state = settlement_result.get("new_state", state)
+
+    # Prepare chapter paths.
+    chapter_file = project_dir / "03_正文" / f"第{chapter_number:03d}章.md"
+    state_file = project_dir / "_工作台状态" / "story_state.json"
+    index_file = project_dir / "_工作台状态" / "accepted_text_index.json"
+
+    # Snapshots for rollback.
+    snapshots = {
+        "chapter": _read_file_bytes(chapter_file),
+        "index": _read_file_bytes(index_file),
+        "state": _read_file_bytes(state_file),
+    }
+    new_files: list[Path] = []
+    if not chapter_file.exists():
+        new_files.append(chapter_file)
+
+    try:
+        # Build new chapter content.
         if chapter_file.exists():
             existing_content = chapter_file.read_text(encoding="utf-8")
-            # 追加到末尾
             new_chapter_content = existing_content + "\n\n" + accepted_text
         else:
+            existing_content = ""
             new_chapter_content = accepted_text
-        
-        # 2c. 更新 accepted_text_index
-        start_char = len(existing_content) + 2 if chapter_file.exists() else 0  # +2 for \n\n
+
+        start_char = len(existing_content) + (2 if existing_content else 0)
         end_char = start_char + len(accepted_text)
         content_sha = _sha256(accepted_text.encode("utf-8"))
-        
+
         new_entry = {
             "sequence": len(index.get("entries", [])) + 1,
             "scene_ref": scene_ref,
@@ -429,42 +403,26 @@ def accept_prose(
             "start_char": start_char,
             "end_char": end_char,
             "content_sha256": content_sha,
-            "state_rev_after": new_state.get("state_rev", state.get("state_rev", 1)),
+            "state_rev_after": new_state.get("state_rev", state.get("state_rev")),
         }
-        
         new_index = json.loads(json.dumps(index))
         new_index.setdefault("entries", []).append(new_entry)
-        
-        # 3. 所有验证通过后写入
-        
-        # 3a. 写章节文件
+
+        # Atomic writes.
         _safe_write_file(chapter_file, new_chapter_content)
-        
-        # 3b. 写 index
-        _safe_write_file(
-            index_file,
-            json.dumps(new_index, ensure_ascii=False, indent=2),
-        )
-        
-        # 3c. 写 state（如果有变化）
+        _safe_write_file(index_file, json.dumps(new_index, ensure_ascii=False, indent=2))
         if new_state != state:
-            _safe_write_file(
-                state_file,
-                json.dumps(new_state, ensure_ascii=False, indent=2),
-            )
-        
+            _safe_write_file(state_file, json.dumps(new_state, ensure_ascii=False, indent=2))
+
         return {
             "success": True,
             "chapter_path": str(chapter_file),
             "scene_ref": scene_ref,
             "state_rev": new_state.get("state_rev"),
         }
-    
     except Exception as e:
-        # 4. Rollback
-        rollback_failed = []
-        
-        # 恢复 snapshot
+        # Rollback on any failure.
+        rollback_failed: list[str] = []
         for name, data in snapshots.items():
             if name == "chapter":
                 path = chapter_file
@@ -474,80 +432,63 @@ def accept_prose(
                 path = state_file
             else:
                 continue
-            
             if data is not None:
                 try:
                     _safe_write_file(path, data)
                 except Exception:
                     rollback_failed.append(str(path))
             else:
-                # 原文件不存在，删除新建的文件
                 try:
                     if path.exists():
                         path.unlink()
                 except Exception:
                     rollback_failed.append(str(path))
-        
-        # 清理新建的文件
-        for new_file in new_files:
+        for nf in new_files:
             try:
-                if new_file.exists():
-                    new_file.unlink()
+                if nf.exists():
+                    nf.unlink()
             except Exception:
-                rollback_failed.append(str(new_file))
-        
+                rollback_failed.append(str(nf))
         if rollback_failed:
-            raise WorkspaceError(
-                f"Rollback 失败，需要手动恢复：{rollback_failed}"
-            ) from e
-        
+            raise WorkspaceError(f"Rollback 失败，需要手动恢复：{rollback_failed}") from e
         raise WorkspaceError(f"接受正文失败，已回滚：{e}") from e
 
 
+def _read_file_bytes(path: Path) -> bytes | None:
+    if not path.exists():
+        return None
+    return path.read_bytes()
+
+
 def get_recent_prose(project_dir: str | Path, max_chars: int = 2000) -> str | None:
-    """获取最近接受的正文。
-    
-    Args:
-        project_dir: 项目目录
-        max_chars: 最大字符数
-    
-    Returns:
-        最近接受的正文，或 None
+    """获取最近接受的正文（基于正式正文 + accepted_text_index）。
+
+    This function reads only from production chapter files under 03_正文/ and
+    validates the accepted_text_index SHA/range against disk. It does NOT
+    consult Context packages or any derivative cache.
     """
     project_dir = Path(project_dir)
     proj = load_project(project_dir)
     index = proj["index"]
-    
     if not index or not index.get("entries"):
         return None
-    
-    # 获取最后一个 entry
+
     last_entry = index["entries"][-1]
-    
-    # 读取章节文件
     chapter_path = project_dir / last_entry["chapter_path"]
     if not chapter_path.exists():
         raise WorkspaceError(f"章节文件不存在：{chapter_path}")
-    
+
     chapter_content = chapter_path.read_text(encoding="utf-8")
-    
-    # 提取对应范围
     start = last_entry["start_char"]
     end = last_entry["end_char"]
-    
     if start >= len(chapter_content) or end > len(chapter_content):
         raise WorkspaceError("accepted_text_index 与章节内容不一致（ACCEPTED_TEXT_INDEX_STALE）")
-    
+
     accepted_text = chapter_content[start:end]
-    
-    # 验证 SHA
     content_sha = _sha256(accepted_text.encode("utf-8"))
     if content_sha != last_entry["content_sha256"]:
         raise WorkspaceError("accepted_text_index SHA 不匹配（ACCEPTED_TEXT_INDEX_STALE）")
-    
-    # 返回末尾 max_chars
+
     if len(accepted_text) > max_chars:
         return accepted_text[-max_chars:]
-    
     return accepted_text
-
