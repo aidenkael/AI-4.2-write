@@ -175,7 +175,7 @@ python "05_Skills与自动化/01_Skills/MaterialIntake/intake.py" --root E:\AI-W
 python -m pytest "05_Skills与自动化/01_Skills/MaterialIntake" -q
 ```
 
-## 当前真实状态（Phase 2B1.1 时点）
+## 当前真实状态（Phase 2C1 后）
 
 - 141 assets（REFERENCE_WORK 130 / RESEARCH 5 / NEEDS_REVIEW 6）、182 files、1 container（马伯庸作品合集，21 splits）。
 - purification：可用 3 / 未处理 138；knowledge：可用 3 / 未开始 138（book_0035/0038/0065 从真实 BKP 自动恢复，
