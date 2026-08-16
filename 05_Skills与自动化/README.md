@@ -26,6 +26,7 @@
 | StoryPlan | 长篇规划（合同/投影/重规划） | closed / frozen |
 | ContextCompiler | 上下文编译（显式选择） | consumer-driven freeze |
 | StoryWrite | 写作原语与机械结算辅助 | keep / freeze |
+| ProjectWorkspace | 真实作品机械接线层，不负责文学判断 | available |
 
 ## Agent 操作规则
 
