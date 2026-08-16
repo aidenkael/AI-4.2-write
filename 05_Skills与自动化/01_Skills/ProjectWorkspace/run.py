@@ -1,14 +1,5 @@
 # -*- coding: utf-8 -*-
-"""ProjectWorkspace CLI — 机械操作入口（F0.1）。
-
-不做：
-- 自然语言解析
-- LLM 调用
-- Prompt Router
-- Git commit/push
-- BKP 自动选择
-- 文学判断
-"""
+"""ProjectWorkspace CLI — 机械操作入口（F0.2）。"""
 import argparse
 import json
 import sys
@@ -22,8 +13,6 @@ from project_workspace import (
     create_project,
     accept_prose,
     get_recent_prose,
-    persist_state_transition,
-    load_project,
     WorkspaceError,
 )
 
@@ -67,11 +56,9 @@ def cmd_create(args):
 def cmd_recent(args):
     try:
         proj = resolve_project(args.project)
-        prose = get_recent_prose(proj["project_dir"])
-        if prose is None:
-            print("没有接受的正文")
-        else:
-            print(prose)
+        artifact = get_recent_prose(proj["project_dir"])
+        # CLI prints only the text field from the frozen artifact.
+        print(artifact["text"])
     except WorkspaceError as e:
         print(f"错误: {e}", file=sys.stderr)
         sys.exit(1)
@@ -88,7 +75,6 @@ def cmd_accept(args):
         sys.exit(1)
     accepted_text = prose_path.read_text(encoding="utf-8")
 
-    # Settlement is REQUIRED at CLI level too.
     if not args.settlement_json:
         print("错误: 必须提供 --settlement-json", file=sys.stderr)
         sys.exit(1)

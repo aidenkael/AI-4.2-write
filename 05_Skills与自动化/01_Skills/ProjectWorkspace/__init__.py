@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""ProjectWorkspace — 真实项目机械接线层（F0.1）。"""
+"""ProjectWorkspace — 真实项目机械接线层（F0.2）。"""
 from .project_workspace import (
     WorkspaceError,
     ContractError,
