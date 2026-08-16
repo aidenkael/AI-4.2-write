@@ -38,7 +38,7 @@ def _load_catalog():
 
     bkps = discover_bkps(BASE_DIR)
     if not bkps:
-        print("[ERROR] No BKPs found under 02_原著蒸馏/*/bkp/")
+        print("[ERROR] No BKPs found under 02_素材知识库/*/bkp/")
         sys.exit(1)
 
     all_items = []

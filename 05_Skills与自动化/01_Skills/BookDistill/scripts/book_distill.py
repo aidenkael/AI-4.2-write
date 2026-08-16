@@ -34,7 +34,7 @@ MAP 为独立结构性作品地图，不属于 Evidence kind。
 
 接口契约（继承自旧分支 skill/source-prepare-v1 的接口草案，见 PROVENANCE.md）：
   SourcePrepare PASS -> 06_工作区/SourcePrepare/<作品ID>_<作品>/full.md + chapters/
-                     -> 02_原著蒸馏/<作品ID>_<作品>/
+                     -> 02_素材知识库/<作品ID>_<作品>/
 """
 
 from __future__ import annotations
@@ -1572,7 +1572,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p_p = sub.add_parser("prepare", help="生成章节索引与证据模板")
     p_p.add_argument("--input", required=True, help="SourcePrepare 输出目录")
-    p_p.add_argument("--output", required=True, help="BookDistill 输出目录，如 02_原著蒸馏/book_0038_一九八四")
+    p_p.add_argument("--output", required=True, help="BookDistill 输出目录，如 02_素材知识库/book_0038_一九八四")
 
     p_a = sub.add_parser("assemble", help="校验证据并生成清单与报告骨架")
     p_a.add_argument("--input", required=True, help="SourcePrepare 输出目录（用于校验 source snapshot 与行号越界）")

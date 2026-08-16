@@ -17,7 +17,7 @@
 | 目录 | 职责 | Authority |
 |---|---|---|
 | 01_原始素材 | 未经 AI 加工的原始来源 + 素材资产.json（canonical ledger） | 原始文件真相 + canonical registry |
-| 02_原著蒸馏 | 参考作品结构化知识（BKP） | 参考知识 |
+| 02_素材知识库 | 参考作品结构化知识（BKP） | 参考知识 |
 | 03_作品工程 | 原创小说作品 | **原创最高 authority** |
 | 04_写作知识库 | 经多作品验证的长期写作知识 | 跨作品经验 |
 | 05_Skills与自动化 | 工作台可调用能力 | capability |
@@ -109,7 +109,7 @@ BKP 长期保存作品身份、作品地图、BookProfile、Observation、Infere
 |---|---|---|
 | MATERIAL_INTAKE | intake apply 成功（完整事务） | 三份 material state files：`01_原始素材/素材资产.json` + `素材清单.csv` + `素材总索引.md` |
 | SOURCE_PREPARE | formal 结果（PASS/REVIEW/FAIL）且 metadata 完整（refresh 成功）且无 runtime ERROR | 同上（SP 输出在 `06_工作区`，Local Only） |
-| BOOK_DISTILL | BKP FINALIZED + 全部验证通过（settlement，每作品一次） | 当前 book_id 的单一 distillation subtree（`02_原著蒸馏/<book_id>_<书名>/`）+ 三份 material state files |
+| BOOK_DISTILL | BKP FINALIZED + 全部验证通过（settlement，每作品一次） | 当前 book_id 的单一 distillation subtree（`02_素材知识库/<book_id>_<书名>/`）+ 三份 material state files |
 
 规则：
 

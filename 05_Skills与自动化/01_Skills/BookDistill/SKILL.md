@@ -24,7 +24,7 @@ BookDistill 不读取 `01_原始素材` 作为正文输入；不修改 SourcePre
 
 ## 输出契约
 
-目录：`02_原著蒸馏/<book_id>_<书名>/`
+目录：`02_素材知识库/<book_id>_<书名>/`
 
 | 文件 | 内容 |
 |---|---|
@@ -157,11 +157,11 @@ Apodictic 式镜头用于诊断和发现，不自动覆盖为普遍写作规则�
 
 ```powershell
 python scripts/book_distill.py validate --input "06_工作区/SourcePrepare/<book_id>_<书名>"
-python scripts/book_distill.py prepare  --input "06_工作区/SourcePrepare/<book_id>_<书名>" --output "02_原著蒸馏/<book_id>_<书名>"
-python scripts/book_distill.py assemble --input "06_工作区/SourcePrepare/<book_id>_<书名>" --output "02_原著蒸馏/<book_id>_<书名>"
-python scripts/book_distill.py profile  --output "02_原著蒸馏/<book_id>_<书名>"
-python scripts/book_distill.py deepdive --output "02_原著蒸馏/<book_id>_<书名>" --dimension "人物" --input "06_工作区/SourcePrepare/<book_id>_<书名>"
-python scripts/book_distill.py bkp      --output "02_原著蒸馏/<book_id>_<书名>"  # 默认读取 <output>/bkp_prototype
+python scripts/book_distill.py prepare  --input "06_工作区/SourcePrepare/<book_id>_<书名>" --output "02_素材知识库/<book_id>_<书名>"
+python scripts/book_distill.py assemble --input "06_工作区/SourcePrepare/<book_id>_<书名>" --output "02_素材知识库/<book_id>_<书名>"
+python scripts/book_distill.py profile  --output "02_素材知识库/<book_id>_<书名>"
+python scripts/book_distill.py deepdive --output "02_素材知识库/<book_id>_<书名>" --dimension "人物" --input "06_工作区/SourcePrepare/<book_id>_<书名>"
+python scripts/book_distill.py bkp      --output "02_素材知识库/<book_id>_<书名>"  # 默认读取 <output>/bkp_prototype
 ```
 
 测试：
@@ -182,8 +182,8 @@ python -m unittest discover -s tests -p "test_*.py"
    - **catalog refresh**：`refresh_and_render()`（`素材资产.json` 的 `knowledge` 自动变为可用，`CSV / MD` 刷新）；
    - **动态 allowlist（Phase 2B2.1，BD_SETTLEMENT_CURRENT_BOOK_ONLY）**：`scripts/settlement_contract.py` 的
      `build_settlement_allowlist(book_id, work_name)` / `build_settlement_allowlist_from_dir(distill_rel)` 按当前作品构建：
-     当前 book_id 的**单一** distillation subtree（`02_原著蒸馏/<book_id>_<书名>/`）+ 三份 material state files；
-     `02_原著蒸馏/` 整目录授权已废止；sibling（book_0002_Beta）与伪造前缀（book_00010_Fake）一律拒绝；
+     当前 book_id 的**单一** distillation subtree（`02_素材知识库/<book_id>_<书名>/`）+ 三份 material state files；
+     `02_素材知识库/` 整目录授权已废止；sibling（book_0002_Beta）与伪造前缀（book_00010_Fake）一律拒绝；
      commit message 使用 `chore: settle book_<XXXX> <书名>`。
 3. **绝不包含**：`01_原始素材` 原著全文（Local Only）、`06_工作区/**`（Local Only）、其他作品目录（含 sibling）。
 4. settlement 不修改 `book_distill.py` runtime；具体动作由 Agent 按本 SKILL 执行（`settlement_contract.py` 只提供 contract 常量与校验）。
@@ -199,7 +199,7 @@ python -m unittest discover -s tests -p "test_*.py"
 - 逐章 evidence 与 manifest 是 audit appendix / 工作附件；作者核心产物是
   `model.md` / `evidence.md` / `mechanisms.md` / `book_profile.md` / `bd_report.md`。
 - 详细的逐章工作底稿优先放 `06_工作区/BookDistill/<book>/`（Local Only），
-  不把 `02_原著蒸馏` 默认膨胀成逐章分析数据库。
+  不把 `02_素材知识库` 默认膨胀成逐章分析数据库。
 - 专项深挖的文学分析方法优先参考已有来源（Apodictic / ani-book / creative-writing-skills / oh-story），
   当前只吸收分析框架/方法纪律，不整体复制外部代码或 Prompt。
 - 多视角 Discovery 是**方法要求**而不是固定 Skill 数量；不要为了满足本节而制造新的平级 Skill、复杂编排或永久 taxonomy。

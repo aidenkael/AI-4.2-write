@@ -53,7 +53,7 @@
 
 这些是**发现阶段 staging**，不是 BKP，不自动成为写作规则。
 
-`discovery/` 是逐章工作底稿，默认 Local Only；`.gitignore` 已排除 `02_原著蒸馏/*/discovery/`。正式长期保存的是 BookDistill 收敛后的 canonical evidence、BookProfile、Deep Dive 结论和 BKP，不把 observer staging 当长期知识库提交。
+`discovery/` 是逐章工作底稿，默认 Local Only；`.gitignore` 已排除 `02_素材知识库/*/discovery/`。正式长期保存的是 BookDistill 收敛后的 canonical evidence、BookProfile、Deep Dive 结论和 BKP，不把 observer staging 当长期知识库提交。
 
 ## 可桥接条目
 

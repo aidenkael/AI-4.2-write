@@ -6,8 +6,8 @@ from pathlib import Path
 
 
 def discover_bkps(base_dir: str) -> list:
-    """Scan 02_原著蒸馏/*/bkp/identity.json, return list of BKP info dicts."""
-    distill_dir = Path(base_dir) / "02_原著蒸馏"
+    """Scan 02_素材知识库/*/bkp/identity.json, return list of BKP info dicts."""
+    distill_dir = Path(base_dir) / "02_素材知识库"
     if not distill_dir.exists():
         return []
 

@@ -70,7 +70,7 @@ class KnowledgeRetrieveCardsTest(unittest.TestCase):
     def test_legacy_1984_and_three_body_load(self):
         root = Path(__file__).resolve().parents[3]
         for dirname in ("book_0038_一九八四", "book_0065_三体"):
-            bkp = root / "02_原著蒸馏" / dirname / "bkp"
+            bkp = root / "02_素材知识库" / dirname / "bkp"
             identity = json.loads((bkp / "identity.json").read_text(encoding="utf-8"))
             info = {"bkp_dir": str(bkp), "book_id": identity["book"]["book_id"],
                     "title": identity["book"]["title"], "identity": identity}

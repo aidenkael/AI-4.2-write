@@ -198,7 +198,7 @@ def test_bkp_recovery(ledger):
         k = a["knowledge"]
         assert k["status"] == "可用"
         assert k["source_sha256"] == expect_sha
-        assert k["path"].startswith("02_原著蒸馏/book_")
+        assert k["path"].startswith("02_素材知识库/book_")
         assert expect_sha in {f["sha256"] for f in a["files"]}
         assert a["purification"]["status"] == "可用"
         assert a["purification"]["evidence"] == "bkp_source_snapshot"
@@ -255,7 +255,7 @@ def test_fake_tree_recovery(tmp_path):
     ledger = _read_ledger(tmp_path)
     a = next(x for x in ledger["assets"] if x["id"] == "book_0001")
     # BKP FINALIZED + SHA 匹配 → 可用；作者从 BKP identity 恢复；purification 补写持久字段
-    assert a["knowledge"] == {"status": "可用", "path": "02_原著蒸馏/book_0001_Alpha",
+    assert a["knowledge"] == {"status": "可用", "path": "02_素材知识库/book_0001_Alpha",
                               "source_sha256": epub_sha}
     assert a["purification"]["status"] == "可用"
     assert a["purification"]["evidence"] == "bkp_source_snapshot"
@@ -744,9 +744,9 @@ def test_parse_author_pure():
 
 def test_derive_knowledge_pure():
     bkp_ok = {"finalized": True, "source_sha256": "abc",
-              "dir_rel": "02_原著蒸馏/book_x", "author": "A"}
+              "dir_rel": "02_素材知识库/book_x", "author": "A"}
     assert catalog.derive_knowledge(bkp_ok, {"abc"}) == \
-        {"status": "可用", "path": "02_原著蒸馏/book_x", "source_sha256": "abc"}
+        {"status": "可用", "path": "02_素材知识库/book_x", "source_sha256": "abc"}
     assert catalog.derive_knowledge(bkp_ok, {"def"})["status"] == "需更新"
     assert catalog.derive_knowledge(None, {"abc"}) == {"status": "未开始"}
     not_final = dict(bkp_ok, finalized=False)

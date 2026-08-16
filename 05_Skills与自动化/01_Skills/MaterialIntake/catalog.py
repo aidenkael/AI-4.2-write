@@ -51,7 +51,7 @@ import sys
 from pathlib import Path
 
 MATERIAL_DIR_NAME = "01_原始素材"
-DISTILL_DIR_NAME = "02_原著蒸馏"
+DISTILL_DIR_NAME = "02_素材知识库"
 LEGACY_CSV_FILENAME = "素材清单.csv"
 LEDGER_FILENAME = "素材资产.json"
 INDEX_FILENAME = "素材总索引.md"

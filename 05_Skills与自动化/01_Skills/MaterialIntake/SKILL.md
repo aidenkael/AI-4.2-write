@@ -20,7 +20,7 @@ MI 负责「资产登记与状态推导」+「新素材入库（inbox intake）�
 
 - `01_原始素材/素材资产.json` —— **唯一 canonical 输入**（Phase 2B1 cutover 完成，legacy CSV 已退出输入链）。
 - `01_原始素材` 磁盘全量扫描（逐文件 SHA256，排除 `collection_manifest.json`）。
-- `02_原著蒸馏/<book_id>_*/bkp/identity.json` —— 正式 BKP 证据（`schema_status` 以 `FINALIZED` 开头才算可用）。
+- `02_素材知识库/<book_id>_*/bkp/identity.json` —— 正式 BKP 证据（`schema_status` 以 `FINALIZED` 开头才算可用）。
 - `06_工作区/SourcePrepare/<book_id>_<书名>/metadata.json` —— SP 提纯证据（A 级证据，SP 正式合同路径；
   工作区清理后通常不存在）。目录名前缀 `<book_id>_` 必须恰好匹配 1 个目录，多目录直接报歧义错误。
 
@@ -92,7 +92,7 @@ Phase 2B1.1 旧算法（`path:sha256`）写入的 record 在内容未变时自�
 ### 知识状态推导
 
 - 无 FINALIZED BKP → `未开始`。
-- FINALIZED 且 `source_sha256` 匹配 → `可用`（含 `path="02_原著蒸馏/book_xxxx_xxx"` 与 `source_sha256`）。
+- FINALIZED 且 `source_sha256` 匹配 → `可用`（含 `path="02_素材知识库/book_xxxx_xxx"` 与 `source_sha256`）。
 - 否则 → `需更新`。
 
 ### 确定性 / 幂等性
@@ -188,4 +188,4 @@ python -m pytest "05_Skills与自动化/01_Skills/MaterialIntake" -q
 - 资产变更审计 / 历史版本化 / diff 报告。
 - 素材语义分类自动化（intake 语义判断由 Agent 完成；runtime 不接 LLM、无分类字典）。
 - 与 BookDistill / KnowledgeRetrieve 的状态联动（当前只单向读 BKP 证据；settlement 由 BookDistill SKILL 驱动）。
-- Phase 2C2：`02_原著蒸馏 → 02_素材知识库` 目录重命名（尚未执行）。
+- Phase 2C2：`02_原著蒸馏 → 02_素材知识库` 目录重命名（已完成）。

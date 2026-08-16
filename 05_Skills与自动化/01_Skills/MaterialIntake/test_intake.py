@@ -92,7 +92,7 @@ def _make_repo(tmp_path: Path) -> tuple[Path, str]:
          "files": [{"path": "01_网络小说/Alpha/Alpha.epub", "sha256": sha1, "primary": True}],
          "purification": {"status": "可用", "evidence": "sourceprepare_record",
                           "source_sha256": sha1, "input_fingerprint": fp1},
-         "knowledge": {"status": "可用", "path": "02_原著蒸馏/book_0001_Alpha",
+         "knowledge": {"status": "可用", "path": "02_素材知识库/book_0001_Alpha",
                        "source_sha256": sha1}},
         {"id": "book_0003", "name": "Beta", "type": "RESEARCH", "author": "", "tags": [], "notes": "",
          "files": [{"path": "05_现代专业资料/Beta.pdf", "sha256": sha2, "primary": True}],

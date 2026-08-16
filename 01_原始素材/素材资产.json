@@ -935,7 +935,7 @@
       ],
       "id": "book_0035",
       "knowledge": {
-        "path": "02_原著蒸馏/book_0035_长安十二时辰",
+        "path": "02_素材知识库/book_0035_长安十二时辰",
         "source_sha256": "38b604e406bcb58b793a94446433c4a69b4a17de3c25125da4217ccc8f38d8d6",
         "status": "可用"
       },
@@ -1015,7 +1015,7 @@
       ],
       "id": "book_0038",
       "knowledge": {
-        "path": "02_原著蒸馏/book_0038_一九八四",
+        "path": "02_素材知识库/book_0038_一九八四",
         "source_sha256": "a426098082241b8260ee67112dd656e7677f3d90dab323083f2d0338322a5627",
         "status": "可用"
       },
@@ -1613,7 +1613,7 @@
       ],
       "id": "book_0065",
       "knowledge": {
-        "path": "02_原著蒸馏/book_0065_三体",
+        "path": "02_素材知识库/book_0065_三体",
         "source_sha256": "0fb3cde2dc4f8c9f4e5a2ba612f3d3d3eb049d67928cce4fcc8b2c94ea20c6a8",
         "status": "可用"
       },

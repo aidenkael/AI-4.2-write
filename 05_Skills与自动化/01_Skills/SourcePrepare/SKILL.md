@@ -227,7 +227,7 @@ SP 在转换前执行 production preflight，结束后默认执行 Post-Action g
 ```text
 SourcePrepare  (01_原始素材 -> 06_工作区/SourcePrepare/<ID>_<作品>/full.md)
     ↓
-BookDistill    (读取 full.md / chapters -> 02_原著蒸馏)
+BookDistill    (读取 full.md / chapters -> 02_素材知识库)
     ↓
 作品工程        (03_作品工程)
 ```
