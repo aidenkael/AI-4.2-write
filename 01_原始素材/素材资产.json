@@ -1955,7 +1955,7 @@
       "author": "当年明月",
       "files": [
         {
-          "path": "02_中文文学/明朝那些事儿/明朝那些事儿 (当年明月) (z-library.sk, 1lib.sk, z-lib.sk).epub",
+          "path": "01_参考作品/明朝那些事儿/明朝那些事儿.epub",
           "primary": true,
           "sha256": "0d7fb71c27b06b7d47edc51a48604f939afc52ff7bf3b55e6f2243d01b07a0cc"
         }
@@ -1971,7 +1971,7 @@
         "status": "未处理"
       },
       "tags": [],
-      "type": "NEEDS_REVIEW"
+      "type": "REFERENCE_WORK"
     },
     {
       "author": "烛",
@@ -2496,7 +2496,7 @@
       "author": "",
       "files": [
         {
-          "path": "02_中文文学/马伯庸作品合集/我读书少你可别骗我.epub",
+          "path": "01_参考作品/我读书少你可别骗我/我读书少你可别骗我.epub",
           "primary": true,
           "sha256": "8a233558ba28bb64b3f75f64c1705e40ca482ffcd43a50acae14997c6922f35a",
           "source_container": "马伯庸作品合集"
@@ -2513,13 +2513,13 @@
         "status": "未处理"
       },
       "tags": [],
-      "type": "NEEDS_REVIEW"
+      "type": "REFERENCE_WORK"
     },
     {
       "author": "",
       "files": [
         {
-          "path": "02_中文文学/马伯庸作品合集/马伯庸笑翻中国简史.epub",
+          "path": "01_参考作品/马伯庸笑翻中国简史/马伯庸笑翻中国简史.epub",
           "primary": true,
           "sha256": "6cbd097a516e95b2bd4cc394e1937804118eba575c1961b7c5d22869e077fad8",
           "source_container": "马伯庸作品合集"
@@ -2536,13 +2536,13 @@
         "status": "未处理"
       },
       "tags": [],
-      "type": "NEEDS_REVIEW"
+      "type": "REFERENCE_WORK"
     },
     {
       "author": "",
       "files": [
         {
-          "path": "02_中文文学/马伯庸作品合集/她死在QQ上.epub",
+          "path": "01_参考作品/她死在QQ上/她死在QQ上.epub",
           "primary": true,
           "sha256": "aeb93d4ddc8473cf02eedc12a469bcb9a6cc5053e5370df9012f43f91725531a",
           "source_container": "马伯庸作品合集"
@@ -2559,13 +2559,13 @@
         "status": "未处理"
       },
       "tags": [],
-      "type": "NEEDS_REVIEW"
+      "type": "REFERENCE_WORK"
     },
     {
       "author": "",
       "files": [
         {
-          "path": "02_中文文学/马伯庸作品合集/殷商玛雅征服史.epub",
+          "path": "01_参考作品/殷商玛雅征服史/殷商玛雅征服史.epub",
           "primary": true,
           "sha256": "5dc6e322e0d34271e1368d737a276933fd9979aa80cabf8da8cfa613f774bfd8",
           "source_container": "马伯庸作品合集"
@@ -2582,7 +2582,7 @@
         "status": "未处理"
       },
       "tags": [],
-      "type": "NEEDS_REVIEW"
+      "type": "REFERENCE_WORK"
     },
     {
       "author": "",
@@ -2703,7 +2703,7 @@
       "author": "",
       "files": [
         {
-          "path": "02_中文文学/马伯庸作品合集/事实证明，人民永远是最可爱的.epub",
+          "path": "01_参考作品/事实证明，人民永远是最可爱的/事实证明，人民永远是最可爱的.epub",
           "primary": true,
           "sha256": "6d7d2b1a20105f221b2c1856fabc71dc071f9d41bbaf457f8d63896794aa68cc",
           "source_container": "马伯庸作品合集"
@@ -2720,7 +2720,7 @@
         "status": "未处理"
       },
       "tags": [],
-      "type": "NEEDS_REVIEW"
+      "type": "REFERENCE_WORK"
     },
     {
       "author": "",
@@ -3343,10 +3343,10 @@
   ],
   "containers": [
     {
-      "category": "02_中文文学",
-      "container_dir": "02_中文文学/马伯庸作品合集",
+      "category": "01_参考作品",
+      "container_dir": "01_参考作品/马伯庸作品合集",
       "id": "马伯庸作品合集",
-      "manifest_path": "02_中文文学/马伯庸作品合集/collection_manifest.json",
+      "manifest_path": "01_参考作品/马伯庸作品合集/collection_manifest.json",
       "original": {
         "filename": "马伯庸作品合集（原始23册）.epub",
         "path": "01_参考作品/马伯庸作品合集/马伯庸作品合集（原始23册）.epub",

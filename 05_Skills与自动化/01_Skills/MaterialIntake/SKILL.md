@@ -175,12 +175,13 @@ python "05_Skills与自动化/01_Skills/MaterialIntake/intake.py" --root E:\AI-W
 python -m pytest "05_Skills与自动化/01_Skills/MaterialIntake" -q
 ```
 
-## 当前真实状态（Phase 2C1 后）
+## 当前真实状态（Phase 2C1.2 后）
 
-- 141 assets（REFERENCE_WORK 130 / RESEARCH 5 / NEEDS_REVIEW 6）、182 files、1 container（马伯庸作品合集，21 splits）。
+- 141 assets（REFERENCE_WORK 136 / RESEARCH 5 / NEEDS_REVIEW 0）、182 files、1 container（马伯庸作品合集，21 splits）。
 - purification：可用 3 / 未处理 138；knowledge：可用 3 / 未开始 138（book_0035/0038/0065 从真实 BKP 自动恢复，
   并补写长期 record：`source_sha256` + `input_fingerprint`）。
 - 幂等验证：连续 refresh 两次 ledger/CSV/MD 三文件 byte-for-byte 不变；record 补写后 CSV/MD 零变化。
+- Legacy cleanup 完成：旧六分类目录已清理，6 项 NEEDS_REVIEW 已确认并迁入角色型目录。
 
 ## 未实现（禁止臆造）
 
