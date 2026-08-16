@@ -170,6 +170,22 @@ python scripts/book_distill.py bkp      --output "02_原著蒸馏/<book_id>_<书
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
+## Finalized Settlement（Phase 2B2）
+
+**只在 BKP FINALIZED 且全部验证通过后，对当前作品执行一次 settlement**（收尾动作，不重复执行）：
+
+1. **Mandatory Preflight**（不满足则 STOP，保留现场）：
+   - `bkp/identity.json` 的 `schema_status == "FINALIZED"`，且 `bkp/knowledge/cards.md` 存在；
+   - 本作品全部验证通过（validate / assemble / bkp 校验无未处理告警）；
+   - git `precheck`：`fetch` 成功、`branch == main`、`HEAD == origin/main`、porcelain 空（MaterialIntake `post_action.precheck`）。
+2. 执行 settlement：
+   - **catalog refresh**：`refresh_and_render()`（`素材资产.json` 的 `knowledge` 自动变为可用，`CSV / MD` 刷新）；
+   - **Post-Action git sync**：`post_action.safe_commit_push`，allowlist 见 `scripts/settlement_contract.py`：
+     `02_原著蒸馏/<book_id>_<书名>/` 整棵 subtree + `01_原始素材` 三份 material state files；
+     commit message 使用 `chore: settle book_<XXXX> <书名>`。
+3. **绝不包含**：`01_原始素材` 原著全文（Local Only）、`06_工作区/**`（Local Only）、其他作品目录。
+4. settlement 不修改 `book_distill.py` runtime；具体动作由 Agent 按本 SKILL 执行（`settlement_contract.py` 只提供 contract 常量与校验）。
+
 ## 范围边界
 
 - 本技能只做 1 部作品的真实蒸馏；批量蒸馏、RAG、知识图谱、多 Agent、复杂长期状态不属于当前版本。

@@ -88,7 +88,7 @@ PURIFICATION_STATUS = ("未处理", "可用", "需复核", "需更新", "失败"
 # 知识状态（含 Phase 2B 预留：失败 / 不适用）
 KNOWLEDGE_STATUS = ("未开始", "可用", "需更新", "失败", "不适用")
 
-# 合法类型（LOOSE_MATERIAL 为 Phase 2B 预留，当前 ledger 不产出）
+# 合法类型（Phase 2B2 起 LOOSE_MATERIAL 由 inbox intake 正式产出）
 VALID_TYPES = ("REFERENCE_WORK", "RESEARCH", "LOOSE_MATERIAL", "NEEDS_REVIEW")
 
 
@@ -369,6 +369,12 @@ def refresh_ledger(ledger: dict, mat_dir: Path, distill_dir: Path, sp_dir: Path)
         legacy_fp = legacy_path_fingerprint(new_files)
         bkp = find_bkp(distill_dir, a["id"])
         sp_meta = find_sp_metadata(sp_dir, a["id"])
+        # LOOSE_MATERIAL：提纯不适用（Phase 2B2 正式类型）。即使无任何证据也不退回未处理。
+        if a["type"] == "LOOSE_MATERIAL":
+            purif = {"status": "不适用", "evidence": None}
+        else:
+            purif = derive_purification(sp_meta, bkp, file_shas, input_fp,
+                                        a.get("purification"), legacy_fp)
         new_assets.append({
             "id": a["id"],
             "name": a["name"],
@@ -377,8 +383,7 @@ def refresh_ledger(ledger: dict, mat_dir: Path, distill_dir: Path, sp_dir: Path)
             "tags": list(a.get("tags") or []),
             "notes": a.get("notes") or "",
             "files": new_files,
-            "purification": derive_purification(sp_meta, bkp, file_shas, input_fp,
-                                                a.get("purification"), legacy_fp),
+            "purification": purif,
             "knowledge": derive_knowledge(bkp, file_shas),
         })
 
@@ -499,6 +504,7 @@ def render_index_md(ledger: dict) -> str:
     sections = [
         ("## 参考作品（REFERENCE_WORK）", by_type.get("REFERENCE_WORK", [])),
         ("## 研究资料（RESEARCH）", by_type.get("RESEARCH", [])),
+        ("## 零散素材（LOOSE_MATERIAL）", by_type.get("LOOSE_MATERIAL", [])),
         ("## 待确认（NEEDS_REVIEW）", by_type.get("NEEDS_REVIEW", [])),
     ]
     for title, items in sections:

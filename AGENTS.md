@@ -37,7 +37,7 @@ Context/Brief/recent prose 是 derivative，不得成为事实 authority。
 
 | 子系统 | 状态 |
 |---|---|
-| MaterialIntake | CANONICAL_CATALOG_AVAILABLE（素材资产.json = 唯一 canonical 真源；CSV/MD derived） |
+| MaterialIntake | CANONICAL_CATALOG_AVAILABLE + INTAKE_AND_WRITEBACK_AVAILABLE（素材资产.json = 唯一 canonical 真源；CSV/MD derived） |
 | SourcePrepare | AVAILABLE（canonical ledger consumer；index_builder 已退役） |
 | BookDistill | AVAILABLE / FROZEN |
 | KnowledgeRetrieve | AVAILABLE / FROZEN |
@@ -99,6 +99,28 @@ BKP 长期保存作品身份、作品地图、BookProfile、Observation、Infere
 无明确授权禁止：`reset / restore / clean / force push / rebase / merge`。
 
 临时 worktree 默认进入系统 TEMP，不在 E:\ 根留下 AI-Write-*。任务完成后删除 worktree。
+
+## Post-Action Writeback（Phase 2B2）
+
+三个工作台动作完成后**自动**执行「更新长期 tracked 状态 → 最小验证 → git fetch → 安全 commit → 普通 fast-forward push」，
+作者无需重复要求“记得更新清单/索引/GitHub”：
+
+| 动作 | 完成条件 | allowlist |
+|---|---|---|
+| MATERIAL_INTAKE | intake apply 成功 | `01_原始素材` 三份 metadata + README + 新角色目录 `.gitkeep` |
+| SOURCE_PREPARE | formal 结果（PASS/REVIEW/FAIL）且 metadata 完整（refresh 成功）且无 runtime ERROR | 同上（SP 输出在 `06_工作区`，Local Only） |
+| BOOK_DISTILL | BKP FINALIZED + 全部验证通过（settlement，每作品一次） | `02_原著蒸馏/<book_id>_<书名>/` subtree + 三份 material state files |
+
+规则：
+
+- 实现统一收敛在 `MaterialIntake/post_action.py`（PRECHECK + SAFE_COMMIT_PUSH）：
+  绝不 merge / rebase / force / reset / restore / clean / pull；远端前进 → STOP 保留现场；
+  allowlist 外任何 tracked 变更 → STOP；无变化 → 不造空 commit。
+- 原始素材（*.epub/*.txt/*.pdf/*.mobi/*.azw3/*.zip）、`06_工作区/SourcePrepare/`、`collection_manifest.json`
+  任何 action 绝不 staging（第二道过滤）。
+- 测试/调试使用 `--no-git-sync` 或 tmp git repo；真实 sync 需 worktree clean + HEAD==origin/main。
+- **不泛化到原创 Canon**：AI 草稿 / candidate / Brief / Context / Story State 绝不自动进 Git，
+  原创作品只按作者显式 acceptance / decision 与既有合同管理。
 
 ## NEXT
 

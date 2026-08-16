@@ -48,6 +48,19 @@ import xml.etree.ElementTree as ET
 # MaterialIntake canonical catalog：ledger 是 SP 的唯一素材真源（不复制第二套 registry）
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "MaterialIntake"))
 import catalog as material_catalog  # noqa: E402
+import post_action  # noqa: E402
+
+# SP 动作允许进 Git 的 tracked 面（01_原始素材 元数据；SP 输出在 06_工作区 → 第二道过滤拦截）
+SP_ALLOWLIST = [
+    "01_原始素材/素材资产.json",
+    "01_原始素材/素材清单.csv",
+    "01_原始素材/素材总索引.md",
+    "01_原始素材/README.md",
+    "01_原始素材/00_待入库/.gitkeep",
+    "01_原始素材/01_参考作品/.gitkeep",
+    "01_原始素材/02_研究资料/.gitkeep",
+    "01_原始素材/03_零散素材/.gitkeep",
+]
 
 SKILL_VERSION = "0.3.0"
 RAW = "01_原始素材"
@@ -800,14 +813,16 @@ def locate(root: Path, name: Optional[str], all_books: bool, ledger: dict) -> li
         f"{g['work_name']}({g['book_id']})" for g in partial))
 
 
-def main() -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="AI-Write SourcePrepare：原著源文件标准化为纯净 Markdown")
     ap.add_argument("--root", required=True, help=r"项目根目录，例如 E:\AI-Write")
     ap.add_argument("--book", help="处理单部作品；支持唯一部分匹配")
     ap.add_argument("--all", action="store_true", help="处理全部作品（建议先单书试跑）")
     ap.add_argument("--force", action="store_true", help="覆盖工作区已有转换结果；绝不覆盖原始素材")
     ap.add_argument("--dry-run", action="store_true", help="仅输出处理计划，不转换、不写索引")
-    args = ap.parse_args()
+    ap.add_argument("--no-git-sync", action="store_true",
+                    help="完成后不执行 Post-Action git writeback（测试/调试用）")
+    args = ap.parse_args(argv)
 
     if not args.book and not args.all:
         raise SystemExit("必须指定 --book <作品名> 或 --all")
@@ -851,6 +866,19 @@ def main() -> int:
     except Exception as exc:
         print(f"WARN writeback 失败（refresh_and_render）：{exc}", file=sys.stderr)
         rc = 1
+
+    # Post-Action Writeback（Phase 2B2 第 31-34 节）：formal 结果（PASS/REVIEW/FAIL）
+    # 且 metadata 完整（refresh rc==0）且无 runtime ERROR → git sync。
+    # ERROR / refresh 失败 / unexpected diff / remote divergence → 不 commit 保留现场。
+    if not args.no_git_sync and rc == 0 and not any(
+            r.startswith("ERROR") for r in results if isinstance(r, str)):
+        outcome = post_action.safe_commit_push(root, SP_ALLOWLIST,
+                                               "chore: source-prepare writeback")
+        print(f"[post-action] {outcome}")
+        if outcome not in ("OK", "NO_TRACKED_CHANGES"):
+            print(f"[post-action] {outcome}：保留现场，请人工检查", file=sys.stderr)
+            rc = 3
+
     # FAIL / ERROR 均视为批次中存在失败项，退出码非 0
     failed = any(r.startswith(("FAIL", "ERROR")) for r in results)
     if failed:

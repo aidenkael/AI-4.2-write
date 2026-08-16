@@ -1,52 +1,24 @@
 # 01_原始素材
 
-未经 AI 加工的原始参考来源。
+> 未经 AI 加工的原始来源。`素材资产.json` 是本目录的 **canonical ledger**（唯一真源）；
+> `素材清单.csv` / `素材总索引.md` 是其 derived 视图，由 `MaterialIntake/catalog.py` 自动重建。
 
-## 放什么
+## 目录布局（Phase 2B2 起）
 
-- 网络小说（epub / txt / pdf / mobi / azw3 / zip）
-- 中文文学作品
-- 外国文学作品（含中文译本）
-- 历史与古代资料（非小说型）
-- 现代专业资料
-- 其他参考资料
+| 目录 | 角色 |
+|---|---|
+| `00_待入库/` | **作者投放新素材的唯一 inbox**。MaterialIntake 从这里 scan / 去重 / 生成 intake plan |
+| `01_参考作品/` | 新 MaterialIntake 正式目标目录：`REFERENCE_WORK` 资产 |
+| `02_研究资料/` | 新 MaterialIntake 正式目标目录：`RESEARCH` 资产 |
+| `03_零散素材/` | 新 MaterialIntake 正式目标目录：`LOOSE_MATERIAL` 资产 |
 
-## 目录中的机器工件（Phase 2B1 canonical cutover）
+## 旧六分类目录（LEGACY_PHYSICAL_LAYOUT）
 
-| 文件 | 角色 | 说明 |
-|---|---|---|
-| 素材资产.json | **canonical registry（唯一真源）** | MaterialIntake 维护：资产登记 + 机器事实（SHA）+ 状态推导 |
-| 素材清单.csv | derived author view | 9 列（素材ID/名称/类型/作者/标签/位置/提纯/知识/备注），由 ledger 派生 |
-| 素材总索引.md | derived human view | GitHub 总览，由 ledger 派生 |
+`01_网络小说` / `02_中文文学` / `03_外国文学` / `04_现代专业资料` / `05_其他参考资料` 等
+旧六分类目录属于历史物理布局，**在 Phase 2C 一次性迁移前继续存在、不做新分类规范**。
+现有 141 个已登记资产继续留在旧目录；Phase 2B2 之后新增资产一律进入上述新角色型目录。
 
-> 禁止用 CSV / MD 反向生成 ledger；SourcePrepare 等下游只从 ledger 读取身份与候选来源。
+## Git 安全
 
-## 不放什么
-
-- AI 生成的分析、蒸馏结果、知识卡片（→ 02_原著蒸馏）
-- 原创作品（→ 03_作品工程）
-- 跨书验证后的写作知识（→ 04_写作知识库）
-- SP 转换后的 Markdown 副本（→ 06_工作区/SourcePrepare）
-
-## 目录结构
-
-```
-01_原始素材/
-├── README.md
-├── 素材资产.json      ← canonical（MaterialIntake 维护）
-├── 素材总索引.md     ← 人类可读，自动生成
-├── 素材清单.csv      ← 机器可读（9 列），自动生成
-├── 01_网络小说/
-├── 02_中文文学/
-├── 03_外国文学/
-├── 04_历史与古代资料/
-├── 05_现代专业资料/
-└── 06_其他参考资料/
-```
-
-## Agent 操作规则
-
-- 不修改、不移动原始文件
-- 新素材入库与登记由 MaterialIntake 负责（inbox intake 在 Phase 2B2）
-- 分类由真实内容推动，不预建空目录
-- 不手工编辑素材资产.json / 素材清单.csv / 素材总索引.md（均由工具生成）
+- 原著正文 / 版权源文件（`*.epub` `*.txt` `*.pdf` `*.mobi` `*.azw3` `*.zip`）**Local Only，不上传 GitHub**（`.gitignore` 全局忽略）。
+- 本目录可同步的 tracked 文件仅限：`素材资产.json` / `素材清单.csv` / `素材总索引.md` / `README.md` / `.gitkeep`。

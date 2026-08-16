@@ -1,6 +1,6 @@
 # SourcePrepare（SP）Skill
 
-版本：0.3.0（Phase 2B1：canonical ledger consumer）
+版本：0.3.1（Phase 2B2：canonical ledger consumer + Post-Action Writeback）
 
 ## 目标
 
@@ -185,15 +185,36 @@ python "05_Skills与自动化/01_Skills/SourcePrepare/scripts/source_prepare.py"
 默认如果目标 `full.md` 已存在则跳过。只有明确需要重跑工作副本时使用 `--force`；
 `--force` 也永远不能覆盖原始素材。
 
+调试 / 测试时可用 `--no-git-sync` 跳过收尾的 git writeback（local writeback 仍执行）：
+
+```powershell
+python "05_Skills与自动化/01_Skills/SourcePrepare/scripts/source_prepare.py" `
+  --root "E:\AI-Write" --book "一九八四" --no-git-sync
+```
+
+> `--dry-run` 绝不写文件、不 commit、不 push；`--no-git-sync` 只是跳过 git 同步，不影响转换本身。
+
 ## 完成后 local writeback
 
 SP 跑完后调用 MaterialIntake `refresh_and_render()` 刷新 `素材资产.json / 素材清单.csv / 素材总索引.md`
-（**不 git**，不写 legacy 22 列字段）：
+（不写 legacy 22 列字段）：
 
 - `metadata.json` 的 `status`（PASS/REVIEW/FAIL）与 `selected_source.sha256` 是 A 级提纯证据；
 - refresh 后 ledger 的 `purification` 自动推导：`PASS → 可用`、`REVIEW → 需复核`、`FAIL → 失败`；
 - SP **不再回写** legacy 22 列 CSV 字段（SourcePrepare状态/版本/字符数/章节数/最后检查时间），
   这些机器事实统一由 ledger 的 derived view 反映。
+
+## 完成后 Post-Action Writeback（Phase 2B2）
+
+SP 结束后默认执行 Post-Action git writeback（MaterialIntake `post_action.safe_commit_push`）：
+
+- **formal 结果（PASS / REVIEW / FAIL）且 metadata 完整（refresh 成功）且无 runtime ERROR → 自动 git sync**
+  （allowlist 仅 `01_原始素材` 三份 metadata + README + 新角色目录 `.gitkeep`；commit message
+  `chore: source-prepare writeback`）；
+- **ERROR / 异常 / refresh 失败 / unexpected diff / remote divergence → 不 commit，保留现场**（STOP_*）；
+- **`--dry-run` 绝不写文件 / commit / push**；
+- **测试与调试一律使用 `--no-git-sync`**（local writeback 仍执行，仅跳过 git）；
+- SP 输出（`06_工作区/SourcePrepare/**`）被第二道过滤拦截，任何情况下不 staging。
 
 ## 与其他 Skill 的边界
 
