@@ -141,6 +141,7 @@ def test_work_name_injection_rejected():
 def test_from_dir_path_validation():
     # 绝对路径 / .. / 非 02_素材知识库 / 多层 / 非法 book_id 前缀 → ValueError
     for bad in ("/02_素材知识库/book_0001_Alpha",
+                "02_原著蒸馏/book_0001_Alpha",  # LEGACY_DISTILL_ROOT_REJECTED
                 "02_素材知识库/../book_0001_Alpha",
                 "03_作品工程/book_0001_Alpha",
                 "02_素材知识库/book_0001_Alpha/deep",
