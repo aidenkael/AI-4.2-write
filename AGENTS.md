@@ -12,6 +12,8 @@
 
 让后台复杂度服务作者。作者不管理 Prompt / Agent / Skill / Schema / Context ID。
 
+作者应使用自然语言表达“新建/继续/切换作品、构思、规划、写、修改、确认方向、接受正文”；Agent 负责识别后台能力。不要要求作者记 StoryDesign / StoryPlan / ContextCompiler / KnowledgeRetrieve / StoryWrite 名称，也不要要求作者维护一组 Skill Prompt 模板。
+
 ## 目录 authority
 
 | 目录 | 职责 | Authority |
@@ -33,6 +35,26 @@
 **BKP 不得成为原创 Canon。** 未接受文本不得进入 production 正文/State。
 Context/Brief/recent prose 是 derivative，不得成为事实 authority。
 
+## 多作品长期规则
+
+**KNOWLEDGE_SHARED_AUTHORITY_ISOLATED**。
+
+- `02_素材知识库` 与未来成熟的 `04_写作知识库` 跨原创作品共享。
+- 每部小说的 `project_id / Author Intent / Story State / approved_plan / Decision / 正式正文 / 项目专属资料` 完全隔离。
+- 切换作品 = 切换整套原创 project context；上一作品的 Context 不得继续沿用。
+- 任何会修改正文、Story State、planning、Decision 的动作，在唯一 project_id 未确定前禁止执行。
+- 多作品存在而用户只说“继续写”时不得猜；明确说“继续《作品名》”或“切到《作品名》”时直接解析。
+- 不建立全局 `current_project` 文件作为 authority。
+
+## 长篇正文与上下文规则
+
+- 正式正文位于 `03_作品工程/<作品>/03_正文/`，物理存储按章（`第001章.md`、`第002章.md`……）。
+- 只有作者明确 acceptance 的版本进入正式正文。
+- StoryWrite 运行/acceptance 继续使用稳定 scene/write-turn ref；一个章节可包含多个 accepted ref，不把 scene 强制成文学层级。
+- accepted ref 必须可追溯到真实正式正文。
+- 每次写作不重读全文：长期连续性用 Story State；未来方向用 active approved_plan；当前任务用 ContextCompiler 少量显式 selection；短期衔接用最近 accepted 正文末尾约 1000–2000 字；久远原文按需定向读取。
+- 当前不升级原创全文 RAG / embedding / vector DB。
+
 ## 正式能力状态
 
 | 子系统 | 状态 |
@@ -46,6 +68,8 @@ Context/Brief/recent prose 是 derivative，不得成为事实 authority。
 | ContextCompiler | CONSUMER_DRIVEN_FREEZE |
 | StoryWrite primitives | KEEP_AND_FREEZE |
 | Mechanical settlement assist | KEEP_AND_FREEZE |
+| REAL_PROJECT_WIRING_DESIGN | FROZEN |
+| REAL_PROJECT_WIRING_IMPLEMENTATION | NEXT |
 | AUTHOR_FACING_ONE_SENTENCE_ENTRY | NOT_YET_PROVEN |
 | WRITER_PLATFORM_REQUIRED | NO |
 
@@ -91,8 +115,8 @@ BKP 长期保存作品身份、作品地图、BookProfile、Observation、Infere
 - 不批量蒸馏新书
 - 不升级 Retrieval/RAG/KG
 - 不实现完整 Writer/Reader/Editor/Controller/UI 平台
-- 不为了测试主动制造小说
-- 不为一次任务新造长期 Skill
+- 不为了测试主动制造真实小说；测试可在 tmp 目录创建最小虚构 fixture
+- 不为一次任务新造长期文学 Skill；REAL_PROJECT_WIRING 只允许跨 frozen 能力的最薄机械接线
 
 ## Git 安全
 
@@ -131,9 +155,6 @@ BKP 长期保存作品身份、作品地图、BookProfile、Observation、Infere
 
 ## NEXT
 
-真实 author acceptance：
-- 作者接受正文 → accepted_text
-- 进入 production Story State
-- 生成 next Context
+**REAL_PROJECT_WIRING_IMPLEMENTATION**：只实现最薄真实项目操作层，连接 `03_作品工程/<作品>` 与现有 frozen StoryDesign / StoryPlan / ContextCompiler / StoryWrite；完成新建/解析作品、accepted 正文落盘、production State 持久化、多项目隔离和 shared BKP 验证。
 
-不以 Benchmark / Gate / Phase 编号驱动。以真实创作产出驱动。
+完成后仍需真实作者纵切验证，未验证前不得把 `AUTHOR_FACING_ONE_SENTENCE_ENTRY` 标记为 proven。
