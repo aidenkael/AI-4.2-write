@@ -156,8 +156,9 @@ containers 按 id 排序；不含时间戳等 volatile 字段。**同一输入�
   事实证明，人民永远是最可爱的 / 明朝那些事儿 / 我读书少你可别骗我）不自动处理。
 - Phase 2B1.1：提纯结果持久化进 ledger（`source_sha256` / `input_fingerprint`）；
   06_工作区 清理后已结算提纯事实不消失；container `original.path` 缺失 → MISSING 且不写盘。
-- Phase 2B2：inbox intake 与 post-action writeback 已实施（见下节）；
-  旧六分类目录保留为 LEGACY_PHYSICAL_LAYOUT（Phase 2C 再迁移）。
+- Phase 2B2：inbox intake 与 post-action writeback 已实施（见下节）。
+- Phase 2C1：旧六分类目录中已确认角色（REFERENCE_WORK / RESEARCH）的 135 项资产已迁入角色型目录
+  （`01_参考作品/` / `02_研究资料/` / `03_零散素材/`）；旧目录仅暂存 6 个 NEEDS_REVIEW 资产。
 
 ## 运行方式
 
@@ -186,4 +187,4 @@ python -m pytest "05_Skills与自动化/01_Skills/MaterialIntake" -q
 - 资产变更审计 / 历史版本化 / diff 报告。
 - 素材语义分类自动化（intake 语义判断由 Agent 完成；runtime 不接 LLM、无分类字典）。
 - 与 BookDistill / KnowledgeRetrieve 的状态联动（当前只单向读 BKP 证据；settlement 由 BookDistill SKILL 驱动）。
-- Phase 2C：旧六分类目录物理迁移到新角色目录（当前保留 LEGACY_PHYSICAL_LAYOUT）。
+- Phase 2C2：`02_原著蒸馏 → 02_素材知识库` 目录重命名（尚未执行）。

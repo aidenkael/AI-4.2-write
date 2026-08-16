@@ -41,15 +41,37 @@ __pycache__/
 05_Skills与自动化/pandoc/
 
 # 原始素材不传 GitHub（本地保留，避免上传受版权保护的小说/资料）
+# Phase 2C1：角色型目录同样 ignore（01_参考作品 / 02_研究资料 / 03_零散素材）
 01_原始素材/**/*.epub
 01_原始素材/**/*.txt
 01_原始素材/**/*.zip
 01_原始素材/**/*.pdf
 01_原始素材/**/*.azw3
 01_原始素材/**/*.mobi
+01_参考作品/**/*.epub
+01_参考作品/**/*.txt
+01_参考作品/**/*.zip
+01_参考作品/**/*.pdf
+01_参考作品/**/*.azw3
+01_参考作品/**/*.mobi
+02_研究资料/**/*.epub
+02_研究资料/**/*.txt
+02_研究资料/**/*.zip
+02_研究资料/**/*.pdf
+02_研究资料/**/*.azw3
+02_研究资料/**/*.mobi
+03_零散素材/**/*.epub
+03_零散素材/**/*.txt
+03_零散素材/**/*.zip
+03_零散素材/**/*.pdf
+03_零散素材/**/*.azw3
+03_零散素材/**/*.mobi
 
 # SourcePrepare 合集识别 manifest（Local Only）
 01_原始素材/**/collection_manifest.json
+01_参考作品/**/collection_manifest.json
+02_研究资料/**/collection_manifest.json
+03_零散素材/**/collection_manifest.json
 
 # SourcePrepare 本地工作区（运行时生成，含原著派生正文；不上传）
 06_工作区/SourcePrepare/
