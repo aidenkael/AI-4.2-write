@@ -16,6 +16,14 @@ source_prepare.py — AI-Write 原著源文件标准化（SourcePrepare / SP）
 - 跑完后调用 MaterialIntake refresh_and_render 做 local writeback
   （刷新 素材资产.json / 素材清单.csv / 素材总索引.md；不 git）。
 
+Phase 2B2.1 preflight（SOURCE_PREPARE_PREFLIGHT = TRUE）：
+- production 默认（无 --dry-run / --no-git-sync）在真正 process_book / 转换之前
+  执行 post_action.precheck(root)：git repo / branch=main / fetch / HEAD==origin/main /
+  porcelain 空；失败 → 立即 STOP，不 process_book、不写 06_工作区、不 refresh、不 sync。
+- --dry-run：纯静态计划查看，不 precheck、不 fetch、不转换、不 refresh、不 sync。
+- --no-git-sync：测试/调试模式，跳过 precheck 与 post-action Git sync；
+  local conversion + local catalog writeback 仍按现有合同执行。
+
 输出位置：
   06_工作区/SourcePrepare/<作品ID>_<作品>/
       ├─ full.md
@@ -24,7 +32,7 @@ source_prepare.py — AI-Write 原著源文件标准化（SourcePrepare / SP）
       └─ conversion_report.md
 
 注意：原著正文/版权源文件 与 06_工作区 均 Local Only（不上 GitHub）；
-01_原始素材 下的 素材资产.json / 素材清单.csv / 素材总索引.md / README.md
+01_原始素材 下的 素材资产.json / 素材清单.csv / 素材总索引.md
 属于可同步的工作台元数据（MaterialIntake canonical ledger 及其 derived views）。
 """
 from __future__ import annotations
@@ -50,16 +58,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "MaterialIntake"))
 import catalog as material_catalog  # noqa: E402
 import post_action  # noqa: E402
 
-# SP 动作允许进 Git 的 tracked 面（01_原始素材 元数据；SP 输出在 06_工作区 → 第二道过滤拦截）
+# SP 动作允许进 Git 的 tracked 面（Phase 2B2.1 收窄为最小必要面：仅三份 material state files；
+# README / .gitkeep 属 Phase 2B2 安装时一次性 commit，动作期间意外修改 → STOP_UNEXPECTED_DIFF）
 SP_ALLOWLIST = [
     "01_原始素材/素材资产.json",
     "01_原始素材/素材清单.csv",
     "01_原始素材/素材总索引.md",
-    "01_原始素材/README.md",
-    "01_原始素材/00_待入库/.gitkeep",
-    "01_原始素材/01_参考作品/.gitkeep",
-    "01_原始素材/02_研究资料/.gitkeep",
-    "01_原始素材/03_零散素材/.gitkeep",
 ]
 
 SKILL_VERSION = "0.3.0"
@@ -847,6 +851,14 @@ def main(argv: Optional[list[str]] = None) -> int:
                   f"formats=[{fmts}]  来源容器=[{conts}]  type={g['asset_type']}"
                   f"  → {handle}")
         return 0
+
+    # production preflight（Phase 2B2.1）：动作前 git 安全校验。
+    # --dry-run 已 return；--no-git-sync 跳过；失败 → 立即 STOP，不开始转换。
+    if not args.no_git_sync:
+        ok, reason = post_action.precheck(root)
+        if not ok:
+            print(f"[source_prepare] PRECHECK FAILED: {reason} → STOP（不执行转换 / refresh / sync）")
+            return 1
 
     results = []
     for g in targets:

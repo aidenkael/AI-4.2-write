@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""MaterialIntake intake 测试（Phase 2B2，tmp_path，无真实数据依赖）。
+"""MaterialIntake intake 测试（Phase 2B2 + 2B2.1 transactional，tmp_path，无真实数据依赖）。
 
 覆盖：
   A. EMPTY_INBOX             无文件 → no-op
@@ -16,6 +16,14 @@
   L. ROLE_ROUTING            三种正式 type → 三个正确目录
   M. ATTACH_MARKS_STALE      已有可用 asset 附新版本 → purification 需更新 / knowledge 仍可用
   N. LOOSE_MATERIAL_NA       新 LOOSE_MATERIAL → purification=不适用；再次 refresh 仍=不适用
+
+Phase 2B2.1 事务测试（INTAKE_TRANSACTIONAL）：
+  O. PREEXISTING_CATALOG_INVALID_STOPS_BEFORE_MOVE   已有仓损坏 → STOP_BEFORE_MOVE
+  P. REFRESH_RC_FAILURE_ROLLBACK                     mock refresh rc=1 → 完整回滚
+  Q. REFRESH_EXCEPTION_ROLLBACK                      refresh 抛异常 → 完整回滚
+  R. PARTIAL_METADATA_WRITE_ROLLBACK                 CSV 已写 / MD 写失败 → 三份全恢复
+  S. DUPLICATE_NOT_LOST_ON_LATER_FAILURE             后续 settlement 失败 → duplicate 仍留 inbox
+  T. SUCCESS_TRANSACTION                             成功路径：duplicate 最后删除 + 三视图齐全
 """
 import hashlib
 import json
@@ -27,6 +35,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import catalog  # noqa: E402
 import intake  # noqa: E402
+
+
+METADATA_RELS = (catalog.LEDGER_FILENAME, catalog.LEGACY_CSV_FILENAME,
+                 catalog.INDEX_FILENAME)
 
 
 def _sha(b: bytes) -> str:
@@ -390,3 +402,144 @@ def test_loose_material_purification_not_applicable(tmp_path):
     a2 = next(x for x in ledger2["assets"] if x["name"] == "便签")
     assert a2["purification"]["status"] == "不适用"
     assert a2["knowledge"]["status"] == "未开始"
+
+
+def _make_full_metadata(root: Path) -> dict[str, bytes]:
+    """模拟真实仓三份 metadata 都在，返回 {rel: 原始 bytes} 用于 byte-for-byte 断言。"""
+    mat = root / catalog.MATERIAL_DIR_NAME
+    (mat / catalog.LEGACY_CSV_FILENAME).write_text("csv-before\n", encoding="utf-8")
+    (mat / catalog.INDEX_FILENAME).write_text("md-before\n", encoding="utf-8")
+    return {rel: (mat / rel).read_bytes() for rel in METADATA_RELS}
+
+
+def _new_asset_items(*names: str) -> list[dict]:
+    return [{"action": "NEW_ASSET", "files": [f"00_待入库/{n}.epub"], "name": n,
+             "type": "REFERENCE_WORK"} for n in names]
+
+
+# ---------- O. PREEXISTING_CATALOG_INVALID_STOPS_BEFORE_MOVE ----------
+
+def test_preexisting_catalog_invalid_stops_before_move(tmp_path):
+    root, _ = _make_repo(tmp_path)
+    mat = root / catalog.MATERIAL_DIR_NAME
+    # 模拟已有仓损坏：registered file 缺失（MISSING_REGISTERED_FILE）
+    (mat / "01_网络小说" / "Alpha" / "Alpha.epub").unlink()
+    before = _make_full_metadata(root)
+    _put_inbox(root, "新书.epub", b"brand new book")
+    report = intake.apply_plan({"items": _new_asset_items("新书")},
+                               _read_ledger(root), root)
+    assert report["ok"] is False
+    assert any("STOP_BEFORE_MOVE" in e and "MISSING_REGISTERED_FILE" in e
+               for e in report["errors"])
+    assert report["moves"] == []
+    # inbox 不动、三份 metadata 不变
+    assert (mat / intake.INBOX_DIR / "新书.epub").exists()
+    for rel, data in before.items():
+        assert (mat / rel).read_bytes() == data
+
+
+# ---------- P. REFRESH_RC_FAILURE_ROLLBACK ----------
+
+def test_refresh_rc_failure_rollback(tmp_path, monkeypatch):
+    root, _ = _make_repo(tmp_path)
+    mat = root / catalog.MATERIAL_DIR_NAME
+    before = _make_full_metadata(root)
+    _put_inbox(root, "a.epub", b"txn a")
+    _put_inbox(root, "b.epub", b"txn b")
+    monkeypatch.setattr(catalog, "refresh_and_render", lambda r: 1)  # rc=1
+    report = intake.apply_plan({"items": _new_asset_items("a", "b")},
+                               _read_ledger(root), root)
+    assert report["ok"] is False
+    assert any("refresh 失败 rc=1" in e for e in report["errors"])
+    # raw 文件回 inbox；目标目录无残留
+    inbox = mat / intake.INBOX_DIR
+    assert (inbox / "a.epub").exists() and (inbox / "b.epub").exists()
+    assert not (mat / "01_参考作品" / "a").exists()
+    assert not (mat / "01_参考作品" / "b").exists()
+    # ledger / CSV / MD byte-for-byte 原样
+    for rel, data in before.items():
+        assert (mat / rel).read_bytes() == data
+
+
+# ---------- Q. REFRESH_EXCEPTION_ROLLBACK ----------
+
+def test_refresh_exception_rollback(tmp_path, monkeypatch):
+    root, _ = _make_repo(tmp_path)
+    mat = root / catalog.MATERIAL_DIR_NAME
+    before = _make_full_metadata(root)
+    _put_inbox(root, "a.epub", b"txn a")
+
+    def boom(r):
+        raise RuntimeError("refresh exploded")
+
+    monkeypatch.setattr(catalog, "refresh_and_render", boom)
+    report = intake.apply_plan({"items": _new_asset_items("a")},
+                               _read_ledger(root), root)
+    assert report["ok"] is False
+    assert any("refresh exploded" in e for e in report["errors"])
+    assert (mat / intake.INBOX_DIR / "a.epub").exists()  # 同样完整恢复
+    for rel, data in before.items():
+        assert (mat / rel).read_bytes() == data
+
+
+# ---------- R. PARTIAL_METADATA_WRITE_ROLLBACK ----------
+
+def test_partial_metadata_write_rollback(tmp_path, monkeypatch):
+    root, _ = _make_repo(tmp_path)
+    mat = root / catalog.MATERIAL_DIR_NAME
+    before = _make_full_metadata(root)
+    _put_inbox(root, "a.epub", b"txn a")
+
+    def md_boom(ledger):
+        raise OSError("md write failed")
+
+    # refresh 已写 ledger / CSV 后，MD 渲染/写入抛异常 → 三份 metadata 全恢复
+    monkeypatch.setattr(catalog, "render_index_md", md_boom)
+    report = intake.apply_plan({"items": _new_asset_items("a")},
+                               _read_ledger(root), root)
+    assert report["ok"] is False
+    assert any("md write failed" in e for e in report["errors"])
+    assert (mat / intake.INBOX_DIR / "a.epub").exists()  # raw 回 inbox
+    for rel, data in before.items():
+        assert (mat / rel).read_bytes() == data  # 三份全部恢复
+
+
+# ---------- S. DUPLICATE_NOT_LOST_ON_LATER_FAILURE ----------
+
+def test_duplicate_not_lost_on_later_failure(tmp_path, monkeypatch):
+    root, _ = _make_repo(tmp_path)
+    mat = root / catalog.MATERIAL_DIR_NAME
+    dup = _put_inbox(root, "Alpha 副本.epub", b"alpha v1 content")  # exact duplicate
+    _put_inbox(root, "新书.epub", b"brand new book")  # 同批新素材
+    monkeypatch.setattr(catalog, "refresh_and_render", lambda r: 1)  # 后续 settlement 失败
+    report = intake.apply_plan({"items": [
+        {"action": "NEW_ASSET", "files": ["00_待入库/Alpha 副本.epub"],
+         "name": "Alpha 副本", "type": "REFERENCE_WORK"},
+        * _new_asset_items("新书")]}, _read_ledger(root), root)
+    assert report["ok"] is False
+    assert dup.exists()  # duplicate 仍在 inbox（从未删除）
+    assert (mat / intake.INBOX_DIR / "新书.epub").exists()  # 新素材也回 inbox
+    assert report["duplicates_removed"] == []
+
+
+# ---------- T. SUCCESS_TRANSACTION ----------
+
+def test_success_transaction(tmp_path):
+    root, _ = _make_repo(tmp_path)
+    mat = root / catalog.MATERIAL_DIR_NAME
+    dup = _put_inbox(root, "Alpha 副本.epub", b"alpha v1 content")  # exact duplicate
+    _put_inbox(root, "新书.epub", b"brand new book")
+    report = intake.apply_plan({"items": [
+        {"action": "NEW_ASSET", "files": ["00_待入库/Alpha 副本.epub"],
+         "name": "Alpha 副本", "type": "REFERENCE_WORK"},
+        * _new_asset_items("新书")]}, _read_ledger(root), root)
+    assert report["ok"] is True
+    assert report["new_ids"] == ["book_0004"]  # 新素材一个 asset；duplicate 不建 asset
+    assert len(report["duplicates_removed"]) == 1
+    assert not dup.exists()  # duplicate 在 settlement 成功后最后删除
+    # catalog settlement 完整：三视图全部由 refresh 写出
+    assert (mat / catalog.LEGACY_CSV_FILENAME).exists()
+    assert (mat / catalog.INDEX_FILENAME).exists()
+    ledger = _read_ledger(root)
+    assert len(ledger["assets"]) == 3
+

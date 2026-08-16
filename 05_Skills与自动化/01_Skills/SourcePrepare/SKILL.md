@@ -1,6 +1,6 @@
 # SourcePrepare（SP）Skill
 
-版本：0.3.1（Phase 2B2：canonical ledger consumer + Post-Action Writeback）
+版本：0.4.0（Phase 2B2.1：production preflight + 收窄 allowlist）
 
 ## 目标
 
@@ -185,14 +185,15 @@ python "05_Skills与自动化/01_Skills/SourcePrepare/scripts/source_prepare.py"
 默认如果目标 `full.md` 已存在则跳过。只有明确需要重跑工作副本时使用 `--force`；
 `--force` 也永远不能覆盖原始素材。
 
-调试 / 测试时可用 `--no-git-sync` 跳过收尾的 git writeback（local writeback 仍执行）：
+调试 / 测试时可用 `--no-git-sync`（跳过 precheck 与收尾 git writeback；local 转换与 local catalog writeback 仍执行）：
 
 ```powershell
 python "05_Skills与自动化/01_Skills/SourcePrepare/scripts/source_prepare.py" `
   --root "E:\AI-Write" --book "一九八四" --no-git-sync
 ```
 
-> `--dry-run` 绝不写文件、不 commit、不 push；`--no-git-sync` 只是跳过 git 同步，不影响转换本身。
+> `--dry-run` 纯静态计划查看：不 precheck、不 fetch、不转换、不 refresh、不 sync；
+> `--no-git-sync` 测试/调试模式：跳过 precheck 与 git 同步，不影响 local 转换本身。
 
 ## 完成后 local writeback
 
@@ -204,16 +205,21 @@ SP 跑完后调用 MaterialIntake `refresh_and_render()` 刷新 `素材资产.js
 - SP **不再回写** legacy 22 列 CSV 字段（SourcePrepare状态/版本/字符数/章节数/最后检查时间），
   这些机器事实统一由 ledger 的 derived view 反映。
 
-## 完成后 Post-Action Writeback（Phase 2B2）
+## 完成后 Post-Action Writeback（Phase 2B2 / 2B2.1）
 
-SP 结束后默认执行 Post-Action git writeback（MaterialIntake `post_action.safe_commit_push`）：
+SP 在转换前执行 production preflight，结束后默认执行 Post-Action git writeback（MaterialIntake `post_action`）：
 
+- **preflight（Phase 2B2.1，动作前）**：ledger/参数解析完成、dry-run 判断之后、真正 process_book / 转换之前，
+  若非 `--no-git-sync` 则执行 `post_action.precheck(root)`（git repo / branch=main / fetch / HEAD==origin/main /
+  porcelain 空）；失败 → 立即 STOP：不 process_book、不写 `06_工作区`、不 refresh、不 sync
+  （SOURCE_PREPARE_FAILS_BEFORE_CONVERSION_IF_GIT_UNSAFE=TRUE）；
 - **formal 结果（PASS / REVIEW / FAIL）且 metadata 完整（refresh 成功）且无 runtime ERROR → 自动 git sync**
-  （allowlist 仅 `01_原始素材` 三份 metadata + README + 新角色目录 `.gitkeep`；commit message
+  （allowlist 仅三份 material state files：`素材资产.json / 素材清单.csv / 素材总索引.md`；commit message
   `chore: source-prepare writeback`）；
 - **ERROR / 异常 / refresh 失败 / unexpected diff / remote divergence → 不 commit，保留现场**（STOP_*）；
-- **`--dry-run` 绝不写文件 / commit / push**；
-- **测试与调试一律使用 `--no-git-sync`**（local writeback 仍执行，仅跳过 git）；
+- **`--dry-run` 纯静态计划查看**：不 precheck、不 fetch、不转换、不 refresh、不 sync；
+- **`--no-git-sync` 测试/调试模式**：跳过 precheck 与 post-action Git sync（local conversion + local catalog
+  writeback 仍按现有合同执行）；
 - SP 输出（`06_工作区/SourcePrepare/**`）被第二道过滤拦截，任何情况下不 staging。
 
 ## 与其他 Skill 的边界

@@ -100,25 +100,32 @@ BKP 长期保存作品身份、作品地图、BookProfile、Observation、Infere
 
 临时 worktree 默认进入系统 TEMP，不在 E:\ 根留下 AI-Write-*。任务完成后删除 worktree。
 
-## Post-Action Writeback（Phase 2B2）
+## Post-Action Writeback（Phase 2B2 / 2B2.1）
 
 三个工作台动作完成后**自动**执行「更新长期 tracked 状态 → 最小验证 → git fetch → 安全 commit → 普通 fast-forward push」，
 作者无需重复要求“记得更新清单/索引/GitHub”：
 
-| 动作 | 完成条件 | allowlist |
+| 动作 | 完成条件 | allowlist（本次动作最小必要面，非 subsystem 整目录授权） |
 |---|---|---|
-| MATERIAL_INTAKE | intake apply 成功 | `01_原始素材` 三份 metadata + README + 新角色目录 `.gitkeep` |
+| MATERIAL_INTAKE | intake apply 成功（完整事务） | 三份 material state files：`01_原始素材/素材资产.json` + `素材清单.csv` + `素材总索引.md` |
 | SOURCE_PREPARE | formal 结果（PASS/REVIEW/FAIL）且 metadata 完整（refresh 成功）且无 runtime ERROR | 同上（SP 输出在 `06_工作区`，Local Only） |
-| BOOK_DISTILL | BKP FINALIZED + 全部验证通过（settlement，每作品一次） | `02_原著蒸馏/<book_id>_<书名>/` subtree + 三份 material state files |
+| BOOK_DISTILL | BKP FINALIZED + 全部验证通过（settlement，每作品一次） | 当前 book_id 的单一 distillation subtree（`02_原著蒸馏/<book_id>_<书名>/`）+ 三份 material state files |
 
 规则：
 
 - 实现统一收敛在 `MaterialIntake/post_action.py`（PRECHECK + SAFE_COMMIT_PUSH）：
   绝不 merge / rebase / force / reset / restore / clean / pull；远端前进 → STOP 保留现场；
   allowlist 外任何 tracked 变更 → STOP；无变化 → 不造空 commit。
+- **MATERIAL_INTAKE 是完整事务**（ROLLBACK_ON_FAILURE=TRUE）：动作前只读 catalog health check
+  （失败 → STOP_BEFORE_MOVE）；修改 canonical 前保存三份 metadata byte snapshot；
+  move / ledger / refresh 任一失败 → 按 journal 逆序恢复文件 + 恢复三份 metadata + 清理新建空目录
+  （不依赖 git restore）；exact duplicate 延迟到 settlement 成功后删除。
+- **Git sync 失败不回滚业务动作**：catalog settlement 已完整成功后，post_action 因
+  REMOTE_ADVANCED / UNEXPECTED_DIFF / push race 停止 → 本地 durable action 已完成，保留现场人工处理 Git。
 - 原始素材（*.epub/*.txt/*.pdf/*.mobi/*.azw3/*.zip）、`06_工作区/SourcePrepare/`、`collection_manifest.json`
   任何 action 绝不 staging（第二道过滤）。
-- 测试/调试使用 `--no-git-sync` 或 tmp git repo；真实 sync 需 worktree clean + HEAD==origin/main。
+- 测试/调试使用 `--no-git-sync` 或 tmp git repo；真实 sync 需 worktree clean + HEAD==origin/main；
+  SP production 默认在转换前执行 `post_action.precheck`，失败立即 STOP。
 - **不泛化到原创 Canon**：AI 草稿 / candidate / Brief / Context / Story State 绝不自动进 Git，
   原创作品只按作者显式 acceptance / decision 与既有合同管理。
 

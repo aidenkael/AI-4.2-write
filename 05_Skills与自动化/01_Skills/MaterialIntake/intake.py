@@ -1,12 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""MaterialIntake intake —— 新素材入库（Phase 2B2）。
+"""MaterialIntake intake —— 新素材入库（Phase 2B2 / 2B2.1 transactional）。
 
 薄层职责（不膨胀 catalog.py）：
   scan   扫描 01_原始素材/00_待入库，输出 deterministic 事实
          （path / filename / sha256 / exact_duplicate_matches / possible_existing_candidates）
-  apply  校验 explicit intake plan → 安全移动（move journal + rollback）→ ledger mutation
-         → catalog.refresh_and_render() →（默认）post_action SAFE_COMMIT_PUSH
+  apply  校验 explicit intake plan → 只读 catalog health check（STOP_BEFORE_MOVE）
+         → 三份 metadata byte snapshot → 安全移动（move journal + rollback）→ ledger mutation
+         → catalog settlement（refresh 三视图）→ 最后删除 inbox duplicate
+         →（默认）post_action SAFE_COMMIT_PUSH
+
+Phase 2B2.1 事务边界（INTAKE_TRANSACTIONAL = TRUE）：
+  - move 前基于 canonical ledger 做只读 health check；已有 MISSING_REGISTERED_FILE /
+    invalid ledger / container original 缺失 → STOP_BEFORE_MOVE，不开始 intake；
+  - 修改任何 canonical tracked state 前保存 素材资产.json / 素材清单.csv / 素材总索引.md
+    的 byte snapshot（缺失记录为 missing snapshot）；
+  - write_ledger / refresh 返回非 0 / refresh 抛异常 / CSV|MD 写入异常 → 完整回滚：
+    文件逆序恢复 + 三份 metadata 恢复原始 bytes + 新建空目录清理（INTAKE_CANONICAL_PARTIAL_WRITE = FALSE）；
+    只有 rollback 本身失败才 RECOVERY_REQUIRED；
+  - exact duplicate 只在 settlement 全部成功后最后删除（失败时 duplicate 仍留 inbox）；
+  - Git sync 失败不属于事务范围：settlement 已完成后保留现场，人工处理 Git（不回滚已完成的 intake）。
 
 架构（对应 SKILL 第 5 节）：
   用户 → Agent → intake scan → Agent 语义判断 → explicit intake plan（系统 TEMP，不 tracked）
@@ -46,16 +59,13 @@ VALID_TYPES = ("REFERENCE_WORK", "RESEARCH", "LOOSE_MATERIAL")
 UNSUPPORTED_SUFFIXES = (".doc", ".docx")
 ID_RE = re.compile(r"^book_(\d{4})$")
 
-# MaterialIntake 动作允许进 Git 的 tracked 面（01_原始素材 元数据 + 新目录 .gitkeep + README）
+# MaterialIntake 动作允许进 Git 的 tracked 面（Phase 2B2.1 收窄为最小必要面：
+# 仅三份 material state files。README / .gitkeep 属 Phase 2B2 安装时一次性 commit，
+# 动作期间意外修改 → STOP_UNEXPECTED_DIFF，避免被顺手提交）
 INTAKE_ALLOWLIST = [
     "01_原始素材/素材资产.json",
     "01_原始素材/素材清单.csv",
     "01_原始素材/素材总索引.md",
-    "01_原始素材/README.md",
-    "01_原始素材/00_待入库/.gitkeep",
-    "01_原始素材/01_参考作品/.gitkeep",
-    "01_原始素材/02_研究资料/.gitkeep",
-    "01_原始素材/03_零散素材/.gitkeep",
 ]
 
 
@@ -182,6 +192,10 @@ class _MoveError(Exception):
     pass
 
 
+class _SettlementError(Exception):
+    pass
+
+
 def allocate_next_id(ledger: dict) -> str:
     """max(existing numeric book id) + 1；不补 gap、不复用删除 ID。"""
     nums = []
@@ -242,8 +256,19 @@ def _canonical_ref_path(ledger: dict, sha: str, mat_dir: Path) -> Path | None:
     return None
 
 
+def _rmdir_chain(d: Path) -> None:
+    """从 d 向上逐级删除空目录；非空或到达 01_原始素材 即停。"""
+    while d.name != catalog.MATERIAL_DIR_NAME:
+        try:
+            d.rmdir()
+        except OSError:
+            break
+        d = d.parent
+
+
 def _rollback(journal: list[dict], mat_dir: Path, report: dict) -> None:
-    """按逆序回滚已移动文件（journal 每项含 from/to；含移动后校验失败项）。回滚失败 → RECOVERY_REQUIRED。"""
+    """按逆序回滚已移动文件（journal 每项含 from/to；含移动后校验失败项），并清理新建空目录。
+    回滚失败 → RECOVERY_REQUIRED。"""
     for j in reversed(journal):
         dst = mat_dir / j["to"]
         src = mat_dir / j["from"]
@@ -251,23 +276,80 @@ def _rollback(journal: list[dict], mat_dir: Path, report: dict) -> None:
             if dst.exists():
                 dst.replace(src)
                 report["rolled_back"].append(j["from"])
-                # 清理本次新建的空目录（ATTACH 目标在既有 asset 目录 → rmdir 非空失败，天然安全）
-                try:
-                    dst.parent.rmdir()
-                except OSError:
-                    pass
+                _rmdir_chain(dst.parent)
         except OSError as exc:
             report["errors"].append(f"RECOVERY_REQUIRED rollback 失败 {j['to']}: {exc}")
             break
 
 
+def _catalog_health_errors(root: Path, ledger: dict) -> list[str]:
+    """move 前只读 catalog health check（不写盘、不重算 SHA）。
+
+    基于当前 canonical ledger 验证：
+      - schema 合法（validate_ledger）
+      - 磁盘 registered files 全部存在（MISSING_REGISTERED_FILE）
+      - container original 存在
+    发现任何问题 → 调用方 STOP_BEFORE_MOVE，不开始 intake。
+    """
+    mat_dir = root / catalog.MATERIAL_DIR_NAME
+    errors = []
+    errors.extend(catalog.validate_ledger(ledger))
+    for a in ledger["assets"]:
+        for f in a["files"]:
+            if not (mat_dir / f["path"]).is_file():
+                errors.append(f"MISSING_REGISTERED_FILE: {a['id']}: {f['path']}")
+    for c in ledger["containers"]:
+        op = c.get("original") or {}
+        if op.get("path") and not (mat_dir / op["path"]).is_file():
+            errors.append(f"MISSING_REGISTERED_FILE: container:{c.get('id')}: {op['path']}")
+    return errors
+
+
+def _snapshot_metadata(mat_dir: Path) -> dict[str, bytes | None]:
+    """三份 canonical metadata（ledger / CSV / MD）的 byte snapshot；缺失 → None（missing snapshot）。"""
+    out = {}
+    for rel in (catalog.LEDGER_FILENAME, catalog.LEGACY_CSV_FILENAME,
+                catalog.INDEX_FILENAME):
+        p = mat_dir / rel
+        out[rel] = p.read_bytes() if p.exists() else None
+    return out
+
+
+def _rollback_all(journal: list[dict], mat_dir: Path, report: dict,
+                  snapshots: dict[str, bytes | None]) -> None:
+    """完整事务回滚（catalog settlement 失败路径）：
+      A. 按 journal 逆序恢复所有已移动文件（含新建空目录清理）
+      B. 恢复 ledger / CSV / MD 原始 bytes（原本缺失 → 删除本次新建）
+    只有 rollback 本身失败才记 RECOVERY_REQUIRED。report.ok 由调用方置 false。
+    """
+    _rollback(journal, mat_dir, report)
+    for rel, data in snapshots.items():
+        p = mat_dir / rel
+        try:
+            if data is None:
+                if p.exists():
+                    p.unlink()
+            else:
+                p.write_bytes(data)
+        except OSError as exc:
+            report["errors"].append(f"RECOVERY_REQUIRED 恢复 {rel} 失败: {exc}")
+
+
 def apply_plan(plan: dict, ledger: dict, root: Path) -> dict:
-    """执行 intake plan：validate → 移动（journal + SHA 校验）→ ledger mutation → refresh。
+    """执行 intake plan：validate → health check → snapshot → 移动（journal + SHA 校验）
+    → ledger mutation → catalog settlement → 最后删除 inbox duplicate。
+
+    Phase 2B2.1（INTAKE_TRANSACTIONAL = TRUE）：
+      - move 前基于 canonical ledger 做只读 health check（失败 → STOP_BEFORE_MOVE）；
+      - 修改任何 canonical tracked state 前保存三份 metadata byte snapshot；
+      - write_ledger / refresh 非 0 / refresh 异常 / CSV|MD 写入异常 → 完整回滚
+        （文件 + 三份 metadata + 新建空目录），不留下“ledger 已写需人工检查”的正常失败路径；
+      - exact duplicate 只在 settlement 全部成功后最后删除（失败时 inbox 不变）；
+      - Git sync 失败不在本函数范围内（settlement 已完成 → 保留现场人工处理 Git）。
 
     返回 report：
       {"ok", "new_ids", "attached", "duplicates_removed", "reviews", "moves",
        "errors", "rolled_back"}
-    任何移动失败 → 逆序回滚已移动文件；ledger 不写半份。
     """
     mat_dir = root / catalog.MATERIAL_DIR_NAME
     inbox = mat_dir / INBOX_DIR
@@ -279,6 +361,15 @@ def apply_plan(plan: dict, ledger: dict, root: Path) -> dict:
         report["errors"] = errors
         return report
 
+    # 0) move 前 catalog health check（只读）：现有仓已损坏 → STOP_BEFORE_MOVE，不开始 intake
+    health_errors = _catalog_health_errors(root, ledger)
+    if health_errors:
+        report["errors"] = [f"STOP_BEFORE_MOVE: {e}" for e in health_errors]
+        return report
+
+    # 1) 事务开始：三份 canonical metadata byte snapshot（缺失 → missing snapshot）
+    snapshots = _snapshot_metadata(mat_dir)
+
     # 逐文件：inbox 源 + 当前 SHA + 所属 plan item
     planned: list[tuple[Path, str, dict]] = []
     for item in plan["items"]:
@@ -287,18 +378,19 @@ def apply_plan(plan: dict, ledger: dict, root: Path) -> dict:
             if src.is_file():
                 planned.append((src, catalog.sha256_file(src), item))
 
-    # EXACT_DUPLICATE 自动处理（deterministic）：三条件全满足才删 inbox 副本，否则 STOP
+    # EXACT_DUPLICATE 确认（deterministic）：三条件全满足才记录待删，暂不 unlink；
+    # 全部 settlement 成功后最后删除（失败时 duplicate 仍留 inbox，不造成部分状态改变）
     known_shas = _collect_known_shas(ledger)
     remaining: list[tuple[Path, str, dict]] = []
+    pending_duplicates: list[dict] = []
     for src, sha, item in planned:
         if sha not in known_shas:
             remaining.append((src, sha, item))
             continue
         ref_path = _canonical_ref_path(ledger, sha, mat_dir)
         if ref_path is not None and ref_path.exists():
-            src.unlink()
-            report["duplicates_removed"].append({"file": f"{INBOX_DIR}/{src.name}",
-                                                 "sha": sha, "match": known_shas[sha]})
+            pending_duplicates.append({"file": f"{INBOX_DIR}/{src.name}",
+                                       "sha": sha, "match": known_shas[sha]})
         else:
             report["errors"].append(
                 f"EXACT_DUPLICATE 删除条件不满足（canonical source 缺失）: "
@@ -340,19 +432,29 @@ def apply_plan(plan: dict, ledger: dict, root: Path) -> dict:
         _rollback(journal, mat_dir, report)
         return report
 
-    # 全部移动成功 → 内存 mutation → 落盘 ledger → refresh 三视图
+    # 全部移动成功 → 内存 mutation → 落盘 ledger → catalog settlement（refresh 三视图）
     old_ids = {a["id"] for a in ledger["assets"]}
     new_ledger = _mutate_ledger(ledger, journal)
     try:
         catalog.write_ledger(new_ledger, mat_dir / catalog.LEDGER_FILENAME)
-    except OSError as exc:
-        report["errors"].append(f"写 ledger 失败: {exc}")
-        _rollback(journal, mat_dir, report)
+        rc = catalog.refresh_and_render(root)
+        if rc != 0:
+            raise _SettlementError(f"catalog refresh 失败 rc={rc}")
+    except Exception as exc:
+        report["errors"].append(f"catalog settlement 失败: {exc}")
+        _rollback_all(journal, mat_dir, report, snapshots)
         return report
-    rc = catalog.refresh_and_render(root)
-    if rc != 0:
-        report["errors"].append(f"catalog refresh 失败 rc={rc}（ledger 已写，需人工检查）")
-        return report
+
+    # 5) settlement 完整成功 → 最后删除 inbox duplicate（事务收尾）
+    for d in pending_duplicates:
+        try:
+            (mat_dir / d["file"]).unlink()
+            report["duplicates_removed"].append(d)
+        except OSError as exc:
+            report["errors"].append(f"删除 inbox duplicate 失败（settlement 已完成，不回滚）: "
+                                    f"{d['file']}: {exc}")
+            report["ok"] = False
+            return report
 
     report["new_ids"] = sorted(a["id"] for a in new_ledger["assets"]
                                if a["id"] not in old_ids)

@@ -170,7 +170,7 @@ python scripts/book_distill.py bkp      --output "02_原著蒸馏/<book_id>_<书
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
-## Finalized Settlement（Phase 2B2）
+## Finalized Settlement（Phase 2B2 / 2B2.1）
 
 **只在 BKP FINALIZED 且全部验证通过后，对当前作品执行一次 settlement**（收尾动作，不重复执行）：
 
@@ -180,10 +180,12 @@ python -m unittest discover -s tests -p "test_*.py"
    - git `precheck`：`fetch` 成功、`branch == main`、`HEAD == origin/main`、porcelain 空（MaterialIntake `post_action.precheck`）。
 2. 执行 settlement：
    - **catalog refresh**：`refresh_and_render()`（`素材资产.json` 的 `knowledge` 自动变为可用，`CSV / MD` 刷新）；
-   - **Post-Action git sync**：`post_action.safe_commit_push`，allowlist 见 `scripts/settlement_contract.py`：
-     `02_原著蒸馏/<book_id>_<书名>/` 整棵 subtree + `01_原始素材` 三份 material state files；
+   - **动态 allowlist（Phase 2B2.1，BD_SETTLEMENT_CURRENT_BOOK_ONLY）**：`scripts/settlement_contract.py` 的
+     `build_settlement_allowlist(book_id, work_name)` / `build_settlement_allowlist_from_dir(distill_rel)` 按当前作品构建：
+     当前 book_id 的**单一** distillation subtree（`02_原著蒸馏/<book_id>_<书名>/`）+ 三份 material state files；
+     `02_原著蒸馏/` 整目录授权已废止；sibling（book_0002_Beta）与伪造前缀（book_00010_Fake）一律拒绝；
      commit message 使用 `chore: settle book_<XXXX> <书名>`。
-3. **绝不包含**：`01_原始素材` 原著全文（Local Only）、`06_工作区/**`（Local Only）、其他作品目录。
+3. **绝不包含**：`01_原始素材` 原著全文（Local Only）、`06_工作区/**`（Local Only）、其他作品目录（含 sibling）。
 4. settlement 不修改 `book_distill.py` runtime；具体动作由 Agent 按本 SKILL 执行（`settlement_contract.py` 只提供 contract 常量与校验）。
 
 ## 范围边界

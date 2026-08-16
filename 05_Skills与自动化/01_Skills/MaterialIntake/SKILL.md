@@ -1,6 +1,6 @@
 # MaterialIntake（MI）Skill
 
-版本：0.3.0（Phase 2B2：inbox intake + post-action writeback）
+版本：0.4.0（Phase 2B2.1：transactional intake + 收窄 allowlist）
 能力状态：CANONICAL_CATALOG_AVAILABLE + INTAKE_AND_WRITEBACK_AVAILABLE
 
 ## 目标
@@ -109,13 +109,21 @@ containers 按 id 排序；不含时间戳等 volatile 字段。**同一输入�
    exact_duplicate_matches / possible_existing_candidates）；
 2. **Agent 语义判断**：每文件判定 NEW_ASSET / ATTACH_EXISTING / REVIEW
    （runtime 不接 LLM、不硬编码分类字典、不做 fuzzy 自动合并）；
-3. `intake.py apply --plan <plan.json>`：校验 → 移动（journal + SHA 校验）→
-   ledger mutation → refresh 三视图 →（默认）post_action SAFE_COMMIT_PUSH。
+3. `intake.py apply --plan <plan.json>`：健康检查 → byte snapshot → 校验 → 移动（journal + SHA 校验）→
+   ledger mutation → refresh 三视图 →（默认）post_action SAFE_COMMIT_PUSH（完整事务，见下）。
 
 规则：
 
-- **EXACT_DUPLICATE** 三条件（重算 inbox SHA + canonical 已有同 SHA + canonical source 文件真实存在）
-  全满足才删除 inbox 副本，否则 STOP 保留；
+- **完整事务（ROLLBACK_ON_FAILURE=TRUE，Phase 2B2.1）**：apply 开始前基于当前 canonical ledger 做只读
+  catalog health check（invalid ledger / MISSING_REGISTERED_FILE / container original 缺失 / schema error
+  → STOP_BEFORE_MOVE，inbox 不动）；修改 canonical 前保存三份 metadata（素材资产.json / 素材清单.csv /
+  素材总索引.md）的 byte snapshot（缺失文件记 missing）；move / ledger / refresh 任一失败
+  → 按 journal 逆序恢复已移动文件 + 恢复三份 metadata 原始 bytes + 清理新建空目录 + report.ok=false
+  （INTAKE_CANONICAL_PARTIAL_WRITE=FALSE，不依赖 git restore）；只有 rollback 本身失败才输出 RECOVERY_REQUIRED。
+- **EXACT_DUPLICATE 延迟删除**：确认（三条件）后先暂存，待 move + ledger + settlement 全部成功后才
+  unlink inbox 副本；settlement 失败时 duplicate 仍留 inbox。
+- **Git sync 失败不回滚业务动作**：catalog settlement 已成功后 post_action 因 REMOTE_ADVANCED /
+  UNEXPECTED_DIFF / push race 停止 → 本地 durable action 已完成，保留现场人工处理 Git。
 - **稳定 ID**：`book_XXXX` max+1（不补 gap、不复用删除 ID）；批量 NEW_ASSET 按 deterministic inbox path 排序分配；
 - **NEW_ASSET 路由**：REFERENCE_WORK → `01_参考作品/`、RESEARCH → `02_研究资料/`、
   LOOSE_MATERIAL → `03_零散素材/`（safe_name，不建二级 taxonomy）；
@@ -123,11 +131,10 @@ containers 按 id 排序；不含时间戳等 volatile 字段。**同一输入�
   purification 需更新、knowledge 保持可用（fingerprint 机制自动处理）；
 - **REVIEW** 留 inbox 不分 ID；
 - **collision**：同名不同 SHA → `<stem>__<sha前8位><suffix>`（绝不覆盖）；
-- **rollback**：任何移动失败 → 逆序回滚已移动文件并清理新建空目录；失败输出 RECOVERY_REQUIRED；
 - 初始状态：REFERENCE_WORK/RESEARCH = 未处理/未开始；LOOSE_MATERIAL = 不适用/未开始
   （refresh 强制尊重不适用，不退回未处理）。
 
-## Post-Action Writeback（Phase 2B2 已实施）
+## Post-Action Writeback（Phase 2B2.1 已实施）
 
 `post_action.py` 提供 PRECHECK + SAFE_COMMIT_PUSH（MaterialIntake 动作默认自动执行）：
 
@@ -139,7 +146,8 @@ containers 按 id 排序；不含时间戳等 volatile 字段。**同一输入�
   `STOP_UNEXPECTED_DIFF`；无变化 → `NO_TRACKED_CHANGES`（不造空 commit）；
 - 第二道过滤：原始素材后缀（*.epub/*.txt/*.pdf/*.mobi/*.azw3/*.zip）、`06_工作区/SourcePrepare/`、
   `collection_manifest.json` 任何情况不 staging；
-- `--no-git-sync` 跳过 git（仅测试/调试）；`01_原始素材` 下只放行三份 metadata + README + `.gitkeep`。
+- `--no-git-sync` 跳过 git（仅测试/调试）；`01_原始素材` 下只放行三份 material state files
+  （素材资产.json / 素材清单.csv / 素材总索引.md；README / .gitkeep 属安装时一次性 commit，不再进入 allowlist）。
 
 ## 阶段边界（Phase 2B1/2B1.1 完成；Phase 2B2 inbox intake + writeback 完成）
 
@@ -158,11 +166,11 @@ containers 按 id 排序；不含时间戳等 volatile 字段。**同一输入�
 python "05_Skills与自动化/01_Skills/MaterialIntake/catalog.py" --root E:\AI-Write
 python "05_Skills与自动化/01_Skills/MaterialIntake/catalog.py" --root E:\AI-Write --check
 
-# inbox 扫描与入库（Phase 2B2）
+# inbox 扫描与入库（Phase 2B2 / 2B2.1）
 python "05_Skills与自动化/01_Skills/MaterialIntake/intake.py" --root E:\AI-Write scan
 python "05_Skills与自动化/01_Skills/MaterialIntake/intake.py" --root E:\AI-Write apply --plan <plan.json> [--no-git-sync]
 
-# 测试（58 项：catalog 34 + intake 14 + post_action 10；真实扫描仅约 1s）
+# 测试（77 项：catalog 47 + intake 20 + post_action 10；真实扫描仅约 1s）
 python -m pytest "05_Skills与自动化/01_Skills/MaterialIntake" -q
 ```
 

@@ -1,14 +1,21 @@
 # -*- coding: utf-8 -*-
-"""SP Post-Action Writeback integration tests（Phase 2B2 第 50 节）。
+"""SP Post-Action Writeback integration tests（Phase 2B2 第 50 节 + 2B2.1 preflight）。
 
 fake post_action / refresh / process_book：验证 sync 触发条件（不碰真实 git）：
-  1. PASS   → sync 被调用（allowlist 含 01_原始素材 元数据）
+  1. PASS   → sync 被调用（allowlist 仅三份 material state files）
   2. REVIEW → sync 被调用
   3. FAIL   → sync 仍被调用（formal result 也 sync；退出码 2）
   4. ERROR  → 不 sync（保留现场）
   5. refresh 失败 → 不 sync（metadata 未形成）
   6. --no-git-sync → 不调用
   7. --dry-run → process_book / refresh / sync 全部不调用（绝不写文件）
+
+Phase 2B2.1 production preflight（SOURCE_PREPARE_PREFLIGHT）：
+  A. PRECHECK_PASS → process 正常
+  B. PRECHECK_FAIL（DIRTY_WORKTREE）→ process=0 / refresh=0 / sync=0，退出码 1
+  C. PRECHECK_FAIL（REMOTE_MISMATCH）→ 不开始转换
+  D. DRY_RUN → precheck 不调用
+  E. NO_GIT_SYNC → precheck 不调用
 
 运行：
   python -m pytest test_sp_post_action_integration.py -v
@@ -48,9 +55,10 @@ def fixture(tmp_path):
 
 
 def _invoke(root: Path, result: str, refresh_rc: int = 0,
-            dry_run: bool = False, no_git_sync: bool = False) -> tuple[int, dict]:
+            dry_run: bool = False, no_git_sync: bool = False,
+            precheck_ok: bool = True, precheck_reason: str = "OK") -> tuple[int, dict]:
     """以固定 process_book 结果调用 sp.main，返回 (exit_code, calls)。"""
-    calls = {"process": [], "refresh": 0, "sync": []}
+    calls = {"process": [], "refresh": 0, "sync": [], "precheck": 0}
     mp = pytest.MonkeyPatch()
 
     def fake_process(r, work_name, asset_type, files, book_id, pandoc, force):
@@ -65,9 +73,14 @@ def _invoke(root: Path, result: str, refresh_rc: int = 0,
         calls["sync"].append({"allowlist": list(allowlist), "message": message})
         return "OK"
 
+    def fake_precheck(r):
+        calls["precheck"] += 1
+        return (precheck_ok, precheck_reason)
+
     mp.setattr(sp, "process_book", fake_process)
     mp.setattr(sp.material_catalog, "refresh_and_render", fake_refresh)
     mp.setattr(sp.post_action, "safe_commit_push", fake_sync)
+    mp.setattr(sp.post_action, "precheck", fake_precheck)
     args = ["--root", str(root), "--all"]
     if dry_run:
         args.append("--dry-run")
@@ -85,10 +98,13 @@ def _invoke(root: Path, result: str, refresh_rc: int = 0,
 def test_pass_sync_called(fixture):
     code, calls = _invoke(fixture, "PASS Alpha")
     assert code == 0
+    assert calls["precheck"] == 1  # production 默认 preflight 已通过
     assert len(calls["sync"]) == 1
     al = calls["sync"][0]["allowlist"]
     assert "01_原始素材/素材资产.json" in al
-    assert "01_原始素材/README.md" in al
+    assert "01_原始素材/素材清单.csv" in al
+    assert "01_原始素材/素材总索引.md" in al
+    assert "01_原始素材/README.md" not in al  # allowlist 收窄：仅三份 material state files
     assert calls["sync"][0]["message"] == "chore: source-prepare writeback"
 
 
@@ -139,6 +155,48 @@ def test_no_git_sync_flag(fixture):
 def test_dry_run_no_write_no_sync(fixture):
     code, calls = _invoke(fixture, "PASS Alpha", dry_run=True)
     assert code == 0
+    assert calls["precheck"] == 0  # dry-run 不 git precheck / 不 fetch
     assert calls["process"] == []
     assert calls["refresh"] == 0
     assert calls["sync"] == []
+
+
+# ---------- 8. --no-git-sync → 跳过 precheck 与 sync（local 仍执行） ----------
+
+def test_no_git_sync_skips_precheck(fixture):
+    code, calls = _invoke(fixture, "PASS Alpha", no_git_sync=True)
+    assert code == 0
+    assert calls["precheck"] == 0  # 测试/调试模式跳过 precheck
+    assert calls["process"] == ["Alpha"]
+    assert calls["refresh"] == 1  # local writeback 仍执行
+    assert calls["sync"] == []
+
+
+# ---------- A. PRECHECK_PASS → process 正常（production 默认，见 test_pass_sync_called） ----------
+
+# ---------- B. PRECHECK_FAIL（DIRTY_WORKTREE）→ 不开始转换 ----------
+
+def test_precheck_fail_dirty_worktree_stops(fixture):
+    code, calls = _invoke(fixture, "PASS Alpha",
+                          precheck_ok=False, precheck_reason="DIRTY_WORKTREE")
+    assert code == 1
+    assert calls["precheck"] == 1
+    assert calls["process"] == []  # 不 process_book / 不转换
+    assert calls["refresh"] == 0   # 不 refresh catalog
+    assert calls["sync"] == []     # 不 commit / push
+
+
+# ---------- C. PRECHECK_FAIL（REMOTE_MISMATCH）→ 不开始转换 ----------
+
+def test_precheck_fail_remote_mismatch_stops(fixture):
+    code, calls = _invoke(fixture, "PASS Alpha",
+                          precheck_ok=False, precheck_reason="HEAD_AHEAD_OF_ORIGIN")
+    assert code == 1
+    assert calls["process"] == []
+    assert calls["refresh"] == 0
+    assert calls["sync"] == []
+
+
+# ---------- D. DRY_RUN → precheck 不调用（见 test_dry_run_no_write_no_sync） ----------
+
+# ---------- E. NO_GIT_SYNC → precheck 不调用（见 test_no_git_sync_skips_precheck） ----------
