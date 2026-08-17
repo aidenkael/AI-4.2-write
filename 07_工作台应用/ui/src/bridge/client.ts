@@ -12,9 +12,40 @@ export interface AppStatusData {
   message: string
 }
 
+export interface ProjectItem {
+  project_id: string
+  name: string
+}
+
+export interface ProjectOverview {
+  project_id: string
+  name: string
+  state: {
+    state_rev: number
+    last_authority_source: string
+  }
+  last_accepted?: {
+    chapter_path: string
+    scene_ref: string
+    sequence: number
+  }
+  recent_prose?: {
+    scene_ref: string
+    window_chars: number
+    below_target: boolean
+  }
+  planning?: {
+    entries: number
+    latest: string | null
+    latest_id?: string
+    latest_occurred?: boolean
+  }
+}
+
 interface ApiResult<T> {
   ok: boolean
   data: T
+  error?: string
 }
 
 /**
@@ -56,12 +87,32 @@ function whenBridgeReady(timeoutMs = 10000): Promise<any> {
   })
 }
 
-/** 获取应用状态（骨架验证用；数据来自 Python AppApi.get_app_status）。 */
-export async function getAppStatus(): Promise<AppStatusData> {
+async function call<T>(method: string, ...args: unknown[]): Promise<T> {
   const api = await whenBridgeReady()
-  const result = (await api.get_app_status()) as ApiResult<AppStatusData>
+  const result = (await api[method](...args)) as ApiResult<T>
   if (!result || result.ok !== true) {
-    throw new Error('get_app_status 返回异常')
+    throw new Error(result?.error || `${method} 返回异常`)
   }
   return result.data
+}
+
+/** 获取应用状态（骨架验证用；数据来自 Python AppApi.get_app_status）。 */
+export async function getAppStatus(): Promise<AppStatusData> {
+  return call<AppStatusData>('get_app_status')
+}
+
+/** 真实作品列表（来自 03_作品工程）。 */
+export async function listProjects(): Promise<ProjectItem[]> {
+  const data = await call<{ projects: ProjectItem[] }>('list_projects')
+  return data.projects
+}
+
+/** 打开作品（以 project_id 优先，或作品名）。 */
+export async function openProject(project: { project_id?: string; name?: string }): Promise<{ project_id: string; name: string }> {
+  return call<{ project_id: string; name: string }>('open_project', project)
+}
+
+/** 作品最小概览（只读正式状态）。 */
+export async function getProjectOverview(projectId: string): Promise<ProjectOverview> {
+  return call<ProjectOverview>('get_project_overview', projectId)
 }

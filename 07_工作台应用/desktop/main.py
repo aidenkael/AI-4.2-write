@@ -16,7 +16,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]          # 07_工作台应用/
-BRIDGE_DIR = ROOT / "backend" / "bridge"
+BACKEND_DIR = ROOT / "backend"
+BRIDGE_DIR = BACKEND_DIR / "bridge"
+sys.path.insert(0, str(BACKEND_DIR))
 sys.path.insert(0, str(BRIDGE_DIR))
 
 import webview  # noqa: E402
