@@ -75,8 +75,10 @@
       "name": "亮剑",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "e03d8f7552285e992889b69c922d5d87596447a47ac3453bd3cc89be37b8a30b",
+        "source_sha256": "45186bd25722f9a9801bee91b0719f6323147820473198ddc317c6787dc764e8",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
