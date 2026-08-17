@@ -21,8 +21,10 @@
       "name": "一世之尊",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "f5a74f21d9ac8b026a249cfc5b9e6c6cecc53c06b6b005c6fdcaa7cb4ab3ae9f",
+        "source_sha256": "6b3d1142063f73c7e0d8c1b93026bed280c1fb5e89fdc1130c4da183c16f226e",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -48,8 +50,10 @@
       "name": "上品寒士",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "cf484d5daab91db2b16d8c8dd8589baf062c1e85bf6f90dda84996f8cc03e730",
+        "source_sha256": "09b1bc9114faea0655dd04bfcff4ba13d83818cadce6fc529e737346aa14f219",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -104,8 +108,10 @@
       "name": "创业在晚唐",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "7904295e8b936215a89ebe8ab434a7381b203af7ff464658be5979a26ed2ae9b",
+        "source_sha256": "630b2940ef825e05c0e72c16fc0a44032b13157668ded742fe7e6faace75f33f",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -131,8 +137,10 @@
       "name": "十日终焉",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "8ab5c83920a22316816833bb8da9bb71fcaca4638abb5328c21615db2ff6ba4b",
+        "source_sha256": "45821c4c380f203282c9e7482af7e123a1bce57db10c19d75f6b291cfe01d67a",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -158,8 +166,10 @@
       "name": "唐砖",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "a5d38a11230cf8192bb5e62f31762a639ced2e8374fc61c6a28ed2ed98da9667",
+        "source_sha256": "23ecdc6c62a653f22afd278ab90af3d155684256d16dff8c522c69a43b484018",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -185,8 +195,10 @@
       "name": "回到明朝当王爷",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "7be9f9e59b137d191f94897bab1a56b16257cf2f62e064bf940e43792bddc062",
+        "source_sha256": "7171d7530d4b0eb5b4f60e5972bb9560e5e35cae2ede17752b4102342e751c24",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -212,8 +224,10 @@
       "name": "大奉打更人",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "5f6460275704bc20ff65f45297f6b46810ea8e0d6c0c21aecf661d70425a2bfa",
+        "source_sha256": "5d0e0e595b24a7a4b0204bbe7fced1af0c0f3c92527742089bb05439bd42a73e",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -239,8 +253,10 @@
       "name": "大宋的智慧",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "d684812285f214c3e4aa07d5f879cca4cd23a4ef19d4e28a447a4872b75b78ce",
+        "source_sha256": "3dfa57afaed3116b96c70eebf6c31f13ab830b5f0fed0544a03272ba9ebab0ef",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -266,8 +282,10 @@
       "name": "奥术神座",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "89a40a2aaf09a0132e408f24b40715dece1baeddceb9479ad0dcd6a2018e43f2",
+        "source_sha256": "efe76ca3306d75c6feba08ececc77484b91fad7084f9126e0c898147de44867f",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -293,8 +311,10 @@
       "name": "孺子帝",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "5de75e4a185e4b578c0112a573c2d4500457a6b8415b744d06c9a9711a787fa3",
+        "source_sha256": "58c275bc56af336d91fa0453a132a142b43fc6c7b32ff764c0abd4eb274f732e",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -320,8 +340,10 @@
       "name": "官居一品",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "242b13fa2f6392f0c755420da86d2dfe0dc36096331ccb69abdaeec85718d94c",
+        "source_sha256": "06c96706188c09a3c63b95f3f4a2f378c379fa0e2842c329e4273f509ada7d15",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -347,8 +369,10 @@
       "name": "宰执天下",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "c222453e5089121c40cae2d122946ec7adff001477bb612cec41adae063b59e2",
+        "source_sha256": "90696063ff2de17e6ace0b6eeefc8406bf7ef23d848c607a851b8e3a36b11675",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -374,8 +398,10 @@
       "name": "将夜",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "a133bf27078de9301e9998b8979b3de3bf9ec0b8c14544bce6e8ded9248b8a34",
+        "source_sha256": "2eac56ce54c9f2c937b4a81f39f9be982849577734e47d1a4d493648c267746d",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -401,8 +427,10 @@
       "name": "庆余年",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "c25f27548180b6b19a6affa0260b5bb02052b5e826ae0a834dc96707e278c714",
+        "source_sha256": "7201b75bf39eb31b7989f8e4b625bb401c9dd5df2392b2e8397aa8ad1053d217",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -428,8 +456,10 @@
       "name": "异兽迷城",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "27d250e98cae3d9470db35fa624198deab683150bfb560c17f4351c21ab8a6d1",
+        "source_sha256": "6689569680d32a6e0142b4d2cc116263267d5d5273e6f0a6ea55030e9c7079ed",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -455,8 +485,10 @@
       "name": "我不是戏神",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "3c307b5448b60bbda571fde961dbe59f360fa3408efc07cc7f335a5e61b6b94e",
+        "source_sha256": "1987d95ba4a887d52c4f5d9c09bfea3dd021d183eab4b08d632527aa8b7d34a4",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -482,8 +514,10 @@
       "name": "我在精神病院学斩神",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "7a2430552f36213a8204f6161c4c4e3b40eaf9affeb55ec9fec846456429eb44",
+        "source_sha256": "fb3cf575c566d618769ef0815ff84628c1fa15d22f32e792b453a2f48967bbc5",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -509,8 +543,10 @@
       "name": "放开那个女巫",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "1cb678962c0ff76d0190281f9b1c7691ab95616316a6e10097a0ddcb9a08dd40",
+        "source_sha256": "69415ff6fb10a66acf798746bd7f87a6a328d5e4bf9643b6319ebdde968dd0f4",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -536,8 +572,10 @@
       "name": "明天下",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "7645f8c92be2fc07b332d67a3e13d15930270ced7c89003da596b74c48277001",
+        "source_sha256": "1a0bdbac4e1ab798f21aa1a4b140e3d86f202a6c64512ce44d1753ff408a14c6",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -563,8 +601,10 @@
       "name": "晚明",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "8ac0daf50536ca41c0eb6ce79ec6e233354d7aa8563caacb288537fc61c745b7",
+        "source_sha256": "a8f3b43dcd496822cd384ac8e9aa85f7dc374f8430f06c6f8321c26825093082",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -590,8 +630,10 @@
       "name": "极品家丁",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "a0461e141ba41feccdb2671529537230535f647102938e99fdfa169ec7f3c616",
+        "source_sha256": "49c6dccb63042ef6459b427164e0aee3888a530bf9702912e940ece44a5cb3a6",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -617,8 +659,10 @@
       "name": "枭臣",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "babd611802da763258a073c3681f5aac9d6224d8715e0abb1eadb72db4394d8b",
+        "source_sha256": "03cab4b44deb44bfc130adee99a3517fd5bb2793fcabf84f98ffdbd18c37d9bc",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -644,8 +688,10 @@
       "name": "步步生莲",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "e6d192e63436e7a3b64d30507225fd53d2d70d5b67b945775e618ad53a41ff82",
+        "source_sha256": "ea6597171da545b15912ee3fe4a357d7b527d5de70bf51ff652289207a918609",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -671,8 +717,10 @@
       "name": "死人经",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "bd1acff4fa1d7090e3c71fb327f1a93a20cbb29563ff2f6a224064b97f665173",
+        "source_sha256": "725a1cdf2babbe8cdad78386e060a729d2eff8c19e95935a881ae4f433d7bbaa",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -698,8 +746,10 @@
       "name": "汉乡",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "041e4435db1fa4a7b8bad8080880be792bc02af6969e059ecef7ee1f09901d2c",
+        "source_sha256": "4a131fafadf22199862eeb8d930b37ad17d4bb68aa850faf56acce28969a5488",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -725,8 +775,10 @@
       "name": "琅琊榜",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "82d9c5e5078738e98210dadfe42d2a76eb2143d8807c29e29479d506aa63bb3f",
+        "source_sha256": "a2bfa93d4a68246dd0050f77c0bfa646c3799535970cacf9049098cab3daf842",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -752,8 +804,10 @@
       "name": "秦吏",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "9614f08320bc8f3137284442b4d9604085e822a6bbfce6d1327f200bcdcf66f4",
+        "source_sha256": "6065fd705e996641fe919a0a8a69d185cd9834d16aa07d1c354a457470553b65",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -779,8 +833,10 @@
       "name": "窃明",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "6b7e60ff0a030ba5d1d66476ffc43088331b8608eb8c28cac1467977e371d71b",
+        "source_sha256": "268710943c93dae64abe68f03c0e011565b50f34adefe68b301636d5d544f40d",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -806,8 +862,10 @@
       "name": "绍宋",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "3cbb803afe844e42350fec888de10c4401099135605d2c0da1c1c751903cc69f",
+        "source_sha256": "c7a5406e6dc7e5e2e4e282ec396a6984654b2851563c0da0e8b325f7b26cf302",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -833,8 +891,10 @@
       "name": "覆汉",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "7afb554b93d5240f8ca3876b49e3ca9e22d11b9d198bd86d53e59b74b24e06e3",
+        "source_sha256": "d7961924f7985acf44fb5eaafea4125e4ada164c75751d2738a2f03e2387a431",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -860,8 +920,10 @@
       "name": "诡秘之主",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "92cb689072f4c43e0db853939013ecba64ab8f6790b151d0d0356dadd0fa5cc5",
+        "source_sha256": "1f8d9c681e1960d8283aafa0416c61923970cc55d932050728bcc4e79ddbd5a1",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -887,8 +949,10 @@
       "name": "道诡异仙",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "b501cc4a6c5fd8079f36aa9bb8dfc2a9f0f110ece13e6fa52a5a621116430703",
+        "source_sha256": "51433b5eb3fcd02e53eb46a113e7d216a82c60e5992511cb4e538d5bbd6cde5e",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -914,8 +978,10 @@
       "name": "银狐",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "02e3051774e8862e6af79e6b603867b1fa05a2ed3464667b70272a0b01b3011f",
+        "source_sha256": "b42c6167e83536085f3890db001a99cfcc1aa4eb2d54edd8491ce4996f472d7c",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -973,8 +1039,10 @@
       "name": "间客",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "b850eea4e77cbe3213aa5bc8c72fde5bc7c7a4126c7f4d8dcf6281d8f3063ae4",
+        "source_sha256": "66a70390258dcf1ba58c7dff45be68779c97bf1fb8295529cbc3b6aa0c404bcf",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1000,8 +1068,10 @@
       "name": "黎明之剑",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "7c4d879a67299aa81c66229f44cb3f63a9582bbfcb74395b4a5fd1106e48fefa",
+        "source_sha256": "6f64180c14ac127127a8e48cb3f1d4e4a9ad03820e4284f8ea3b48591dc51450",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1048,8 +1118,10 @@
       "name": "使女的故事",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "ff3c349c9d25848c1e54c788987a206e00a61b5041a9b0ed27e3376cfbc1c1f2",
+        "source_sha256": "36532f90ba669955dbbb892c2e6073dd077547c844d6d164d0e85226a241d40f",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1070,8 +1142,9 @@
       "name": "动物农场",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "5001d3fc2e6cff5daddbdfc54ea4103106832ff1f4acb4379b5a6f6672e1fe81",
+        "status": "失败"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1092,8 +1165,9 @@
       "name": "华氏451",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "47cd1e75126b87d9765e7f394e7ae73f771356f42d7595d387a69bf0aa9eb5a2",
+        "status": "失败"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1114,8 +1188,10 @@
       "name": "卡拉马佐夫兄弟",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "52926a9db1770eb5c8a9d697bfea174ae6a721902bb4f9865ce004be8f845ef9",
+        "source_sha256": "8bcb0bfe7c4e4209af370dc15b54303ebf0d7dd40ff1376896cd43245ebdfdcc",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1136,8 +1212,10 @@
       "name": "双城记",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "71d73c9182b76568933c34d0613920a33b59c3c305ae3c967a5c4bf45102ff71",
+        "source_sha256": "c3db5307b8111eef2c0ca910b19fc7bb68e30f65d0c58c56d48ef1c757e9bf65",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1158,8 +1236,10 @@
       "name": "圣殿春秋",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "81437baf3d99030f24575585d0dd6d2c07442caf76d97f00c9f71d7db9061131",
+        "source_sha256": "3261d8515eb46277a2e34316f04ffe16ce75be54f1de363006776b750dcebe7a",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1180,8 +1260,10 @@
       "name": "基督山伯爵",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "f16d57e30dd41604be6bd19e970390d1fd08d819fbcb81c83c264b7c0d7eb348",
+        "source_sha256": "ad574074696f6996cd874db9a51ac8fa6d8105a06af308ae067fdf52167d0d39",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1202,8 +1284,10 @@
       "name": "大师与玛格丽特",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "c9bad72ef058038912c7df02681a5a33bbfd2485fa9dad262648c73cb4d0db3c",
+        "source_sha256": "9135d8cea9598d2eadad810550bc2ed5abb5a51d8ed9e985d7af04c3ac7ea46c",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1224,8 +1308,9 @@
       "name": "审判",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "27cbf2099c27439da40ea15df2a41ccca2f2fd70c038eaf71b04ce1d89737604",
+        "status": "失败"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1246,8 +1331,10 @@
       "name": "悲惨世界",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "e73e0373c5e00c5cde33c446aece386649eb6e917f0ce6b346100d7fc6477078",
+        "source_sha256": "8c6e5694a942d1e562665fafb32d0d8f8454d5da60f1cbf4add1343762f2e5a9",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1268,8 +1355,10 @@
       "name": "战争与和平",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "33f35b91bf32312a3818d31b7f55008dbc3390cea87218e9f1d1e82e40d6bf87",
+        "source_sha256": "e138f149cac0c8e8f083b07e950cee4460b3ccdfbb3dead7e4bedf5f6e783b50",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1290,8 +1379,9 @@
       "name": "百年孤独",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "13b53e225eec6245d3b84899c1d389aa44e2e5a51f07f0c3f3f346bb07ff5d6a",
+        "status": "失败"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1312,8 +1402,10 @@
       "name": "红与黑",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "2bcdb92517dae41067af02d1f6c29d4b78e1fb0a8e94040ee8740aed45073643",
+        "source_sha256": "c84176d690364ef403c62ec1e681891c60c88937e27257264af38a1b3b453a70",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1334,8 +1426,10 @@
       "name": "罪与罚",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "de52e6c976272a834af8816099b8d4493ed8ca38ab91235699a0764e89fcdda4",
+        "source_sha256": "bea2ed42c5d558ba0fda3bf420dc86575ac7415fa04c41fde253e671dfffd293",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1356,8 +1450,10 @@
       "name": "美妙的新世界",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "94d3dd0f6da21c801117cb0c182ef2376bd318f9dbb3717426bc2657c68f87dd",
+        "source_sha256": "10b679fc6d80850ad7437c11fffa03582a072cf43d6ee02b7dc7e60a29ac20c3",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1378,8 +1474,9 @@
       "name": "萨拉马戈：失明症漫记",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "aad478990ffa836468475e0c9cb3f75253b90dfe20f36beaeecf9af7a56c649d",
+        "status": "失败"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1400,8 +1497,10 @@
       "name": "蝇王",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "1ddc5f70823b1325cdb337b9d09ec30da01b5e56feb6ba9d0e4c52524198baed",
+        "source_sha256": "27369d65e6fc8098e17e51e89ed82005e74df7efff22a2f3301c1c0fe54b94c2",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1422,8 +1521,10 @@
       "name": "静静的顿河",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "af35d526c4282c599dd0ff2dc647d2bc556355079a5dde42c118d4f8a6bd4dc7",
+        "source_sha256": "7111367261318de100cdc60a48079aecd7f12798cd1a3f04a25e50f86d83b789",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1444,8 +1545,9 @@
       "name": "1c番茄小说潜力题材预测报告",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "87935b0fbc9bf287b72bde2521873f4a8ffdd3c635d482d1e242ccf60676002b",
+        "status": "失败"
       },
       "tags": [],
       "type": "RESEARCH"
@@ -1466,8 +1568,9 @@
       "name": "1g番茄网文趋势预测分析",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "020ccdf1a6af82af5debb81a9b3b80e679ff5469904a1f0ce4f7117685c8cb05",
+        "status": "失败"
       },
       "tags": [],
       "type": "RESEARCH"
@@ -1488,8 +1591,9 @@
       "name": "题材-资料建议-work",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "ddbd46f5bd8746f5d665d269e6e90d96c37df8704ce89203b9103391e3547bea",
+        "status": "失败"
       },
       "tags": [],
       "type": "RESEARCH"
@@ -1510,8 +1614,9 @@
       "name": "题材-资料建议chat",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "248986a9bc9da92dede68dd3c36c13c56a37b1b0c743f6d68d62f1f8deedcf03",
+        "status": "失败"
       },
       "tags": [],
       "type": "RESEARCH"
@@ -1532,8 +1637,9 @@
       "name": "题材-资料建议融合",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "09a02e2b1f39d4b0df5c4467452705e573b8bde91651adc40d0160d2dcc35db1",
+        "status": "失败"
       },
       "tags": [],
       "type": "RESEARCH"
@@ -1554,8 +1660,10 @@
       "name": "大道朝天",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "08dba62d1303ed8dff841d41b1a2b9ba47dc1ec199e2afb0baf0ff5490bf65e8",
+        "source_sha256": "a4f422805cba96ac9e55393c457ad8c33f6cb417402f0b0c715cfc56211569b5",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1576,8 +1684,10 @@
       "name": "官道无疆",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "81b58ad7cd7286c6bbe20041bc79ca2bdf35dbc580f0ef3713a62cb044ec1deb",
+        "source_sha256": "bcce6f6db319436af43fcb23c4fd72f7967572290265e294c99deec597902563",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1598,8 +1708,10 @@
       "name": "二号首长",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "86ba3e772dc0f46a514bc976700fb69d143af112cdd4cbe9caf97d72b1c1719a",
+        "source_sha256": "a146624c0051f606b1d3bb2c548a455c5119b326dde35b2dd2d5430b6c0dd2b3",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1646,8 +1758,10 @@
       "name": "三国演义",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "f4b18abbdf976e415441e20469a01701693bdc70754a9e327dac2ae8931f8f09",
+        "source_sha256": "5ee0a294391756ee446f2157ca33642ecfe3a747baf72b85dfef09d6c1a85529",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1668,8 +1782,10 @@
       "name": "侯卫东官场笔记",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "144d86bd688bb7ba249007c9d43b300e3451c23c9f2f3893b440c0025bc99c60",
+        "source_sha256": "85162c714d9e10ba64b2c0479a69e1c71fc9b8b753ee2cd4cd35b1c606d666bd",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1690,8 +1806,9 @@
       "name": "儒林外史",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "c80618638f6d1aa564eb7213bc58d82f4743a30e3428b3fcdb274afdc9dbe13f",
+        "status": "失败"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1712,8 +1829,10 @@
       "name": "全职高手",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "b79d6357a0c7924b97431171efbcbf190706e83c9e4a3e95edf32c362d9fa130",
+        "source_sha256": "b4ba771577ba6039fac9ead1a79b2e3117303243547ffc269b0a126c6a19e4ce",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1734,8 +1853,10 @@
       "name": "剑来",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "bba9b1418e025ee251e3d08d638414a7ecb01a8f5bb16a7bef4a29244c7972cb",
+        "source_sha256": "8368c9b1a06a5ce8ba156fda5892cb20020b008680dbc8a99de2d833cc789940",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1756,8 +1877,10 @@
       "name": "四世同堂",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "da7a2df786154d1707147f8260c03b5f1c2519a65e5cb93bbd103db9aaf47549",
+        "source_sha256": "6b3e877303529d3b68c4d8459bfab39c74973d8d1d717b62462196ff5e7874b7",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1783,8 +1906,10 @@
       "name": "围城",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "4ba10de47d9c60f555c36e0f4b3808db060f5c394b106c036023d3c0a2df89a1",
+        "source_sha256": "af1202c7de06755d34a57112ff9af75653e98ee46c8230c19ecd9c0d5fd163d5",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1805,8 +1930,10 @@
       "name": "太平令",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "643bdb050de2b4b8a03685f9390988a0769b49ef7db5cfb8c22f408b41407585",
+        "source_sha256": "729c51db73a8a7821b1d689310ce7fe35f853e16a3a7969446c65c7b8b68d432",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1827,8 +1954,10 @@
       "name": "她上岸提分手，我转身成领导秘书",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "a9b46690ded27cdf698d7b6c3ef0f56f851d4db024a8008d303f1175f84adc1c",
+        "source_sha256": "6579f3b4fbd63d5dd39c5b0506e593d390568547b1d252b64a5afc2d4c8cac8a",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1849,8 +1978,10 @@
       "name": "子夜",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "52fd09721df6ee840c32b90395df8b810398a55780f542116c84909e05ab1378",
+        "source_sha256": "4809ffdfde16d66c9d460eafc1fc13f665b0a04583c1a7cd12d4c9a380d4d9d7",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1876,8 +2007,10 @@
       "name": "官梯",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "e65abd5adb9eef81b36b846a706910bc7792d14e10a8a5db757b318eab9dbfb2",
+        "source_sha256": "87f1f04a695c0304702e45258a64c0f11b65d4349a3187c76294e204f2238ccb",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1898,8 +2031,10 @@
       "name": "尘埃落定",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "0f9a313a823645575a24cecdf486deb199130f0b710db3331cf644241c2c8139",
+        "source_sha256": "60d5871eb67db459b34ce96b1be4652c025f5c39c002d4403770a06d80bb7e09",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1920,8 +2055,10 @@
       "name": "平凡的世界",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "35b15bdd4cd379f9ecb89b431378f081aaa1b6dba4431f1cb906e4f4bbec8087",
+        "source_sha256": "ec8c25b669707b8287f4e509e66477f7c7550e1a7016c0a9dad5d48088991c50",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1947,8 +2084,10 @@
       "name": "新官路商途",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "4e1423bdd02fc02b4fa19bd98f917fda9e52502df4a6267a23f8e0b7f1102690",
+        "source_sha256": "edcfda5bdf279c5a3bd485058451f6ec9a75864ff47e6747efe4a5ae774356c2",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1969,8 +2108,10 @@
       "name": "明朝那些事儿",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "3a94b2730aaf6edb0a8f7086e724f803642ee6bd1b95bbef01fc2579930951a2",
+        "source_sha256": "0d7fb71c27b06b7d47edc51a48604f939afc52ff7bf3b55e6f2243d01b07a0cc",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1996,8 +2137,10 @@
       "name": "明臣",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "4473a29aeebfa50270ec419fb2352bfda88de8b8b973685dc9dace388a41ee4f",
+        "source_sha256": "680c208ec774f053a18b3f5ca94be68af0da9c19eadcce2d1fe0acb83f58c45a",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2018,8 +2161,10 @@
       "name": "水浒传",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "0544252e54f0336ce120fd96c5e506a77054b3d08b55368968bb558f3173fed3",
+        "source_sha256": "480ed171f4da435ca9770c884732ed5a3496a65f7e103d16fc00bee04247679d",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2040,8 +2185,10 @@
       "name": "沧浪之水",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "e566d3c17d3153a21f0551a123b0a6220673469f61b3ddd15099c856926ea887",
+        "source_sha256": "fb78102bf91c863e8da452a7b65a54f287e5719b24e1cfabc664fefa7eb47546",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2062,8 +2209,10 @@
       "name": "活着",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "6e85ab25197eae3a0b1ca77d7d1badad90e6a6ddd2fb9483111a0bdbbe3f637c",
+        "source_sha256": "d5eaf00bfdac62718a1cb0db9f9b0486016043b82dfdd437fd2402e7c59f2d7e",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2084,8 +2233,9 @@
       "name": "牧神记",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "3c0bce2cc55a56e9a1d80216701d8d419c1704efbff968eba5ab1ab714fb5cd7",
+        "status": "失败"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2106,8 +2256,10 @@
       "name": "特种兵在都市",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "11db0e00d968a4537f57d3292c035c5f84a6a0aa51f73e3602cb89a1d27f7a63",
+        "source_sha256": "ca11702b792608a6ba51d090ca687060d90b7c897783ad028c9448a8f191cc1b",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2128,8 +2280,10 @@
       "name": "白鹿原",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "180d2135f02558c59841679ee998aa2338124410d5304bc80f482d6db28c40c6",
+        "source_sha256": "2600d0cb383afe5ca157b068bfd02740ee3112968f55266fe54c49c7feef4d3c",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2150,8 +2304,10 @@
       "name": "第一序列",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "42c8a810b6f87641a1efc92a7c1485580a59d27211cd77eaa5b93ba1284eddb9",
+        "source_sha256": "7d1a16fab7b866a3fd94224b116eb3cc3fb2217f52f06268d69b2216f6f61d11",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2172,8 +2328,10 @@
       "name": "素食者",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "9bb13a04773d46799245541ae6313fc67224700dd87affc69da3c296d13e18b6",
+        "source_sha256": "f131e0d541bfb185bede1e9d9c96b3fc22341139e6525eb1a1783592967e3d38",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2194,8 +2352,10 @@
       "name": "紫川",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "4a98a8d3ba90be98d5b78ed482ec22f25125e00b2f526c08d3d2d9a8714ef5e2",
+        "source_sha256": "fd4e47283fc6ff12799358bca3bd4b00ca72b093eb1edfb7530557149a914238",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2216,8 +2376,10 @@
       "name": "红楼梦",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "653d119533d9a0fb5c6c775d27c70496f147dac57889bcd17c28d4bfb62adad0",
+        "source_sha256": "8138278f1845a2d1ed3e154738d7174a912d04b563cb03e84a33b87097ae101c",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2238,8 +2400,10 @@
       "name": "茶馆",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "0a009e56c50d9148cf97cfde83fc8c6d91b30d2a0dcfdc0163741dd12bdced0d",
+        "source_sha256": "ce3d617fc28f533885aaa60338a4515f3022a4e22388fb70e538d75187903dba",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2260,8 +2424,10 @@
       "name": "金瓶梅",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "8506994afc8644c18fc53a8912e1f2a4bc28b6c3ef14229a4be7b57cc671baa4",
+        "source_sha256": "1a542c10f5a7d779388c978b0a24c608d0e09efd153984708bf826de29b545dd",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2282,8 +2448,10 @@
       "name": "锦衣夜行",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "df880ef5d39d3d004194302953c8add6986805f12ee4aa13e3606abc3272922c",
+        "source_sha256": "263776ebfc099bd802fcbcb70f5398fbe1ba07e239800a76205e70b03e00f25e",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2304,8 +2472,10 @@
       "name": "雪中悍刀行",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "f52f93bbd7befcd48d299696f957d4bbe4f35aa15613d008f0f47577a30c6467",
+        "source_sha256": "047efa4cd69e2be5403ac43419ea7e9572f783491953eb8b345102cc1c499012",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2327,8 +2497,10 @@
       "name": "风起陇西",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "b6c05c1722fe33474881c9e3a3958f485f66e2f6fc11ec9146fa6279fb7150fd",
+        "source_sha256": "d81cf52dcb662d019fdabc6a51471715f55a6b2f1335f08b245de605ecb7f15c",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2350,8 +2522,10 @@
       "name": "古董局中局1：佛头奇案",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "8a93033f6367cf0ce36d5755a3fd676eb9782f13e87486fb153683b21160a197",
+        "source_sha256": "d90b516153a757f0e10e216fdcab6ab93d26cbe7d70c3d5e149a9a67068852c4",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2373,8 +2547,10 @@
       "name": "古董局中局2：“清明上河图”之谜",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "5def3e3058e3b768578cfaec57332b43b8e539768a003030e9d0355012612b4b",
+        "source_sha256": "943b02ff2e7c1dca411ebe14bfcdfd1f51c44540742da66d535cc1c998f47348",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2396,8 +2572,10 @@
       "name": "古董局中局3：掠宝清单",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "4555d6a06e6dc0e4c8547d8fd4bcb95298745cdb4360826f64fc789ef926f42c",
+        "source_sha256": "5011515a43d95b587c5fa909da35311d7b776f88a0f7a96656e752022d166c9b",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2419,8 +2597,10 @@
       "name": "古董局中局4：大结局",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "964330f5b8629702b9c46eecdcfa896c5531005ff0a573e21926266743b1533f",
+        "source_sha256": "63331f8d7f93bf8f2252df0d888b35efc78b64ea45ba0692c382cc5846652add",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2442,8 +2622,10 @@
       "name": "显微镜下的大明",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "c2ec0f30a5127f7ef607494bbb6a3fe6ecd88e1df5562f4cdaa45862bb5f958b",
+        "source_sha256": "d2f431793f35e50e7759c745ae7eb87ad65d9c98678b71569df6743895974589",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2465,8 +2647,10 @@
       "name": "两京十五日（全2册）",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "ebd5d52e47e9daf471adca058f68e8ce42b215b1c95d22544e5a944e93a5d8d3",
+        "source_sha256": "0f90b8dd1e3288efb5b617abb7b04e6e5786bf9b9ec6d82c90bbb3bd8aa79177",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2488,8 +2672,10 @@
       "name": "三国配角演义",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "d788caa5160def4a784fa92bc9bc14167c5dbebc4f2a4bd539801d6668fee104",
+        "source_sha256": "93211615d3442b63ba21c621e1c659fbf87703cfb8742b02361cad47cc1be4e3",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2511,8 +2697,10 @@
       "name": "我读书少你可别骗我",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "d50af325db9b5275d15fedcbbba7291f9fbce1887a4f482a381b62a2bee65f8b",
+        "source_sha256": "8a233558ba28bb64b3f75f64c1705e40ca482ffcd43a50acae14997c6922f35a",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2534,8 +2722,10 @@
       "name": "马伯庸笑翻中国简史",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "75be93a6c25413030f3b62344f7021fe1913670635c9e9405fccd7979928605f",
+        "source_sha256": "6cbd097a516e95b2bd4cc394e1937804118eba575c1961b7c5d22869e077fad8",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2557,8 +2747,10 @@
       "name": "她死在QQ上",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "53f895830bd35569623492f671492c9462e6e03da7d11ece6c8c127dca348c2c",
+        "source_sha256": "aeb93d4ddc8473cf02eedc12a469bcb9a6cc5053e5370df9012f43f91725531a",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2580,8 +2772,10 @@
       "name": "殷商玛雅征服史",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "454bdf95314db68911535fcad39695ecf4936b2c6eb955cd4905c4bbc3487cd9",
+        "source_sha256": "5dc6e322e0d34271e1368d737a276933fd9979aa80cabf8da8cfa613f774bfd8",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2603,8 +2797,10 @@
       "name": "欧罗巴英雄记",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "81c0101a968259e3a05e000e7d5715bc46b4d6eb0a45e87e95f95a8ab0a84dae",
+        "source_sha256": "8a8b6da13d2e241014e61a7fffea567a3ce13ed10e187817035edc64090d5326",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2626,8 +2822,10 @@
       "name": "龙与地下铁",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "054d902fd3aed5ac5f02bd1139f468da7d1a150ea023dd9d257209c0ad39e81b",
+        "source_sha256": "16852b39e9f3a3e595af4f632c0295ed503b07ccf874c25733b7e61102704585",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2649,8 +2847,10 @@
       "name": "草原动物园",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "46aed69a41d7f3086a85f7af92d7c6cb550d7110f288e80918af875ae4cb8c6f",
+        "source_sha256": "2a7ccc4bce0810759af3b801dbc661d72ad6c407746bee66567fb72ed2446145",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2672,8 +2872,10 @@
       "name": "三国机密（上）龙难日",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "2d84793b245cc3df259565126879ce6a2be574460af0528c3f8f4771dc05828c",
+        "source_sha256": "7d36b22ce36aaa56bef52382c632f0e92647d8bbf0d1b7e7f61688a12cac2b67",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2695,8 +2897,10 @@
       "name": "三国机密（下）潜龙在渊",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "861bae4f708ce7ee41ca1318670e65e80d1977c3442ae0596969e68860ed063a",
+        "source_sha256": "d572025929141cab9983b7fd6945aa391700b7f5b0a556cc8408354a493d2a00",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2718,8 +2922,10 @@
       "name": "事实证明，人民永远是最可爱的",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "535aac55a5176bd37d519fc17913694284b7f84c7429c50418e820ea2e877b6b",
+        "source_sha256": "6d7d2b1a20105f221b2c1856fabc71dc071f9d41bbaf457f8d63896794aa68cc",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2741,8 +2947,10 @@
       "name": "七侯笔录（上）",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "96b1d23cef2d51ff443191378b13d9d25c0bfb8728fc6c6d4ab203a07a80e304",
+        "source_sha256": "f8245ad8da72bd52805c15c7fbc084cfba72aedc776a1a42fd9f544eb3d1ad65",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2764,8 +2972,10 @@
       "name": "七侯笔录（下）",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "dc6dd03f447e944870e37e1c4153a7e76a720625c19379fa12a26ec119d134ae",
+        "source_sha256": "d97d7d2d046a712a1ce3e7bdeae0a31cc734dfbad66337ee712d88008980d8a2",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2786,8 +2996,10 @@
       "name": "傲慢与偏见",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "5b11b0b4e062dc250e994f37a799166dd8b4fb4ec1beb778cee1b6af6deada9a",
+        "source_sha256": "53328695d5b42eb01940d163c4195f6f7193fa97913de415e6a1b9bc154ffd39",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2808,8 +3020,10 @@
       "name": "凡人修仙传",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "4eed14467edb89f29c8b6a0d57493ea592fdbff96100e5c7861119f316bcfb1b",
+        "source_sha256": "5d2f949df09a9f7115b89ff0e7ffee4846c12e47329b362edef326c7a4c819b7",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2830,8 +3044,9 @@
       "name": "大国重工",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "b55297c78a5ebdd831a35e9bbc7cce13db4e3d7bd1c90352d57f2394c4d3aa64",
+        "status": "失败"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2852,8 +3067,10 @@
       "name": "大江东去",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "b96969aeba7a1d6f42e154a17e22908b68e58115fb25bcfcea000de647180372",
+        "source_sha256": "df203f21215e250e056abaa8c49ef3943251227883cd123694f8e0dc14ae9df2",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2874,8 +3091,10 @@
       "name": "完美世界",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "6e9537f3db9794c376c82cccc33388c7296b4e2fd7dcfe97a5d1099581312898",
+        "source_sha256": "99f81f445b972f11990ba56517079b730c6a33d0625c0de165297c8aa3513b56",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2896,8 +3115,10 @@
       "name": "小王子",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "e25d7016542e563d11269a839dcf44a4f3ccd7c84ce9615e37b63a1b12b010b6",
+        "source_sha256": "0e012042edfd7e7e75d86d99da6e09255a16c80015eb0f36324ef24091883958",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2918,8 +3139,10 @@
       "name": "悟空传",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "2bf4b415e3addeacd3e98518f6948df83eb75d7a457cfe6093bba8abdf67414a",
+        "source_sha256": "a21817790ad7532e8a1cd50e690cac8a0725450d888be696903c52a7eac1b05a",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2940,8 +3163,10 @@
       "name": "惊悚乐园",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "867a4b85af0e14571dc1b87348fd0b80e47ed3ea7d814906b3e51b1c81837f8b",
+        "source_sha256": "8f1cabfa470102c1ce9914bb79ba86822bad2cde77899b327b66b1280772518d",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2962,8 +3187,10 @@
       "name": "搜神记",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "692b408bcfd7ae11889e839777a0f8da621d8b680446bc1fffc1b2218aec87b3",
+        "source_sha256": "9244e99ed4e732e87ab19aaead378f855e070fe70a1f529c0b44e128466035d4",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2984,8 +3211,10 @@
       "name": "斗破苍穹",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "d5c66342bda4feeaa8ab293d54292cdea1e0461769eb1f3e4fc9eaede9a19a46",
+        "source_sha256": "7a6f1123d4bbd609e76c93bc27cd7b356a28aa9abbdce95f3880917e6cb11514",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -3006,8 +3235,10 @@
       "name": "斗罗大陆",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "53262ecd737dd2823786b41ad2147c9c86da26bc73a38e31e27e75760bfc9a0a",
+        "source_sha256": "09d6b9e71c3a2540c3950f92de5fbf50dd827d5bc7a8f5a94d26e2d13bdc5096",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -3028,8 +3259,10 @@
       "name": "无限恐怖",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "c73dcf7e4fc303f4662251be5f6d11aa8b58953c487ac997fe20b32fa9e72cee",
+        "source_sha256": "6cdb0aba1015dd4f983147d3ff76a1b52ea26bbfcc2b7e57c1b1f6f79f40738a",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -3050,8 +3283,10 @@
       "name": "星辰变",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "5c79edea5e8164732226414b806181628bf4e80548df05a4c6add7107ee61476",
+        "source_sha256": "94f6ed52faa88bc9f1f365cbfff89c0a7400e89dfe2f708828a2436ad6be8067",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -3072,8 +3307,10 @@
       "name": "杀死一只知更鸟",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "879872b8278a0036908743c7384e887c00f01c651b607a47bf5f4f4cf5e42373",
+        "source_sha256": "8dad01c39ff23fb715259fe1ee4f435ebe28b2063d5c0eeee678a1a9598f674f",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -3094,8 +3331,10 @@
       "name": "盗墓笔记",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "e1148aeec42b32679ecf547618a3005bf598002085336e99ee103fdb70a84834",
+        "source_sha256": "e9438d3ac78e0c8c982edf70f9737c399186d73d32e57670f7c74d7815961cb7",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -3116,8 +3355,10 @@
       "name": "盘龙",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "2554ab5442adb1d532c8dbcbabd4adfeabbe1546df2c730fad0c629341fbbbaa",
+        "source_sha256": "2707d70be5b988df7e6228315e1663dcd0b5f49f1f28dd75b373bfd4f248375c",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -3138,8 +3379,10 @@
       "name": "神墓",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "474e707aa55210e6da9651d4cc7384f9b00d1bf1820374e04e0c88dc6e6639bb",
+        "source_sha256": "6470156742e24e78eb549e50b8d88dd26a8dca7b7a63a8efd430601d929ac989",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -3160,8 +3403,10 @@
       "name": "老人与海",
       "notes": "果麦经典丛书",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "cac264ff4bc14e1596d298f7b593d6a728b46d55d2f1b4b0001f197935fbb974",
+        "source_sha256": "db6b5d4da1524c0ac717e986071dbe5ee15464b634dd829653331e781c985a30",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -3182,8 +3427,10 @@
       "name": "西游记",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "712d3b7e92d136c02c6bce498a564bf188eef660084a20fa4279a499ed8093ab",
+        "source_sha256": "476bde17ca6156cde3f5b02d754394b9faa474d7860da33e2c4b21df5550126d",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -3204,8 +3451,10 @@
       "name": "诛仙",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "acdfb130772f0d05a5ecb59d173d48f6f5797ded8189a0e7e7207c98249d7634",
+        "source_sha256": "8a9883fae43f5553763d9bfea3959e88a506c1b259eb546c2b4334995b481937",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -3226,8 +3475,10 @@
       "name": "赘婿",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "6bbab63d13970b9a0b3eb8f18d19a6517cc4bc64152b7954dc6cf65a7cacef18",
+        "source_sha256": "b5377a82d9981392cadca9f74b11e49119efff39588c17efac1e25fd95964c13",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -3248,8 +3499,10 @@
       "name": "遮天",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "bb45c75c316f75a6db1e0d54fdacc6f332380015583c30f0dd293173072b0d66",
+        "source_sha256": "70c8333c70fcf9eaab123813bd527f6b82a1b0503a04409609e6394b2a657ca8",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -3270,8 +3523,10 @@
       "name": "阳神",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "39273fa65370cf94733fa468c16ad4033b4c5f0bd5c8270528e5b4d65e324c11",
+        "source_sha256": "cf8b5f2659e49a3ea2ce3a04dc76ee416e8bd48900659ab22f94b6e13d0decb8",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -3292,8 +3547,9 @@
       "name": "雪鹰领主",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "99105da8bea538eab844107de669f5eead8346a3540eac76e8e63ddcb8e5d13a",
+        "status": "失败"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -3314,8 +3570,10 @@
       "name": "骆驼祥子",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "04dca43328c8d84660fef2624ad228fdd119f8e63f7fdb63d451551f7b7b76cc",
+        "source_sha256": "d7fd866a9212a802a36061ea36f4cd308dfc6804dcbd98aaee55e5f7f510072d",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -3336,8 +3594,10 @@
       "name": "鬼吹灯",
       "notes": "",
       "purification": {
-        "evidence": null,
-        "status": "未处理"
+        "evidence": "sourceprepare_metadata",
+        "input_fingerprint": "9f8028510d9f5b1d331f151b2e28dc980e1ec4c2dc8c44b74f6462a6550fd8fe",
+        "source_sha256": "09cba392a11ccd96f3fc8a590737126961e05c9c2a2b88a9a0d532e11751e3a9",
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
