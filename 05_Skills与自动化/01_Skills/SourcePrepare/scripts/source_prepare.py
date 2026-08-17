@@ -10,8 +10,10 @@ source_prepare.py — AI-Write 原著源文件标准化（SourcePrepare / SP）
 - asset.type 决定处理策略：REFERENCE_WORK 正常处理、NEEDS_REVIEW 跳过、
   RESEARCH 保守处理（结果不进参考作品链）、LOOSE_MATERIAL 不适用。
   目录名不再决定 SP 行为。
-- 来源选择优先级：完整性 > 准确性 > 章节 > 格式（不再“EPUB 永远最好”；
-  单 EPUB 只要通过质检即可 PASS）。
+- 来源选择优先级：**EPUB-first**——有 EPUB 时先只检查/转换 EPUB；只要至少一个 EPUB
+  通过 14 项质检并得到 PASS，就直接使用 EPUB（不再读取/转换 TXT/PDF 来与 EPUB 比长度，
+  也不能因 TXT 字符更多而反选 TXT）。只有没有任何 EPUB PASS 时才 fallback 到 TXT/PDF；
+  没有 EPUB 的作品继续按现有 TXT/PDF 逻辑处理。
 - EPUB 跑 14 项质量检测（结构 + 转换 + 正文质量）。
 - 跑完后调用 MaterialIntake refresh_and_render 做 local writeback
   （刷新 素材资产.json / 素材清单.csv / 素材总索引.md；不 git）。
@@ -492,8 +494,25 @@ def convert_other(path: Path) -> Candidate:
     return cand
 
 
+def _convert_file(p: Path, pandoc: Optional[str], work: Path) -> Candidate:
+    """按扩展名分派到对应转换器（薄分派层，EPUB-first 编排用）。"""
+    ext = p.suffix.lower()
+    if ext == ".epub":
+        return convert_epub(p, pandoc, work) if pandoc else _no_pandoc_epub(p)
+    if ext == ".txt":
+        return convert_txt(p, work)
+    if ext == ".pdf":
+        return convert_pdf(p, work)
+    return convert_other(p)
+
+
 # --------------------------------------------------------------------------- #
-# 来源选择：完整性 > 准确性 > 章节 > 格式
+# 来源选择：EPUB-first 的“池内选优”
+#
+# 注：EPUB-first 的判定发生在 process_book（有 EPUB 且任一 PASS → 只评估 EPUB；
+# 无 EPUB PASS → fallback TXT/PDF；无 EPUB → 现有 TXT/PDF 逻辑）。
+# choose_candidate 只负责在“同一候选池”（EPUB-only 或 non-EPUB-only）内按质量选优，
+# 不再承担“跨格式比长度、TXT 更长反选 TXT”的职责。
 # --------------------------------------------------------------------------- #
 def choose_candidate(cands: list[Candidate]) -> tuple[Optional[Candidate], list[str]]:
     warnings: list[str] = []
@@ -708,20 +727,24 @@ def process_book(root: Path, work_name: str, asset_type: str,
 
     with tempfile.TemporaryDirectory() as td:
         work = Path(td)
-        cands: list[Candidate] = []
-        for p in sorted(files):
-            ext = p.suffix.lower()
-            if ext == ".epub":
-                cands.append(convert_epub(p, pandoc, work) if pandoc
-                             else _no_pandoc_epub(p))
-            elif ext == ".txt":
-                cands.append(convert_txt(p, work))
-            elif ext == ".pdf":
-                cands.append(convert_pdf(p, work))
-            else:
-                cands.append(convert_other(p))
+        epubs = [p for p in files if p.suffix.lower() == ".epub"]
+        others = [p for p in files if p.suffix.lower() != ".epub"]
 
-        selected, cross_warnings = choose_candidate(cands)
+        # EPUB-first：有 EPUB 先只检查/转换 EPUB。至少一个 EPUB PASS → 直接用 EPUB，
+        # 不再读取/转换 TXT/PDF（不能因 TXT 字符更多而反选 TXT）。
+        cands: list[Candidate] = [_convert_file(p, pandoc, work) for p in sorted(epubs)]
+        selected: Optional[Candidate] = None
+        cross_warnings: list[str] = []
+        if epubs and any(c.status == "PASS" for c in cands):
+            selected, cross_warnings = choose_candidate(cands)
+        else:
+            # 无任何 EPUB PASS（或根本没有 EPUB）→ fallback 到 TXT/PDF（现有逻辑）。
+            # 失败/未通过的 EPUB 仍进入报告（cands），但不参与 fallback 选源。
+            for p in sorted(others):
+                cands.append(_convert_file(p, pandoc, work))
+            fallback = [c for c in cands if c.ext != ".epub"]
+            if fallback:
+                selected, cross_warnings = choose_candidate(fallback)
         if not selected:
             overall = "FAIL"
             report.write_text(report_markdown(work_name, label, book_id, cands,
