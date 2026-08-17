@@ -134,3 +134,91 @@ def test_no_epub_txt_pdf_unchanged(tmp_path, monkeypatch):
     # 无 EPUB：仍按现有“完整性(字符数降)”选优 → 更长的 TXT 胜出
     assert meta["selected_source"]["format"] == ".txt"
     assert meta["selected_source"]["char_count"] == 10000
+
+
+# ---------- F. 单 EPUB 正文正常 + 0 章 → REVIEW（不是 FAIL），full.md 必须存在 ----------
+
+def test_single_epub_review_zero_chapters_is_review_not_fail(tmp_path, monkeypatch):
+    epub = _mk_cand(tmp_path, ".epub", "REVIEW", 50000, 0)  # 正文可用，仅章节未识别
+
+    monkeypatch.setattr(sp, "convert_epub", lambda p, pandoc, work: epub)
+    monkeypatch.setattr(sp, "split_chapters", lambda text, out_dir: 0)
+
+    files = [tmp_path / "src.epub"]
+    out = sp.process_book(tmp_path, "Alpha", "REFERENCE_WORK", files,
+                          "book_0001", "pandoc", False)
+    assert out.startswith("REVIEW Alpha")
+    meta = _meta(tmp_path)
+    assert meta["status"] == "REVIEW"
+    assert meta["selected_source"]["format"] == ".epub"
+    # 正文可用 → full.md 必须保留
+    full = tmp_path / "06_工作区" / "SourcePrepare" / "book_0001_Alpha" / "full.md"
+    assert full.exists()
+
+
+# ---------- G. EPUB 关键结构失败 → 仍 FAIL ----------
+
+def test_single_epub_critical_structure_fail_still_fail(tmp_path, monkeypatch):
+    epub = _mk_cand(tmp_path, ".epub", "FAIL", 0, 0)
+    epub.temp_md = None  # 关键结构失败：无可用转换输出
+
+    monkeypatch.setattr(sp, "convert_epub", lambda p, pandoc, work: epub)
+    monkeypatch.setattr(sp, "split_chapters", lambda text, out_dir: 0)
+
+    files = [tmp_path / "src.epub"]
+    out = sp.process_book(tmp_path, "Alpha", "REFERENCE_WORK", files,
+                          "book_0001", "pandoc", False)
+    assert out.startswith("FAIL Alpha")
+    meta = _meta(tmp_path)
+    assert meta["status"] == "FAIL"
+    full = tmp_path / "06_工作区" / "SourcePrepare" / "book_0001_Alpha" / "full.md"
+    assert not full.exists()
+
+
+# ---------- H. Pandoc 转换失败（无输出）→ 仍 FAIL ----------
+
+def test_single_epub_pandoc_failure_still_fail(tmp_path, monkeypatch):
+    epub = _mk_cand(tmp_path, ".epub", "FAIL", 0, 0)
+    epub.temp_md = None  # Pandoc 失败：无 temp_md
+
+    monkeypatch.setattr(sp, "convert_epub", lambda p, pandoc, work: epub)
+    monkeypatch.setattr(sp, "split_chapters", lambda text, out_dir: 0)
+
+    files = [tmp_path / "src.epub"]
+    out = sp.process_book(tmp_path, "Alpha", "REFERENCE_WORK", files,
+                          "book_0001", "pandoc", False)
+    assert out.startswith("FAIL Alpha")
+
+
+# ---------- I. 正文低于质量阈值 → 仍 FAIL（即使有 temp_md） ----------
+
+def test_single_epub_low_chars_still_fail(tmp_path, monkeypatch):
+    epub = _mk_cand(tmp_path, ".epub", "FAIL", 1000, 3)  # 正文过少 → 判定 FAIL
+
+    monkeypatch.setattr(sp, "convert_epub", lambda p, pandoc, work: epub)
+    monkeypatch.setattr(sp, "split_chapters", lambda text, out_dir: 0)
+
+    files = [tmp_path / "src.epub"]
+    out = sp.process_book(tmp_path, "Alpha", "REFERENCE_WORK", files,
+                          "book_0001", "pandoc", False)
+    assert out.startswith("FAIL Alpha")
+    meta = _meta(tmp_path)
+    assert meta["status"] == "FAIL"
+
+
+# ---------- J. EPUB-first / fallback 不回归：EPUB REVIEW + TXT PASS → 仍 fallback 选 TXT ----------
+
+def test_epub_review_falls_back_to_txt_not_regressed(tmp_path, monkeypatch):
+    epub = _mk_cand(tmp_path, ".epub", "REVIEW", 50000, 0)
+    txt = _mk_cand(tmp_path, ".txt", "PASS", 20000, 5)
+
+    monkeypatch.setattr(sp, "convert_epub", lambda p, pandoc, work: epub)
+    monkeypatch.setattr(sp, "convert_txt", lambda p, work: txt)
+    monkeypatch.setattr(sp, "split_chapters", lambda text, out_dir: 5)
+
+    files = [tmp_path / "src.epub", tmp_path / "src.txt"]
+    out = sp.process_book(tmp_path, "Alpha", "REFERENCE_WORK", files,
+                          "book_0001", "pandoc", False)
+    assert out.startswith("PASS Alpha")
+    meta = _meta(tmp_path)
+    assert meta["selected_source"]["format"] == ".txt"

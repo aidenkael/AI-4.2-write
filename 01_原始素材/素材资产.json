@@ -1144,7 +1144,8 @@
       "purification": {
         "evidence": "sourceprepare_metadata",
         "input_fingerprint": "5001d3fc2e6cff5daddbdfc54ea4103106832ff1f4acb4379b5a6f6672e1fe81",
-        "status": "失败"
+        "source_sha256": "a4fb5a0a9decd147d4dd01e1ca0f6447ef9c976c7a89ccaf563f7ac1e409abcd",
+        "status": "需复核"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1167,7 +1168,8 @@
       "purification": {
         "evidence": "sourceprepare_metadata",
         "input_fingerprint": "47cd1e75126b87d9765e7f394e7ae73f771356f42d7595d387a69bf0aa9eb5a2",
-        "status": "失败"
+        "source_sha256": "d86c3d4fb3acc303a4bace6109ca7366cbe11736c453a4e7c964505048ab1bca",
+        "status": "需复核"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1310,7 +1312,8 @@
       "purification": {
         "evidence": "sourceprepare_metadata",
         "input_fingerprint": "27cbf2099c27439da40ea15df2a41ccca2f2fd70c038eaf71b04ce1d89737604",
-        "status": "失败"
+        "source_sha256": "cd34d78854e5dca47a718c318c589e8da4e488904574d42c39483052b18c850c",
+        "status": "需复核"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1381,7 +1384,8 @@
       "purification": {
         "evidence": "sourceprepare_metadata",
         "input_fingerprint": "13b53e225eec6245d3b84899c1d389aa44e2e5a51f07f0c3f3f346bb07ff5d6a",
-        "status": "失败"
+        "source_sha256": "e5751000da1770ac55cc6a2136956ae3e380a22333251a6ca63d90d913ff513c",
+        "status": "需复核"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1476,7 +1480,8 @@
       "purification": {
         "evidence": "sourceprepare_metadata",
         "input_fingerprint": "aad478990ffa836468475e0c9cb3f75253b90dfe20f36beaeecf9af7a56c649d",
-        "status": "失败"
+        "source_sha256": "53aaf3e3ad1086147f369341cb319f8593c3351cea51cb26dabc8463ec0d7b55",
+        "status": "需复核"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1528,121 +1533,6 @@
       },
       "tags": [],
       "type": "REFERENCE_WORK"
-    },
-    {
-      "author": "",
-      "files": [
-        {
-          "path": "02_研究资料/1c番茄小说潜力题材预测报告/1c番茄小说潜力题材预测报告.pdf",
-          "primary": true,
-          "sha256": "7031ec0b4aae614d6964d89f31b9ecaaebaf629b89cf2483c821d352a93d579f"
-        }
-      ],
-      "id": "book_0057",
-      "knowledge": {
-        "status": "未开始"
-      },
-      "name": "1c番茄小说潜力题材预测报告",
-      "notes": "",
-      "purification": {
-        "evidence": "sourceprepare_metadata",
-        "input_fingerprint": "87935b0fbc9bf287b72bde2521873f4a8ffdd3c635d482d1e242ccf60676002b",
-        "status": "失败"
-      },
-      "tags": [],
-      "type": "RESEARCH"
-    },
-    {
-      "author": "",
-      "files": [
-        {
-          "path": "02_研究资料/1g番茄网文趋势预测分析/1g番茄网文趋势预测分析.pdf",
-          "primary": true,
-          "sha256": "417464a8ab437f0fa4014f79b5c570a18fa5cf52e3477e58c3e62b124e0ea007"
-        }
-      ],
-      "id": "book_0058",
-      "knowledge": {
-        "status": "未开始"
-      },
-      "name": "1g番茄网文趋势预测分析",
-      "notes": "",
-      "purification": {
-        "evidence": "sourceprepare_metadata",
-        "input_fingerprint": "020ccdf1a6af82af5debb81a9b3b80e679ff5469904a1f0ce4f7117685c8cb05",
-        "status": "失败"
-      },
-      "tags": [],
-      "type": "RESEARCH"
-    },
-    {
-      "author": "",
-      "files": [
-        {
-          "path": "02_研究资料/题材-资料建议-work/题材-资料建议-work.pdf",
-          "primary": true,
-          "sha256": "0c8f71411ec80ac8b40c23ea22717b92c49374070d0b94f16aade23496fa4100"
-        }
-      ],
-      "id": "book_0059",
-      "knowledge": {
-        "status": "未开始"
-      },
-      "name": "题材-资料建议-work",
-      "notes": "",
-      "purification": {
-        "evidence": "sourceprepare_metadata",
-        "input_fingerprint": "ddbd46f5bd8746f5d665d269e6e90d96c37df8704ce89203b9103391e3547bea",
-        "status": "失败"
-      },
-      "tags": [],
-      "type": "RESEARCH"
-    },
-    {
-      "author": "",
-      "files": [
-        {
-          "path": "02_研究资料/题材-资料建议chat/题材-资料建议chat.pdf",
-          "primary": true,
-          "sha256": "e4b4d8c7b7882616cd3b021f968904e0215a377abac994e90c1fff253ac90d5d"
-        }
-      ],
-      "id": "book_0060",
-      "knowledge": {
-        "status": "未开始"
-      },
-      "name": "题材-资料建议chat",
-      "notes": "",
-      "purification": {
-        "evidence": "sourceprepare_metadata",
-        "input_fingerprint": "248986a9bc9da92dede68dd3c36c13c56a37b1b0c743f6d68d62f1f8deedcf03",
-        "status": "失败"
-      },
-      "tags": [],
-      "type": "RESEARCH"
-    },
-    {
-      "author": "",
-      "files": [
-        {
-          "path": "02_研究资料/题材-资料建议融合/题材-资料建议融合.pdf",
-          "primary": true,
-          "sha256": "4ad0f779295a9286c1098560b6cd91fac5339395baca8422d254cb4b0943b3ef"
-        }
-      ],
-      "id": "book_0061",
-      "knowledge": {
-        "status": "未开始"
-      },
-      "name": "题材-资料建议融合",
-      "notes": "",
-      "purification": {
-        "evidence": "sourceprepare_metadata",
-        "input_fingerprint": "09a02e2b1f39d4b0df5c4467452705e573b8bde91651adc40d0160d2dcc35db1",
-        "status": "失败"
-      },
-      "tags": [],
-      "type": "RESEARCH"
     },
     {
       "author": "猫腻",
@@ -1808,7 +1698,8 @@
       "purification": {
         "evidence": "sourceprepare_metadata",
         "input_fingerprint": "c80618638f6d1aa564eb7213bc58d82f4743a30e3428b3fcdb274afdc9dbe13f",
-        "status": "失败"
+        "source_sha256": "892da74862697b4535a72aa868b24236effd78bd7ac11b9dcf86062fee0df7c3",
+        "status": "需复核"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2235,7 +2126,8 @@
       "purification": {
         "evidence": "sourceprepare_metadata",
         "input_fingerprint": "3c0bce2cc55a56e9a1d80216701d8d419c1704efbff968eba5ab1ab714fb5cd7",
-        "status": "失败"
+        "source_sha256": "ff3045161098750a15ecc2a8cffc7b0c74278188d934531304ed32f88d185ef4",
+        "status": "需复核"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -3046,7 +2938,8 @@
       "purification": {
         "evidence": "sourceprepare_metadata",
         "input_fingerprint": "b55297c78a5ebdd831a35e9bbc7cce13db4e3d7bd1c90352d57f2394c4d3aa64",
-        "status": "失败"
+        "source_sha256": "27beabb4283e1ff478a551edd781dae4a6f44f865961f9d37123eee5a2c297ec",
+        "status": "需复核"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -3549,7 +3442,8 @@
       "purification": {
         "evidence": "sourceprepare_metadata",
         "input_fingerprint": "99105da8bea538eab844107de669f5eead8346a3540eac76e8e63ddcb8e5d13a",
-        "status": "失败"
+        "source_sha256": "16d9e53b5982e030ca5f71e83134abe963783a8f5789f9c7df0d6b481f712e8a",
+        "status": "需复核"
       },
       "tags": [],
       "type": "REFERENCE_WORK"

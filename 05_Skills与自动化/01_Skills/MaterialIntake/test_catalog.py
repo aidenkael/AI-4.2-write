@@ -3,13 +3,13 @@
 MaterialIntake catalog builder 测试（CANONICAL_CATALOG，Phase 2B1）。
 
 覆盖（原 A–H + Phase 2B1 cutover A–H + SP contract + 枚举）：
-  A. BOOTSTRAP_COUNTS       141 assets / 182 registered files / 1 container
-  B. ID_PRESERVATION        全部 book_xxxx ID 稳定、无 gap
+  A. BOOTSTRAP_COUNTS       136 assets / 177 registered files / 1 container
+  B. ID_PRESERVATION        全部 book_xxxx ID 稳定（book_0057-0061 已注销，不复用/不重排）
   C. MULTI_SOURCE           book_0035 单 asset 双 file（含 source_container）；book_0072 双 file
   D. BKP_RECOVERY           book_0035/0038/0065 knowledge=可用 且 BKP source_sha256 在 files 中
   E. EVIDENCE_PRIORITY      无证据 → 未处理；FINALIZED BKP 优先于无证据
   F. IDEMPOTENCY            同输入重建 byte-for-byte（真实 serialize + tmp_path 端到端两次）
-  G. VIEW_PARITY            9 列 CSV（142 行）/ 索引不含易变与敏感字段
+  G. VIEW_PARITY            9 列 CSV（137 行）/ 索引不含易变与敏感字段
   H. SP_CONTRACT            真实目录 discovery + metadata schema（PASS/REVIEW/FAIL/缺失/歧义）
 
 Phase 2B1 cutover tests：
@@ -62,7 +62,8 @@ BKP_SHA_EXPECT = {
     "book_0065": "0fb3cde2dc4f8c9f4e5a2ba612f3d3d3eb049d67928cce4fcc8b2c94ea20c6a8",
 }
 
-ALL_IDS = [f"book_{i:04d}" for i in range(1, 142)]
+# 全部 book_id（book_0057-0061 五个已废弃 RESEARCH 资产已正式注销，不复用、不重排）
+ALL_IDS = [f"book_{i:04d}" for i in range(1, 142) if i not in (57, 58, 59, 60, 61)]
 
 CSV_HEADER = ["素材ID", "名称", "类型", "作者", "标签", "位置", "提纯", "知识", "备注"]
 
@@ -159,8 +160,8 @@ def _read_ledger(root: Path) -> dict:
 
 def test_bootstrap_counts(ledger):
     assert ledger["schema_version"] == "1.0"
-    assert len(ledger["assets"]) == 141
-    assert sum(len(a["files"]) for a in ledger["assets"]) == 182
+    assert len(ledger["assets"]) == 136
+    assert sum(len(a["files"]) for a in ledger["assets"]) == 177
     assert len(ledger["containers"]) == 1
 
 
@@ -272,7 +273,7 @@ def test_fake_tree_recovery(tmp_path):
 def test_view_parity(ledger):
     rows = catalog.render_catalog_csv(ledger)
     assert rows[0] == CSV_HEADER
-    assert len(rows) == 142  # 1 表头 + 141 数据行
+    assert len(rows) == 137  # 1 表头 + 136 数据行
     assert all(len(r) == 9 for r in rows)
     assert [r[0] for r in rows[1:]] == ALL_IDS
 
@@ -289,7 +290,7 @@ def test_csv_excludes_legacy_fields(ledger):
 
 def test_index_generation(ledger):
     text = catalog.render_index_md(ledger)
-    assert "素材总数：141" in text
+    assert "素材总数：136" in text
     assert "## 参考作品（REFERENCE_WORK）" in text
     assert "## 研究资料（RESEARCH）" in text
     assert "## 待确认（NEEDS_REVIEW）" in text
@@ -389,10 +390,10 @@ def test_unregistered_file(tmp_path):
 
 
 def test_csv_view(ledger):
-    # F. CSV_VIEW：正式 CSV 9 列、一 asset 一行（真实数据 141 数据行）
+    # F. CSV_VIEW：正式 CSV 9 列、一 asset 一行（真实数据 136 数据行）
     rows = catalog.render_catalog_csv(ledger)
     assert rows[0] == CSV_HEADER
-    assert len(rows) == 142
+    assert len(rows) == 137
     assert all(len(r) == 9 for r in rows)
     # book_0035 单 asset 仅一行
     assert sum(1 for r in rows[1:] if r[0] == "book_0035") == 1
@@ -615,11 +616,11 @@ def test_real_ledger_refresh_compat(ledger):
         ledger, mat, ROOT / catalog.DISTILL_DIR_NAME, ROOT / "06_工作区" / "SourcePrepare")
     assert report["missing"] == []
     assert [a["id"] for a in new_ledger["assets"]] == ALL_IDS
-    assert sum(len(a["files"]) for a in new_ledger["assets"]) == 182
+    assert sum(len(a["files"]) for a in new_ledger["assets"]) == 177
     assert len(new_ledger["containers"]) == 1
     statuses = [a["purification"]["status"] for a in new_ledger["assets"]]
-    assert statuses.count("可用") == 4  # book_0035/0038/0065(BKP) + book_0003 亮剑(SP PASS)
-    assert statuses.count("未处理") == 137
+    assert statuses.count("可用") == 127  # 全部已提纯作品（BKP 0035/0038/0065 + SP PASS）
+    assert statuses.count("未处理") == 0
     for bid, expect_sha in BKP_SHA_EXPECT.items():
         p = _asset(new_ledger, bid)["purification"]
         assert p["status"] == "可用"  # 0035/0038/0065 不得降级

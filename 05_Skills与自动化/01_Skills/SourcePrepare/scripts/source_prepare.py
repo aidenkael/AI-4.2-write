@@ -745,6 +745,15 @@ def process_book(root: Path, work_name: str, asset_type: str,
             fallback = [c for c in cands if c.ext != ".epub"]
             if fallback:
                 selected, cross_warnings = choose_candidate(fallback)
+            else:
+                # 无 TXT/PDF 兜底时：正文已成功提取且达到可用质量的 EPUB
+                # （结构正常、Pandoc 成功、正文达标，仅章节识别失败/乱码迹象等
+                # 非致命原因 → REVIEW）仍应产出 REVIEW 并保留 full.md，而不是误判 FAIL。
+                # 关键结构损坏 / Pandoc 失败 / 正文过少 的 EPUB 无可用输出 → 仍 FAIL。
+                epub_usable = [c for c in cands
+                               if c.ext == ".epub" and c.temp_md and c.status != "FAIL"]
+                if epub_usable:
+                    selected, cross_warnings = choose_candidate(epub_usable)
         if not selected:
             overall = "FAIL"
             report.write_text(report_markdown(work_name, label, book_id, cands,
