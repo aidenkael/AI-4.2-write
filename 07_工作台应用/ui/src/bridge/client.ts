@@ -4,7 +4,21 @@
  * 规则：React 组件禁止直接调用 `window.pywebview.api`；
  * 所有 Python 调用必须经过本模块。Python 侧唯一暴露入口：
  * `07_工作台应用/backend/bridge/app_api.py`（AppApi）。
+ *
+ * 统一返回合同（与 AppApi 一致）：
+ *   成功：{ ok: true,  data: T,    error: null }
+ *   失败：{ ok: false, data: null, error: { code, message } }
  */
+
+export class BridgeError extends Error {
+  readonly code: string
+
+  constructor(code: string, message: string) {
+    super(message)
+    this.name = 'BridgeError'
+    this.code = code
+  }
+}
 
 export interface AppStatusData {
   app_name: string
@@ -44,8 +58,8 @@ export interface ProjectOverview {
 
 interface ApiResult<T> {
   ok: boolean
-  data: T
-  error?: string
+  data: T | null
+  error: { code: string; message: string } | null
 }
 
 /**
@@ -77,7 +91,7 @@ function whenBridgeReady(timeoutMs = 10000): Promise<any> {
       if (settled) return
       settled = true
       cleanup()
-      reject(new Error('pywebview bridge 就绪超时：请通过 desktop/main.py 启动应用'))
+      reject(new BridgeError('BRIDGE_TIMEOUT', 'pywebview bridge 就绪超时：请通过 desktop/main.py 启动应用'))
     }
 
     const timer = window.setTimeout(onTimeout, timeoutMs)
@@ -87,11 +101,16 @@ function whenBridgeReady(timeoutMs = 10000): Promise<any> {
   })
 }
 
+/** 统一调用：解析 {ok, data, error} 合同；失败抛 BridgeError。 */
 async function call<T>(method: string, ...args: unknown[]): Promise<T> {
   const api = await whenBridgeReady()
   const result = (await api[method](...args)) as ApiResult<T>
-  if (!result || result.ok !== true) {
-    throw new Error(result?.error || `${method} 返回异常`)
+  if (!result || result.ok !== true || result.data === null) {
+    const err = result?.error
+    throw new BridgeError(
+      err?.code ?? 'BRIDGE_INVALID_RESPONSE',
+      err?.message ?? `${method} 返回异常`,
+    )
   }
   return result.data
 }
