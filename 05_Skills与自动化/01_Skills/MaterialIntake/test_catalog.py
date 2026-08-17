@@ -618,8 +618,8 @@ def test_real_ledger_refresh_compat(ledger):
     assert sum(len(a["files"]) for a in new_ledger["assets"]) == 182
     assert len(new_ledger["containers"]) == 1
     statuses = [a["purification"]["status"] for a in new_ledger["assets"]]
-    assert statuses.count("可用") == 3
-    assert statuses.count("未处理") == 138
+    assert statuses.count("可用") == 4  # book_0035/0038/0065(BKP) + book_0003 亮剑(SP PASS)
+    assert statuses.count("未处理") == 137
     for bid, expect_sha in BKP_SHA_EXPECT.items():
         p = _asset(new_ledger, bid)["purification"]
         assert p["status"] == "可用"  # 0035/0038/0065 不得降级
