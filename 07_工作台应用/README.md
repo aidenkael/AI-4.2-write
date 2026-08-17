@@ -2,7 +2,8 @@
 
 AI-write 正式作者侧桌面应用（UI 1.0，`UI_1_0_BASELINE = APPROVED`）。
 
-> 本目录当前仅登记逻辑结构与职责边界（文档收口）；工程骨架与代码实现下一阶段进行。
+> 当前状态：第一轮最小工程骨架（pywebview 桌面壳 ↔ React ↔ Bridge 验证）。
+> 未接入任何 Skill / 项目数据；operations / agents / tasks / views / config 等后续阶段按需创建。
 
 ## 逻辑结构
 
@@ -57,6 +58,41 @@ Electron、Tauri/Rust、FastAPI、WebSocket、Redis、Celery、Neo4j、自研 UI
 复杂写作统计仪表盘。
 
 统一表述：当前无真实需求证据，1.0 不建设；未来由真实 consumer blocker 决定。
+
+## 运行（第一轮骨架）
+
+前置：Python 3；Windows WebView2 Runtime（已安装）；Node.js + npm。
+
+```powershell
+# 1) Python 依赖
+pip install -r desktop/requirements.txt
+
+# 2) 前端依赖
+cd ui
+npm install
+
+# 3) 构建前端（产物 ui/dist/）
+npm run build
+
+# 4) 启动桌面（默认加载构建产物）
+cd ..
+python desktop/main.py
+```
+
+开发模式（前端热更新）：
+
+```powershell
+# 终端 1
+cd ui
+npm run dev          # Vite dev server，默认 http://127.0.0.1:5173
+
+# 终端 2
+python desktop/main.py --dev
+```
+
+Bridge 链路：React 唯一入口 `ui/src/bridge/client.ts` ↔ `desktop/main.py` 注册的
+`AppApi`（`backend/bridge/app_api.py`）。本轮唯一方法 `get_app_status()` 返回
+`{ok, data:{app_name, status, message}}`，用于验证桌面壳 ↔ React 链路。
 
 ## 运行规则
 
