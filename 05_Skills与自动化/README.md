@@ -1,6 +1,6 @@
 # 05_Skills与自动化
 
-工作台真正可调用的能力。
+工作台**已验证的基座能力 / Skills**。
 
 ## 放什么
 
@@ -34,3 +34,9 @@
 - Agent 应优先复用现有能力
 - 禁止为一次任务新造长期 Skill
 - 不重构冻结 Skill 内部结构，除非路径迁移所必需
+
+## 与 07_工作台应用 的关系
+
+- `07_工作台应用`（作者侧桌面应用）通过 **Agent Adapter** 调用这里的 Skill
+- UI 禁止直接调用 StoryWrite / StoryPlan / BookDistill 等 Skill
+- 现有 Skill 不迁移到 `07_工作台应用`，保留在 05 由 Agent Adapter 复用

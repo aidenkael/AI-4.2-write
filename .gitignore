@@ -54,6 +54,9 @@ __pycache__/
 # SourcePrepare 本地工作区（运行时生成，含原著派生正文；不上传）
 06_工作区/SourcePrepare/
 
+# 应用开发临时产物（UI、接口、pywebview、Agent 接入等；Local Only）
+06_工作区/应用开发/
+
 # BookDistill Observer discovery staging（正式长期资产由 evidence/BKP 收敛后保存）
 02_素材知识库/*/discovery/
 

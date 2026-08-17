@@ -10,17 +10,17 @@
 
 ## 核心目标
 
-让后台复杂度服务作者。作者不管理 Prompt / Agent / Skill / Schema / Context ID。
+让后台复杂度服务作者。日常创作界面中，作者不管理 Prompt / Agent / Skill / Schema / Context ID；「设置」页面允许作者真实配置 AI 服务/API、模型、Agent 与任务执行配置。
 
 作者应使用自然语言表达“新建/继续/切换作品、构思、规划、写、修改、确认方向、接受正文”；Agent 负责识别后台能力。不要要求作者记 StoryDesign / StoryPlan / ContextCompiler / KnowledgeRetrieve / StoryWrite 名称，也不要要求作者维护一组 Skill Prompt 模板。
 
 ## 作者侧产品规则
 
 - 后台按成熟作者标准工作，前台按普通新手可理解的方式交流。
-- 作者操作作品，不操作 Agent、模型或 Skill。
+- 日常创作界面中，作者操作作品和创作任务，不需要每次选择 Agent、模型或 Skill；「设置」页面允许作者真实配置 AI 服务/API、模型、Agent 与任务执行配置。Agent 是 AI-write 执行 Skills 和复用知识库的重要执行层。
 - 高频明确操作可以按钮化；模糊和创造性需求保留自然语言。
 - candidate / draft / proposal 默认不是 authority，作者明确采用后才能正式写入。
-- 当前 UI 设计 ACTIVE 但 NOT FROZEN，不能把讨论中的页面结构当最终规范。
+- UI 1.0 产品基线已确认（`UI_1_0_BASELINE = APPROVED`）：页面职责、主要导航、核心交互与视觉方向已定；具体像素/间距/局部组件实现时可小范围调整，不因此推翻 UI 1.0。
 
 ## 目录 authority
 
@@ -32,6 +32,7 @@
 | 04_写作知识库 | 经多作品验证的长期写作知识 | 跨作品经验 |
 | 05_Skills与自动化 | 工作台可调用能力 | capability |
 | 06_工作区 | 临时运行空间 | derivative/temp |
+| 07_工作台应用 | 正式作者侧桌面应用（UI、接口、Agent 接入、应用层） | 产品/应用层 |
 
 ## 创作 authority 顺序
 
@@ -80,7 +81,7 @@ Context/Brief/recent prose 是 derivative，不得成为事实 authority。
 | REAL_PROJECT_WIRING_IMPLEMENTATION | READY_FOR_REAL_VERTICAL_SLICE |
 | AUTHOR_FACING_ONE_SENTENCE_ENTRY | NOT_YET_PROVEN |
 | AUTHOR_FACING_WORKBENCH_DESIGN | ACTIVE |
-| UI_DESIGN | NOT_FROZEN |
+| UI_1_0_BASELINE | APPROVED |
 | WRITER_PLATFORM_REQUIRED | NO |
 
 ## 方法链
@@ -105,7 +106,7 @@ BKP 长期保存作品身份、作品地图、BookProfile、Observation、Infere
 
 开发决策规则：只有同时满足（1）真实使用暴露问题；（2）问题重复或严重；（3）现有能力不能低成本解决；（4）新代码能明显降低长期负担，才允许建议新 runtime。否则 DO_NOT_BUILD。
 
-窄口径：`THIN_ORCHESTRATION_BUILD_ALLOWED`——只允许复用现有合同的薄操作层；不代表 Writer platform 获批。
+窄口径：`THIN_ORCHESTRATION_BUILD_ALLOWED`——只允许复用现有合同的薄操作层；不代表完整通用 Writer platform 获批（AI-write 作者侧桌面工作台 1.0 已批准进入实现）。
 
 ## Borrow-first
 
@@ -117,6 +118,12 @@ BKP 长期保存作品身份、作品地图、BookProfile、Observation、Infere
 - Apodictic：Developmental Editing
 - ani-book-skill：evidence-first、权威工件
 
+许可与复用规则：
+- 成熟技术不重新验证；能直接使用成熟 MIT/BSD/Apache 等宽松许可组件时优先使用。
+- 同类 AGPL/GPL 项目主要借架构、产品思路、交互设计。
+- 复制具体代码前必须再次核验对应版本/文件的许可证。
+- 不要因为 GitHub 有代码就自动复制。
+
 ## 当前禁止
 
 - 未获得作者明确 acceptance / decision 时，不得修改 production 正文或 Story State
@@ -124,12 +131,12 @@ BKP 长期保存作品身份、作品地图、BookProfile、Observation、Infere
 - AI 自己的草稿、推测、candidate、Context、Brief 不得自动升级为 production authority
 - 不批量蒸馏新书
 - 不升级 Retrieval/RAG/KG
-- 不实现完整 Writer/Reader/Editor/Controller/UI 平台
+- 不建设完整通用 Writer/Reader/Editor/Controller 平台（AI-write 作者侧桌面工作台 1.0 已批准进入实现，属例外）
 - 不为了测试主动制造真实小说；测试可在 tmp 目录创建最小虚构 fixture
 - 不为一次任务新造长期文学 Skill；REAL_PROJECT_WIRING 只允许跨 frozen 能力的最薄机械接线
-- 不因当前 UI 讨论直接开发完整 UI 平台
+- 除已批准的 07_工作台应用 UI 1.0 外，不因 UI 讨论开发其他完整平台
 
-当前阶段允许的是：设计、原型和由真实 UI 需求证明必要的最小补强。
+当前阶段允许的是：按 UI 1.0 基准实现 07_工作台应用，以及由真实 UI 使用证明必要的最小底层补强。
 
 ## Git 安全
 
@@ -168,15 +175,12 @@ BKP 长期保存作品身份、作品地图、BookProfile、Observation、Infere
 
 ## NEXT
 
-**AUTHOR_FACING_WORKBENCH_DESIGN**：
+**AUTHOR_FACING_WORKBENCH_IMPLEMENTATION（UI_1_0_BASELINE = APPROVED）**：
 
-1. 完成“故事发展”交互模式和卡片类型；
-2. 合并首页、参考素材、新建作品、创作台、故事地图，形成第一版完整用户流程；
-3. 从 UI 核对三个最小基座：
-   - candidate / accepted / authority 统一决策机制
-   - 状态变化 proposal → confirm/writeback
-   - next-best-action（下一步建议）
-4. 只有真实 UI 需求证明底层缺能力时才补底层；
-5. UI 流程稳定后，再设计 UI → Author Operation Layer → Agent Adapter → Skills 的实际接线。
+1. 建立 `07_工作台应用` 工程骨架（desktop / ui / backend，仅目录结构，下一阶段）；
+2. 按 UI 1.0 基准实现顶部导航与作品内导航对应页面；
+3. 打通 UI → Bridge → Author Operations → Agent Adapter / Task Manager → 现有 Skills → 正式项目/知识数据；
+4. 实现中落实三个最小基座：candidate / accepted / authority 统一决策、proposal → confirm/writeback、next-best-action；
+5. 只有真实 UI 使用证明底层缺能力时才补底层。
 
 真实作者纵切尚未完成，因此 `AUTHOR_FACING_ONE_SENTENCE_ENTRY` 不得标记 proven。
