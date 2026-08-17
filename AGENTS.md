@@ -14,6 +14,14 @@
 
 作者应使用自然语言表达“新建/继续/切换作品、构思、规划、写、修改、确认方向、接受正文”；Agent 负责识别后台能力。不要要求作者记 StoryDesign / StoryPlan / ContextCompiler / KnowledgeRetrieve / StoryWrite 名称，也不要要求作者维护一组 Skill Prompt 模板。
 
+## 作者侧产品规则
+
+- 后台按成熟作者标准工作，前台按普通新手可理解的方式交流。
+- 作者操作作品，不操作 Agent、模型或 Skill。
+- 高频明确操作可以按钮化；模糊和创造性需求保留自然语言。
+- candidate / draft / proposal 默认不是 authority，作者明确采用后才能正式写入。
+- 当前 UI 设计 ACTIVE 但 NOT FROZEN，不能把讨论中的页面结构当最终规范。
+
 ## 目录 authority
 
 | 目录 | 职责 | Authority |
@@ -69,8 +77,10 @@ Context/Brief/recent prose 是 derivative，不得成为事实 authority。
 | StoryWrite primitives | KEEP_AND_FREEZE |
 | Mechanical settlement assist | KEEP_AND_FREEZE |
 | REAL_PROJECT_WIRING_DESIGN | FROZEN |
-| REAL_PROJECT_WIRING_IMPLEMENTATION | NEXT |
+| REAL_PROJECT_WIRING_IMPLEMENTATION | READY_FOR_REAL_VERTICAL_SLICE |
 | AUTHOR_FACING_ONE_SENTENCE_ENTRY | NOT_YET_PROVEN |
+| AUTHOR_FACING_WORKBENCH_DESIGN | ACTIVE |
+| UI_DESIGN | NOT_FROZEN |
 | WRITER_PLATFORM_REQUIRED | NO |
 
 ## 方法链
@@ -117,6 +127,9 @@ BKP 长期保存作品身份、作品地图、BookProfile、Observation、Infere
 - 不实现完整 Writer/Reader/Editor/Controller/UI 平台
 - 不为了测试主动制造真实小说；测试可在 tmp 目录创建最小虚构 fixture
 - 不为一次任务新造长期文学 Skill；REAL_PROJECT_WIRING 只允许跨 frozen 能力的最薄机械接线
+- 不因当前 UI 讨论直接开发完整 UI 平台
+
+当前阶段允许的是：设计、原型和由真实 UI 需求证明必要的最小补强。
 
 ## Git 安全
 
@@ -155,6 +168,15 @@ BKP 长期保存作品身份、作品地图、BookProfile、Observation、Infere
 
 ## NEXT
 
-**REAL_PROJECT_WIRING_IMPLEMENTATION**：只实现最薄真实项目操作层，连接 `03_作品工程/<作品>` 与现有 frozen StoryDesign / StoryPlan / ContextCompiler / StoryWrite；完成新建/解析作品、accepted 正文落盘、production State 持久化、多项目隔离和 shared BKP 验证。
+**AUTHOR_FACING_WORKBENCH_DESIGN**：
 
-完成后仍需真实作者纵切验证，未验证前不得把 `AUTHOR_FACING_ONE_SENTENCE_ENTRY` 标记为 proven。
+1. 完成“故事发展”交互模式和卡片类型；
+2. 合并首页、参考素材、新建作品、创作台、故事地图，形成第一版完整用户流程；
+3. 从 UI 核对三个最小基座：
+   - candidate / accepted / authority 统一决策机制
+   - 状态变化 proposal → confirm/writeback
+   - next-best-action（下一步建议）
+4. 只有真实 UI 需求证明底层缺能力时才补底层；
+5. UI 流程稳定后，再设计 UI → Author Operation Layer → Agent Adapter → Skills 的实际接线。
+
+真实作者纵切尚未完成，因此 `AUTHOR_FACING_ONE_SENTENCE_ENTRY` 不得标记 proven。
