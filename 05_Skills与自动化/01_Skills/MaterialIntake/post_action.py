@@ -12,6 +12,8 @@
   - allowlist 之外的任何 tracked change → POST_ACTION_UNEXPECTED_DIFF / STOP
   - 原始素材（*.epub/*.txt/*.pdf/*.mobi/*.azw3/*.zip）、06_工作区/SourcePrepare/、
     collection_manifest.json 无论任何 action 都绝不 staging（allowlist 误含也会被第二道过滤拦截）
+  - Git path 解析一律用 `--porcelain=v1 -z` / `--name-only -z`（NUL 分隔、不做 pathname
+    quoting），Windows 下中文路径不会再变成 quoted/octal 转义，allowlist 匹配不受影响
   - 无 tracked state change → NO_TRACKED_CHANGES（不制造空 commit）
 
 返回值为稳定字符串枚举：
@@ -60,18 +62,36 @@ def head_sha(root: Path, ref: str = "HEAD") -> str:
     return r.stdout.strip()
 
 
-def porcelain(root: Path) -> list[str]:
-    """返回 porcelain 行（忽略空行）。"""
-    r = _git(root, "status", "--porcelain")
-    return [ln for ln in r.stdout.splitlines() if ln.strip()]
+def porcelain(root: Path) -> list[tuple[str, str, str | None]]:
+    """返回 `git status --porcelain=v1 -z` 解析后的记录 [(XY, path1, path2_or_None), ...]。
 
+    用 `-z`（NUL 分隔）：Git 不做 pathname quoting，中文路径不会再被输出成
+    quoted/octal 转义（否则 Windows 默认 `core.quotepath=true` 会把中文变成
+    `"\\345\\216..."`，字符串截取会让 allowlist 匹配失败）。
 
-def _porcelain_path(ln: str) -> str:
-    """从 porcelain 行提取相对路径（处理 'XY path' 与 rename 'R old -> new' 与 untracked '?? dir/'）。"""
-    body = ln[3:].strip()
-    if " -> " in body:
-        body = body.split(" -> ", 1)[1]
-    return body
+    porcelain=v1 -z 记录格式：`XY path1\\0[path2\\0]`。rename/copy
+    （状态首位为 `R`/`C`）带第二个路径（先 new、后 orig），作为一个记录返回，
+    不把第二个路径当成独立状态记录。
+    """
+    r = _git(root, "status", "--porcelain=v1", "-z")
+    tokens = r.stdout.split("\0")
+    records: list[tuple[str, str, str | None]] = []
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if not tok:
+            i += 1
+            continue
+        xy = tok[:2]
+        path1 = tok[3:]
+        path2: str | None = None
+        if xy and xy[0] in ("R", "C") and i + 1 < len(tokens) and tokens[i + 1]:
+            path2 = tokens[i + 1]
+            i += 2
+        else:
+            i += 1
+        records.append((xy, path1, path2))
+    return records
 
 
 def path_allowed(rel: str, allowlist: list[str]) -> bool:
@@ -117,16 +137,20 @@ def precheck(root: Path) -> tuple[bool, str]:
 
 
 def _collect_changes(root: Path, allowlist: list[str]) -> tuple[list[str], list[str]]:
-    """遍历 porcelain，返回 (allowed_paths, unexpected_paths)。"""
+    """遍历 porcelain=v1 -z 记录，返回 (allowed_paths, unexpected_paths)。
+
+    rename/copy 记录的两个路径（new + orig）都参与 allowlist 判定，
+    但同属一条记录——不会把第二个路径当成独立状态记录。
+    """
     allowed, unexpected = [], []
-    for ln in porcelain(root):
-        rel = _porcelain_path(ln)
-        if not rel:
-            continue
-        if path_allowed(rel, allowlist) and not path_never_stage(rel):
-            allowed.append(rel)
-        else:
-            unexpected.append(rel)
+    for _xy, path1, path2 in porcelain(root):
+        for rel in (path1, path2):
+            if not rel:
+                continue
+            if path_allowed(rel, allowlist) and not path_never_stage(rel):
+                allowed.append(rel)
+            else:
+                unexpected.append(rel)
     return allowed, unexpected
 
 
@@ -166,8 +190,9 @@ def safe_commit_push(root: Path, allowlist: list[str], message: str) -> str:
         return "NO_TRACKED_CHANGES"
 
     # 4) 第二道保护：staged 清单绝不含原始素材 / SP workspace / manifest
-    r = _git(root, "diff", "--cached", "--name-only")
-    cached = [ln.strip() for ln in r.stdout.splitlines() if ln.strip()]
+    #    用 -z 避免中文路径被 quoted/octal 转义，取真实路径。
+    r = _git(root, "diff", "--cached", "--name-only", "-z")
+    cached = [p for p in r.stdout.split("\0") if p]
     bad = [p for p in cached if path_never_stage(p)]
     if bad:
         print(f"[post-action] STAGED_FORBIDDEN × {len(bad)}：{bad}")
