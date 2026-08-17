@@ -63,9 +63,16 @@ Electron、Tauri/Rust、FastAPI、WebSocket、Redis、Celery、Neo4j、自研 UI
 
 前置：Python 3；Windows WebView2 Runtime（已安装）；Node.js + npm。
 
+> **依赖一律使用根目录 venv：`E:\AI-Write\.venv`**（已被 .gitignore 排除，不入库）。
+> 安装与启动都请优先使用该 venv 的 Python，**不要用全局 Python**，避免污染全局环境。
+> 若 `.venv` 尚不存在，先执行：`python -m venv E:\AI-Write\.venv`。
+
 ```powershell
-# 1) Python 依赖
-pip install -r desktop/requirements.txt
+# 0) 首次：创建根目录 venv（已存在则跳过）
+python -m venv E:\AI-Write\.venv
+
+# 1) Python 依赖（一律用 venv 的 Python）
+E:\AI-Write\.venv\Scripts\python.exe -m pip install -r desktop/requirements.txt
 
 # 2) 前端依赖
 cd ui
@@ -74,9 +81,9 @@ npm install
 # 3) 构建前端（产物 ui/dist/）
 npm run build
 
-# 4) 启动桌面（默认加载构建产物）
+# 4) 启动桌面（默认加载构建产物，用 venv 的 Python）
 cd ..
-python desktop/main.py
+E:\AI-Write\.venv\Scripts\python.exe desktop/main.py
 ```
 
 开发模式（前端热更新）：
@@ -86,8 +93,8 @@ python desktop/main.py
 cd ui
 npm run dev          # Vite dev server，默认 http://127.0.0.1:5173
 
-# 终端 2
-python desktop/main.py --dev
+# 终端 2（用 venv 的 Python）
+E:\AI-Write\.venv\Scripts\python.exe desktop/main.py --dev
 ```
 
 Bridge 链路：React 唯一入口 `ui/src/bridge/client.ts` ↔ `desktop/main.py` 注册的
