@@ -1,16 +1,18 @@
 # -*- coding: utf-8 -*-
 """Agent registry：业务层只能通过本模块获取 Agent。
 
-当前注册：deepseek_harness。
-以后 Qoder / Codex 可新增 Adapter，但业务层不得出现 if deepseek / if qoder / if codex 分支。
+当前注册：deepseek_harness、qoder。
+以后 Codex 等可新增 Adapter，但业务层不得出现 if deepseek / if qoder / if codex 分支。
 """
 from __future__ import annotations
 
 from agents.base import AgentAdapter, AgentRequest, AgentResult  # noqa: F401
 from agents.deepseek_harness import DeepSeekHarnessAdapter
+from agents.qoder import QoderAdapter
 
 _REGISTRY: dict[str, type[AgentAdapter]] = {
     "deepseek_harness": DeepSeekHarnessAdapter,
+    "qoder": QoderAdapter,
 }
 
 

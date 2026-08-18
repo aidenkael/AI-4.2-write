@@ -27,13 +27,12 @@ from agents.registry import available, get_agent
 
 def test_registry_decoupled():
     assert "deepseek_harness" in available()
+    assert "qoder" in available()
     agent = get_agent("deepseek_harness")
     assert isinstance(agent, DeepSeekHarnessAdapter)
     assert isinstance(agent, AgentAdapter)
     with pytest.raises(KeyError):
         get_agent("codex")
-    with pytest.raises(KeyError):
-        get_agent("qoder")
 
 
 # ---------- 2. capabilities 如实声明 ----------

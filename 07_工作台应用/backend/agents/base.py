@@ -12,10 +12,16 @@ from typing import Any, Optional
 
 @dataclass
 class AgentRequest:
-    """一次 Agent 调用请求。"""
+    """一次 Agent 调用请求。
+
+    只放多个 Agent 都可能真正需要的通用字段；Agent 特有配置（如 Qoder
+    BYOK 的 provider / api_key）由各 Adapter 的配置对象负责，不进本类。
+    """
 
     task: str
     cwd: Optional[str] = None  # 子进程工作目录（None = 继承调用方）
+    model: Optional[str] = None  # 可选：通用模型选择（多个 Agent 都可能需要）
+    reasoning_effort: Optional[str] = None  # 可选：通用推理强度（多个 Agent 都可能需要）
 
 
 @dataclass
