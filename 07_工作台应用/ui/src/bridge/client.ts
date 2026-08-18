@@ -135,3 +135,115 @@ export async function openProject(project: { project_id?: string; name?: string 
 export async function getProjectOverview(projectId: string): Promise<ProjectOverview> {
   return call<ProjectOverview>('get_project_overview', projectId)
 }
+
+// ---------------- Agent / 模型 / Token 设置 ----------------
+
+export interface AgentCapabilities {
+  run: boolean
+  cancel: boolean
+  model_selection: string
+  byok?: boolean
+  reasoning_effort?: boolean
+  [key: string]: unknown
+}
+
+export interface AgentInfo {
+  id: string
+  available: boolean
+  capabilities: AgentCapabilities | null
+  error: string | null
+}
+
+export interface ByokModel {
+  key: string | null
+  display_name: string | null
+  is_reasoning?: boolean | null
+  efforts?: string[]
+}
+
+export interface ByokType {
+  key: string | null
+  display_name: string | null
+  models: ByokModel[]
+}
+
+export interface ByokProvider {
+  key: string | null
+  display_name: string | null
+  types: ByokType[]
+}
+
+export interface AgentSettings {
+  default_agent: string
+  qoder_mode: string
+  qoder_model: string | null
+  reasoning_effort: string | null
+  byok_provider: string | null
+  byok_model: string | null
+  byok_secret_id: string | null
+}
+
+export interface AgentSettingsData {
+  settings: AgentSettings
+  agents: AgentInfo[]
+  byok: { secret_id: string | null; has_secret: boolean }
+}
+
+export interface AgentOptionsData {
+  qoder_models: string[]
+  qoder_models_error: string | null
+  byok_providers: ByokProvider[]
+  byok_error: string | null
+  reasoning_effort_options: string[]
+}
+
+export interface ConnectionTestResult {
+  agent: string
+  status: 'ok' | 'failed' | 'not_configured'
+  message: string
+  output?: string | null
+}
+
+/** 当前设置 + 各 Agent 状态/能力 + BYOK Token 是否已配置（无明文）。 */
+export async function getAgentSettings(): Promise<AgentSettingsData> {
+  return call<AgentSettingsData>('get_agent_settings')
+}
+
+/** 动态选项：Qoder 自带模型 / BYOK provider-model / 思考强度。 */
+export async function getAgentOptions(): Promise<AgentOptionsData> {
+  return call<AgentOptionsData>('get_agent_options')
+}
+
+/** 保存普通设置（不含 Token）。 */
+export async function saveAgentSettings(settings: {
+  default_agent: string
+  qoder_mode?: string
+  qoder_model?: string | null
+  reasoning_effort?: string | null
+  byok_provider?: string | null
+  byok_model?: string | null
+}): Promise<{ settings: AgentSettings }> {
+  return call<{ settings: AgentSettings }>('save_agent_settings', settings)
+}
+
+/** 保存 BYOK Token 到 keyring（只返回 secret_id + has_secret，绝不明文）。 */
+export async function saveByokSecret(token: string): Promise<{ secret_id: string; has_secret: boolean }> {
+  return call<{ secret_id: string; has_secret: boolean }>('save_byok_secret', token)
+}
+
+/** 删除 BYOK Token；删除后状态立即变为未配置。 */
+export async function deleteByokSecret(): Promise<{ secret_id: string | null; has_secret: boolean }> {
+  return call<{ secret_id: string | null; has_secret: boolean }>('delete_byok_secret')
+}
+
+/** 测试连接（无副作用任务 + 临时目录）；BYOK 未配置 Token 时返回 not_configured。 */
+export async function testAgentConnection(payload: {
+  agent: string
+  qoder_mode?: string
+  qoder_model?: string | null
+  reasoning_effort?: string | null
+  byok_provider?: string | null
+  byok_model?: string | null
+}): Promise<ConnectionTestResult> {
+  return call<ConnectionTestResult>('test_agent_connection', payload)
+}

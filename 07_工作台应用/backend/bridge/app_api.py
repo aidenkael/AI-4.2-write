@@ -16,10 +16,13 @@ from operations.projects import (
     list_projects as op_list_projects,
     open_project as op_open_project,
 )
+from operations.settings import SettingsOpError
+from operations import settings as settings_ops
 from views import project as project_views
 
 # 稳定错误码（client.ts 依赖 code 字段）
 CODE_PROJECT_OP_ERROR = "PROJECT_OP_ERROR"
+CODE_SETTINGS_ERROR = "SETTINGS_ERROR"
 CODE_BRIDGE_INTERNAL = "BRIDGE_INTERNAL"
 
 
@@ -67,5 +70,58 @@ class AppApi:
             return _ok(project_views.overview_view(overview))
         except ProjectOpError as exc:
             return _err(CODE_PROJECT_OP_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    # ---------------- Agent / 模型 / Token 设置（最小配置层） ----------------
+    # 安全：任何 Bridge 返回值都不得包含 Token 明文（save 只存 keyring，
+    # 读取只回 has_secret；get_secret 仅后台测试连接使用）。
+
+    def get_agent_settings(self) -> dict:
+        """当前设置 + 各 Agent 真实状态/能力 + BYOK Token 是否已配置（无明文）。"""
+        try:
+            return _ok(settings_ops.get_agent_settings())
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def get_agent_options(self) -> dict:
+        """动态选项：Qoder 自带模型 / BYOK provider-model / 思考强度档位。"""
+        try:
+            return _ok(settings_ops.get_agent_options())
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def save_agent_settings(self, settings: dict) -> dict:
+        """保存普通设置（不含 Token）；非法 Agent / 模式 / 思考强度会被拒绝。"""
+        try:
+            saved = settings_ops.save_agent_settings(settings)
+            return _ok({"settings": saved})
+        except SettingsOpError as exc:
+            return _err(CODE_SETTINGS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def save_byok_secret(self, token: str) -> dict:
+        """保存 BYOK Token 到 keyring；配置只写 secret_id 引用。"""
+        try:
+            return _ok(settings_ops.save_byok_secret(token))
+        except SettingsOpError as exc:
+            return _err(CODE_SETTINGS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def delete_byok_secret(self) -> dict:
+        """删除 keyring 中的 BYOK Token，状态立即变为未配置。"""
+        try:
+            return _ok(settings_ops.delete_byok_secret())
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def test_agent_connection(self, payload: dict) -> dict:
+        """测试连接：无副作用任务 + 临时目录；BYOK 未配置 Token 时不真实调用。"""
+        try:
+            return _ok(settings_ops.test_agent_connection(payload))
+        except SettingsOpError as exc:
+            return _err(CODE_SETTINGS_ERROR, str(exc))
         except Exception as exc:  # noqa: BLE001
             return _err(CODE_BRIDGE_INTERNAL, str(exc))

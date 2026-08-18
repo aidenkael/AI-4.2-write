@@ -2,6 +2,7 @@ import { useState } from 'react'
 import HomePage from './pages/HomePage'
 import ProjectsPage from './pages/ProjectsPage'
 import ProjectOverviewPage from './pages/ProjectOverviewPage'
+import SettingsPage from './pages/SettingsPage'
 
 const NAV_ITEMS = ['首页', '我的作品', '素材与学习', '灵感箱', '搜索', '设置']
 
@@ -9,6 +10,7 @@ export type Page =
   | { kind: 'home' }
   | { kind: 'projects' }
   | { kind: 'overview'; projectId: string; projectName: string }
+  | { kind: 'settings' }
 
 export default function App() {
   const [page, setPage] = useState<Page>({ kind: 'home' })
@@ -16,6 +18,7 @@ export default function App() {
   const navClick = (item: string) => {
     if (item === '首页') setPage({ kind: 'home' })
     else if (item === '我的作品') setPage({ kind: 'projects' })
+    else if (item === '设置') setPage({ kind: 'settings' })
     // 其余导航项本轮不实现业务（占位）
   }
 
@@ -43,6 +46,7 @@ export default function App() {
           onBack={() => setPage({ kind: 'projects' })}
         />
       )}
+      {page.kind === 'settings' && <SettingsPage />}
     </div>
   )
 }
