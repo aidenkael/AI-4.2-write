@@ -329,3 +329,40 @@ export async function confirmStoryPlan(payload: {
 }): Promise<ConfirmStoryPlanResult> {
   return call<ConfirmStoryPlanResult>('confirm_story_plan', payload)
 }
+
+// ---------------- 正文写作（"这一段想写什么"纵切） ----------------
+
+export interface ProposeStoryWriteResult {
+  writing_token: string
+  project_id: string
+  name: string
+  scene_ref: string
+  chapter_number: number
+  draft_text: string
+  message: string
+}
+
+export interface ConfirmStoryWriteResult {
+  project_id: string
+  name: string
+  chapter_path: string
+  chapter_number: number
+  scene_ref: string
+  message: string
+}
+
+/** 这一段想写什么 → 两阶段 Agent → 正文候选（不写正式作品）。 */
+export async function proposeStoryWrite(payload: {
+  project_id: string
+  author_input: string
+}): Promise<ProposeStoryWriteResult> {
+  return call<ProposeStoryWriteResult>('propose_story_write', payload)
+}
+
+/** 作者明确"保留这段" → accept_prose 写入正式 03_正文。 */
+export async function confirmStoryWrite(payload: {
+  project_id: string
+  writing_token: string
+}): Promise<ConfirmStoryWriteResult> {
+  return call<ConfirmStoryWriteResult>('confirm_story_write', payload)
+}

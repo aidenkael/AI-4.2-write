@@ -22,6 +22,8 @@ from operations.new_project import NewProjectError
 from operations import new_project as new_project_ops
 from operations.story_planning import StoryPlanningError
 from operations import story_planning as story_planning_ops
+from operations.story_writing import StoryWritingError
+from operations import story_writing as story_writing_ops
 from views import project as project_views
 
 # 稳定错误码（client.ts 依赖 code 字段）
@@ -29,6 +31,7 @@ CODE_PROJECT_OP_ERROR = "PROJECT_OP_ERROR"
 CODE_SETTINGS_ERROR = "SETTINGS_ERROR"
 CODE_NEW_PROJECT_ERROR = "NEW_PROJECT_ERROR"
 CODE_STORY_PLANNING_ERROR = "STORY_PLANNING_ERROR"
+CODE_STORY_WRITING_ERROR = "STORY_WRITING_ERROR"
 CODE_BRIDGE_INTERNAL = "BRIDGE_INTERNAL"
 
 
@@ -188,5 +191,35 @@ class AppApi:
             return _ok(data)
         except StoryPlanningError as exc:
             return _err(CODE_STORY_PLANNING_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    # ---------------- 正文写作（"这一段想写什么"纵切） ----------------
+    # 确认前只写临时 writing 工作区；只有作者明确确认（带后台 writing token）
+    # 才通过 ProjectWorkspace.accept_prose 写入正式 03_正文。
+
+    def propose_story_write(self, payload: dict) -> dict:
+        """这一段想写什么 → 两阶段 Agent → 正文候选（不写正式作品）。"""
+        try:
+            data = story_writing_ops.propose_story_write(
+                project_id=str(payload.get("project_id") or ""),
+                author_input=str(payload.get("author_input") or ""),
+            )
+            return _ok(data)
+        except StoryWritingError as exc:
+            return _err(CODE_STORY_WRITING_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def confirm_story_write(self, payload: dict) -> dict:
+        """作者明确"保留这段" → accept_prose 写入正式 03_正文。"""
+        try:
+            data = story_writing_ops.confirm_story_write(
+                project_id=str(payload.get("project_id") or ""),
+                writing_token=str(payload.get("writing_token") or ""),
+            )
+            return _ok(data)
+        except StoryWritingError as exc:
+            return _err(CODE_STORY_WRITING_ERROR, str(exc))
         except Exception as exc:  # noqa: BLE001
             return _err(CODE_BRIDGE_INTERNAL, str(exc))
