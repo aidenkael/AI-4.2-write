@@ -67,12 +67,12 @@ _WRITING_ROOT = (
 )
 
 # 第一阶段 Agent 任务模板：上下文选择
-_SELECTION_TASK_TEMPLATE = """你是 Go Write 的上下文选择语义助手。只做语义判断，不读取或修改任何文件。
+_SELECTION_TASK_TEMPLATE = """上下文选择：只做语义判断，不读取或修改任何文件。
 
-你的任务：根据作者本轮写作要求，从当前 Story State 中选出本场景真正需要的少量条目。
+根据作者本轮写作要求，从当前 Story State 中选出本场景真正需要的少量条目。
 不要选全部，不要 fallback 整包。只选与本场直接相关的条目。
 
-请返回**一个合法的 JSON 对象**（不要任何额外文字、不要 markdown 代码块标记），
+直接输出一个合法的 JSON 对象（不要任何额外文字、不要 markdown 代码块标记）。
 结构必须如下：
 
 {{
@@ -105,12 +105,13 @@ _SELECTION_TASK_TEMPLATE = """你是 Go Write 的上下文选择语义助手。�
 {state_entries_summary}
 
 作者本轮要求：{author_input}
-"""
+
+直接输出 JSON，不要输出任何其他内容。"""
 
 # 第二阶段 Agent 任务模板：正文生成
-_PROSE_TASK_TEMPLATE = """你是 Go Write 的正文写作助手。根据下面的创作上下文，写一段正文。
+_PROSE_TASK_TEMPLATE = """根据下面的创作上下文，写一段正文。
 
-请返回**一个合法的 JSON 对象**（不要任何额外文字、不要 markdown 代码块标记），
+直接输出一个合法的 JSON 对象（不要任何额外文字、不要 markdown 代码块标记）。
 结构必须如下：
 
 {{
@@ -151,7 +152,8 @@ Context Package：
 {recent_prose_section}
 
 作者本轮要求：{author_input}
-"""
+
+直接输出 JSON，不要输出任何其他内容。"""
 
 
 class StoryWritingError(Exception):
