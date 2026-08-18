@@ -34,6 +34,9 @@ export interface ProjectItem {
 export interface ProjectOverview {
   project_id: string
   name: string
+  work_direction?: string
+  reader_promise?: string
+  current_plans?: Array<{ id: string; description: string }>
   state: {
     state_rev: number
     last_authority_source: string
@@ -248,7 +251,7 @@ export async function testAgentConnection(payload: {
   return call<ConnectionTestResult>('test_agent_connection', payload)
 }
 
-// ---------------- 新建作品（“我有个想法”纵切） ----------------
+// ---------------- 新建作品（"我有个想法"纵切） ----------------
 
 export interface StoryCandidate {
   work_direction: string
@@ -286,4 +289,43 @@ export async function proposeNewProject(payload: { name: string; idea: string })
 /** 作者明确确认 → 用后台保存的候选创建正式作品。 */
 export async function confirmNewProject(payload: { proposal_token: string }): Promise<ConfirmResult> {
   return call<ConfirmResult>('confirm_new_project', payload)
+}
+
+// ---------------- 故事规划（"一起往前想"纵切） ----------------
+
+export interface StoryPlanCandidate {
+  proposal: string
+  planning_items: string[]
+}
+
+export interface ProposeStoryPlanResult {
+  planning_token: string
+  project_id: string
+  name: string
+  status: string
+  candidate: StoryPlanCandidate
+  message: string
+}
+
+export interface ConfirmStoryPlanResult {
+  project_id: string
+  name: string
+  state_rev: number | null
+  message: string
+}
+
+/** 一起往前想 → 当前 Agent 设置 → StoryPlan 候选（不写正式作品）。 */
+export async function proposeStoryPlan(payload: {
+  project_id: string
+  author_question: string
+}): Promise<ProposeStoryPlanResult> {
+  return call<ProposeStoryPlanResult>('propose_story_plan', payload)
+}
+
+/** 作者明确确认 → 用后台保存的候选写入正式 approved_plan。 */
+export async function confirmStoryPlan(payload: {
+  project_id: string
+  planning_token: string
+}): Promise<ConfirmStoryPlanResult> {
+  return call<ConfirmStoryPlanResult>('confirm_story_plan', payload)
 }

@@ -1,9 +1,23 @@
 import { useEffect, useState } from 'react'
-import { getProjectOverview, type ProjectOverview } from '../bridge/client'
+import {
+  getProjectOverview,
+  proposeStoryPlan,
+  confirmStoryPlan,
+  type ProjectOverview,
+  type ProposeStoryPlanResult,
+} from '../bridge/client'
 
-type State =
+type OverviewState =
   | { kind: 'loading' }
   | { kind: 'ok'; overview: ProjectOverview }
+  | { kind: 'error'; message: string }
+
+type PlanningStage =
+  | { kind: 'idle' }
+  | { kind: 'working' }
+  | { kind: 'candidate'; result: ProposeStoryPlanResult }
+  | { kind: 'confirming' }
+  | { kind: 'done'; message: string }
   | { kind: 'error'; message: string }
 
 export default function ProjectOverviewPage({
@@ -17,15 +31,52 @@ export default function ProjectOverviewPage({
   warning?: string | null
   onBack: () => void
 }) {
-  const [state, setState] = useState<State>({ kind: 'loading' })
+  const [overviewState, setOverviewState] = useState<OverviewState>({ kind: 'loading' })
+  const [planningStage, setPlanningStage] = useState<PlanningStage>({ kind: 'idle' })
+  const [authorQuestion, setAuthorQuestion] = useState('')
+
+  const refreshOverview = () => {
+    setOverviewState({ kind: 'loading' })
+    getProjectOverview(projectId)
+      .then((overview) => setOverviewState({ kind: 'ok', overview }))
+      .catch((err) => setOverviewState({ kind: 'error', message: String(err) }))
+  }
 
   useEffect(() => {
-    let cancelled = false
-    getProjectOverview(projectId)
-      .then((overview) => { if (!cancelled) setState({ kind: 'ok', overview }) })
-      .catch((err) => { if (!cancelled) setState({ kind: 'error', message: String(err) }) })
-    return () => { cancelled = true }
+    refreshOverview()
   }, [projectId])
+
+  const startPlanning = async () => {
+    setPlanningStage({ kind: 'working' })
+    try {
+      const result = await proposeStoryPlan({
+        project_id: projectId,
+        author_question: authorQuestion,
+      })
+      setPlanningStage({ kind: 'candidate', result })
+    } catch (err) {
+      setPlanningStage({ kind: 'error', message: String(err) })
+    }
+  }
+
+  const confirmPlanning = async (result: ProposeStoryPlanResult) => {
+    setPlanningStage({ kind: 'confirming' })
+    try {
+      const confirmed = await confirmStoryPlan({
+        project_id: result.project_id,
+        planning_token: result.planning_token,
+      })
+      setPlanningStage({ kind: 'done', message: confirmed.message })
+      setAuthorQuestion('')
+      refreshOverview()
+    } catch (err) {
+      setPlanningStage({ kind: 'error', message: String(err) })
+    }
+  }
+
+  const revisePlanning = () => {
+    setPlanningStage({ kind: 'idle' })
+  }
 
   return (
     <section>
@@ -36,38 +87,127 @@ export default function ProjectOverviewPage({
         </p>
       )}
       <button onClick={onBack} style={{ cursor: 'pointer' }}>← 返回作品列表</button>
-      {state.kind === 'loading' && <p>正在读取概览…</p>}
-      {state.kind === 'error' && <p>读取失败：{state.message}</p>}
-      {state.kind === 'ok' && (
-        <div style={{ marginTop: '0.75rem', lineHeight: 1.7 }}>
-          <p>
-            <strong>{state.overview.name}</strong>
-            <span style={{ marginLeft: '0.75rem', color: '#888', fontSize: '0.85rem' }}>
-              {state.overview.project_id}
-            </span>
-          </p>
-          <p>
-            基础状态：state_rev {state.overview.state.state_rev} ·
-            最近权威来源 {state.overview.state.last_authority_source}
-          </p>
-          {state.overview.last_accepted && (
-            <p>
-              最近写作位置：{state.overview.last_accepted.chapter_path}
-              （scene_ref: {state.overview.last_accepted.scene_ref}）
-            </p>
+
+      {overviewState.kind === 'loading' && <p>正在读取概览…</p>}
+      {overviewState.kind === 'error' && <p>读取失败：{overviewState.message}</p>}
+
+      {overviewState.kind === 'ok' && (
+        <div style={{ marginTop: '1rem', lineHeight: 1.8 }}>
+          {/* 已确定的故事方向 */}
+          {overviewState.overview.work_direction && (
+            <div>
+              <h3>已确定的故事方向</h3>
+              <p style={{ color: '#444' }}>{overviewState.overview.work_direction}</p>
+            </div>
           )}
-          {state.overview.recent_prose && (
-            <p>
-              最近正文窗口：{state.overview.recent_prose.window_chars} 字
-              （scene_ref: {state.overview.recent_prose.scene_ref}）
-            </p>
+
+          {/* 读者主要期待 */}
+          {overviewState.overview.reader_promise && (
+            <div style={{ marginTop: '0.75rem' }}>
+              <h3>读者主要期待</h3>
+              <p style={{ color: '#444' }}>{overviewState.overview.reader_promise}</p>
+            </div>
           )}
-          {state.overview.planning && (
-            <p>
-              当前规划：{state.overview.planning.entries} 条
-              {state.overview.planning.latest ? ` · 最新：${state.overview.planning.latest}` : ''}
-            </p>
+
+          {/* 当前已确定的规划 */}
+          {overviewState.overview.current_plans && overviewState.overview.current_plans.length > 0 && (
+            <div style={{ marginTop: '0.75rem' }}>
+              <h3>当前已确定</h3>
+              <ul style={{ color: '#444', paddingLeft: '1.5rem' }}>
+                {overviewState.overview.current_plans.map((plan) => (
+                  <li key={plan.id} style={{ marginBottom: '0.35rem' }}>{plan.description}</li>
+                ))}
+              </ul>
+            </div>
           )}
+
+          {/* 最近正文位置 */}
+          {overviewState.overview.last_accepted && (
+            <div style={{ marginTop: '0.75rem' }}>
+              <h3>最近写作位置</h3>
+              <p style={{ color: '#444' }}>{overviewState.overview.last_accepted.chapter_path}</p>
+            </div>
+          )}
+
+          {/* 规划输入区 */}
+          <div style={{ marginTop: '1.5rem', borderTop: '1px solid #ddd', paddingTop: '1rem' }}>
+            <h3>接下来你想一起想什么？</h3>
+
+            {planningStage.kind === 'idle' && (
+              <div>
+                <textarea
+                  value={authorQuestion}
+                  onChange={(e) => setAuthorQuestion(e.target.value)}
+                  placeholder="例如：先想想故事前半程怎么推进，我不希望男女主太早站到一起。"
+                  rows={4}
+                  style={{ width: '100%', padding: '0.5rem', boxSizing: 'border-box' }}
+                />
+                <button
+                  onClick={startPlanning}
+                  disabled={!authorQuestion.trim()}
+                  style={{ cursor: 'pointer', padding: '0.5rem 1rem', marginTop: '0.5rem' }}
+                >
+                  和 AI 一起往前想
+                </button>
+              </div>
+            )}
+
+            {planningStage.kind === 'working' && (
+              <p>正在一起想…</p>
+            )}
+
+            {planningStage.kind === 'confirming' && (
+              <p>正在确认规划…</p>
+            )}
+
+            {planningStage.kind === 'done' && (
+              <p style={{ color: '#2a7' }}>✓ {planningStage.message}</p>
+            )}
+
+            {planningStage.kind === 'candidate' && (
+              <div style={{ lineHeight: 1.8 }}>
+                <h4>可以这样往前走</h4>
+                <p style={{ color: '#444' }}>{planningStage.result.candidate.proposal}</p>
+
+                {planningStage.result.candidate.planning_items.length > 0 && (
+                  <ul style={{ color: '#444', paddingLeft: '1.5rem' }}>
+                    {planningStage.result.candidate.planning_items.map((item, i) => (
+                      <li key={i} style={{ marginBottom: '0.35rem' }}>{item}</li>
+                    ))}
+                  </ul>
+                )}
+
+                <p style={{ color: '#888', fontSize: '0.85rem' }}>{planningStage.result.message}</p>
+
+                <div style={{ marginTop: '1rem' }}>
+                  <button
+                    onClick={() => confirmPlanning(planningStage.result)}
+                    style={{ cursor: 'pointer', padding: '0.5rem 1rem', marginRight: '0.75rem' }}
+                  >
+                    就这样继续
+                  </button>
+                  <button
+                    onClick={revisePlanning}
+                    style={{ cursor: 'pointer', padding: '0.5rem 1rem' }}
+                  >
+                    我想改一改
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {planningStage.kind === 'error' && (
+              <div>
+                <p style={{ color: '#b00' }}>{planningStage.message}</p>
+                <button
+                  onClick={() => setPlanningStage({ kind: 'idle' })}
+                  style={{ cursor: 'pointer', padding: '0.5rem 1rem' }}
+                >
+                  返回修改
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </section>

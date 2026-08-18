@@ -65,6 +65,7 @@ def get_project_overview(project_id: str) -> dict:
     except (ContractError, WorkspaceError) as exc:
         raise ProjectOpError(str(exc)) from exc
 
+    intent = loaded["intent"]
     state = loaded["state"]
     index = loaded["index"] or {}
 
@@ -76,6 +77,25 @@ def get_project_overview(project_id: str) -> dict:
             "last_authority_source": state.get("last_authority_source"),
         },
     }
+
+    # 作者可读字段：已确定的故事方向 + 读者主要期待
+    work_direction = intent.get("work_direction") or ""
+    reader_promise = intent.get("reader_promise") or ""
+    if work_direction:
+        overview["work_direction"] = work_direction
+    if reader_promise:
+        overview["reader_promise"] = reader_promise
+
+    # 当前已确定的规划（取 approved_plan 中所有条目的 description）
+    plans = state.get("approved_plan") or []
+    if plans:
+        current_plans = []
+        for plan in plans:
+            desc = plan.get("description") or plan.get("text") or ""
+            if desc:
+                current_plans.append({"id": plan.get("id") or "", "description": desc})
+        if current_plans:
+            overview["current_plans"] = current_plans
 
     # 最近写作位置：accepted_text_index 最后一条（可靠）
     entries = index.get("entries") or []
@@ -98,11 +118,10 @@ def get_project_overview(project_id: str) -> dict:
             pass
 
     # 当前有效规划：approved_plan 非空才显示（防御式取最新条目可读文本）
-    plans = state.get("approved_plan") or []
     if plans:
         latest = plans[-1]
         text = None
-        for key in ("text", "title", "summary", "content"):
+        for key in ("description", "text", "title", "summary", "content"):
             if isinstance(latest.get(key), str) and latest[key].strip():
                 text = latest[key].strip()
                 break

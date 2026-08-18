@@ -20,12 +20,15 @@ from operations.settings import SettingsOpError
 from operations import settings as settings_ops
 from operations.new_project import NewProjectError
 from operations import new_project as new_project_ops
+from operations.story_planning import StoryPlanningError
+from operations import story_planning as story_planning_ops
 from views import project as project_views
 
 # 稳定错误码（client.ts 依赖 code 字段）
 CODE_PROJECT_OP_ERROR = "PROJECT_OP_ERROR"
 CODE_SETTINGS_ERROR = "SETTINGS_ERROR"
 CODE_NEW_PROJECT_ERROR = "NEW_PROJECT_ERROR"
+CODE_STORY_PLANNING_ERROR = "STORY_PLANNING_ERROR"
 CODE_BRIDGE_INTERNAL = "BRIDGE_INTERNAL"
 
 
@@ -129,7 +132,7 @@ class AppApi:
         except Exception as exc:  # noqa: BLE001
             return _err(CODE_BRIDGE_INTERNAL, str(exc))
 
-    # ---------------- 新建作品（“我有个想法”纵切） ----------------
+    # ---------------- 新建作品（"我有个想法"纵切） ----------------
     # 确认前只写临时 pre-project 工作区；只有作者明确确认（带后台 proposal token）
     # 才调用真实 ProjectWorkspace.create_project。
 
@@ -155,5 +158,35 @@ class AppApi:
             return _ok(data)
         except NewProjectError as exc:
             return _err(CODE_NEW_PROJECT_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    # ---------------- 故事规划（"一起往前想"纵切） ----------------
+    # 确认前只写临时 planning 工作区；只有作者明确确认（带后台 planning token）
+    # 才写入正式 Story State 的 approved_plan。
+
+    def propose_story_plan(self, payload: dict) -> dict:
+        """一起往前想 → 当前 Agent 设置 → StoryPlan 候选（proposal_noncanonical）。"""
+        try:
+            data = story_planning_ops.propose_story_plan(
+                project_id=str(payload.get("project_id") or ""),
+                author_question=str(payload.get("author_question") or ""),
+            )
+            return _ok(data)
+        except StoryPlanningError as exc:
+            return _err(CODE_STORY_PLANNING_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def confirm_story_plan(self, payload: dict) -> dict:
+        """作者明确确认 → 用后台保存的候选写入正式 approved_plan。"""
+        try:
+            data = story_planning_ops.confirm_story_plan(
+                project_id=str(payload.get("project_id") or ""),
+                planning_token=str(payload.get("planning_token") or ""),
+            )
+            return _ok(data)
+        except StoryPlanningError as exc:
+            return _err(CODE_STORY_PLANNING_ERROR, str(exc))
         except Exception as exc:  # noqa: BLE001
             return _err(CODE_BRIDGE_INTERNAL, str(exc))
