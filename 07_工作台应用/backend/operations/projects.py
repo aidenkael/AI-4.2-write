@@ -20,6 +20,10 @@ _PW = Path(__file__).resolve().parents[3] / "05_Skills与自动化" / "01_Skills
 if str(_PW) not in sys.path:
     sys.path.insert(0, str(_PW))
 
+_SP = Path(__file__).resolve().parents[3] / "05_Skills与自动化" / "01_Skills" / "StoryPlan"
+if str(_SP) not in sys.path:
+    sys.path.insert(0, str(_SP))
+
 from project_workspace import (  # noqa: E402
     ContractError,
     WorkspaceError,
@@ -28,6 +32,7 @@ from project_workspace import (  # noqa: E402
     load_project,
     resolve_project,
 )
+from story_plan import resolve_plan_activity  # noqa: E402  StoryPlan frozen runtime
 
 
 class ProjectOpError(Exception):
@@ -86,14 +91,20 @@ def get_project_overview(project_id: str) -> dict:
     if reader_promise:
         overview["reader_promise"] = reader_promise
 
-    # 当前已确定的规划（取 approved_plan 中所有条目的 description）
-    plans = state.get("approved_plan") or []
-    if plans:
+    # 当前已确定的规划：只使用 frozen resolve_plan_activity 的 active 投影
+    # superseded 的旧规划继续保留在 Story State 历史中，但不显示为"当前已经确定"
+    all_plans = state.get("approved_plan") or []
+    activity = resolve_plan_activity(state)
+    active_ids = set(activity["active"])
+
+    if all_plans:
         current_plans = []
-        for plan in plans:
-            desc = plan.get("description") or plan.get("text") or ""
-            if desc:
-                current_plans.append({"id": plan.get("id") or "", "description": desc})
+        for plan in all_plans:
+            pid = plan.get("id")
+            if pid and pid in active_ids:
+                desc = plan.get("description") or plan.get("text") or ""
+                if desc:
+                    current_plans.append({"id": pid, "description": desc})
         if current_plans:
             overview["current_plans"] = current_plans
 
@@ -117,18 +128,20 @@ def get_project_overview(project_id: str) -> dict:
         except (ContractError, WorkspaceError):
             pass
 
-    # 当前有效规划：approved_plan 非空才显示（防御式取最新条目可读文本）
-    if plans:
-        latest = plans[-1]
-        text = None
-        for key in ("description", "text", "title", "summary", "content"):
-            if isinstance(latest.get(key), str) and latest[key].strip():
-                text = latest[key].strip()
-                break
-        overview["planning"] = {
-            "entries": len(plans),
-            "latest": text,
-            "latest_id": latest.get("id"),
-            "latest_occurred": latest.get("occurred"),
-        }
+    # 当前有效规划摘要：只取 active 条目的最新一条（用于向后兼容旧 UI 字段）
+    if all_plans:
+        active_plans = [p for p in all_plans if p.get("id") and p["id"] in active_ids]
+        if active_plans:
+            latest = active_plans[-1]
+            text = None
+            for key in ("description", "text", "title", "summary", "content"):
+                if isinstance(latest.get(key), str) and latest[key].strip():
+                    text = latest[key].strip()
+                    break
+            overview["planning"] = {
+                "entries": len(active_plans),
+                "latest": text,
+                "latest_id": latest.get("id"),
+                "latest_occurred": latest.get("occurred"),
+            }
     return overview

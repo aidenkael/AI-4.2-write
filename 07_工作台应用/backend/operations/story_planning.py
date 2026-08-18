@@ -94,7 +94,8 @@ _AGENT_TASK_TEMPLATE = """你是 AI-write 的故事规划语义助手。只做�
 - 读者主要期待：{reader_promise}
 - 当前已守住的约束：{hard_constraints}
 - 当前可以自由变化的部分：{open_space}
-- 当前已确定的规划：{current_planning}
+- 当前已确定的规划：
+{current_planning}
 
 作者本轮问题：{author_question}
 """
@@ -206,32 +207,29 @@ def _parse_agent_result(output: str) -> dict[str, Any]:
 # 规划来源验证
 # ---------------------------------------------------------------------------
 
-def _get_active_planning_source(state: dict[str, Any]) -> dict[str, Any] | None:
-    """从正式 Story State 中找到当前 active 的 planning source。
+def _get_active_planning_sources(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """从正式 Story State 中返回所有当前 active 的 planning sources。
 
-    优先使用 kind=confirmed_direction 的条目；如果不存在，返回 None。
+    使用 frozen resolve_plan_activity 的 active 投影，按 approved_plan 的
+    append 顺序返回所有未被 supersede 的条目。
+
     StoryPlan 要求 planning source 必须是 approved_plan 中真实存在且 active 的条目。
+    最终仍交给 StoryPlan.compile_plan_brief 验证 authority 是否可信。
     """
     plans = state.get("approved_plan") or []
     if not plans:
-        return None
+        return []
 
     activity = resolve_plan_activity(state)
     active_ids = set(activity["active"])
 
-    # 优先找 confirmed_direction
+    # 按 append 顺序返回所有 active 条目
+    sources = []
     for plan in plans:
         pid = plan.get("id")
-        if pid in active_ids and plan.get("kind") == "confirmed_direction":
-            return {"kind": "approved_plan", "ref": pid}
-
-    # 如果没有 confirmed_direction，找任意 active 的条目
-    for plan in plans:
-        pid = plan.get("id")
-        if pid in active_ids:
-            return {"kind": "approved_plan", "ref": pid}
-
-    return None
+        if pid and pid in active_ids:
+            sources.append({"kind": "approved_plan", "ref": pid})
+    return sources
 
 
 # ---------------------------------------------------------------------------
@@ -258,13 +256,12 @@ def propose_story_plan(project_id: str, author_question: str) -> dict[str, Any]:
     state = loaded["state"]
     name = loaded["name"]
 
-    # 2. 验证规划来源
-    planning_source = _get_active_planning_source(state)
-    if planning_source is None:
+    # 2. 验证规划来源（所有 active approved_plan refs）
+    planning_sources = _get_active_planning_sources(state)
+    if not planning_sources:
         raise StoryPlanningError(
             "故事方向已经保存，但当前还没有可继续展开的已确认规划起点。"
         )
-    planning_sources = [planning_source]
 
     # 3. 构造 Agent 任务
     work_direction = intent.get("work_direction") or ""
@@ -272,14 +269,22 @@ def propose_story_plan(project_id: str, author_question: str) -> dict[str, Any]:
     hard_constraints = ", ".join(intent.get("hard_constraints") or []) or "（暂无）"
     open_space = ", ".join(intent.get("open_space") or []) or "（暂无）"
 
-    # 当前已确定的规划（取最新一条的 description）
-    current_plans = state.get("approved_plan") or []
-    current_planning = "（暂无已确定的规划）"
-    if current_plans:
-        latest = current_plans[-1]
-        desc = latest.get("description") or latest.get("text") or ""
-        if desc:
-            current_planning = desc
+    # 当前已确定的规划：把所有 active 条目整理成普通中文列表传给 Agent
+    # superseded 的旧规划不进入 Prompt
+    all_plans = state.get("approved_plan") or []
+    activity = resolve_plan_activity(state)
+    active_ids = set(activity["active"])
+    active_descriptions = []
+    for plan in all_plans:
+        pid = plan.get("id")
+        if pid and pid in active_ids:
+            desc = plan.get("description") or plan.get("text") or ""
+            if desc:
+                active_descriptions.append(desc)
+    if active_descriptions:
+        current_planning = "\n".join(f"- {d}" for d in active_descriptions)
+    else:
+        current_planning = "（暂无已确定的规划）"
 
     task = _AGENT_TASK_TEMPLATE.format(
         name=name,
@@ -316,8 +321,12 @@ def propose_story_plan(project_id: str, author_question: str) -> dict[str, Any]:
             result.error or f"Agent 未能完成任务（{result.status}）。"
         )
 
-    # 7. 解析并验证 Agent 输出
-    parsed = _parse_agent_result(result.output)
+    # 7. 解析并验证 Agent 输出（失败时清理临时目录）
+    try:
+        parsed = _parse_agent_result(result.output)
+    except StoryPlanningError:
+        _cleanup_planning(project_id, planning_turn_id)
+        raise
 
     # 8. 构造 planning_target（后台生成 target_id）
     agent_target = parsed["planning_target"]

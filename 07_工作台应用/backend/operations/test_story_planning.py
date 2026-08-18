@@ -17,6 +17,14 @@
 13. confirm 后正式概览可以读到新规划
 14. 不生成正文
 15. 临时 planning workspace 成功后清理
+
+额外验证（active 投影 + 临时目录清理）：
+17. superseded 条目不出现在 overview.current_plans
+18. active 条目正常显示
+19. Agent Prompt 不包含 superseded planning
+20. 第二轮规划的 planning_sources 包含 confirmed_direction + active planning
+21. 没有 active source 仍拒绝（多来源场景）
+22. invalid Agent output 后临时 planning turn 被清理
 """
 import json
 import sys
@@ -29,9 +37,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "05_Skills与自动
 import project_workspace  # noqa: E402
 
 from operations import story_planning as sp_ops  # noqa: E402
+from operations.projects import get_project_overview  # noqa: E402
 from operations.agent_runner import run_task  # noqa: E402
 from operations.projects import (  # noqa: E402
-    get_project_overview,
     list_projects,
     open_project,
 )
@@ -412,3 +420,211 @@ def test_real_agent_smoke(isolated, real_project, tmp_path, monkeypatch):
     state_file = real_project["project_dir"] / "_工作台状态" / "story_state.json"
     state = json.loads(state_file.read_text(encoding="utf-8"))
     assert state["state_rev"] == 2
+
+
+# ---------- 17. superseded 条目不出现在 overview.current_plans ----------
+
+def test_superseded_not_in_current_plans(isolated, real_project, fake_agent):
+    """已 superseded 的旧规划保留在历史中，但不显示为"当前已确定"。"""
+    project_id = real_project["project_id"]
+
+    # 第一轮规划
+    r1 = sp_ops.propose_story_plan(project_id=project_id, author_question="第一轮")
+    sp_ops.confirm_story_plan(project_id=project_id, planning_token=r1["planning_token"])
+
+    # 第二轮规划（用 supersedes 替换第一轮的某条规划）
+    # 先读取当前 state，手动添加一条 superseded 的规划
+    state_file = real_project["project_dir"] / "_工作台状态" / "story_state.json"
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+
+    # 找到第一轮写入的 planning id（非 confirmed_direction 的条目）
+    first_round_plans = [p for p in state["approved_plan"] if p.get("kind") != "confirmed_direction"]
+    assert len(first_round_plans) > 0
+    old_plan_id = first_round_plans[0]["id"]
+
+    # 添加一条新规划，supersedes 旧规划
+    state["approved_plan"].append({
+        "id": "plan-superseding-1",
+        "description": "替代旧规划的新版本",
+        "target_ref": first_round_plans[0].get("target_ref"),
+        "authority": "author_decision:decision-superseding",
+        "occurred": False,
+        "supersedes": [old_plan_id],
+    })
+    state["state_rev"] = state["state_rev"] + 1
+    state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # 验证 overview 不包含被 supersede 的旧规划
+    overview = get_project_overview(project_id)
+    current_plan_ids = [p["id"] for p in overview.get("current_plans", [])]
+    assert old_plan_id not in current_plan_ids, f"superseded 的 {old_plan_id} 不应出现在 current_plans"
+    assert "plan-superseding-1" in current_plan_ids, "新规划应出现在 current_plans"
+
+    # 验证旧规划仍保留在正式 State 历史中
+    state_after = json.loads(state_file.read_text(encoding="utf-8"))
+    all_ids = [p.get("id") for p in state_after["approved_plan"]]
+    assert old_plan_id in all_ids, "superseded 的旧规划必须保留在历史中"
+
+
+# ---------- 18. active 条目正常显示 ----------
+
+def test_active_plans_displayed(isolated, real_project, fake_agent):
+    """所有 active 条目都显示在 current_plans 中。"""
+    project_id = real_project["project_id"]
+
+    # 第一轮规划
+    r1 = sp_ops.propose_story_plan(project_id=project_id, author_question="第一轮")
+    sp_ops.confirm_story_plan(project_id=project_id, planning_token=r1["planning_token"])
+
+    overview = get_project_overview(project_id)
+    # confirmed_direction + 第一轮 planning 都应显示
+    assert "current_plans" in overview
+    assert len(overview["current_plans"]) >= 2  # confirmed_direction + 至少1条 planning
+
+
+# ---------- 19. Agent Prompt 不包含 superseded planning ----------
+
+def test_agent_prompt_excludes_superseded(isolated, real_project, monkeypatch):
+    """Agent Prompt 中的"当前已确定的规划"不包含 superseded 条目。"""
+    project_id = real_project["project_id"]
+
+    # 先做一轮规划
+    from agents.base import AgentResult
+    captured_tasks: list[str] = []
+
+    def _capture_agent(task: str, cwd=None):
+        captured_tasks.append(task)
+        return AgentResult(status="completed", output=VALID_AGENT_JSON, agent="fake")
+
+    monkeypatch.setattr(sp_ops, "run_task", _capture_agent)
+
+    r1 = sp_ops.propose_story_plan(project_id=project_id, author_question="第一轮")
+    sp_ops.confirm_story_plan(project_id=project_id, planning_token=r1["planning_token"])
+
+    # 手动 supersede 第一轮的某条规划
+    state_file = real_project["project_dir"] / "_工作台状态" / "story_state.json"
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    first_round_plans = [p for p in state["approved_plan"] if p.get("kind") != "confirmed_direction"]
+    old_plan_id = first_round_plans[0]["id"]
+    old_desc = first_round_plans[0]["description"]
+
+    state["approved_plan"].append({
+        "id": "plan-superseding-2",
+        "description": "替代版本",
+        "target_ref": first_round_plans[0].get("target_ref"),
+        "authority": "author_decision:decision-s2",
+        "occurred": False,
+        "supersedes": [old_plan_id],
+    })
+    state["state_rev"] = state["state_rev"] + 1
+    state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # 第二轮规划
+    captured_tasks.clear()
+    sp_ops.propose_story_plan(project_id=project_id, author_question="第二轮")
+
+    # 验证 Agent Prompt 不包含被 supersede 的旧规划描述
+    assert len(captured_tasks) == 1
+    prompt = captured_tasks[0]
+    assert old_desc not in prompt, f"superseded 的旧规划描述不应出现在 Prompt 中：{old_desc}"
+    assert "替代版本" in prompt, "active 的新规划描述应出现在 Prompt 中"
+
+
+# ---------- 20. 第二轮规划 planning_sources 包含 confirmed_direction + active planning ----------
+
+def test_second_round_sources_include_all_active(isolated, real_project, fake_agent):
+    """第二轮规划的 planning_sources 包含 confirmed_direction 和已确认的 active planning。"""
+    project_id = real_project["project_id"]
+
+    # 第一轮规划
+    r1 = sp_ops.propose_story_plan(project_id=project_id, author_question="第一轮")
+    sp_ops.confirm_story_plan(project_id=project_id, planning_token=r1["planning_token"])
+
+    # 第二轮规划：检查 planning_sources
+    # 通过 inspect 临时工作区中的 brief 来验证
+    r2 = sp_ops.propose_story_plan(project_id=project_id, author_question="第二轮")
+
+    planning_root = isolated.parent / ".planning"
+    # 找到第二轮的 turn dir
+    turn_dirs = list(planning_root.glob(f"{project_id}/*/"))
+    assert len(turn_dirs) >= 1
+    # 取最新的 turn dir
+    latest_turn = sorted(turn_dirs, key=lambda p: p.stat().st_mtime)[-1]
+    brief_files = list(latest_turn.glob("briefs/plan-brief-*.json"))
+    assert len(brief_files) == 1
+    brief = json.loads(brief_files[0].read_text(encoding="utf-8"))
+
+    # planning_sources 应包含至少 2 条：confirmed_direction + 第一轮 planning
+    sources = brief.get("planning_sources", [])
+    assert len(sources) >= 2, f"第二轮 planning_sources 应包含至少 2 条 active 来源，实际：{sources}"
+
+    # 验证所有 sources 都是 approved_plan kind
+    for s in sources:
+        assert s["kind"] == "approved_plan"
+
+
+# ---------- 21. 没有 active source 仍拒绝（多来源场景） ----------
+
+def test_no_active_source_rejected_multi(isolated, real_project, fake_agent):
+    """所有 approved_plan 都被 supersede 后，propose 仍拒绝。"""
+    project_id = real_project["project_id"]
+
+    # 手动把所有规划都 supersede（包括 confirmed_direction）
+    state_file = real_project["project_dir"] / "_工作台状态" / "story_state.json"
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+
+    all_plan_ids = [p.get("id") for p in state["approved_plan"] if p.get("id")]
+    state["approved_plan"].append({
+        "id": "plan-supersede-all",
+        "description": "替代所有",
+        "target_ref": "design-all",
+        "authority": "author_decision:decision-all",
+        "occurred": False,
+        "supersedes": all_plan_ids,
+    })
+    state["state_rev"] = state["state_rev"] + 1
+    state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # 现在应该还有 1 条 active（plan-supersede-all）
+    result = sp_ops.propose_story_plan(project_id=project_id, author_question="测试")
+    assert result["status"] == "proposal_noncanonical"
+
+    # 再把它也 supersede
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    state["approved_plan"].append({
+        "id": "plan-supersede-final",
+        "description": "最终替代",
+        "target_ref": "design-final",
+        "authority": "author_decision:decision-final",
+        "occurred": False,
+        "supersedes": ["plan-supersede-all"],
+    })
+    state["state_rev"] = state["state_rev"] + 1
+    state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # 现在只有 plan-supersede-final 是 active，propose 应成功
+    result = sp_ops.propose_story_plan(project_id=project_id, author_question="再测试")
+    assert result["status"] == "proposal_noncanonical"
+
+
+# ---------- 22. invalid Agent output 后临时 planning turn 被清理 ----------
+
+def test_invalid_agent_output_cleanup(isolated, real_project, monkeypatch):
+    """Agent 输出结构错误时，临时 planning turn 被清理。"""
+    from agents.base import AgentResult
+
+    def _bad_agent(task: str, cwd=None):
+        return AgentResult(status="completed", output="这不是合法 JSON", agent="fake")
+
+    monkeypatch.setattr(sp_ops, "run_task", _bad_agent)
+
+    project_id = real_project["project_id"]
+    planning_root = isolated.parent / ".planning"
+
+    with pytest.raises(sp_ops.StoryPlanningError):
+        sp_ops.propose_story_plan(project_id=project_id, author_question="测试")
+
+    # 临时 planning turn 应被清理
+    project_planning_dir = planning_root / project_id
+    if project_planning_dir.exists():
+        assert list(project_planning_dir.iterdir()) == [], "invalid Agent output 后临时目录应被清理"
