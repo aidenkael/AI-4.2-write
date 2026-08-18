@@ -56,6 +56,33 @@ def _default_cli() -> str:
     raise RuntimeError("找不到 Qoder CLI（可用 launch 参数或环境变量 QODERCLI_PATH 指定）")
 
 
+def _resolve_cmd(cli_path: str) -> list[str]:
+    """解析 CLI 入口为实际子进程命令。
+
+    Windows 上 npm 安装的 qodercli 是 .CMD 包装器，CMD.exe 通过系统 ANSI
+    代码页（如中文 Windows 的 CP936）处理命令行参数，导致 Python subprocess
+    传递的 UTF-8 中文字符损坏。解决方法：检测 .CMD 包装器，直接调用
+    Node.js + JS bundle，绕过 CMD.exe 的代码页转换。
+
+    非 Windows 或无法解析时返回原始 [cli_path]。
+    """
+    if os.name != "nt":
+        return [cli_path]
+    p = Path(cli_path)
+    if p.suffix.upper() not in (".CMD", ".BAT"):
+        return [cli_path]
+    npm_dir = p.parent
+    # 定位 Node.js：优先 npm 目录下的 node.exe，其次系统 PATH
+    node_exe = shutil.which("node")
+    if not node_exe:
+        return [cli_path]
+    # 定位 JS bundle（npm 标准布局）
+    bundle = npm_dir / "node_modules" / "@qoder-ai" / "qodercli" / "bundle" / "qodercli.js"
+    if bundle.is_file():
+        return [node_exe, str(bundle)]
+    return [cli_path]
+
+
 @dataclass
 class QoderBYOKConfig:
     """Qoder 特有 BYOK 配置（只进 QoderAdapter，不进统一 AgentRequest）。
@@ -97,6 +124,11 @@ class QoderAdapter(AgentAdapter):
         else:
             self._cli_path = cli_path if cli_path is not None else _default_cli()
             self._launch = [self._cli_path]
+        # 实际子进程命令（Windows 上绕过 CMD 包装器直接调 Node.js，避免中文编码损坏）
+        if self._cli_path:
+            self._subprocess_cmd = _resolve_cmd(self._cli_path)
+        else:
+            self._subprocess_cmd = self._launch
         # CLI 路径的进程句柄 / 取消状态
         self._proc: Optional[subprocess.Popen] = None
         self._lock = threading.Lock()
@@ -162,7 +194,7 @@ class QoderAdapter(AgentAdapter):
 
     def _run_cli(self, request: AgentRequest) -> AgentResult:
         self._cancelled.clear()
-        cmd = self._launch + ["-p", "--permission-mode", "dont_ask", "--output-format", "json"]
+        cmd = self._subprocess_cmd + ["-p", "--permission-mode", "dont_ask", "--output-format", "json"]
         if request.model:
             cmd += ["--model", request.model]
         if request.reasoning_effort:
@@ -220,6 +252,13 @@ class QoderAdapter(AgentAdapter):
                 error=(err.strip() or f"非 0 退出码 {proc.returncode}"),
                 agent=self.name, exit_code=proc.returncode,
             )
+        # CLI 退出码 0 但信封标记错误（如模型配额耗尽）：转 failed 而非 completed
+        cli_error = self._extract_cli_error(out)
+        if cli_error:
+            return AgentResult(
+                status="failed", output=self._extract_cli_result(out),
+                error=cli_error, agent=self.name, exit_code=proc.returncode,
+            )
         return AgentResult(status="completed", output=self._extract_cli_result(out), agent=self.name,
                            exit_code=proc.returncode)
 
@@ -241,6 +280,29 @@ class QoderAdapter(AgentAdapter):
         except (ValueError, TypeError):
             pass
         return text
+
+    @staticmethod
+    def _extract_cli_error(raw_output: str) -> Optional[str]:
+        """检查 CLI JSON 信封中是否包含错误信息。
+
+        CLI 有时退出码 0 但信封标记 is_error=true（如模型配额耗尽），
+        此时需要从 errors 字段提取可读错误信息。无错误时返回 None。
+        """
+        text = (raw_output or "").strip()
+        if not text:
+            return None
+        try:
+            import json as _json
+            data = _json.loads(text)
+            if isinstance(data, dict) and data.get("is_error"):
+                errors = data.get("errors")
+                if isinstance(errors, list) and errors:
+                    return "; ".join(str(e) for e in errors)
+                subtype = data.get("subtype", "")
+                return f"CLI 返回错误（{subtype}）" if subtype else "CLI 返回未知错误"
+        except (ValueError, TypeError):
+            pass
+        return None
 
     # ---------------- SDK BYOK 路径 ----------------
 
@@ -350,13 +412,7 @@ class QoderAdapter(AgentAdapter):
         输出为简单表格（首行为表头 MODEL），逐行取模型名；
         禁止在 AI-write 中硬编码名单，Qoder 增删模型后本方法自然跟随。
         """
-        cli = self._cli_path
-        if cli is None:
-            if len(self._launch) == 1:
-                cli = self._launch[0]
-            else:
-                raise RuntimeError("list_qoder_models 需要单个 qodercli 入口（launch 为单元素或 cli_path）")
-        cmd = [cli, "--list-models"]
+        cmd = self._subprocess_cmd + ["--list-models"]
         try:
             proc = subprocess.run(
                 cmd, capture_output=True, text=True, encoding="utf-8",

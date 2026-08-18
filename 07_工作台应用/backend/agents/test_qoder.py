@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 from agents.base import AgentAdapter, AgentRequest, AgentResult
-from agents.qoder import QoderAdapter, QoderBYOKConfig, _default_cli
+from agents.qoder import QoderAdapter, QoderBYOKConfig, _default_cli, _resolve_cmd
 from agents.registry import available, get_agent
 
 
@@ -211,3 +211,90 @@ def test_list_qoder_models_dynamic():
     models = a.list_qoder_models()
     assert isinstance(models, list) and models
     assert all(isinstance(m, str) and m.strip() for m in models)
+
+
+# ---------- _extract_cli_result：JSON 信封提取 ----------
+
+def test_extract_cli_result_json_envelope():
+    """CLI --output-format json 返回 JSON 信封时，应提取 result 字段。"""
+    import json
+    envelope = json.dumps({
+        "type": "result",
+        "subtype": "success",
+        "result": '{"ok":true}',
+        "duration_ms": 1234,
+    })
+    assert QoderAdapter._extract_cli_result(envelope) == '{"ok":true}'
+
+
+def test_extract_cli_result_json_envelope_with_chinese():
+    """JSON 信封的 result 字段含中文时，应完整提取。"""
+    import json
+    result_text = '{"semantic_interpretation":{"objective":"测试中文"}}'
+    envelope = json.dumps({
+        "type": "result",
+        "result": result_text,
+        "duration_ms": 500,
+    }, ensure_ascii=False)
+    assert QoderAdapter._extract_cli_result(envelope) == result_text
+
+
+def test_extract_cli_result_fallback_plain_text():
+    """非 JSON 信封时，回退到原始文本。"""
+    assert QoderAdapter._extract_cli_result("just plain text") == "just plain text"
+
+
+def test_extract_cli_result_empty():
+    """空输入回退到空文本。"""
+    assert QoderAdapter._extract_cli_result("") == ""
+    assert QoderAdapter._extract_cli_result(None) == ""
+
+
+# ---------- _resolve_cmd：CMD 包装器解析 ----------
+
+def test_resolve_cmd_non_windows_returns_original(monkeypatch):
+    """非 Windows 系统直接返回原始路径。"""
+    monkeypatch.setattr("os.name", "posix")
+    result = _resolve_cmd("/usr/local/bin/qodercli")
+    assert result == ["/usr/local/bin/qodercli"]
+
+
+def test_resolve_cmd_non_cmd_returns_original(monkeypatch):
+    """非 .CMD/.BAT 文件直接返回原始路径。"""
+    monkeypatch.setattr("os.name", "nt")
+    result = _resolve_cmd("C:\\path\\to\\qodercli.exe")
+    assert result == ["C:\\path\\to\\qodercli.exe"]
+
+
+# ---------- _extract_cli_error：错误信封检测 ----------
+
+def test_extract_cli_error_detects_error_envelope():
+    """CLI 返回 is_error=true 的信封时，应提取错误信息。"""
+    import json
+    envelope = json.dumps({
+        "type": "result",
+        "is_error": True,
+        "subtype": "error_during_execution",
+        "errors": ["You've reached your monthly Lite model limit."],
+    })
+    error = QoderAdapter._extract_cli_error(envelope)
+    assert error is not None
+    assert "Lite model limit" in error
+
+
+def test_extract_cli_error_no_error_returns_none():
+    """正常成功信封无错误，应返回 None。"""
+    import json
+    envelope = json.dumps({
+        "type": "result",
+        "is_error": False,
+        "result": "some output",
+    })
+    assert QoderAdapter._extract_cli_error(envelope) is None
+
+
+def test_extract_cli_error_non_json_returns_none():
+    """非 JSON 文本应返回 None（不误报）。"""
+    assert QoderAdapter._extract_cli_error("plain text") is None
+    assert QoderAdapter._extract_cli_error("") is None
+    assert QoderAdapter._extract_cli_error(None) is None
