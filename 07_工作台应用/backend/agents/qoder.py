@@ -162,7 +162,7 @@ class QoderAdapter(AgentAdapter):
 
     def _run_cli(self, request: AgentRequest) -> AgentResult:
         self._cancelled.clear()
-        cmd = self._launch + ["-p", "--permission-mode", "dont_ask"]
+        cmd = self._launch + ["-p", "--permission-mode", "dont_ask", "--output-format", "json"]
         if request.model:
             cmd += ["--model", request.model]
         if request.reasoning_effort:
@@ -211,17 +211,36 @@ class QoderAdapter(AgentAdapter):
 
         if self._cancelled.is_set():
             return AgentResult(
-                status="cancelled", output=out.strip(), agent=self.name,
+                status="cancelled", output=self._extract_cli_result(out), agent=self.name,
                 exit_code=proc.returncode,
             )
         if proc.returncode != 0:
             return AgentResult(
-                status="failed", output=out.strip(),
+                status="failed", output=self._extract_cli_result(out),
                 error=(err.strip() or f"非 0 退出码 {proc.returncode}"),
                 agent=self.name, exit_code=proc.returncode,
             )
-        return AgentResult(status="completed", output=out.strip(), agent=self.name,
+        return AgentResult(status="completed", output=self._extract_cli_result(out), agent=self.name,
                            exit_code=proc.returncode)
+
+    @staticmethod
+    def _extract_cli_result(raw_output: str) -> str:
+        """从 --output-format json 的 CLI 输出中提取 result 字段。
+
+        CLI 返回 JSON 信封（含 type/result/duration_ms 等元数据），
+        业务层只需要 result 字段的模型文本。如果解析失败，回退到原始文本。
+        """
+        text = (raw_output or "").strip()
+        if not text:
+            return text
+        try:
+            import json as _json
+            data = _json.loads(text)
+            if isinstance(data, dict) and "result" in data:
+                return str(data["result"]).strip()
+        except (ValueError, TypeError):
+            pass
+        return text
 
     # ---------------- SDK BYOK 路径 ----------------
 

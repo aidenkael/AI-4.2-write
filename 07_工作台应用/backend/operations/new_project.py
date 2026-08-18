@@ -60,9 +60,10 @@ _PROPOSALS_ROOT = (
 )
 
 # Agent 任务模板：只要求结构化结果，明确不读文件不写文件
-_AGENT_TASK_TEMPLATE = """你是 Go Write 的故事设计语义助手。只做语义与创意工作，不读取或修改任何文件。
+# 注意：作者想法放在最后，避免模型先回应角色设定而忽略 JSON 输出要求
+_AGENT_TASK_TEMPLATE = """只做语义与创意分析，不读取或修改任何文件。
 
-请针对下面的作者想法，返回**一个合法的 JSON 对象**（不要任何额外文字、不要 markdown 代码块标记），
+请针对以下作者想法，直接输出一个合法的 JSON 对象（不要任何额外文字、不要 markdown 代码块标记）。
 结构必须如下：
 
 {{
@@ -86,7 +87,8 @@ _AGENT_TASK_TEMPLATE = """你是 Go Write 的故事设计语义助手。只做�
 
 作者作品名：{name}
 作者想法：{idea}
-"""
+
+直接输出 JSON，不要输出任何其他内容。"""
 
 # StoryDesign 候选/工件 id（临时工作区内）
 _BRIEF_ID = "brief-idea-001"
