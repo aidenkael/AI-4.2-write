@@ -16,9 +16,14 @@
 - 确认必须带后台生成的 writing token；禁止信任前端自行构造正文或 settlement。
 - Token 禁止进入 Prompt / UI / 日志 / Bridge 返回值。
 - 不修改 planning；不进入 StoryPlan。
+- writing token 必须绑定 project_id；cross-project 使用直接拒绝。
+- replace_existing 必须绑定本轮 selected Context 中的真实 id。
+- 使用 frozen context_package_is_stale 做 confirm stale 检查。
+- accepted_text_index 使用 fingerprint（SHA-256）而非 count。
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import sys
@@ -37,6 +42,8 @@ if str(_REPO_ROOT / "05_Skills与自动化" / "01_Skills" / "StoryWrite") not in
     sys.path.insert(0, str(_REPO_ROOT / "05_Skills与自动化" / "01_Skills" / "StoryWrite"))
 if str(_REPO_ROOT / "05_Skills与自动化" / "01_Skills" / "ProjectWorkspace") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "05_Skills与自动化" / "01_Skills" / "ProjectWorkspace"))
+if str(_REPO_ROOT / "05_Skills与自动化" / "01_Skills" / "ContextCompiler") not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT / "05_Skills与自动化" / "01_Skills" / "ContextCompiler"))
 
 from project_workspace import (  # noqa: E402  ProjectWorkspace frozen runtime
     ContractError as PWContractError,
@@ -52,6 +59,7 @@ from storywrite_entry import (  # noqa: E402  StoryWrite frozen runtime
     prepare_context,
     prepare_recent_prose_window,
 )
+from context_compiler import context_package_is_stale  # noqa: E402
 
 # 临时 writing 工作区根（06_工作区/应用开发 已 gitignore，Local Only，可删除）
 _WRITING_ROOT = (
@@ -111,7 +119,7 @@ _PROSE_TASK_TEMPLATE = """你是 AI-write 的正文写作助手。根据下面�
     {{
       "classification": "mechanical",
       "target_area": "canon_facts",
-      "entry": {{"id": "由你生成的稳定 id", "fact": "本场景中明确成立的事实"}},
+      "entry": {{"id": "见下方 id 规则", "fact": "本场景中明确成立的事实"}},
       "operation": "append",
       "reason": "正文明确写到了这个事实"
     }}
@@ -120,12 +128,19 @@ _PROSE_TASK_TEMPLATE = """你是 AI-write 的正文写作助手。根据下面�
 
 settlement 纪律：
 - classification 只允许：mechanical / ambiguous / creative
-- mechanical：正文明确成立、且可能约束后续连续性的内容（明确数字、日期、合同条件、承诺）
+- mechanical：正文中明确已经发生/成立的话语、动作、事实，且适合进入 Story State。
+  完成普通 mechanical 判断后，再额外扫描 continuity-critical hard anchors：
+  明确数字、日期/时间/deadline、合同条件、明确承诺。
+  这些额外项如满足 mechanical 定义也应标 mechanical。
 - ambiguous：可能是也可能不是的内容
 - creative：纯粹的创意发挥
 - 只有 mechanical 才可能被写入 Story State
-- entry.id 由你生成稳定 id（如 "cf.开场花园.1"）
 - operation 只允许：append / replace_existing
+
+entry.id 规则：
+- append：id 不由你负责，后台自动生成。你可以省略或写占位值（如 "placeholder"）。
+- replace_existing：必须使用 Context Package 中明确提供的真实现有 id
+  （见下方 "selected_story_state" 中的 id）。不得使用不存在的 id。
 
 创作 Brief：
 {brief_summary}
@@ -159,6 +174,26 @@ def _writing_dir(project_id: str, writing_turn_id: str) -> Path:
 def _cleanup_writing(project_id: str, writing_turn_id: str) -> None:
     """确认/失败后删除临时写作工作区。"""
     shutil.rmtree(_writing_dir(project_id, writing_turn_id), ignore_errors=True)
+
+
+def _cleanup_all_for_project(project_id: str) -> None:
+    """清理同一 project 下所有旧临时候选（"我想改一改 → 再生成"不留残留）。"""
+    root = get_writing_root()
+    project_writing = root / project_id
+    if project_writing.exists():
+        shutil.rmtree(project_writing, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# accepted_text_index fingerprint
+# ---------------------------------------------------------------------------
+
+def _index_fingerprint(entries: list[dict]) -> str:
+    """对 index entries 做稳定 SHA-256（空 entries → "empty"）。"""
+    if not entries:
+        return "empty"
+    raw = json.dumps(entries, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +263,11 @@ def _parse_selection_result(output: str) -> dict[str, Any]:
 
 
 def _parse_prose_result(output: str) -> dict[str, Any]:
-    """解析第二阶段 Agent 输出（正文生成）。"""
+    """解析第二阶段 Agent 输出（正文生成）。
+
+    append 类型：不要求模型给有效唯一 id（后台生成）。
+    replace_existing 类型：必须要求非空 id。
+    """
     data = _parse_json_output(output, "正文生成阶段")
 
     draft_text = data.get("draft_text")
@@ -248,11 +287,16 @@ def _parse_prose_result(output: str) -> dict[str, Any]:
         if not isinstance(cand.get("target_area"), str) or not cand["target_area"]:
             raise StoryWritingError(f"settlement_candidates[{i}].target_area 缺失。")
         entry = cand.get("entry")
-        if not isinstance(entry, dict) or not entry.get("id"):
-            raise StoryWritingError(f"settlement_candidates[{i}].entry 缺少 id。")
+        if not isinstance(entry, dict):
+            raise StoryWritingError(f"settlement_candidates[{i}].entry 不是对象。")
         op = cand.get("operation", "append")
         if op not in valid_operations:
             raise StoryWritingError(f"settlement_candidates[{i}].operation 非法。")
+        # replace_existing 必须要求非空 id；append 不要求
+        if op == "replace_existing" and not entry.get("id"):
+            raise StoryWritingError(
+                f"settlement_candidates[{i}]: replace_existing 必须提供非空 entry.id。"
+            )
 
     return {"draft_text": draft_text.strip(), "settlement_candidates": candidates}
 
@@ -281,6 +325,84 @@ def _build_state_entries_summary(state: dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# 辅助：构建第二阶段 Context 摘要（真正消费 Context Package）
+# ---------------------------------------------------------------------------
+
+def _build_context_summary(context: dict[str, Any]) -> str:
+    """把 Context Package 的作者可读内容整理成小型文本块（第二阶段 Agent 真正消费）。
+
+    包含：selected_intent / selected_story_state / selected_bkp_hits /
+    conflicts_or_tensions。不包含完整未选择 State。
+    """
+    parts: list[str] = []
+
+    # selected_intent
+    sel_intent = context.get("selected_intent") or {}
+    if sel_intent:
+        parts.append("[selected_intent]")
+        for k, v in sel_intent.items():
+            if v:
+                parts.append(f"  {k}: {v}")
+
+    # selected_story_state（保留 area + id + 实际内容，replace_existing 需要）
+    sel_state = context.get("selected_story_state") or {}
+    if sel_state:
+        parts.append("\n[selected_story_state]")
+        for area, items in sel_state.items():
+            for item in items:
+                eid = item.get("id", "?")
+                desc = item.get("fact") or item.get("description") or item.get("text") or ""
+                parts.append(f"  [{area}] id={eid}  →  {desc}")
+
+    # selected_bkp_hits
+    bkp_hits = context.get("selected_bkp_hits") or []
+    if bkp_hits:
+        parts.append("\n[selected_bkp_hits]")
+        for hit in bkp_hits:
+            if isinstance(hit, dict):
+                parts.append(f"  - {hit.get('title', '')}: {hit.get('text', '')[:200]}")
+
+    # conflicts_or_tensions
+    conflicts = context.get("conflicts_or_tensions") or []
+    if conflicts:
+        parts.append("\n[conflicts_or_tensions]")
+        for c in conflicts:
+            if isinstance(c, dict) and c.get("text"):
+                parts.append(f"  - {c['text']}")
+
+    return "\n".join(parts) if parts else "（Context 中无选定条目）"
+
+
+# ---------------------------------------------------------------------------
+# 辅助：验证 replace_existing 绑定本轮 selected Context
+# ---------------------------------------------------------------------------
+
+def _validate_replace_existing_in_context(
+    settlement_candidates: list[dict],
+    context: dict[str, Any],
+) -> None:
+    """replace_existing 的 target_area + entry.id 必须出现在 selected_story_state 中。"""
+    sel_state = context.get("selected_story_state") or {}
+    # 构建 (area, id) 集合
+    valid_refs: set[tuple[str, str]] = set()
+    for area, items in sel_state.items():
+        for item in items:
+            eid = item.get("id")
+            if eid:
+                valid_refs.add((area, eid))
+
+    for i, cand in enumerate(settlement_candidates):
+        if cand.get("operation") == "replace_existing":
+            area = cand.get("target_area", "")
+            eid = cand.get("entry", {}).get("id", "")
+            if (area, eid) not in valid_refs:
+                raise StoryWritingError(
+                    f"settlement_candidates[{i}]: replace_existing 目标 "
+                    f"({area}/{eid}) 不在本轮 Context 的选定条目中，拒绝候选。"
+                )
+
+
+# ---------------------------------------------------------------------------
 # 提出正文候选
 # ---------------------------------------------------------------------------
 
@@ -304,11 +426,12 @@ def propose_story_write(project_id: str, author_input: str) -> dict[str, Any]:
     state = loaded["state"]
     name = loaded["name"]
 
+    # 清理同一 project 的旧临时候选（"我想改一改 → 再生成"不留残留）
+    _cleanup_all_for_project(project_id)
+
     # 2. 创建临时写作工作区
     writing_turn_id = uuid.uuid4().hex[:12]
     writing_dir = _writing_dir(project_id, writing_turn_id)
-    if writing_dir.exists():
-        shutil.rmtree(writing_dir, ignore_errors=True)
     writing_dir.mkdir(parents=True, exist_ok=False)
 
     # 3. 第一阶段 Agent：上下文选择
@@ -375,25 +498,27 @@ def propose_story_write(project_id: str, author_input: str) -> dict[str, Any]:
         _cleanup_writing(project_id, writing_turn_id)
         raise StoryWritingError(f"Context 被拒绝：{exc}") from exc
 
-    # 6. 获取 recent prose（如有）
+    # 6. 获取 recent prose
+    #    区分"第一场（index 为空）"和"index 有正文但 recent prose 损坏"
+    index_entries = loaded.get("index", {}).get("entries", [])
     recent_prose_window = None
-    try:
-        recent_prose_window = get_recent_prose(proj["project_dir"])
-    except (PWContractError, PWWorkspaceError):
-        pass  # 第一场没有 recent prose，正常继续
+    if index_entries:
+        # index 已有 accepted entry → 必须有 recent prose；失败则停止
+        try:
+            recent_prose_window = get_recent_prose(proj["project_dir"])
+        except (PWContractError, PWWorkspaceError) as exc:
+            _cleanup_writing(project_id, writing_turn_id)
+            raise StoryWritingError(
+                f"上一段正文衔接数据异常，请重新生成：{exc}"
+            ) from exc
+    # else: index 为空 → 第一场，recent_prose_window = None
 
     # 7. 生成 scene_ref（后台生成，不由模型决定）
     scene_ref = f"scene-{writing_turn_id}"
 
-    # 8. 第二阶段 Agent：正文生成
+    # 8. 第二阶段 Agent：正文生成（真正消费 Context Package）
     brief_summary = f"目标：{brief.get('author_input', '')}\n方向：{work_direction}"
-    context_summary_parts = []
-    for area, items in context.get("selected_story_state", {}).items():
-        for item in items:
-            desc = item.get("fact") or item.get("description") or item.get("text") or ""
-            if desc:
-                context_summary_parts.append(f"- [{area}] {desc}")
-    context_summary = "\n".join(context_summary_parts) if context_summary_parts else "（Context 中无选定条目）"
+    context_summary = _build_context_summary(context)
 
     recent_prose_section = ""
     if recent_prose_window:
@@ -437,7 +562,10 @@ def propose_story_write(project_id: str, author_input: str) -> dict[str, Any]:
             "reason": cand.get("reason") or "",
         })
 
-    # 10. 保存元信息（writing_token 用于确认时校验）
+    # 10. replace_existing 必须绑定本轮 selected Context
+    _validate_replace_existing_in_context(settlement_candidates, context)
+
+    # 11. 保存元信息（writing_token 用于确认时校验）
     meta = {
         "kind": "story_writing_proposal",
         "project_id": project_id,
@@ -455,19 +583,19 @@ def propose_story_write(project_id: str, author_input: str) -> dict[str, Any]:
             "intent_rev": intent["intent_rev"],
             "state_rev": state["state_rev"],
         },
-        "index_entries_count": len(loaded.get("index", {}).get("entries", [])),
+        "index_fingerprint": _index_fingerprint(index_entries),
+        # 保存 brief + context 供 confirm 时 frozen stale 检查
+        "brief": brief,
+        "context": context,
     }
-    (writing_dir / "writing_meta.json").write_text(
-        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
 
-    # 11. 确定 chapter_number
-    index_entries = loaded.get("index", {}).get("entries", [])
+    # 12. 确定 chapter_number
     if index_entries:
         chapter_number = index_entries[-1].get("chapter_number", 1)
     else:
         chapter_number = 1
     meta["chapter_number"] = chapter_number
+
     (writing_dir / "writing_meta.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -512,13 +640,20 @@ def confirm_story_write(project_id: str, writing_token: str) -> dict[str, Any]:
         raise StoryWritingError("正文候选已失效或不存在，请重新生成。")
 
     meta = json.loads((matched / "writing_meta.json").read_text(encoding="utf-8"))
+
+    # 2. cross-project token 检查：writing token 必须绑定当前 project_id
+    if meta.get("project_id") != project_id:
+        raise StoryWritingError("这份正文候选不属于当前作品，请重新生成。")
+
     writing_turn_id = meta["writing_turn_id"]
     scene_ref = meta["scene_ref"]
     draft_text = meta["draft_text"]
     settlement = meta["settlement"]
     chapter_number = meta["chapter_number"]
+    saved_brief = meta.get("brief", {})
+    saved_context = meta.get("context", {})
 
-    # 2. 重新读取正式作品（用于 stale 检查）
+    # 3. 重新读取正式作品（用于 stale 检查）
     try:
         proj = resolve_project(project_id)
         loaded = load_project(proj["project_dir"])
@@ -530,22 +665,19 @@ def confirm_story_write(project_id: str, writing_token: str) -> dict[str, Any]:
     current_index = loaded.get("index", {})
     project_dir = Path(loaded["project_dir"])
 
-    # 3. Stale 检查：intent_rev + state_rev
-    source_versions = meta.get("source_versions", {})
-    if source_versions.get("intent_rev") != current_intent.get("intent_rev"):
-        _cleanup_writing(project_id, writing_turn_id)
-        raise StoryWritingError("作品在这期间已经有了新的变化，请重新生成这一段。")
-    if source_versions.get("state_rev") != current_state.get("state_rev"):
+    # 4. frozen context_package_is_stale 检查
+    if context_package_is_stale(saved_context, saved_brief, current_intent, current_state):
         _cleanup_writing(project_id, writing_turn_id)
         raise StoryWritingError("作品在这期间已经有了新的变化，请重新生成这一段。")
 
-    # 4. accepted_text_index 检查：即使 state_rev 未变，如果 index 已变化也拒绝
-    current_entries_count = len(current_index.get("entries", []))
-    if current_entries_count != meta.get("index_entries_count", -1):
+    # 5. accepted_text_index fingerprint 检查（覆盖正文索引变化）
+    current_entries = current_index.get("entries", [])
+    current_fp = _index_fingerprint(current_entries)
+    if current_fp != meta.get("index_fingerprint"):
         _cleanup_writing(project_id, writing_turn_id)
         raise StoryWritingError("作品在这期间已经有了新的内容，请重新生成这一段。")
 
-    # 5. 调用 ProjectWorkspace.accept_prose（frozen gate）
+    # 6. 调用 ProjectWorkspace.accept_prose（frozen gate）
     try:
         result = accept_prose(
             project_dir=project_dir,
@@ -559,7 +691,7 @@ def confirm_story_write(project_id: str, writing_token: str) -> dict[str, Any]:
         _cleanup_writing(project_id, writing_turn_id)
         raise StoryWritingError(f"接受正文失败：{exc}") from exc
 
-    # 6. 清理临时写作工作区
+    # 7. 清理临时写作工作区
     _cleanup_writing(project_id, writing_turn_id)
 
     return {

@@ -396,8 +396,34 @@ def test_append_id_generated_by_backend(isolated, real_project, fake_agent):
 # ---------- 16. replace_existing 必须保留真实 existing id ----------
 
 def test_replace_existing_keeps_real_id(isolated, real_project, monkeypatch):
-    """replace_existing 类型的 entry.id 保留 Agent 返回的原始 id。"""
+    """replace_existing 类型的 entry.id 保留 Agent 返回的原始 id，
+    且必须在本轮 Context 的 selected_story_state 中真实存在。"""
     from agents.base import AgentResult
+    project_id = real_project["project_id"]
+
+    # 先给 state 加一条 canon_fact
+    state_file = real_project["project_dir"] / "_工作台状态" / "story_state.json"
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    state["canon_facts"].append({
+        "id": "cf.existing.1",
+        "fact": "原有事实",
+        "authority": "author_decision:test",
+    })
+    state["state_rev"] = 3
+    state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # 选择阶段：选中这条 canon_fact
+    sel_with_fact = json.dumps({
+        "semantic_interpretation": {
+            "objective": "测试 replace_existing。",
+            "knowledge_needs": [],
+            "selected_bkp_ids": [],
+            "assumptions": [],
+        },
+        "state_selections": [
+            {"area": "canon_facts", "id": "cf.existing.1", "reason": "测试"},
+        ],
+    }, ensure_ascii=False)
 
     prose_with_replace = json.dumps({
         "draft_text": "正文内容。",
@@ -405,7 +431,7 @@ def test_replace_existing_keeps_real_id(isolated, real_project, monkeypatch):
             {
                 "classification": "mechanical",
                 "target_area": "canon_facts",
-                "entry": {"id": "existing-fact-1", "fact": "修改后的事实"},
+                "entry": {"id": "cf.existing.1", "fact": "修改后的事实"},
                 "operation": "replace_existing",
                 "reason": "修改",
             },
@@ -417,20 +443,20 @@ def test_replace_existing_keeps_real_id(isolated, real_project, monkeypatch):
     def _fake(task, cwd=None):
         calls.append(task)
         if len(calls) == 1:
-            return AgentResult(status="completed", output=VALID_SELECTION_JSON, agent="fake")
+            return AgentResult(status="completed", output=sel_with_fact, agent="fake")
         return AgentResult(status="completed", output=prose_with_replace, agent="fake")
 
     monkeypatch.setattr(sw_ops, "run_task", _fake)
     result = sw_ops.propose_story_write(
-        project_id=real_project["project_id"],
+        project_id=project_id,
         author_input="写",
     )
     writing_root = isolated.parent / ".writing"
-    turn_dir = list(writing_root.glob(f"{real_project['project_id']}/*/"))[0]
+    turn_dir = list(writing_root.glob(f"{project_id}/*/"))[0]
     meta = json.loads((turn_dir / "writing_meta.json").read_text(encoding="utf-8"))
     replace_cands = [c for c in meta["settlement"]["candidates"] if c["operation"] == "replace_existing"]
     assert len(replace_cands) == 1
-    assert replace_cands[0]["entry"]["id"] == "existing-fact-1"
+    assert replace_cands[0]["entry"]["id"] == "cf.existing.1"
 
 
 # ---------- 17. confirm 调用 accept_prose 且 author_accepted=True ----------
@@ -536,3 +562,374 @@ def test_real_agent_propose_smoke(isolated, real_project, tmp_path, monkeypatch)
     state_file = real_project["project_dir"] / "_工作台状态" / "story_state.json"
     state = json.loads(state_file.read_text(encoding="utf-8"))
     assert state["state_rev"] == 2
+
+
+# ==========================================================================
+# 22–33. 生产安全边界加固测试
+# ==========================================================================
+
+# ---------- 22. cross-project token 拒绝 ----------
+
+def test_cross_project_token_rejected(isolated, real_project, fake_agent, tmp_path):
+    """A 的 writing_token + B 的 project_id → 必须拒绝。"""
+    from project_workspace import create_project
+    project_a = real_project["project_id"]
+
+    # 创建项目 B
+    created_b = create_project(
+        name="测试作品B",
+        author_intent={
+            "work_direction": "另一部作品",
+            "reader_promise": "另一读者期待",
+            "hard_constraints": [],
+            "open_space": [],
+        },
+    )
+    project_b = created_b["project_id"]
+
+    # 为 A 生成候选
+    result = sw_ops.propose_story_write(project_id=project_a, author_input="写开场")
+    token_a = result["writing_token"]
+
+    # 用 A 的 token + B 的 project_id → 拒绝
+    with pytest.raises(sw_ops.StoryWritingError, match="不属于当前作品"):
+        sw_ops.confirm_story_write(project_id=project_b, writing_token=token_a)
+
+    # A/B 正式正文、State、index 均零变化
+    state_b = Path(created_b["project_dir"]) / "_工作台状态" / "story_state.json"
+    state_data = json.loads(state_b.read_text(encoding="utf-8"))
+    assert state_data["state_rev"] == 1  # B 初始 rev
+
+
+# ---------- 23. index 有正文但 recent prose 损坏 → propose 拒绝 ----------
+
+def test_corrupted_recent_prose_rejected(isolated, real_project, fake_agent):
+    """已有 accepted index，但 chapter/hash 损坏 → propose 拒绝。"""
+    from project_workspace import accept_prose
+    project_dir = real_project["project_dir"]
+    project_id = real_project["project_id"]
+
+    # 先正常写入一段正文
+    accept_prose(
+        project_dir=project_dir,
+        chapter_number=1,
+        scene_ref="scene-prev",
+        accepted_text="上一段正文内容。" * 100,
+        settlement={"scene_ref": "scene-prev", "candidates": []},
+        author_accepted=True,
+    )
+
+    # 人为损坏章节文件
+    chapter_file = project_dir / "03_正文" / "第001章.md"
+    chapter_file.unlink()
+
+    with pytest.raises(sw_ops.StoryWritingError, match="衔接数据异常"):
+        sw_ops.propose_story_write(project_id=project_id, author_input="继续写")
+
+
+# ---------- 24. 第二阶段 Prompt 包含 selected_intent ----------
+
+def test_stage2_prompt_contains_selected_intent(isolated, real_project, monkeypatch):
+    """第二阶段 Prompt 必须包含 selected_intent 内容。"""
+    from agents.base import AgentResult
+    calls = []
+
+    def _fake(task, cwd=None):
+        calls.append(task)
+        if len(calls) == 1:
+            return AgentResult(status="completed", output=VALID_SELECTION_JSON, agent="fake")
+        return AgentResult(status="completed", output=VALID_PROSE_JSON, agent="fake")
+
+    monkeypatch.setattr(sw_ops, "run_task", _fake)
+    sw_ops.propose_story_write(project_id=real_project["project_id"], author_input="写开场")
+
+    # 第二阶段 prompt
+    stage2_prompt = calls[1]
+    assert "selected_intent" in stage2_prompt or "work_direction" in stage2_prompt
+
+
+# ---------- 25. 第二阶段 Prompt 包含 selected Story State id ----------
+
+def test_stage2_prompt_contains_selected_state_id(isolated, real_project, monkeypatch):
+    """当选择阶段选中 state 条目时，第二阶段 Prompt 必须包含其 id。"""
+    from agents.base import AgentResult
+    project_id = real_project["project_id"]
+
+    # 给 state 加 canon_fact
+    state_file = real_project["project_dir"] / "_工作台状态" / "story_state.json"
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    state["canon_facts"].append({
+        "id": "cf.test.prompt.1",
+        "fact": "用于验证的事实",
+        "authority": "author_decision:test",
+    })
+    state["state_rev"] = 3
+    state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    sel_with_fact = json.dumps({
+        "semantic_interpretation": {
+            "objective": "测试。",
+            "knowledge_needs": [],
+            "selected_bkp_ids": [],
+            "assumptions": [],
+        },
+        "state_selections": [
+            {"area": "canon_facts", "id": "cf.test.prompt.1", "reason": "测试"},
+        ],
+    }, ensure_ascii=False)
+
+    calls = []
+
+    def _fake(task, cwd=None):
+        calls.append(task)
+        if len(calls) == 1:
+            return AgentResult(status="completed", output=sel_with_fact, agent="fake")
+        return AgentResult(status="completed", output=VALID_PROSE_JSON, agent="fake")
+
+    monkeypatch.setattr(sw_ops, "run_task", _fake)
+    sw_ops.propose_story_write(project_id=project_id, author_input="写")
+
+    stage2_prompt = calls[1]
+    assert "cf.test.prompt.1" in stage2_prompt
+
+
+# ---------- 26. BKP/conflicts 存在时进入第二阶段 Context ----------
+
+def test_bkp_and_conflicts_enter_stage2(isolated, real_project, monkeypatch):
+    """conflicts_or_tensions 存在时进入第二阶段 Context 摘要。"""
+    from agents.base import AgentResult
+    project_id = real_project["project_id"]
+
+    sel_with_conflict = json.dumps({
+        "semantic_interpretation": {
+            "objective": "测试。",
+            "knowledge_needs": [],
+            "selected_bkp_ids": [],
+            "assumptions": [],
+        },
+        "state_selections": [],
+        "conflicts_or_tensions": [{"text": "主角的秘密与公开身份之间的张力"}],
+    }, ensure_ascii=False)
+
+    calls = []
+
+    def _fake(task, cwd=None):
+        calls.append(task)
+        if len(calls) == 1:
+            return AgentResult(status="completed", output=sel_with_conflict, agent="fake")
+        return AgentResult(status="completed", output=VALID_PROSE_JSON, agent="fake")
+
+    monkeypatch.setattr(sw_ops, "run_task", _fake)
+    sw_ops.propose_story_write(project_id=project_id, author_input="写")
+
+    stage2_prompt = calls[1]
+    assert "张力" in stage2_prompt or "conflicts_or_tensions" in stage2_prompt
+
+
+# ---------- 27. replace_existing 未在 selected Context → 拒绝 ----------
+
+def test_replace_existing_not_in_context_rejected(isolated, real_project, monkeypatch):
+    """replace_existing 目标不在本轮 Context 中 → propose 拒绝。"""
+    from agents.base import AgentResult
+
+    prose_with_replace = json.dumps({
+        "draft_text": "正文内容。",
+        "settlement_candidates": [
+            {
+                "classification": "mechanical",
+                "target_area": "canon_facts",
+                "entry": {"id": "nonexistent-fact", "fact": "不存在的事实"},
+                "operation": "replace_existing",
+                "reason": "测试",
+            },
+        ],
+    }, ensure_ascii=False)
+
+    calls = []
+
+    def _fake(task, cwd=None):
+        calls.append(task)
+        if len(calls) == 1:
+            return AgentResult(status="completed", output=VALID_SELECTION_JSON, agent="fake")
+        return AgentResult(status="completed", output=prose_with_replace, agent="fake")
+
+    monkeypatch.setattr(sw_ops, "run_task", _fake)
+    with pytest.raises(sw_ops.StoryWritingError, match="不在本轮 Context"):
+        sw_ops.propose_story_write(
+            project_id=real_project["project_id"],
+            author_input="写",
+        )
+
+
+# ---------- 28. append 不依赖模型唯一 id ----------
+
+def test_append_no_dependency_on_model_id(isolated, real_project, monkeypatch):
+    """append 类型的 entry.id 无论模型给什么值，都由后台覆盖。"""
+    from agents.base import AgentResult
+
+    prose_with_placeholder = json.dumps({
+        "draft_text": "正文内容。",
+        "settlement_candidates": [
+            {
+                "classification": "mechanical",
+                "target_area": "canon_facts",
+                "entry": {"id": "placeholder", "fact": "新事实"},
+                "operation": "append",
+                "reason": "测试",
+            },
+        ],
+    }, ensure_ascii=False)
+
+    calls = []
+
+    def _fake(task, cwd=None):
+        calls.append(task)
+        if len(calls) == 1:
+            return AgentResult(status="completed", output=VALID_SELECTION_JSON, agent="fake")
+        return AgentResult(status="completed", output=prose_with_placeholder, agent="fake")
+
+    monkeypatch.setattr(sw_ops, "run_task", _fake)
+    result = sw_ops.propose_story_write(
+        project_id=real_project["project_id"],
+        author_input="写",
+    )
+
+    writing_root = isolated.parent / ".writing"
+    turn_dir = list(writing_root.glob(f"{real_project['project_id']}/*/"))[0]
+    meta = json.loads((turn_dir / "writing_meta.json").read_text(encoding="utf-8"))
+    append_cands = [c for c in meta["settlement"]["candidates"] if c["operation"] == "append"]
+    assert len(append_cands) == 1
+    assert append_cands[0]["entry"]["id"].startswith("sw-"), "append id 由后台覆盖"
+    assert append_cands[0]["entry"]["id"] != "placeholder"
+
+
+# ---------- 29. frozen context_package_is_stale 被真实调用/生效 ----------
+
+def test_frozen_context_stale_check_works(isolated, real_project, fake_agent):
+    """confirm 时如果 context 判定 stale → 拒绝。"""
+    project_id = real_project["project_id"]
+    result = sw_ops.propose_story_write(project_id=project_id, author_input="写开场")
+    token = result["writing_token"]
+
+    # 模拟 intent_rev 变化（这会让 frozen stale 返回 True）
+    intent_file = real_project["project_dir"] / "_工作台状态" / "author_intent.json"
+    intent = json.loads(intent_file.read_text(encoding="utf-8"))
+    intent["intent_rev"] = intent["intent_rev"] + 1
+    intent_file.write_text(json.dumps(intent, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    with pytest.raises(sw_ops.StoryWritingError, match="新的变化"):
+        sw_ops.confirm_story_write(project_id=project_id, writing_token=token)
+
+
+# ---------- 30. accepted index 同数量但内容变化 → stale 拒绝 ----------
+
+def test_index_fingerprint_content_change_rejected(isolated, real_project, monkeypatch):
+    """index entries 内容变化（即使数量相同） → fingerprint 不同 → 拒绝。"""
+    from project_workspace import accept_prose
+    project_id = real_project["project_id"]
+    project_dir = real_project["project_dir"]
+
+    # 先接受一段正文，使 index 有 entries
+    accept_prose(
+        project_dir=project_dir,
+        chapter_number=1,
+        scene_ref="scene-existing",
+        accepted_text="已有正文内容。" * 100,
+        settlement={"scene_ref": "scene-existing", "candidates": []},
+        author_accepted=True,
+    )
+
+    # 用 stateless fake agent（因为 fake_agent 的 counter 在多次 propose 时不重置）
+    from agents.base import AgentResult
+
+    def _stateless_fake(task, cwd=None):
+        if "上下文选择" in task:
+            return AgentResult(status="completed", output=VALID_SELECTION_JSON, agent="fake")
+        else:
+            return AgentResult(status="completed", output=VALID_PROSE_JSON, agent="fake")
+
+    monkeypatch.setattr(sw_ops, "run_task", _stateless_fake)
+
+    result = sw_ops.propose_story_write(project_id=project_id, author_input="写下一段")
+    token = result["writing_token"]
+
+    # 修改 index 内容但保持相同数量（篡改 scene_ref）
+    index_file = project_dir / "_工作台状态" / "accepted_text_index.json"
+    idx = json.loads(index_file.read_text(encoding="utf-8"))
+    assert idx.get("entries"), "index 应有 entries"
+    idx["entries"][0]["scene_ref"] = "scene-tampered"
+    index_file.write_text(json.dumps(idx, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    with pytest.raises(sw_ops.StoryWritingError, match="新的内容"):
+        sw_ops.confirm_story_write(project_id=project_id, writing_token=token)
+
+
+# ---------- 31. 正常第一场 index 为空仍可写 ----------
+
+def test_first_scene_empty_index_still_writes(isolated, real_project, fake_agent):
+    """index 为空（第一场）→ propose + confirm 正常完成。"""
+    project_id = real_project["project_id"]
+    result = sw_ops.propose_story_write(project_id=project_id, author_input="写开场")
+    confirmed = sw_ops.confirm_story_write(project_id=project_id, writing_token=result["writing_token"])
+    assert confirmed["message"] == "这段已经保留下来了。"
+    assert confirmed["chapter_number"] == 1
+
+
+# ---------- 32. confirm 仍然只通过 accept_prose 正式保存 ----------
+
+def test_confirm_only_via_accept_prose(isolated, real_project, fake_agent):
+    """confirm 唯一写入路径是 accept_prose；不绕过 frozen gate。"""
+    project_id = real_project["project_id"]
+    result = sw_ops.propose_story_write(project_id=project_id, author_input="写开场")
+
+    accept_prose_calls = []
+    original = sw_ops.accept_prose
+
+    def _spy(**kwargs):
+        accept_prose_calls.append(kwargs)
+        return original(**kwargs)
+
+    with patch.object(sw_ops, "accept_prose", side_effect=_spy):
+        sw_ops.confirm_story_write(project_id=project_id, writing_token=result["writing_token"])
+
+    assert len(accept_prose_calls) == 1
+    assert accept_prose_calls[0]["author_accepted"] is True
+
+
+# ---------- 33. 旧临时候选在新生成时被清理 ----------
+
+def test_old_candidate_cleaned_on_new_propose(isolated, real_project, monkeypatch):
+    """同一 project 生成新候选时，旧临时候选被清理。"""
+    from agents.base import AgentResult
+    project_id = real_project["project_id"]
+
+    # 使用基于 task 内容判断的 fake agent（不依赖全局 counter）
+    def _stateless_fake(task, cwd=None):
+        if "上下文选择" in task:
+            return AgentResult(status="completed", output=VALID_SELECTION_JSON, agent="fake")
+        else:
+            return AgentResult(status="completed", output=VALID_PROSE_JSON, agent="fake")
+
+    monkeypatch.setattr(sw_ops, "run_task", _stateless_fake)
+
+    # 第一次 propose
+    result1 = sw_ops.propose_story_write(project_id=project_id, author_input="写第一段")
+    token1 = result1["writing_token"]
+
+    writing_root = isolated.parent / ".writing"
+    # 第一次 propose 后有且仅有一个 turn 目录
+    turns_after_first = list((writing_root / project_id).iterdir())
+    assert len(turns_after_first) == 1
+
+    # 第二次 propose（"我想改一改 → 再生成"）
+    result2 = sw_ops.propose_story_write(project_id=project_id, author_input="重写第一段")
+
+    # 旧 turn 已被清理，只剩新的
+    turns_after_second = list((writing_root / project_id).iterdir())
+    assert len(turns_after_second) == 1
+    # 旧 token 已失效
+    with pytest.raises(sw_ops.StoryWritingError, match="已失效"):
+        sw_ops.confirm_story_write(project_id=project_id, writing_token=token1)
+    # 新 token 有效
+    confirmed = sw_ops.confirm_story_write(project_id=project_id, writing_token=result2["writing_token"])
+    assert confirmed["message"] == "这段已经保留下来了。"
