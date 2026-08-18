@@ -167,10 +167,22 @@ def _cleanup_proposal(project_id: str) -> None:
 # 候选解析（Agent 输出必须是合法结构化结果）
 # ---------------------------------------------------------------------------
 
+def _validate_str_list(value: Any, field_name: str) -> None:
+    """校验字段必须是 list[str]；类型错误抛 NewProjectError。"""
+    if not isinstance(value, list):
+        raise NewProjectError(f"Agent 输出字段 {field_name} 类型错误（应为列表）。")
+    for i, item in enumerate(value):
+        if not isinstance(item, str):
+            raise NewProjectError(
+                f"Agent 输出字段 {field_name}[{i}] 类型错误（应为字符串）。"
+            )
+
+
 def _parse_agent_result(output: str) -> dict[str, Any]:
     """把 Agent 输出解析成 {semantic_interpretation, model_output}。
 
     非法结构化结果：抛 NewProjectError（普通可读错误），不猜数据补齐、不落盘。
+    严格类型检查：字段缺失或类型错误一律拒绝，不自动修复。
     """
     text = (output or "").strip()
     # 容错：去掉可能包裹的 markdown 代码块标记
@@ -187,12 +199,36 @@ def _parse_agent_result(output: str) -> dict[str, Any]:
         raise NewProjectError("Agent 输出不是合法结构化结果，请重试或更换想法表述。") from exc
     if not isinstance(data, dict):
         raise NewProjectError("Agent 输出不是合法结构化结果（应为 JSON 对象）。")
+
+    # --- semantic_interpretation 严格校验 ---
     si = data.get("semantic_interpretation")
+    if not isinstance(si, dict):
+        raise NewProjectError("Agent 输出缺少 semantic_interpretation（应为对象）。")
+    if "scope" in si and not isinstance(si["scope"], str):
+        raise NewProjectError("Agent 输出 semantic_interpretation.scope 类型错误（应为字符串）。")
+    if not isinstance(si.get("objective"), str) or not si["objective"].strip():
+        raise NewProjectError("Agent 输出 semantic_interpretation.objective 缺失或不是非空字符串。")
+    _validate_str_list(si.get("knowledge_needs", []), "semantic_interpretation.knowledge_needs")
+    _validate_str_list(si.get("selected_bkp_ids", []), "semantic_interpretation.selected_bkp_ids")
+    _validate_str_list(si.get("assumptions", []), "semantic_interpretation.assumptions")
+
+    # --- model_output 严格校验 ---
     mo = data.get("model_output")
-    if not isinstance(si, dict) or not isinstance(mo, dict):
-        raise NewProjectError("Agent 输出缺少 semantic_interpretation 或 model_output。")
+    if not isinstance(mo, dict):
+        raise NewProjectError("Agent 输出缺少 model_output（应为对象）。")
     if not isinstance(mo.get("proposal"), str) or not mo["proposal"].strip():
         raise NewProjectError("Agent 输出缺少作者可读的故事方向（model_output.proposal）。")
+    if not isinstance(mo.get("work_direction"), str) or not mo["work_direction"].strip():
+        raise NewProjectError("Agent 输出缺少作品方向（model_output.work_direction 应为非空字符串）。")
+    if not isinstance(mo.get("reader_promise"), str) or not mo["reader_promise"].strip():
+        raise NewProjectError("Agent 输出缺少读者期待（model_output.reader_promise 应为非空字符串）。")
+    _validate_str_list(mo.get("hard_constraints", []), "model_output.hard_constraints")
+    _validate_str_list(mo.get("open_space", []), "model_output.open_space")
+    if "unknowns" in mo:
+        _validate_str_list(mo["unknowns"], "model_output.unknowns")
+    if "stance" in mo:
+        _validate_str_list(mo["stance"], "model_output.stance")
+
     return {"semantic_interpretation": si, "model_output": mo}
 
 
@@ -345,6 +381,9 @@ def confirm_new_project(proposal_token: str) -> dict[str, Any]:
 
     decision_id = f"decision-{project_id}"
     plan_id = f"plan-{project_id}"
+    direction_registered = True
+    warning: Optional[str] = None
+    state_rev = base_state.get("state_rev")
     try:
         decision = create_decision_record(
             decision_id=decision_id,
@@ -371,20 +410,22 @@ def confirm_new_project(proposal_token: str) -> dict[str, Any]:
             expected_base_state=base_state,
             new_state=new_state,
         )
+        state_rev = new_state.get("state_rev")
     except (SDContractError, PWContractError, PWWorkspaceError) as exc:
-        # 若现有合同不能干净登记 approved direction，则正式作品已创建但
-        # 只写入了 Author Intent（不强行扩建）；如实抛出普通可读错误。
-        raise NewProjectError(
-            f"作品已创建，但 approved direction 登记失败（未改动正式 State）：{exc}"
-        ) from exc
+        # 作品已创建成功；approved direction 登记失败不阻塞整体成功。
+        # 如实记录 partial success，允许作者进入作品概览。
+        direction_registered = False
+        warning = "作品已创建，但故事方向的规划登记未完成。正式 Author Intent 已保存。"
 
-    # 成功后删除临时候选工作区
+    # 无论 approved direction 成败，都清理临时候选，避免作者再次确认同一 proposal
     _cleanup_proposal(project_id)
 
     return {
         "project_id": created["project_id"],
         "name": created["name"],
         "project_dir": str(created["project_dir"]),
-        "state_rev": new_state.get("state_rev"),
+        "state_rev": state_rev,
+        "approved_direction_registered": direction_registered,
+        "warning": warning,
         "message": "作品已创建",
     }

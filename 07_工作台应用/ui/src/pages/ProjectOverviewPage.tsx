@@ -9,10 +9,12 @@ type State =
 export default function ProjectOverviewPage({
   projectId,
   projectName,
+  warning,
   onBack,
 }: {
   projectId: string
   projectName: string
+  warning?: string | null
   onBack: () => void
 }) {
   const [state, setState] = useState<State>({ kind: 'loading' })
@@ -28,6 +30,11 @@ export default function ProjectOverviewPage({
   return (
     <section>
       <h2>作品概览：{projectName}</h2>
+      {warning && (
+        <p style={{ color: '#8a6d3b', backgroundColor: '#fcf8e3', padding: '0.5rem 0.75rem', borderRadius: '4px', marginTop: '0.5rem' }}>
+          {warning}
+        </p>
+      )}
       <button onClick={onBack} style={{ cursor: 'pointer' }}>← 返回作品列表</button>
       {state.kind === 'loading' && <p>正在读取概览…</p>}
       {state.kind === 'error' && <p>读取失败：{state.message}</p>}

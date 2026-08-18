@@ -9,7 +9,7 @@ const NAV_ITEMS = ['首页', '我的作品', '素材与学习', '灵感箱', '�
 export type Page =
   | { kind: 'home' }
   | { kind: 'projects' }
-  | { kind: 'overview'; projectId: string; projectName: string }
+  | { kind: 'overview'; projectId: string; projectName: string; warning?: string | null }
   | { kind: 'settings' }
 
 export default function App() {
@@ -35,7 +35,7 @@ export default function App() {
       <hr />
       {page.kind === 'home' && (
         <HomePage
-          onProjectCreated={(p) => setPage({ kind: 'overview', projectId: p.project_id, projectName: p.name })}
+          onProjectCreated={(p) => setPage({ kind: 'overview', projectId: p.project_id, projectName: p.name, warning: p.warning })}
         />
       )}
       {page.kind === 'projects' && (
@@ -47,6 +47,7 @@ export default function App() {
         <ProjectOverviewPage
           projectId={page.projectId}
           projectName={page.projectName}
+          warning={page.warning}
           onBack={() => setPage({ kind: 'projects' })}
         />
       )}

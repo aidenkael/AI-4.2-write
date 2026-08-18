@@ -273,6 +273,8 @@ export interface ConfirmResult {
   name: string
   project_dir: string
   state_rev: number | null
+  approved_direction_registered: boolean
+  warning: string | null
   message: string
 }
 

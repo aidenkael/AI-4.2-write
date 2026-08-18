@@ -16,7 +16,7 @@ type Stage =
 export default function HomePage({
   onProjectCreated,
 }: {
-  onProjectCreated: (p: { project_id: string; name: string }) => void
+  onProjectCreated: (p: { project_id: string; name: string; warning?: string | null }) => void
 }) {
   const [name, setName] = useState('')
   const [idea, setIdea] = useState('')
@@ -38,7 +38,11 @@ export default function HomePage({
       const created: ConfirmResult = await confirmNewProject({
         proposal_token: result.proposal_token,
       })
-      onProjectCreated({ project_id: created.project_id, name: created.name })
+      onProjectCreated({
+        project_id: created.project_id,
+        name: created.name,
+        warning: created.warning,
+      })
     } catch (err) {
       setStage({ kind: 'error', message: String(err) })
     }

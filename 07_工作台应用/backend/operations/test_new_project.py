@@ -280,3 +280,176 @@ def test_real_dsh_candidate_generation(isolated, tmp_path, monkeypatch):
     assert result["candidate"]["proposal"]
     # 未确认：03_作品工程 仍为空
     assert list(isolated.iterdir()) == []
+
+
+# ---------- 11. Agent 输出严格校验：work_direction 不是字符串 → propose 拒绝 ----------
+
+def test_work_direction_not_string_rejected(isolated, monkeypatch):
+    from agents.base import AgentResult
+    bad_json = json.dumps({
+        "semantic_interpretation": {
+            "scope": "story_design",
+            "objective": "目标",
+            "knowledge_needs": [],
+            "selected_bkp_ids": [],
+            "assumptions": [],
+        },
+        "model_output": {
+            "proposal": "候选方向。",
+            "work_direction": 12345,  # 不是字符串
+            "reader_promise": "读者期待。",
+            "hard_constraints": [],
+            "open_space": [],
+        },
+    }, ensure_ascii=False)
+
+    def _bad(task: str, cwd=None):
+        return AgentResult(status="completed", output=bad_json, agent="fake")
+
+    monkeypatch.setattr(np_ops, "run_task", _bad)
+    with pytest.raises(np_ops.NewProjectError) as ei:
+        np_ops.propose_new_project(name="类型错误作品", idea="想法")
+    assert "work_direction" in str(ei.value)
+    assert list(isolated.iterdir()) == []  # 03 仍为空
+
+
+# ---------- 12. Agent 输出严格校验：reader_promise 缺失 → propose 拒绝 ----------
+
+def test_reader_promise_missing_rejected(isolated, monkeypatch):
+    from agents.base import AgentResult
+    bad_json = json.dumps({
+        "semantic_interpretation": {
+            "scope": "story_design",
+            "objective": "目标",
+            "knowledge_needs": [],
+            "selected_bkp_ids": [],
+            "assumptions": [],
+        },
+        "model_output": {
+            "proposal": "候选方向。",
+            "work_direction": "作品方向。",
+            # reader_promise 缺失
+            "hard_constraints": [],
+            "open_space": [],
+        },
+    }, ensure_ascii=False)
+
+    def _bad(task: str, cwd=None):
+        return AgentResult(status="completed", output=bad_json, agent="fake")
+
+    monkeypatch.setattr(np_ops, "run_task", _bad)
+    with pytest.raises(np_ops.NewProjectError) as ei:
+        np_ops.propose_new_project(name="缺读者期待", idea="想法")
+    assert "reader_promise" in str(ei.value)
+    assert list(isolated.iterdir()) == []
+
+
+# ---------- 13. Agent 输出严格校验：hard_constraints 不是 list[str] → propose 拒绝 ----------
+
+def test_hard_constraints_not_list_str_rejected(isolated, monkeypatch):
+    from agents.base import AgentResult
+    bad_json = json.dumps({
+        "semantic_interpretation": {
+            "scope": "story_design",
+            "objective": "目标",
+            "knowledge_needs": [],
+            "selected_bkp_ids": [],
+            "assumptions": [],
+        },
+        "model_output": {
+            "proposal": "候选方向。",
+            "work_direction": "作品方向。",
+            "reader_promise": "读者期待。",
+            "hard_constraints": "不是列表",  # 应该是 list[str]
+            "open_space": [],
+        },
+    }, ensure_ascii=False)
+
+    def _bad(task: str, cwd=None):
+        return AgentResult(status="completed", output=bad_json, agent="fake")
+
+    monkeypatch.setattr(np_ops, "run_task", _bad)
+    with pytest.raises(np_ops.NewProjectError) as ei:
+        np_ops.propose_new_project(name="约束类型错误", idea="想法")
+    assert "hard_constraints" in str(ei.value)
+    assert list(isolated.iterdir()) == []
+
+
+# ---------- 14. Agent 输出严格校验：open_space 类型错误 → propose 拒绝 ----------
+
+def test_open_space_type_error_rejected(isolated, monkeypatch):
+    from agents.base import AgentResult
+    bad_json = json.dumps({
+        "semantic_interpretation": {
+            "scope": "story_design",
+            "objective": "目标",
+            "knowledge_needs": [],
+            "selected_bkp_ids": [],
+            "assumptions": [],
+        },
+        "model_output": {
+            "proposal": "候选方向。",
+            "work_direction": "作品方向。",
+            "reader_promise": "读者期待。",
+            "hard_constraints": [],
+            "open_space": {"not": "a list"},  # 应该是 list[str]
+        },
+    }, ensure_ascii=False)
+
+    def _bad(task: str, cwd=None):
+        return AgentResult(status="completed", output=bad_json, agent="fake")
+
+    monkeypatch.setattr(np_ops, "run_task", _bad)
+    with pytest.raises(np_ops.NewProjectError) as ei:
+        np_ops.propose_new_project(name="自由空间类型错误", idea="想法")
+    assert "open_space" in str(ei.value)
+    assert list(isolated.iterdir()) == []
+
+
+# ---------- 15. approved direction 登记失败 → partial success ----------
+
+def test_approved_direction_failure_is_partial_success(isolated, fake_agent, monkeypatch):
+    """模拟 approved direction 登记失败：作品已创建，confirm 返回成功但带 warning。"""
+    # 先正常 propose
+    result = np_ops.propose_new_project(name="部分成功作品", idea="想法")
+    token = result["proposal_token"]
+    project_id = result["project_id"]
+
+    # monkeypatch apply_diff 使其抛异常，模拟登记失败
+    def _failing_apply_diff(*args, **kwargs):
+        from story_runtime import ContractError as SDContractError
+        raise SDContractError("模拟登记失败")
+
+    monkeypatch.setattr(np_ops, "apply_diff", _failing_apply_diff)
+
+    # confirm 应返回成功（不抛异常）
+    created = np_ops.confirm_new_project(proposal_token=token)
+
+    # 验证 partial success 语义
+    assert created["project_id"] == project_id
+    assert created["name"] == "部分成功作品"
+    assert created["approved_direction_registered"] is False
+    assert created["warning"] is not None
+    assert "作品已创建" in created["warning"]
+
+    # 正式项目可以 list/open/overview
+    items = list_projects()
+    assert any(p["project_id"] == project_id for p in items)
+
+    opened = open_project({"project_id": project_id})
+    assert opened["project_id"] == project_id
+
+    overview = get_project_overview(project_id)
+    assert overview["project_id"] == project_id
+
+    # 不生成正文
+    prose_dir = isolated / "部分成功作品" / "03_正文"
+    assert prose_dir.exists()
+    assert list(prose_dir.iterdir()) == []
+
+    # proposal 已清理
+    assert not (isolated.parent / "proposals" / project_id).exists()
+
+    # 再次使用同一个 token 不会再次创建（token 已失效）
+    with pytest.raises(np_ops.NewProjectError, match="候选已失效"):
+        np_ops.confirm_new_project(proposal_token=token)
