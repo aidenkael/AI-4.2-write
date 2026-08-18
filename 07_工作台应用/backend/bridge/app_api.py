@@ -18,11 +18,14 @@ from operations.projects import (
 )
 from operations.settings import SettingsOpError
 from operations import settings as settings_ops
+from operations.new_project import NewProjectError
+from operations import new_project as new_project_ops
 from views import project as project_views
 
 # 稳定错误码（client.ts 依赖 code 字段）
 CODE_PROJECT_OP_ERROR = "PROJECT_OP_ERROR"
 CODE_SETTINGS_ERROR = "SETTINGS_ERROR"
+CODE_NEW_PROJECT_ERROR = "NEW_PROJECT_ERROR"
 CODE_BRIDGE_INTERNAL = "BRIDGE_INTERNAL"
 
 
@@ -123,5 +126,34 @@ class AppApi:
             return _ok(settings_ops.test_agent_connection(payload))
         except SettingsOpError as exc:
             return _err(CODE_SETTINGS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    # ---------------- 新建作品（“我有个想法”纵切） ----------------
+    # 确认前只写临时 pre-project 工作区；只有作者明确确认（带后台 proposal token）
+    # 才调用真实 ProjectWorkspace.create_project。
+
+    def propose_new_project(self, payload: dict) -> dict:
+        """我有个想法 → 当前 Agent 设置 → StoryDesign 候选（proposal_noncanonical）。"""
+        try:
+            data = new_project_ops.propose_new_project(
+                name=str(payload.get("name") or ""),
+                idea=str(payload.get("idea") or ""),
+            )
+            return _ok(data)
+        except NewProjectError as exc:
+            return _err(CODE_NEW_PROJECT_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def confirm_new_project(self, payload: dict) -> dict:
+        """作者明确确认 → 用后台保存的候选创建正式作品。"""
+        try:
+            data = new_project_ops.confirm_new_project(
+                proposal_token=str(payload.get("proposal_token") or ""),
+            )
+            return _ok(data)
+        except NewProjectError as exc:
+            return _err(CODE_NEW_PROJECT_ERROR, str(exc))
         except Exception as exc:  # noqa: BLE001
             return _err(CODE_BRIDGE_INTERNAL, str(exc))

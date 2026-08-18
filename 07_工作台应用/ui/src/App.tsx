@@ -33,7 +33,11 @@ export default function App() {
         ))}
       </nav>
       <hr />
-      {page.kind === 'home' && <HomePage />}
+      {page.kind === 'home' && (
+        <HomePage
+          onProjectCreated={(p) => setPage({ kind: 'overview', projectId: p.project_id, projectName: p.name })}
+        />
+      )}
       {page.kind === 'projects' && (
         <ProjectsPage
           onOpen={(p) => setPage({ kind: 'overview', projectId: p.project_id, projectName: p.name })}

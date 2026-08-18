@@ -247,3 +247,41 @@ export async function testAgentConnection(payload: {
 }): Promise<ConnectionTestResult> {
   return call<ConnectionTestResult>('test_agent_connection', payload)
 }
+
+// ---------------- 新建作品（“我有个想法”纵切） ----------------
+
+export interface StoryCandidate {
+  work_direction: string
+  proposal: string
+  reader_promise: string
+  hard_constraints: string[]
+  open_space: string[]
+  unknowns: string[]
+}
+
+export interface ProposeResult {
+  proposal_token: string
+  project_id: string
+  name: string
+  status: string
+  candidate: StoryCandidate
+  message: string
+}
+
+export interface ConfirmResult {
+  project_id: string
+  name: string
+  project_dir: string
+  state_rev: number | null
+  message: string
+}
+
+/** 我有个想法 → 当前 Agent 设置 → StoryDesign 候选（不写正式作品）。 */
+export async function proposeNewProject(payload: { name: string; idea: string }): Promise<ProposeResult> {
+  return call<ProposeResult>('propose_new_project', payload)
+}
+
+/** 作者明确确认 → 用后台保存的候选创建正式作品。 */
+export async function confirmNewProject(payload: { proposal_token: string }): Promise<ConfirmResult> {
+  return call<ConfirmResult>('confirm_new_project', payload)
+}
