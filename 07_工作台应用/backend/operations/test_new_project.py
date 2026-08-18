@@ -453,3 +453,177 @@ def test_approved_direction_failure_is_partial_success(isolated, fake_agent, mon
     # 再次使用同一个 token 不会再次创建（token 已失效）
     with pytest.raises(np_ops.NewProjectError, match="候选已失效"):
         np_ops.confirm_new_project(proposal_token=token)
+
+
+# ---------- 16. Agent 输出严格校验：缺 hard_constraints → propose 拒绝 ----------
+
+def test_hard_constraints_missing_rejected(isolated, monkeypatch):
+    from agents.base import AgentResult
+    bad_json = json.dumps({
+        "semantic_interpretation": {
+            "scope": "story_design",
+            "objective": "目标",
+            "knowledge_needs": [],
+            "selected_bkp_ids": [],
+            "assumptions": [],
+        },
+        "model_output": {
+            "proposal": "候选方向。",
+            "work_direction": "作品方向。",
+            "reader_promise": "读者期待。",
+            # hard_constraints 缺失
+            "open_space": [],
+        },
+    }, ensure_ascii=False)
+
+    def _bad(task: str, cwd=None):
+        return AgentResult(status="completed", output=bad_json, agent="fake")
+
+    monkeypatch.setattr(np_ops, "run_task", _bad)
+    with pytest.raises(np_ops.NewProjectError) as ei:
+        np_ops.propose_new_project(name="缺约束作品", idea="想法")
+    assert "hard_constraints" in str(ei.value)
+    assert list(isolated.iterdir()) == []
+
+
+# ---------- 17. Agent 输出严格校验：缺 open_space → propose 拒绝 ----------
+
+def test_open_space_missing_rejected(isolated, monkeypatch):
+    from agents.base import AgentResult
+    bad_json = json.dumps({
+        "semantic_interpretation": {
+            "scope": "story_design",
+            "objective": "目标",
+            "knowledge_needs": [],
+            "selected_bkp_ids": [],
+            "assumptions": [],
+        },
+        "model_output": {
+            "proposal": "候选方向。",
+            "work_direction": "作品方向。",
+            "reader_promise": "读者期待。",
+            "hard_constraints": [],
+            # open_space 缺失
+        },
+    }, ensure_ascii=False)
+
+    def _bad(task: str, cwd=None):
+        return AgentResult(status="completed", output=bad_json, agent="fake")
+
+    monkeypatch.setattr(np_ops, "run_task", _bad)
+    with pytest.raises(np_ops.NewProjectError) as ei:
+        np_ops.propose_new_project(name="缺自由空间作品", idea="想法")
+    assert "open_space" in str(ei.value)
+    assert list(isolated.iterdir()) == []
+
+
+# ---------- 18. Agent 输出严格校验：缺 knowledge_needs → propose 拒绝 ----------
+
+def test_knowledge_needs_missing_rejected(isolated, monkeypatch):
+    from agents.base import AgentResult
+    bad_json = json.dumps({
+        "semantic_interpretation": {
+            "scope": "story_design",
+            "objective": "目标",
+            # knowledge_needs 缺失
+            "selected_bkp_ids": [],
+            "assumptions": [],
+        },
+        "model_output": {
+            "proposal": "候选方向。",
+            "work_direction": "作品方向。",
+            "reader_promise": "读者期待。",
+            "hard_constraints": [],
+            "open_space": [],
+        },
+    }, ensure_ascii=False)
+
+    def _bad(task: str, cwd=None):
+        return AgentResult(status="completed", output=bad_json, agent="fake")
+
+    monkeypatch.setattr(np_ops, "run_task", _bad)
+    with pytest.raises(np_ops.NewProjectError) as ei:
+        np_ops.propose_new_project(name="缺知识需求作品", idea="想法")
+    assert "knowledge_needs" in str(ei.value)
+    assert list(isolated.iterdir()) == []
+
+
+# ---------- 19. 读取 brief 失败 → partial success ----------
+
+def test_brief_read_failure_is_partial_success(isolated, fake_agent, monkeypatch):
+    """模拟 create_project 成功后读取 brief 失败：confirm 仍返回成功但带 warning。"""
+    # 先正常 propose
+    result = np_ops.propose_new_project(name="读取失败作品", idea="想法")
+    token = result["proposal_token"]
+    project_id = result["project_id"]
+
+    # monkeypatch json.loads 使其在读取 brief 时抛异常
+    original_loads = json.loads
+    brief_path_marker = "briefs"
+
+    def _failing_loads(text, **kwargs):
+        # 检测是否是读取 brief 文件（通过检查 text 内容或调用栈）
+        # 简单方法：第一次调用后标记，让第二次调用（brief）失败
+        if hasattr(_failing_loads, "called_once") and brief_path_marker in str(kwargs.get("_marker", "")):
+            raise OSError("模拟读取失败")
+        _failing_loads.called_once = True
+        return original_loads(text, **kwargs)
+
+    # 更直接的方法：monkeypatch Path.read_text 让特定路径失败
+    from pathlib import Path as RealPath
+    original_read_text = RealPath.read_text
+
+    def _failing_read_text(self, encoding=None):
+        if "briefs" in str(self) and "brief-idea-001" in str(self):
+            raise OSError("模拟 brief 读取失败")
+        return original_read_text(self, encoding=encoding)
+
+    monkeypatch.setattr(RealPath, "read_text", _failing_read_text)
+
+    # confirm 应返回成功（不抛异常）
+    created = np_ops.confirm_new_project(proposal_token=token)
+
+    # 验证 partial success 语义
+    assert created["project_id"] == project_id
+    assert created["name"] == "读取失败作品"
+    assert created["approved_direction_registered"] is False
+    assert created["warning"] is not None
+    assert "作品已创建" in created["warning"]
+
+    # 项目可以读取
+    items = list_projects()
+    assert any(p["project_id"] == project_id for p in items)
+
+    # proposal 已清理
+    assert not (isolated.parent / "proposals" / project_id).exists()
+
+# ---------- 20. load_project 后处理失败 → partial success ----------
+
+def test_load_project_failure_is_partial_success(isolated, fake_agent, monkeypatch):
+    """模拟 create_project 成功后 load_project 失败：confirm 仍返回成功但带 warning。"""
+    # 先正常 propose
+    result = np_ops.propose_new_project(name="加载失败作品", idea="想法")
+    token = result["proposal_token"]
+    project_id = result["project_id"]
+
+    # monkeypatch load_project 使其抛异常
+    def _failing_load_project(*args, **kwargs):
+        raise OSError("模拟 load_project 失败")
+
+    monkeypatch.setattr(np_ops, "load_project", _failing_load_project)
+
+    # confirm 应返回成功（不抛异常）
+    created = np_ops.confirm_new_project(proposal_token=token)
+
+    # 验证 partial success 语义
+    assert created["project_id"] == project_id
+    assert created["name"] == "加载失败作品"
+    assert created["approved_direction_registered"] is False
+    assert created["warning"] is not None
+
+    # 项目可以读取
+    items = list_projects()
+    assert any(p["project_id"] == project_id for p in items)
+
+    # proposal 已清理
+    assert not (isolated.parent / "proposals" / project_id).exists()

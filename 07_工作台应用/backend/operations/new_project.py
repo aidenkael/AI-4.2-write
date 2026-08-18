@@ -208,9 +208,15 @@ def _parse_agent_result(output: str) -> dict[str, Any]:
         raise NewProjectError("Agent 输出 semantic_interpretation.scope 类型错误（应为字符串）。")
     if not isinstance(si.get("objective"), str) or not si["objective"].strip():
         raise NewProjectError("Agent 输出 semantic_interpretation.objective 缺失或不是非空字符串。")
-    _validate_str_list(si.get("knowledge_needs", []), "semantic_interpretation.knowledge_needs")
-    _validate_str_list(si.get("selected_bkp_ids", []), "semantic_interpretation.selected_bkp_ids")
-    _validate_str_list(si.get("assumptions", []), "semantic_interpretation.assumptions")
+    if "knowledge_needs" not in si:
+        raise NewProjectError("Agent 输出缺少 semantic_interpretation.knowledge_needs（应为列表）。")
+    _validate_str_list(si["knowledge_needs"], "semantic_interpretation.knowledge_needs")
+    if "selected_bkp_ids" not in si:
+        raise NewProjectError("Agent 输出缺少 semantic_interpretation.selected_bkp_ids（应为列表）。")
+    _validate_str_list(si["selected_bkp_ids"], "semantic_interpretation.selected_bkp_ids")
+    if "assumptions" not in si:
+        raise NewProjectError("Agent 输出缺少 semantic_interpretation.assumptions（应为列表）。")
+    _validate_str_list(si["assumptions"], "semantic_interpretation.assumptions")
 
     # --- model_output 严格校验 ---
     mo = data.get("model_output")
@@ -222,8 +228,12 @@ def _parse_agent_result(output: str) -> dict[str, Any]:
         raise NewProjectError("Agent 输出缺少作品方向（model_output.work_direction 应为非空字符串）。")
     if not isinstance(mo.get("reader_promise"), str) or not mo["reader_promise"].strip():
         raise NewProjectError("Agent 输出缺少读者期待（model_output.reader_promise 应为非空字符串）。")
-    _validate_str_list(mo.get("hard_constraints", []), "model_output.hard_constraints")
-    _validate_str_list(mo.get("open_space", []), "model_output.open_space")
+    if "hard_constraints" not in mo:
+        raise NewProjectError("Agent 输出缺少 model_output.hard_constraints（应为列表）。")
+    _validate_str_list(mo["hard_constraints"], "model_output.hard_constraints")
+    if "open_space" not in mo:
+        raise NewProjectError("Agent 输出缺少 model_output.open_space（应为列表）。")
+    _validate_str_list(mo["open_space"], "model_output.open_space")
     if "unknowns" in mo:
         _validate_str_list(mo["unknowns"], "model_output.unknowns")
     if "stance" in mo:
@@ -370,21 +380,22 @@ def confirm_new_project(proposal_token: str) -> dict[str, Any]:
     except (PWContractError, PWWorkspaceError) as exc:
         raise NewProjectError(str(exc)) from exc
 
-    # --- 登记 approved direction（复用现有合同，不新增 Schema） ---
-    # 读取 brief/context（临时工作区内，与 candidate 同一 project_id）
-    brief = json.loads((matched / "briefs" / f"{_BRIEF_ID}.json").read_text(encoding="utf-8"))
-    context = json.loads((matched / "contexts" / f"{_CONTEXT_ID}.json").read_text(encoding="utf-8"))
-
+    # --- create_project 已成功：从此刻起，本次"创建作品"已经成功 ---
+    # 后续任何后处理失败都只记录 partial success，不抛异常。
     project_dir = Path(created["project_dir"])
-    loaded = load_project(project_dir)
-    base_state = loaded["state"]
-
-    decision_id = f"decision-{project_id}"
-    plan_id = f"plan-{project_id}"
-    direction_registered = True
+    direction_registered = False
     warning: Optional[str] = None
-    state_rev = base_state.get("state_rev")
+    state_rev: Optional[int] = None
     try:
+        # 读取 brief/context（临时工作区内，与 candidate 同一 project_id）
+        brief = json.loads((matched / "briefs" / f"{_BRIEF_ID}.json").read_text(encoding="utf-8"))
+        context = json.loads((matched / "contexts" / f"{_CONTEXT_ID}.json").read_text(encoding="utf-8"))
+        loaded = load_project(project_dir)
+        base_state = loaded["state"]
+        state_rev = base_state.get("state_rev")
+
+        decision_id = f"decision-{project_id}"
+        plan_id = f"plan-{project_id}"
         decision = create_decision_record(
             decision_id=decision_id,
             brief=brief,
@@ -411,14 +422,16 @@ def confirm_new_project(proposal_token: str) -> dict[str, Any]:
             new_state=new_state,
         )
         state_rev = new_state.get("state_rev")
-    except (SDContractError, PWContractError, PWWorkspaceError) as exc:
+        direction_registered = True
+    except Exception:  # noqa: BLE001 — 任何后处理异常都算 partial success
         # 作品已创建成功；approved direction 登记失败不阻塞整体成功。
         # 如实记录 partial success，允许作者进入作品概览。
+        # 注意：底层异常文本不返回前端（仅记录 warning 固定提示）。
         direction_registered = False
         warning = "作品已创建，但故事方向的规划登记未完成。正式 Author Intent 已保存。"
-
-    # 无论 approved direction 成败，都清理临时候选，避免作者再次确认同一 proposal
-    _cleanup_proposal(project_id)
+    finally:
+        # 无论后处理成功还是失败，都清理临时候选，避免作者再次确认同一 proposal
+        _cleanup_proposal(project_id)
 
     return {
         "project_id": created["project_id"],
