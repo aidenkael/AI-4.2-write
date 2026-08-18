@@ -26,9 +26,6 @@ VALID_AGENTS = ("deepseek_harness", "qoder")
 # Qoder CLI / SDK 当前真实支持的 reasoning effort 档位（来自官方枚举，不硬编码模型名）
 REASONING_EFFORT_OPTIONS = ("none", "low", "medium", "high", "xhigh", "max")
 
-DEFAULT_CONFIG_DIR = Path(os.environ.get("AI_WRITE_CONFIG_DIR", "")) or (
-    Path.home() / ".ai-write"
-)
 SETTINGS_FILENAME = "settings.json"
 
 @dataclass

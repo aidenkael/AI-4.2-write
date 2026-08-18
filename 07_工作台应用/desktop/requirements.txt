@@ -1,1 +1,4 @@
+# AI-write 桌面工作台直接依赖（正式运行真实使用；不含间接依赖）
 pywebview
+keyring
+qoder-agent-sdk
