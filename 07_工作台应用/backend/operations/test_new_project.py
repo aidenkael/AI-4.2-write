@@ -156,7 +156,7 @@ def test_invalid_agent_output_readable_error(isolated, monkeypatch):
     monkeypatch.setattr(np_ops, "run_task", _bad)
     with pytest.raises(np_ops.NewProjectError) as ei:
         np_ops.propose_new_project(name="坏输出", idea="想法")
-    assert "结构化" in str(ei.value)
+    assert "JSON" in str(ei.value)
     assert list(isolated.iterdir()) == []  # 03 仍为空
 
 

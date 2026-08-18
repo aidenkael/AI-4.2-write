@@ -50,7 +50,7 @@ class AppApi:
 
     def get_app_status(self) -> dict:
         return _ok({
-            "app_name": "AI-write",
+            "app_name": "Go Write",
             "status": "ready",
             "message": "工作台连接正常",
         })

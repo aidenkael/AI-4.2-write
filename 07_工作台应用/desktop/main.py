@@ -47,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
     url = resolve_url(args.dev)
     api = AppApi()
     webview.create_window(
-        "AI-write",
+        "Go Write",
         url,
         js_api=api,
         width=1280,

@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import {
   confirmNewProject,
   proposeNewProject,
@@ -6,7 +5,7 @@ import {
   type ProposeResult,
 } from '../bridge/client'
 
-type Stage =
+export type HomeStage =
   | { kind: 'input' }
   | { kind: 'working' }
   | { kind: 'candidate'; result: ProposeResult }
@@ -14,14 +13,22 @@ type Stage =
   | { kind: 'error'; message: string }
 
 export default function HomePage({
+  name,
+  setName,
+  idea,
+  setIdea,
+  stage,
+  setStage,
   onProjectCreated,
 }: {
+  name: string
+  setName: (v: string) => void
+  idea: string
+  setIdea: (v: string) => void
+  stage: HomeStage
+  setStage: (s: HomeStage) => void
   onProjectCreated: (p: { project_id: string; name: string; warning?: string | null }) => void
 }) {
-  const [name, setName] = useState('')
-  const [idea, setIdea] = useState('')
-  const [stage, setStage] = useState<Stage>({ kind: 'input' })
-
   const startPropose = async () => {
     setStage({ kind: 'working' })
     try {
@@ -49,7 +56,7 @@ export default function HomePage({
   }
 
   const revise = () => {
-    // “我想改一改”：回到输入（作品名与想法保留在 state），作者修改后重新生成候选
+    // "我想改一改"：回到输入（作品名与想法保留在 state），作者修改后重新生成候选
     setStage({ kind: 'input' })
   }
 

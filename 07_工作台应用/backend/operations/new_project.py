@@ -60,7 +60,7 @@ _PROPOSALS_ROOT = (
 )
 
 # Agent 任务模板：只要求结构化结果，明确不读文件不写文件
-_AGENT_TASK_TEMPLATE = """你是 AI-write 的故事设计语义助手。只做语义与创意工作，不读取或修改任何文件。
+_AGENT_TASK_TEMPLATE = """你是 Go Write 的故事设计语义助手。只做语义与创意工作，不读取或修改任何文件。
 
 请针对下面的作者想法，返回**一个合法的 JSON 对象**（不要任何额外文字、不要 markdown 代码块标记），
 结构必须如下：
@@ -178,25 +178,106 @@ def _validate_str_list(value: Any, field_name: str) -> None:
             )
 
 
+def _extract_json_from_output(text: str) -> str:
+    """从 Agent 输出中提取 JSON 对象字符串。
+
+    策略链（按顺序尝试，第一个成功即返回）：
+    1. 直接 json.loads（最快路径）
+    2. 去掉 markdown 代码块包裹（含 ```json 等带语言标记的变体）
+    3. 找文本中第一个 ``` 代码块围栏，提取其中内容
+    4. 找最外层 { ... } 匹配
+
+    所有策略只负责提取，不做字段校验；字段校验由调用方完成。
+    全部失败时，返回去掉代码块后的最佳尝试（让调用方报精确错误）。
+    """
+    stripped = text.strip()
+    if not stripped:
+        return stripped
+
+    # 1. 直接解析
+    try:
+        json.loads(stripped)
+        return stripped
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # 2. 标准 markdown 代码块（首行 ``` 且末行 ```）
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if len(lines) >= 2 and lines[-1].strip() == "```":
+            inner = "\n".join(lines[1:-1]).strip()
+            try:
+                json.loads(inner)
+                return inner
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+    # 3. 查找任意位置的代码块围栏（处理模型先输出文字再给代码块的情况）
+    lines = stripped.splitlines()
+    fence_start = None
+    for i, line in enumerate(lines):
+        if line.strip().startswith("```"):
+            fence_start = i
+            break
+    if fence_start is not None:
+        fence_end = None
+        for i in range(len(lines) - 1, fence_start, -1):
+            if lines[i].strip() == "```":
+                fence_end = i
+                break
+        if fence_end is not None and fence_end > fence_start:
+            inner = "\n".join(lines[fence_start + 1:fence_end]).strip()
+            if inner:
+                try:
+                    json.loads(inner)
+                    return inner
+                except (json.JSONDecodeError, ValueError):
+                    pass
+
+    # 4. 最外层花括号匹配
+    first_brace = stripped.find("{")
+    last_brace = stripped.rfind("}")
+    if first_brace != -1 and last_brace > first_brace:
+        candidate = stripped[first_brace:last_brace + 1]
+        try:
+            json.loads(candidate)
+            return candidate
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # 全部失败：返回去掉围栏后的最佳尝试（供错误诊断）
+    if stripped.startswith("```"):
+        inner_lines = lines[1:]
+        if inner_lines and inner_lines[-1].strip() == "```":
+            inner_lines = inner_lines[:-1]
+        return "\n".join(inner_lines).strip()
+    return stripped
+
+
+def _output_preview(output: str, max_len: int = 300) -> str:
+    """截取 Agent 输出前 max_len 字符用于错误诊断（不打印密钥）。"""
+    text = (output or "").strip()
+    if len(text) <= max_len:
+        return text
+    return text[:max_len] + "…"
+
+
 def _parse_agent_result(output: str) -> dict[str, Any]:
     """把 Agent 输出解析成 {semantic_interpretation, model_output}。
 
     非法结构化结果：抛 NewProjectError（普通可读错误），不猜数据补齐、不落盘。
     严格类型检查：字段缺失或类型错误一律拒绝，不自动修复。
+    JSON 提取使用 _extract_json_from_output 的多策略链；提取后做严格字段校验。
     """
-    text = (output or "").strip()
-    # 容错：去掉可能包裹的 markdown 代码块标记
-    if text.startswith("```"):
-        lines = text.splitlines()
-        if lines and lines[0].strip().startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        text = "\n".join(lines).strip()
+    text = _extract_json_from_output(output)
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise NewProjectError("Agent 输出不是合法结构化结果，请重试或更换想法表述。") from exc
+        preview = _output_preview(output)
+        raise NewProjectError(
+            f"Agent 输出不是合法 JSON，请重试或更换想法表述。"
+            f"\n\n--- Agent 输出预览 ---\n{preview}"
+        ) from exc
     if not isinstance(data, dict):
         raise NewProjectError("Agent 输出不是合法结构化结果（应为 JSON 对象）。")
 

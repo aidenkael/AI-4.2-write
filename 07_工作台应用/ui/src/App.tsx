@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import HomePage from './pages/HomePage'
+import HomePage, { type HomeStage } from './pages/HomePage'
 import ProjectsPage from './pages/ProjectsPage'
 import ProjectOverviewPage from './pages/ProjectOverviewPage'
 import SettingsPage from './pages/SettingsPage'
@@ -15,6 +15,11 @@ export type Page =
 export default function App() {
   const [page, setPage] = useState<Page>({ kind: 'home' })
 
+  // 新建作品表单状态（提升到此处，保证页面切换时不丢失）
+  const [newName, setNewName] = useState('')
+  const [newIdea, setNewIdea] = useState('')
+  const [newStage, setNewStage] = useState<HomeStage>({ kind: 'input' })
+
   const navClick = (item: string) => {
     if (item === '首页') setPage({ kind: 'home' })
     else if (item === '我的作品') setPage({ kind: 'projects' })
@@ -24,7 +29,7 @@ export default function App() {
 
   return (
     <div style={{ fontFamily: 'system-ui, "Microsoft YaHei", sans-serif', padding: '1rem 1.5rem' }}>
-      <h1>AI-write</h1>
+      <h1>Go Write</h1>
       <nav style={{ display: 'flex', gap: '1.25rem', margin: '0.5rem 0 1rem' }}>
         {NAV_ITEMS.map((item) => (
           <span key={item} style={{ cursor: 'pointer' }} onClick={() => navClick(item)}>
@@ -35,7 +40,18 @@ export default function App() {
       <hr />
       {page.kind === 'home' && (
         <HomePage
-          onProjectCreated={(p) => setPage({ kind: 'overview', projectId: p.project_id, projectName: p.name, warning: p.warning })}
+          name={newName}
+          setName={setNewName}
+          idea={newIdea}
+          setIdea={setNewIdea}
+          stage={newStage}
+          setStage={setNewStage}
+          onProjectCreated={(p) => {
+            setNewName('')
+            setNewIdea('')
+            setNewStage({ kind: 'input' })
+            setPage({ kind: 'overview', projectId: p.project_id, projectName: p.name, warning: p.warning })
+          }}
         />
       )}
       {page.kind === 'projects' && (
