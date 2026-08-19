@@ -22,6 +22,13 @@ from pathlib import Path
 
 import pytest
 
+# 真实模型调用门控：默认 pytest 不产生任何 Token 消耗。
+# 只有显式设置 GOWRITE_REAL_QODER_TEST=1 时才允许真实执行。
+_real_qoder_test = pytest.mark.skipif(
+    os.environ.get("GOWRITE_REAL_QODER_TEST") != "1",
+    reason="真实模型调用需要 GOWRITE_REAL_QODER_TEST=1（默认跳过，防止意外消耗 Token）",
+)
+
 from agents.base import AgentAdapter, AgentRequest, AgentResult
 from agents.qoder import QoderAdapter, QoderBYOKConfig, _default_cli, _resolve_cmd
 from agents.registry import available, get_agent
@@ -130,7 +137,9 @@ def test_cli_cancel_running_process(tmp_path):
 
 # ---------- 2. 唯一必要验证：真实 Qoder 自带模型路径 ----------
 # Python → registry → QoderAdapter → qodercli -p → 固定无副作用结果（临时目录）
+# ⚠️ 真实模型调用，消耗 Token；默认跳过，需 GOWRITE_REAL_QODER_TEST=1 显式开启。
 
+@_real_qoder_test
 def test_real_qoder_cli_glue(tmp_path):
     try:
         cli = _default_cli()

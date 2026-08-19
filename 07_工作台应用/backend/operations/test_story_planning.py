@@ -27,10 +27,17 @@
 22. invalid Agent output 后临时 planning turn 被清理
 """
 import json
+import os
 import sys
 from pathlib import Path
 
 import pytest
+
+# 真实模型调用门控：默认 pytest 不产生任何 Token 消耗。
+_real_model_test = pytest.mark.skipif(
+    os.environ.get("GOWRITE_REAL_QODER_TEST") != "1",
+    reason="真实模型调用需要 GOWRITE_REAL_QODER_TEST=1（默认跳过，防止意外消耗 Token）",
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "05_Skills与自动化" / "01_Skills" / "ProjectWorkspace"))
 
@@ -395,7 +402,9 @@ def test_planning_workspace_cleaned(isolated, real_project, fake_agent):
 
 
 # ---------- 16. real Agent integration smoke ----------
+# ⚠️ 真实模型调用，消耗 Token；默认跳过，需 GOWRITE_REAL_QODER_TEST=1 显式开启。
 
+@_real_model_test
 def test_real_agent_smoke(isolated, real_project, tmp_path, monkeypatch):
     """真实 Agent 集成验证：最小 smoke test。"""
     try:

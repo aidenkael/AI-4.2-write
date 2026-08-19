@@ -284,6 +284,9 @@ export default function SettingsPage() {
         <button onClick={test} disabled={testing} style={{ cursor: 'pointer' }}>
           {testing ? '测试中…' : '测试连接'}
         </button>
+        <p style={{ margin: '0.5rem 0 0', color: '#888', fontSize: '0.8rem' }}>
+          测试连接会进行一次真实 Agent 调用，可能消耗 Token / Qoder Credits。
+        </p>
       </div>
 
       {message && (

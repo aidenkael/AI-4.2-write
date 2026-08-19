@@ -18,6 +18,12 @@ from pathlib import Path
 
 import pytest
 
+# 真实模型调用门控：默认 pytest 不产生任何 Token 消耗。
+_real_model_test = pytest.mark.skipif(
+    os.environ.get("GOWRITE_REAL_QODER_TEST") != "1",
+    reason="真实模型调用需要 GOWRITE_REAL_QODER_TEST=1（默认跳过，防止意外消耗 Token）",
+)
+
 from agents.base import AgentAdapter, AgentRequest, AgentResult
 from agents.deepseek_harness import DeepSeekHarnessAdapter, _default_launch
 from agents.registry import available, get_agent
@@ -95,7 +101,9 @@ def test_cancel_running_process(tmp_path):
 
 
 # ---------- 6. 唯一必要验证：真实 DSH headless 胶水通路 ----------
+# ⚠️ 真实模型调用，消耗 Token；默认跳过，需 GOWRITE_REAL_QODER_TEST=1 显式开启。
 
+@_real_model_test
 def test_real_dsh_headless_glue(tmp_path):
     try:
         launch = _default_launch()

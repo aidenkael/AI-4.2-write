@@ -9,9 +9,16 @@
 - test_agent_connection：deepseek_harness / qoder 自带走真实 Adapter；
   qoder BYOK 未配置 Token 时不真实调用（返回 not_configured）
 """
+import os
 import uuid
 
 import pytest
+
+# 真实模型调用门控：默认 pytest 不产生任何 Token 消耗。
+_real_model_test = pytest.mark.skipif(
+    os.environ.get("GOWRITE_REAL_QODER_TEST") != "1",
+    reason="真实模型调用需要 GOWRITE_REAL_QODER_TEST=1（默认跳过，防止意外消耗 Token）",
+)
 
 from config.secrets import SecretStore
 from operations import settings as ops
@@ -144,6 +151,7 @@ def test_connection_unknown_agent(config_dir):
         ops.test_agent_connection({"agent": "codex"})
 
 
+@_real_model_test
 def test_connection_deepseek_real(config_dir):
     """走现有 Adapter 真实执行（无副作用任务 + 临时目录）。"""
     try:
@@ -156,6 +164,7 @@ def test_connection_deepseek_real(config_dir):
     assert r["agent"] == "deepseek_harness"
 
 
+@_real_model_test
 def test_connection_qoder_native_real(config_dir):
     """Qoder 自带：走现有 QoderAdapter CLI 路径真实执行。"""
     try:

@@ -28,11 +28,18 @@
 必须由作者本人在工作台实际点击"保留这段"才算验证。
 """
 import json
+import os
 import sys
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+
+# 真实模型调用门控：默认 pytest 不产生任何 Token 消耗。
+_real_model_test = pytest.mark.skipif(
+    os.environ.get("GOWRITE_REAL_QODER_TEST") != "1",
+    reason="真实模型调用需要 GOWRITE_REAL_QODER_TEST=1（默认跳过，防止意外消耗 Token）",
+)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "05_Skills与自动化" / "01_Skills" / "ProjectWorkspace"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "05_Skills与自动化" / "01_Skills" / "StoryWrite"))
@@ -538,7 +545,9 @@ def test_no_planning_generated(isolated, real_project, fake_agent):
 
 
 # ---------- 21. real Agent propose smoke ----------
+# ⚠️ 真实模型调用，消耗 Token；默认跳过，需 GOWRITE_REAL_QODER_TEST=1 显式开启。
 
+@_real_model_test
 def test_real_agent_propose_smoke(isolated, real_project, tmp_path, monkeypatch):
     """真实 Agent 集成验证：只生成候选，不模拟正式 acceptance。"""
     try:
