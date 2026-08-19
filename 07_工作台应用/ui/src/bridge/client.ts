@@ -318,6 +318,7 @@ export async function confirmNewProject(payload: { proposal_token: string }): Pr
 }
 
 // ---------------- 故事规划（"一起往前想"纵切） ----------------
+// 统一 /gowrite 桥模式：Go Write 准备任务 → Qoder /gowrite → 结果返回
 
 export interface StoryPlanCandidate {
   proposal: string
@@ -340,12 +341,37 @@ export interface ConfirmStoryPlanResult {
   message: string
 }
 
-/** 一起往前想 → 当前 Agent 设置 → StoryPlan 候选（不写正式作品）。 */
-export async function proposeStoryPlan(payload: {
+export interface PrepareStoryPlanResult {
+  request_id: string
+  project_id: string
+  name: string
+  status: string
+  message: string
+}
+
+export interface StoryPlanRequestStatus {
+  request_id: string
+  status: 'pending' | 'completed' | 'failed' | 'expired' | 'canceled'
+  result?: ProposeStoryPlanResult | null
+  error?: string | null
+}
+
+/** 一起往前想 → Go Write 准备本轮 Agent 任务（不运行模型），返回 request_id。 */
+export async function prepareStoryPlan(payload: {
   project_id: string
   author_question: string
-}): Promise<ProposeStoryPlanResult> {
-  return call<ProposeStoryPlanResult>('propose_story_plan', payload)
+}): Promise<PrepareStoryPlanResult> {
+  return call<PrepareStoryPlanResult>('prepare_story_plan', payload)
+}
+
+/** 轮询 Qoder 写回结果：pending 继续等；completed 时 result 含候选。 */
+export async function getStoryPlanRequest(requestId: string): Promise<StoryPlanRequestStatus> {
+  return call<StoryPlanRequestStatus>('get_story_plan_request', { request_id: requestId })
+}
+
+/** 取消等待：旧结果不可能再被接受。 */
+export async function cancelStoryPlanRequest(requestId: string): Promise<{ request_id: string; status: string }> {
+  return call<{ request_id: string; status: string }>('cancel_story_plan_request', { request_id: requestId })
 }
 
 /** 作者明确确认 → 用后台保存的候选写入正式 approved_plan。 */
@@ -377,7 +403,7 @@ export interface ConfirmStoryWriteResult {
   message: string
 }
 
-/** 这一段想写什么 → 两阶段 Agent → 正文候选（不写正式作品）。 */
+/** 正文写作：当前暂不可用（正在接入统一 Qoder 执行方式）。 */
 export async function proposeStoryWrite(payload: {
   project_id: string
   author_input: string

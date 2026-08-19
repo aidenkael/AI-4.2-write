@@ -178,6 +178,9 @@ export default function SettingsPage() {
 
       <h3 style={{ marginBottom: '0.5rem' }}>Agent</h3>
       <div>{['qoder', 'deepseek_harness'].map(agentRadio)}</div>
+      <p style={{ color: '#888', fontSize: '0.8rem', marginTop: '0.25rem' }}>
+        该设置用于后台 Agent 测试与开发能力。当前作者日常创作通过 Qoder 桌面端 /gowrite 执行。
+      </p>
 
       {selectedAgent && agent === 'deepseek_harness' && (
         <div style={{ margin: '0.75rem 0' }}>

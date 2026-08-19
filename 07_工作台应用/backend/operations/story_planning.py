@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 """故事规划 Author Operations：第二条真实作者使用链（"一起往前想"）。
 
-链路：
+链路（统一 /gowrite 桥模式）：
   作品概览 → 作者自然语言提出"接下来想怎么发展"
-  → 当前 Agent/模型设置 → Agent 语义与创意工作
+  → Go Write 准备本轮 Agent 任务（pending request）
+  → 提示作者到 Qoder 桌面端执行 /gowrite
+  → Qoder 返回结果 → Go Write 严格解析
   → 现有 StoryPlan 形成 proposal_noncanonical 候选（临时 planning 工作区）
   → UI 展示 → 作者明确确认 → approved_plan writeback → 刷新概览
 
@@ -13,6 +15,7 @@
 - 确认必须带后台生成的 planning token；禁止信任前端自行构造隐藏内容。
 - Token 禁止进入 Prompt / UI / 日志 / Bridge 返回值。
 - 不生成正文；不进入 StoryWrite。
+- **不调用 run_task / 后台 Agent；模型执行统一由 Qoder 桌面端 /gowrite 完成。**
 """
 from __future__ import annotations
 
@@ -23,7 +26,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from operations.agent_runner import AgentRunError, run_task
+from operations import qoder_bridge as bridge
 
 # ---------------------------------------------------------------------------
 # Frozen runtime imports — NEVER copy their rules; always call them directly.
@@ -238,10 +241,10 @@ def _get_active_planning_sources(state: dict[str, Any]) -> list[dict[str, Any]]:
 # 提出规划候选
 # ---------------------------------------------------------------------------
 
-def propose_story_plan(project_id: str, author_question: str) -> dict[str, Any]:
-    """'一起往前想'：读取正式作品 → Agent → StoryPlan → proposal_noncanonical 候选。
+def prepare_story_plan(project_id: str, author_question: str) -> dict[str, Any]:
+    """'一起往前想'第一步：读取正式作品 → 构造 Agent task → 创建桥请求。
 
-    返回给 UI 的最小展示形状（不含内部 JSON；Token 绝不出现）。
+    不调用任何模型。模型执行由作者在 Qoder 桌面端输入 /gowrite 完成。
     """
     author_question = (author_question or "").strip()
     if not author_question:
@@ -271,8 +274,6 @@ def propose_story_plan(project_id: str, author_question: str) -> dict[str, Any]:
     hard_constraints = ", ".join(intent.get("hard_constraints") or []) or "（暂无）"
     open_space = ", ".join(intent.get("open_space") or []) or "（暂无）"
 
-    # 当前已确定的规划：把所有 active 条目整理成普通中文列表传给 Agent
-    # superseded 的旧规划不进入 Prompt
     all_plans = state.get("approved_plan") or []
     activity = resolve_plan_activity(state)
     active_ids = set(activity["active"])
@@ -298,7 +299,7 @@ def propose_story_plan(project_id: str, author_question: str) -> dict[str, Any]:
         author_question=author_question,
     )
 
-    # 4. 创建临时 planning 工作区
+    # 4. 创建临时 planning 工作区（供后续 finalize 使用）
     planning_turn_id = uuid.uuid4().hex[:12]
     planning_dir = _planning_dir(project_id, planning_turn_id)
     if planning_dir.exists():
@@ -310,27 +311,69 @@ def propose_story_plan(project_id: str, author_question: str) -> dict[str, Any]:
     write_json(paths["intent"], intent)
     write_json(paths["state"], state)
 
-    # 6. 运行 Agent
-    try:
-        result = run_task(task, cwd=str(planning_dir))
-    except AgentRunError as exc:
-        _cleanup_planning(project_id, planning_turn_id)
-        raise StoryPlanningError(str(exc)) from exc
+    # 6. 创建桥请求（不运行模型；Qoder 桌面端 /gowrite 执行）
+    request_id = bridge.create_request(
+        task=task,
+        kind="story_plan_propose",
+        meta={
+            "project_id": project_id,
+            "name": name,
+            "planning_turn_id": planning_turn_id,
+            "author_question": author_question,
+            "planning_sources": planning_sources,
+            "intent_rev": intent["intent_rev"],
+            "state_rev": state["state_rev"],
+        },
+    )
 
-    if result.status != "completed":
-        _cleanup_planning(project_id, planning_turn_id)
-        raise StoryPlanningError(
-            result.error or f"Agent 未能完成任务（{result.status}）。"
-        )
+    # 7. 尽力把 Qoder 桌面端切到前台
+    bridge.focus_qoder_window()
 
-    # 7. 解析并验证 Agent 输出（失败时清理临时目录）
-    try:
-        parsed = _parse_agent_result(result.output)
-    except StoryPlanningError:
-        _cleanup_planning(project_id, planning_turn_id)
-        raise
+    return {
+        "request_id": request_id,
+        "project_id": project_id,
+        "name": name,
+        "status": "task_prepared",
+        "message": "任务已准备好，请到 Qoder 输入 /gowrite 并回车。",
+    }
 
-    # 8. 构造 planning_target（后台生成 target_id）
+
+def _response_output_text(response: dict[str, Any]) -> str:
+    """从 response 提取模型最终结果文本（result 优先，output 兜底）。"""
+    result = response.get("result")
+    if isinstance(result, dict) and result:
+        return json.dumps(result, ensure_ascii=False)
+    output = response.get("output")
+    if isinstance(output, str) and output.strip():
+        return output
+    raise StoryPlanningError("Qoder 返回结果缺少模型输出。")
+
+
+def _finalize_story_plan(
+    request: dict[str, Any], response: dict[str, Any]
+) -> dict[str, Any]:
+    """response → 校验 → 现有严格解析 → StoryPlan 候选。"""
+    # 1. request_id 防串任务
+    if response.get("request_id") != request["request_id"]:
+        raise StoryPlanningError("返回结果与任务不匹配（request_id 不一致），已丢弃。")
+
+    # 2. 状态校验
+    resp_status = response.get("status")
+    if resp_status not in (None, "completed"):
+        err = response.get("error") or f"Qoder 返回状态异常：{resp_status}"
+        raise StoryPlanningError(err)
+
+    # 3. 提取模型最终结果 → 现有严格 JSON/字段验证
+    raw = _response_output_text(response)
+    parsed = _parse_agent_result(raw)
+
+    # 4. 从 request meta 恢复上下文
+    meta = request.get("meta") or {}
+    project_id = str(meta.get("project_id") or "")
+    planning_turn_id = str(meta.get("planning_turn_id") or "")
+    planning_dir = _planning_dir(project_id, planning_turn_id)
+
+    # 5. 构造 planning_target
     agent_target = parsed["planning_target"]
     planning_target = {
         "target_id": f"target-{planning_turn_id}",
@@ -340,15 +383,17 @@ def propose_story_plan(project_id: str, author_question: str) -> dict[str, Any]:
     if "scope" in agent_target:
         planning_target["scope"] = agent_target["scope"]
 
-    # 9. 调用 frozen StoryPlan
+    # 6. 调用 frozen StoryPlan
     brief_id = f"plan-brief-{planning_turn_id}"
     context_id = f"plan-context-{planning_turn_id}"
     candidate_id = f"plan-{planning_turn_id}"
 
+    planning_sources = meta.get("planning_sources") or []
+
     try:
         sp_result = run_story_plan(
             project_dir=planning_dir,
-            author_planning_question=author_question,
+            author_planning_question=meta.get("author_question") or "",
             planning_target=planning_target,
             planning_sources=planning_sources,
             brief_id=brief_id,
@@ -366,22 +411,22 @@ def propose_story_plan(project_id: str, author_question: str) -> dict[str, Any]:
         _cleanup_planning(project_id, planning_turn_id)
         raise StoryPlanningError("候选状态异常（非 proposal_noncanonical），已中止。")
 
-    # 10. 保存元信息（token 用于确认时校验）
-    meta = {
+    # 7. 保存元信息（token 用于确认时校验）
+    planning_meta = {
         "kind": "story_plan_proposal",
         "project_id": project_id,
-        "name": name,
+        "name": meta.get("name") or "",
         "planning_turn_id": planning_turn_id,
         "planning_token": uuid.uuid4().hex,
-        "author_question": author_question,
+        "author_question": meta.get("author_question") or "",
         "source_versions": {
-            "intent_rev": intent["intent_rev"],
-            "state_rev": state["state_rev"],
+            "intent_rev": meta.get("intent_rev"),
+            "state_rev": meta.get("state_rev"),
         },
     }
-    write_json(planning_dir / "planning_meta.json", meta)
+    write_json(planning_dir / "planning_meta.json", planning_meta)
 
-    # 11. 返回给 UI 的最小展示形状
+    # 8. 返回给 UI 的最小展示形状
     content = candidate.get("content") or {}
     planning_items_raw = content.get("planning_items") or []
     planning_items_display = [
@@ -389,9 +434,9 @@ def propose_story_plan(project_id: str, author_question: str) -> dict[str, Any]:
     ]
 
     return {
-        "planning_token": meta["planning_token"],
+        "planning_token": planning_meta["planning_token"],
         "project_id": project_id,
-        "name": name,
+        "name": meta.get("name") or "",
         "status": "proposal_noncanonical",
         "candidate": {
             "proposal": content.get("proposal") or "",
@@ -399,6 +444,80 @@ def propose_story_plan(project_id: str, author_question: str) -> dict[str, Any]:
         },
         "message": "规划候选已生成（未写入正式作品，等待你的确认）",
     }
+
+
+def get_story_plan_request(request_id: str) -> dict[str, Any]:
+    """轮询 Qoder 写回结果（UI 每 2-3 秒调用一次）。
+
+    返回 status：pending（继续等）/ completed（含候选）/ failed / expired / canceled。
+    """
+    request_id = (request_id or "").strip()
+    if not request_id:
+        raise StoryPlanningError("缺少任务标识（request_id）。")
+
+    request = bridge.get_request(request_id)
+    if request is None:
+        return {"request_id": request_id, "status": "failed", "error": "任务已失效，请重新发起。"}
+
+    state = request.get("state")
+    meta = request.get("meta") or {}
+    project_id = str(meta.get("project_id") or "")
+    planning_turn_id = str(meta.get("planning_turn_id") or "")
+
+    if state == "canceled":
+        bridge.cleanup_request(request_id)
+        return {"request_id": request_id, "status": "canceled"}
+    if state == "completed":
+        bridge.cleanup_request(request_id)
+        return {"request_id": request_id, "status": "completed", "error": None}
+    if state == "failed":
+        bridge.cleanup_request(request_id)
+        return {
+            "request_id": request_id,
+            "status": "failed",
+            "error": request.get("error") or "任务失败，请重新发起。",
+        }
+
+    # pending：先查超时，再查 response
+    if bridge.is_expired(request):
+        if project_id and planning_turn_id:
+            _cleanup_planning(project_id, planning_turn_id)
+        bridge.cleanup_request(request_id)
+        return {"request_id": request_id, "status": "expired", "error": "任务已超时，请重新发起。"}
+
+    response = bridge.read_response(request_id)
+    if response is None:
+        return {"request_id": request_id, "status": "pending"}
+
+    try:
+        result = _finalize_story_plan(request, response)
+    except StoryPlanningError as exc:
+        if project_id and planning_turn_id:
+            _cleanup_planning(project_id, planning_turn_id)
+        bridge.cleanup_request(request_id)
+        return {"request_id": request_id, "status": "failed", "error": str(exc)}
+
+    # 成功：清理桥文件（保留临时 planning 工作区，供确认时使用）
+    bridge.cleanup_request(request_id)
+    return {"request_id": request_id, "status": "completed", "result": result}
+
+
+def cancel_story_plan_request(request_id: str) -> dict[str, Any]:
+    """取消等待：标记 canceled、删除临时 planning 工作区。"""
+    request_id = (request_id or "").strip()
+    if not request_id:
+        raise StoryPlanningError("缺少任务标识（request_id）。")
+
+    request = bridge.get_request(request_id)
+    if request is not None:
+        bridge.mark_canceled(request_id)
+        meta = request.get("meta") or {}
+        project_id = str(meta.get("project_id") or "")
+        planning_turn_id = str(meta.get("planning_turn_id") or "")
+        if project_id and planning_turn_id:
+            _cleanup_planning(project_id, planning_turn_id)
+        bridge.clear_active_if(request_id)
+    return {"request_id": request_id, "status": "canceled"}
 
 
 # ---------------------------------------------------------------------------

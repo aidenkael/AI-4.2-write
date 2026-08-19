@@ -196,15 +196,41 @@ class AppApi:
             return _err(CODE_BRIDGE_INTERNAL, str(exc))
 
     # ---------------- 故事规划（"一起往前想"纵切） ----------------
+    # 统一 /gowrite 桥模式：Go Write 准备任务 → Qoder /gowrite → 结果返回
     # 确认前只写临时 planning 工作区；只有作者明确确认（带后台 planning token）
     # 才写入正式 Story State 的 approved_plan。
 
-    def propose_story_plan(self, payload: dict) -> dict:
-        """一起往前想 → 当前 Agent 设置 → StoryPlan 候选（proposal_noncanonical）。"""
+    def prepare_story_plan(self, payload: dict) -> dict:
+        """一起往前想 → 准备本轮 Agent 任务（pending request），不运行模型。"""
         try:
-            data = story_planning_ops.propose_story_plan(
+            data = story_planning_ops.prepare_story_plan(
                 project_id=str(payload.get("project_id") or ""),
                 author_question=str(payload.get("author_question") or ""),
+            )
+            bridge_ops.focus_qoder_window()
+            return _ok(data)
+        except StoryPlanningError as exc:
+            return _err(CODE_STORY_PLANNING_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def get_story_plan_request(self, payload: dict) -> dict:
+        """轮询 Qoder 写回结果：pending / completed / failed / expired / canceled。"""
+        try:
+            data = story_planning_ops.get_story_plan_request(
+                request_id=str(payload.get("request_id") or ""),
+            )
+            return _ok(data)
+        except StoryPlanningError as exc:
+            return _err(CODE_STORY_PLANNING_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def cancel_story_plan_request(self, payload: dict) -> dict:
+        """取消等待：旧结果不可能再被接受。"""
+        try:
+            data = story_planning_ops.cancel_story_plan_request(
+                request_id=str(payload.get("request_id") or ""),
             )
             return _ok(data)
         except StoryPlanningError as exc:
@@ -230,17 +256,11 @@ class AppApi:
     # 才通过 ProjectWorkspace.accept_prose 写入正式 03_正文。
 
     def propose_story_write(self, payload: dict) -> dict:
-        """这一段想写什么 → 两阶段 Agent → 正文候选（不写正式作品）。"""
-        try:
-            data = story_writing_ops.propose_story_write(
-                project_id=str(payload.get("project_id") or ""),
-                author_input=str(payload.get("author_input") or ""),
-            )
-            return _ok(data)
-        except StoryWritingError as exc:
-            return _err(CODE_STORY_WRITING_ERROR, str(exc))
-        except Exception as exc:  # noqa: BLE001
-            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+        """正文写作：当前暂不可用（正在接入统一 Qoder 执行方式）。"""
+        return _err(
+            CODE_STORY_WRITING_ERROR,
+            "正文写作正在接入统一的 Qoder 执行方式，当前暂不可用。",
+        )
 
     def confirm_story_write(self, payload: dict) -> dict:
         """作者明确"保留这段" → accept_prose 写入正式 03_正文。"""
