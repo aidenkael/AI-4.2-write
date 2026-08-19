@@ -69,6 +69,43 @@ def test_read_response_invalid_json_returns_failed_envelope(isolated):
     assert resp["error"]
 
 
+def test_repair_llm_json_unescaped_quotes():
+    """LLM 常见错误：字符串值内未转义英文双引号 → 修复后可解析。"""
+    raw = '{"a": "他说"你好"，然后"再见"。", "b": [1, 2]}'
+    repaired = bridge.repair_llm_json(raw)
+    assert repaired is not None
+    data = json.loads(repaired)
+    assert data["a"] == "他说\"你好\"，然后\"再见\"。"
+    assert data["b"] == [1, 2]
+
+
+def test_repair_llm_json_already_valid_unchanged():
+    raw = '{"a": "他说\\"你好\\"", "b": "ok"}'
+    repaired = bridge.repair_llm_json(raw)
+    assert repaired is not None
+    assert json.loads(repaired) == json.loads(raw)
+
+
+def test_repair_llm_json_structure_quotes_kept():
+    """结构引号（键/值定界）必须保持；只有内容引号被转义。"""
+    raw = '{"key": "value", "nested": {"k2": "text"}}'
+    repaired = bridge.repair_llm_json(raw)
+    assert repaired is not None
+    assert json.loads(repaired) == {"key": "value", "nested": {"k2": "text"}}
+
+
+def test_read_response_repairs_llm_quotes(isolated):
+    rid = bridge.create_request(task="T", kind="k")
+    raw = ('{"schema":"gowrite_response/v1","request_id":"%s","status":"completed",'
+           '"result":{"objective":"为一部以"主角被两条狗咬"为核心的故事"}}') % rid
+    path = bridge.response_path(rid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(raw, encoding="utf-8")
+    resp = bridge.read_response(rid)
+    assert resp["status"] == "completed"
+    assert "主角被两条狗咬" in resp["result"]["objective"]
+
+
 def test_mark_canceled_deletes_response(isolated):
     rid = bridge.create_request(task="T", kind="k")
     bridge.write_response(rid, result={"ok": 1})

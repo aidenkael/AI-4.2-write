@@ -314,6 +314,45 @@ def test_output_string_form_accepted(isolated):
     assert status["result"]["candidate"]["work_direction"] == "都市奇幻长篇的开端设计。"
 
 
+def test_response_with_unescaped_quotes_repaired(isolated):
+    """真实 Qoder 写回常见错误：中文内容里的英文双引号未转义 → 修复后完成。"""
+    prepared = np_ops.prepare_new_project(name="引号作品", idea="想法")
+    rid = prepared["request_id"]
+    # 模拟 Qoder 原样写入：字符串值内含未转义的 "（真实复现自两条狗案例）
+    raw = (
+        '{\n'
+        '  "schema": "gowrite_response/v1",\n'
+        '  "request_id": "%s",\n'
+        '  "status": "completed",\n'
+        '  "result": {\n'
+        '    "semantic_interpretation": {\n'
+        '      "scope": "story_design",\n'
+        '      "objective": "为一部以"主角被两条狗咬"为核心事件的故事生成方向",\n'
+        '      "knowledge_needs": [],\n'
+        '      "selected_bkp_ids": [],\n'
+        '      "assumptions": [""两条狗"是核心意象，但不确定是字面意义还是隐喻"]\n'
+        '    },\n'
+        '    "model_output": {\n'
+        '      "proposal": "候选：一个普通人被两条狗咬伤，生活裂缝不断扩大。",\n'
+        '      "work_direction": "聚焦小人物被两条狗咬伤后失控的中篇。",\n'
+        '      "reader_promise": "读者感到那些"温顺"事物恰恰是危险的。",\n'
+        '      "hard_constraints": ["不合并两条狗的来源"],\n'
+        '      "open_space": ["狗的来历"]\n'
+        '    }\n'
+        '  }\n'
+        '}\n'
+    ) % rid
+    path = bridge.response_path(rid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(raw, encoding="utf-8")
+
+    status = np_ops.get_new_project_request(rid)
+    assert status["status"] == "completed", status.get("error")
+    assert status["result"]["status"] == "proposal_noncanonical"
+    assert "两条狗" in status["result"]["candidate"]["work_direction"]
+    assert "两条狗" in status["result"]["candidate"]["proposal"]
+
+
 # ---------- 8/9. 明确确认 → 真实 create_project；现有链可读；不生成正文 ----------
 
 def _complete(prepared) -> dict:
