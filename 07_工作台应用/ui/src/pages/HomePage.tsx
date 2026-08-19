@@ -1,16 +1,22 @@
+import { useEffect } from 'react'
 import {
+  cancelNewProjectRequest,
   confirmNewProject,
-  proposeNewProject,
+  getNewProjectRequest,
+  prepareNewProject,
   type ConfirmResult,
   type ProposeResult,
 } from '../bridge/client'
 
 export type HomeStage =
   | { kind: 'input' }
-  | { kind: 'working' }
+  | { kind: 'preparing' }
+  | { kind: 'waiting'; requestId: string }
   | { kind: 'candidate'; result: ProposeResult }
   | { kind: 'confirming' }
   | { kind: 'error'; message: string }
+
+const POLL_INTERVAL_MS = 3000
 
 export default function HomePage({
   name,
@@ -29,14 +35,57 @@ export default function HomePage({
   setStage: (s: HomeStage) => void
   onProjectCreated: (p: { project_id: string; name: string; warning?: string | null }) => void
 }) {
-  const startPropose = async () => {
-    setStage({ kind: 'working' })
+  const startPrepare = async () => {
+    setStage({ kind: 'preparing' })
     try {
-      const result = await proposeNewProject({ name, idea })
-      setStage({ kind: 'candidate', result })
+      const prepared = await prepareNewProject({ name, idea })
+      setStage({ kind: 'waiting', requestId: prepared.request_id })
     } catch (err) {
       setStage({ kind: 'error', message: String(err) })
     }
+  }
+
+  // 等待阶段：轮询 Qoder 写回结果（Go Write 不运行模型，模型由 Qoder /gowrite 执行）
+  useEffect(() => {
+    if (stage.kind !== 'waiting') return
+    let cancelled = false
+
+    const tick = async () => {
+      try {
+        const status = await getNewProjectRequest(stage.requestId)
+        if (cancelled) return
+        if (status.status === 'completed' && status.result) {
+          setStage({ kind: 'candidate', result: status.result })
+        } else if (status.status === 'failed') {
+          setStage({ kind: 'error', message: status.error || '任务失败，请重新发起。' })
+        } else if (status.status === 'expired') {
+          setStage({ kind: 'error', message: status.error || '任务已超时，请重新发起。' })
+        } else if (status.status === 'canceled') {
+          setStage({ kind: 'input' })
+        }
+        // pending → 继续等
+      } catch (err) {
+        if (cancelled) return
+        setStage({ kind: 'error', message: String(err) })
+      }
+    }
+
+    void tick() // 立即查一次，快速响应已写回的结果
+    const id = window.setInterval(() => void tick(), POLL_INTERVAL_MS)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [stage, setStage])
+
+  const cancelWait = async () => {
+    if (stage.kind !== 'waiting') return
+    try {
+      await cancelNewProjectRequest(stage.requestId)
+    } catch {
+      // 取消失败也回到输入态（后台终会清理）
+    }
+    setStage({ kind: 'input' })
   }
 
   const confirm = async (result: ProposeResult) => {
@@ -86,7 +135,7 @@ export default function HomePage({
             />
           </div>
           <button
-            onClick={startPropose}
+            onClick={startPrepare}
             disabled={!name.trim() || !idea.trim()}
             style={{ cursor: 'pointer', padding: '0.45rem 1rem' }}
           >
@@ -95,8 +144,23 @@ export default function HomePage({
         </div>
       )}
 
-      {stage.kind === 'working' && (
-        <p style={{ marginTop: '1.5rem' }}>正在整理你的想法……</p>
+      {stage.kind === 'preparing' && (
+        <p style={{ marginTop: '1.5rem' }}>正在准备任务……</p>
+      )}
+
+      {stage.kind === 'waiting' && (
+        <div style={{ marginTop: '1.5rem', lineHeight: 1.8 }}>
+          <p>任务已准备好，请到 Qoder 输入 /gowrite 并回车。</p>
+          <p style={{ color: '#888', fontSize: '0.85rem' }}>
+            Go Write 不直接运行模型；请在 Qoder 桌面端执行 /gowrite，结果会自动回到这里。
+          </p>
+          <button
+            onClick={cancelWait}
+            style={{ cursor: 'pointer', padding: '0.45rem 1rem', marginTop: '0.5rem' }}
+          >
+            取消任务
+          </button>
+        </div>
       )}
 
       {stage.kind === 'confirming' && (

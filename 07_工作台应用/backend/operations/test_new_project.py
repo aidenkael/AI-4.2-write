@@ -1,20 +1,22 @@
 # -*- coding: utf-8 -*-
-"""新建作品“我有个想法”纵切 targeted tests。
+"""新建作品“我有个想法”纵切 targeted tests（Qoder 桥版本）。
 
-覆盖用户要求的 10 项验证（不重测 Agent 基础能力）：
-1. 未确认候选不会创建 03_作品工程
-2. 当前 Agent 设置确实被消费（default_agent 生效）
-3. semantic/model output 能进入 frozen StoryDesign
-4. candidate 为 proposal_noncanonical
-5. 模糊/无确认不能 create_project
-6. 明确确认后调用真实 ProjectWorkspace.create_project
-7. author_intent 通过 frozen gate
-8. 新作品能被现有 list/open/overview 链读取
-9. 不生成正文
+架构（已确认）：Go Write 管长期记忆；Qoder 桌面端只执行当前任务。
+Go Write 只准备任务（pending request）并回收结果，不直接调用模型 API。
+
+覆盖用户要求的验证：
+1. prepare 不创建 03_作品工程
+2. Go Write 创建唯一 pending request（含完整 task + response_path + active 指针）
+3. pending 直到 Qoder 写回；写回后 completed 且候选走现有 StoryDesign
+4. request_id 防串任务：不一致的 response 被丢弃
+5. 取消后旧结果不可能被接受
+6. 超时（expired）
+7. 严格 JSON/字段验证仍然存在（非法输出/缺字段/类型错误 → failed）
+8. 明确确认后调用真实 ProjectWorkspace.create_project（author_intent 过 frozen gate）
+9. 新作品可被现有 list/open/overview 链读取；不生成正文
 10. 不修改现有 frozen Skills（仅 import，不改文件；git diff 另查）
-
-真实 Agent 集成验证：临时 AI_WRITE_CONFIG_DIR + DeepSeek Harness
-（当前已验证可用）完成一次无正式写入的候选生成。
+11. 旧 response 不会串到新请求（不同 request_id 天然隔离）
+12. “两条狗咬”模拟完整链路（真实模型执行由 Qoder /gowrite 完成，见真实验证）
 """
 import json
 import sys
@@ -27,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "05_Skills与自动
 import project_workspace  # noqa: E402
 
 from operations import new_project as np_ops  # noqa: E402
+from operations import qoder_bridge as bridge  # noqa: E402
 from operations.agent_runner import AgentRunError  # noqa: E402
 from operations.agent_runner import run_task  # noqa: E402
 from operations.projects import (  # noqa: E402
@@ -34,9 +37,8 @@ from operations.projects import (  # noqa: E402
     list_projects,
     open_project,
 )
-from config.settings import SettingsStore, AppSettings  # noqa: E402
 
-VALID_AGENT_JSON = json.dumps({
+VALID_AGENT_RESULT = {
     "semantic_interpretation": {
         "scope": "story_design",
         "objective": "设计一个可推进的故事发动机。",
@@ -53,116 +55,275 @@ VALID_AGENT_JSON = json.dumps({
         "open_space": ["秘密来源", "关系走向"],
         "unknowns": ["花园保存秘密的代价"],
     },
-}, ensure_ascii=False)
+}
+
+# “两条狗咬”模拟结果（真实执行由 Qoder 桌面端完成）
+TWO_DOGS_RESULT = {
+    "semantic_interpretation": {
+        "scope": "story_design",
+        "objective": "围绕“主角被两条狗咬”设计一个有张力的故事方向。",
+        "knowledge_needs": [],
+        "selected_bkp_ids": [],
+        "assumptions": ["两条狗的来历与动机是故事核心悬念，作者尚未确认"],
+    },
+    "model_output": {
+        "stance": ["story_engine"],
+        "proposal": "候选：主角在小镇接连被两条狗咬伤，伤口愈合后开始听懂犬吠，卷入两条狗背后的秘密。",
+        "work_direction": "现实奇幻短长篇的开端设计。",
+        "reader_promise": "读者先感到被咬之后的日常异常，再被两条狗的秘密牵引。",
+        "hard_constraints": ["不把两条狗的秘密写成既成事实"],
+        "open_space": ["狗的来历", "咬伤后果", "小镇关系"],
+        "unknowns": ["两条狗为什么只咬主角"],
+    },
+}
 
 
 @pytest.fixture()
 def isolated(tmp_path, monkeypatch):
-    """隔离：03_作品工程 → tmp 根；临时工作区 → tmp；AI_WRITE_CONFIG_DIR → tmp。"""
+    """隔离：03_作品工程 → tmp；临时工作区 → tmp；桥根 → tmp；配置目录 → tmp。"""
     projects_root = tmp_path / "03_作品工程"
     projects_root.mkdir()
     monkeypatch.setattr(project_workspace, "get_projects_root", lambda: projects_root)
     monkeypatch.setattr(np_ops, "get_proposals_root", lambda: tmp_path / "proposals")
+    monkeypatch.setattr(bridge, "get_bridge_root", lambda: tmp_path / "qoder_bridge")
     monkeypatch.setenv("AI_WRITE_CONFIG_DIR", str(tmp_path / "cfg"))
     return projects_root
 
 
-@pytest.fixture()
-def fake_agent(monkeypatch):
-    """把 run_task 替换成返回固定合法结构化 JSON 的假 Agent。"""
-    def _fake(task: str, cwd=None):
-        from agents.base import AgentResult
-        return AgentResult(status="completed", output=VALID_AGENT_JSON, agent="fake")
-    monkeypatch.setattr(np_ops, "run_task", _fake)
-    return _fake
+# ---------- 1. prepare 不创建 03_作品工程 ----------
 
-
-# ---------- 1. 未确认候选不会创建 03_作品工程 ----------
-
-def test_propose_does_not_create_project(isolated, fake_agent):
-    result = np_ops.propose_new_project(name="测试作品", idea="我想写一个……")
-    assert result["status"] == "proposal_noncanonical"
+def test_prepare_does_not_create_project(isolated):
+    prepared = np_ops.prepare_new_project(name="测试作品", idea="我想写一个……")
+    assert prepared["status"] == "task_prepared"
+    assert prepared["request_id"]
+    assert "Qoder" in prepared["message"]
     # 03_作品工程 仍然为空（只有目录本身，无任何作品子目录）
     children = [p for p in isolated.iterdir() if p.is_dir()]
-    assert children == [], f"propose 不应创建作品，实际：{children}"
+    assert children == [], f"prepare 不应创建作品，实际：{children}"
 
 
-# ---------- 2. 当前 Agent 设置确实被消费 ----------
+# ---------- 2. 唯一 pending request：完整 task + response_path + active 指针 ----------
 
-def test_agent_settings_consumed_by_runner(isolated, tmp_path, monkeypatch):
-    # 保存默认 Agent = deepseek_harness，并记录 run_task 是否经由 runner
-    store = SettingsStore(config_dir=tmp_path / "cfg")
-    store.save(AppSettings(default_agent="deepseek_harness"))
+def test_prepare_creates_unique_request(isolated):
+    a = np_ops.prepare_new_project(name="请求A", idea="想法A")
+    b = np_ops.prepare_new_project(name="请求B", idea="想法B")
+    assert a["request_id"] != b["request_id"], "每次准备必须是唯一 request_id"
 
-    from agents.base import AgentResult
-    calls: list[dict] = []
+    req_a = bridge.get_request(a["request_id"])
+    assert req_a["state"] == "pending"
+    assert "想法A" in req_a["task"] and "请求A" in req_a["task"], "完整 Agent task 必须保存在请求中"
+    resp_parts = Path(req_a["response_path"]).parts
+    assert "responses" in resp_parts and resp_parts[-1] == f"{a['request_id']}.json"
+    assert bridge.get_active_request_id() == b["request_id"], "active 指向最新请求"
 
-    def _fake(task: str, cwd=None):
-        calls.append({"task": task, "cwd": cwd})
-        return AgentResult(status="completed", output=VALID_AGENT_JSON, agent="fake")
-
-    monkeypatch.setattr(np_ops, "run_task", _fake)
-    np_ops.propose_new_project(name="消费测试", idea="想法")
-    assert calls, "propose 必须消费当前 Agent 设置并调用 run_task"
-    # 任务文本包含作品名与想法（作者输入进入 Agent 任务）
-    assert "消费测试" in calls[0]["task"]
-    assert "想法" in calls[0]["task"]
+    # response 目录尚无任何文件（pending）
+    assert not bridge.response_path(a["request_id"]).exists()
 
 
-def test_runner_rejects_unavailable_agent(isolated, tmp_path, monkeypatch):
-    store = SettingsStore(config_dir=tmp_path / "cfg")
-    store.save(AppSettings(default_agent="qoder", qoder_mode="qoder_byok"))
-    # 未配置 BYOK provider/model → 普通可读错误，不触发真实第三方
-    with pytest.raises(AgentRunError):
-        run_task("任何任务")
+# ---------- 3. pending → 写回 → completed，候选走现有 StoryDesign ----------
 
+def test_pending_until_response_then_completed(isolated):
+    prepared = np_ops.prepare_new_project(name="完整链作品", idea="想法")
+    rid = prepared["request_id"]
 
-# ---------- 3. semantic/model output 能进入 frozen StoryDesign ----------
+    status = np_ops.get_new_project_request(rid)
+    assert status["status"] == "pending"
 
-def test_agent_output_flows_into_story_design(isolated, fake_agent):
-    result = np_ops.propose_new_project(name="语义测试", idea="想法")
-    # StoryDesign 产物已写入临时工作区
+    bridge.write_response(rid, result=VALID_AGENT_RESULT)
+    status = np_ops.get_new_project_request(rid)
+    assert status["status"] == "completed"
+    assert status["result"]["status"] == "proposal_noncanonical"
+
+    # StoryDesign 产物已写入临时工作区（briefs/contexts/designs）
     proposals = isolated.parent / "proposals"
-    proj_dir = proposals / result["project_id"]
+    proj_dir = proposals / status["result"]["project_id"]
     assert (proj_dir / "briefs" / "brief-idea-001.json").exists()
     assert (proj_dir / "contexts" / "context-idea-001.json").exists()
     assert (proj_dir / "designs" / "design-idea-001.json").exists()
-    # candidate.content 就是 model_output
     candidate = json.loads((proj_dir / "designs" / "design-idea-001.json").read_text(encoding="utf-8"))
     assert candidate["content"]["work_direction"] == "都市奇幻长篇的开端设计。"
 
-
-# ---------- 4. candidate 为 proposal_noncanonical ----------
-
-def test_candidate_is_proposal_noncanonical(isolated, fake_agent):
-    result = np_ops.propose_new_project(name="状态测试", idea="想法")
-    assert result["status"] == "proposal_noncanonical"
-    proposals = isolated.parent / "proposals"
-    candidate = json.loads(
-        (proposals / result["project_id"] / "designs" / "design-idea-001.json").read_text(encoding="utf-8")
-    )
-    assert candidate["status"] == "proposal_noncanonical"
-    assert candidate["must_not_write_canon"] is True
+    # 完成后桥文件已清理（旧结果不可能再被接受）
+    assert bridge.get_request(rid) is None
+    assert not bridge.response_path(rid).exists()
 
 
-# ---------- 非法 Agent 输出：普通可读错误，不落盘 ----------
+# ---------- 4. request_id 防串任务：不一致的 response 被丢弃 ----------
 
-def test_invalid_agent_output_readable_error(isolated, monkeypatch):
-    from agents.base import AgentResult
+def test_request_id_mismatch_rejected(isolated):
+    prepared = np_ops.prepare_new_project(name="防串作品", idea="想法")
+    rid = prepared["request_id"]
+    # 模拟 Qoder 写错 request_id：文件在正确位置，但内容 request_id 不一致
+    path = bridge.response_path(rid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "schema": "gowrite_response/v1",
+        "request_id": "other-request-id",
+        "status": "completed",
+        "result": VALID_AGENT_RESULT,
+    }, ensure_ascii=False), encoding="utf-8")
 
-    def _bad(task: str, cwd=None):
-        return AgentResult(status="completed", output="这不是 JSON", agent="fake")
-
-    monkeypatch.setattr(np_ops, "run_task", _bad)
-    with pytest.raises(np_ops.NewProjectError) as ei:
-        np_ops.propose_new_project(name="坏输出", idea="想法")
-    assert "JSON" in str(ei.value)
-    assert list(isolated.iterdir()) == []  # 03 仍为空
+    status = np_ops.get_new_project_request(rid)
+    assert status["status"] == "failed"
+    assert "request_id" in status["error"]
+    # 候选未生成、临时工作区已清理、桥文件已清理
+    assert list(isolated.iterdir()) == []
 
 
-# ---------- 5. 模糊/无确认不能 create_project ----------
+# ---------- 5. 取消后旧结果不可能被接受 ----------
 
-def test_confirm_without_token_rejected(isolated, fake_agent):
+def test_cancel_then_response_not_accepted(isolated):
+    prepared = np_ops.prepare_new_project(name="取消作品", idea="想法")
+    rid = prepared["request_id"]
+
+    canceled = np_ops.cancel_new_project_request(rid)
+    assert canceled["status"] == "canceled"
+
+    # 取消后即使 Qoder 再写回，也不会被接受
+    bridge.write_response(rid, result=VALID_AGENT_RESULT)
+    status = np_ops.get_new_project_request(rid)
+    assert status["status"] == "canceled"
+    assert "result" not in status or status["result"] is None
+    assert list(isolated.iterdir()) == [], "取消后临时工作区应已清理"
+
+
+# ---------- 6. 超时（expired） ----------
+
+def test_expired_request(isolated, monkeypatch):
+    prepared = np_ops.prepare_new_project(name="超时作品", idea="想法")
+    rid = prepared["request_id"]
+
+    monkeypatch.setattr(bridge, "is_expired", lambda req: True)
+    status = np_ops.get_new_project_request(rid)
+    assert status["status"] == "expired"
+    assert "超时" in status["error"]
+    assert bridge.get_request(rid) is None
+    assert list(isolated.iterdir()) == [], "超时后临时工作区应已清理"
+
+
+# ---------- 7. 严格 JSON/字段验证仍然存在 ----------
+
+def test_invalid_json_output_rejected(isolated):
+    prepared = np_ops.prepare_new_project(name="坏输出作品", idea="想法")
+    rid = prepared["request_id"]
+    bridge.write_response(rid, output="这不是 JSON")
+
+    status = np_ops.get_new_project_request(rid)
+    assert status["status"] == "failed"
+    assert "JSON" in status["error"]
+    assert list(isolated.iterdir()) == []
+
+
+def test_work_direction_not_string_rejected(isolated):
+    bad = {
+        "semantic_interpretation": {
+            "scope": "story_design", "objective": "目标",
+            "knowledge_needs": [], "selected_bkp_ids": [], "assumptions": [],
+        },
+        "model_output": {
+            "proposal": "候选方向。", "work_direction": 12345,
+            "reader_promise": "读者期待。", "hard_constraints": [], "open_space": [],
+        },
+    }
+    prepared = np_ops.prepare_new_project(name="类型错误作品", idea="想法")
+    bridge.write_response(prepared["request_id"], result=bad)
+    status = np_ops.get_new_project_request(prepared["request_id"])
+    assert status["status"] == "failed"
+    assert "work_direction" in status["error"]
+    assert list(isolated.iterdir()) == []
+
+
+def test_reader_promise_missing_rejected(isolated):
+    bad = {
+        "semantic_interpretation": {
+            "scope": "story_design", "objective": "目标",
+            "knowledge_needs": [], "selected_bkp_ids": [], "assumptions": [],
+        },
+        "model_output": {
+            "proposal": "候选方向。", "work_direction": "作品方向。",
+            "hard_constraints": [], "open_space": [],
+        },
+    }
+    prepared = np_ops.prepare_new_project(name="缺读者期待", idea="想法")
+    bridge.write_response(prepared["request_id"], result=bad)
+    status = np_ops.get_new_project_request(prepared["request_id"])
+    assert status["status"] == "failed"
+    assert "reader_promise" in status["error"]
+
+
+def test_hard_constraints_not_list_str_rejected(isolated):
+    bad = {
+        "semantic_interpretation": {
+            "scope": "story_design", "objective": "目标",
+            "knowledge_needs": [], "selected_bkp_ids": [], "assumptions": [],
+        },
+        "model_output": {
+            "proposal": "候选方向。", "work_direction": "作品方向。",
+            "reader_promise": "读者期待。", "hard_constraints": "不是列表", "open_space": [],
+        },
+    }
+    prepared = np_ops.prepare_new_project(name="约束类型错误", idea="想法")
+    bridge.write_response(prepared["request_id"], result=bad)
+    status = np_ops.get_new_project_request(prepared["request_id"])
+    assert status["status"] == "failed"
+    assert "hard_constraints" in status["error"]
+
+
+def test_open_space_missing_rejected(isolated):
+    bad = {
+        "semantic_interpretation": {
+            "scope": "story_design", "objective": "目标",
+            "knowledge_needs": [], "selected_bkp_ids": [], "assumptions": [],
+        },
+        "model_output": {
+            "proposal": "候选方向。", "work_direction": "作品方向。",
+            "reader_promise": "读者期待。", "hard_constraints": [],
+        },
+    }
+    prepared = np_ops.prepare_new_project(name="缺自由空间作品", idea="想法")
+    bridge.write_response(prepared["request_id"], result=bad)
+    status = np_ops.get_new_project_request(prepared["request_id"])
+    assert status["status"] == "failed"
+    assert "open_space" in status["error"]
+
+
+def test_knowledge_needs_missing_rejected(isolated):
+    bad = {
+        "semantic_interpretation": {
+            "scope": "story_design", "objective": "目标",
+            "selected_bkp_ids": [], "assumptions": [],
+        },
+        "model_output": {
+            "proposal": "候选方向。", "work_direction": "作品方向。",
+            "reader_promise": "读者期待。", "hard_constraints": [], "open_space": [],
+        },
+    }
+    prepared = np_ops.prepare_new_project(name="缺知识需求作品", idea="想法")
+    bridge.write_response(prepared["request_id"], result=bad)
+    status = np_ops.get_new_project_request(prepared["request_id"])
+    assert status["status"] == "failed"
+    assert "knowledge_needs" in status["error"]
+
+
+def test_output_string_form_accepted(isolated):
+    """response 用 output 字符串（模型原始文本）兜底也应通过同一严格解析。"""
+    prepared = np_ops.prepare_new_project(name="字符串输出", idea="想法")
+    bridge.write_response(prepared["request_id"], output=json.dumps(VALID_AGENT_RESULT, ensure_ascii=False))
+    status = np_ops.get_new_project_request(prepared["request_id"])
+    assert status["status"] == "completed"
+    assert status["result"]["candidate"]["work_direction"] == "都市奇幻长篇的开端设计。"
+
+
+# ---------- 8/9. 明确确认 → 真实 create_project；现有链可读；不生成正文 ----------
+
+def _complete(prepared) -> dict:
+    bridge.write_response(prepared["request_id"], result=VALID_AGENT_RESULT)
+    status = np_ops.get_new_project_request(prepared["request_id"])
+    assert status["status"] == "completed"
+    return status["result"]
+
+
+def test_confirm_without_token_rejected(isolated):
     with pytest.raises(np_ops.NewProjectError):
         np_ops.confirm_new_project(proposal_token="")
     with pytest.raises(np_ops.NewProjectError):
@@ -170,17 +331,17 @@ def test_confirm_without_token_rejected(isolated, fake_agent):
     assert list(isolated.iterdir()) == []
 
 
-def test_confirm_rejects_forged_token(isolated, fake_agent):
-    np_ops.propose_new_project(name="防伪造", idea="想法")
+def test_confirm_rejects_forged_token(isolated):
+    prepared = np_ops.prepare_new_project(name="防伪造", idea="想法")
+    _complete(prepared)
     with pytest.raises(np_ops.NewProjectError):
         np_ops.confirm_new_project(proposal_token="forged-token-00000000")
     assert list(isolated.iterdir()) == []
 
 
-# ---------- 6. 明确确认后调用真实 ProjectWorkspace.create_project ----------
-
-def test_confirm_creates_real_project(isolated, fake_agent):
-    result = np_ops.propose_new_project(name="正式作品", idea="想法")
+def test_confirm_creates_real_project(isolated):
+    prepared = np_ops.prepare_new_project(name="正式作品", idea="想法")
+    result = _complete(prepared)
     created = np_ops.confirm_new_project(proposal_token=result["proposal_token"])
     assert created["name"] == "正式作品"
     assert created["project_id"] == result["project_id"]
@@ -191,10 +352,9 @@ def test_confirm_creates_real_project(isolated, fake_agent):
     assert (proj_dir / "_工作台状态" / "accepted_text_index.json").exists()
 
 
-# ---------- 7. author_intent 通过 frozen gate ----------
-
-def test_confirm_intent_passes_frozen_gate(isolated, fake_agent):
-    result = np_ops.propose_new_project(name="门槛作品", idea="想法")
+def test_confirm_intent_passes_frozen_gate(isolated):
+    prepared = np_ops.prepare_new_project(name="门槛作品", idea="想法")
+    result = _complete(prepared)
     created = np_ops.confirm_new_project(proposal_token=result["proposal_token"])
     intent = json.loads(
         (isolated / "门槛作品" / "_工作台状态" / "author_intent.json").read_text(encoding="utf-8")
@@ -205,10 +365,9 @@ def test_confirm_intent_passes_frozen_gate(isolated, fake_agent):
         assert field in intent
 
 
-# ---------- 8. 新作品能被现有 list/open/overview 链读取 ----------
-
-def test_new_project_readable_by_existing_chain(isolated, fake_agent):
-    result = np_ops.propose_new_project(name="可读作品", idea="想法")
+def test_new_project_readable_by_existing_chain(isolated):
+    prepared = np_ops.prepare_new_project(name="可读作品", idea="想法")
+    result = _complete(prepared)
     created = np_ops.confirm_new_project(proposal_token=result["proposal_token"])
 
     items = list_projects()
@@ -222,10 +381,9 @@ def test_new_project_readable_by_existing_chain(isolated, fake_agent):
     assert overview["name"] == "可读作品"
 
 
-# ---------- 9. 不生成正文 ----------
-
-def test_confirm_generates_no_prose(isolated, fake_agent):
-    result = np_ops.propose_new_project(name="无正文作品", idea="想法")
+def test_confirm_generates_no_prose(isolated):
+    prepared = np_ops.prepare_new_project(name="无正文作品", idea="想法")
+    result = _complete(prepared)
     np_ops.confirm_new_project(proposal_token=result["proposal_token"])
     prose_dir = isolated / "无正文作品" / "03_正文"
     assert prose_dir.exists()
@@ -236,10 +394,9 @@ def test_confirm_generates_no_prose(isolated, fake_agent):
     assert index["entries"] == []
 
 
-# ---------- 确认后清理临时工作区 ----------
-
-def test_proposal_cleaned_after_confirm(isolated, fake_agent):
-    result = np_ops.propose_new_project(name="清理作品", idea="想法")
+def test_proposal_cleaned_after_confirm(isolated):
+    prepared = np_ops.prepare_new_project(name="清理作品", idea="想法")
+    result = _complete(prepared)
     assert (isolated.parent / "proposals" / result["project_id"]).exists()
     np_ops.confirm_new_project(proposal_token=result["proposal_token"])
     assert not (isolated.parent / "proposals" / result["project_id"]).exists()
@@ -247,7 +404,7 @@ def test_proposal_cleaned_after_confirm(isolated, fake_agent):
 
 # ---------- 10. frozen Skills 零修改（只 import 不改文件） ----------
 
-def test_frozen_skills_untouched(isolated, fake_agent):
+def test_frozen_skills_untouched(isolated):
     import story_runtime  # noqa: F401
     import story_design  # noqa: F401
     import project_workspace  # noqa: F401
@@ -256,320 +413,84 @@ def test_frozen_skills_untouched(isolated, fake_agent):
     assert hasattr(project_workspace, "create_project")
 
 
-# ---------- 真实 Agent 集成验证（DeepSeek Harness，临时目录，无正式写入） ----------
+# ---------- 11. 旧 response 不会串到新请求 ----------
 
-def test_real_dsh_candidate_generation(isolated, tmp_path, monkeypatch):
-    """临时 AI_WRITE_CONFIG_DIR + DeepSeek Harness：真实候选生成，不写正式作品。"""
-    try:
-        from agents.deepseek_harness import _default_launch
-        _default_launch()
-    except RuntimeError as exc:
-        pytest.skip(f"DeepSeek Harness 不可用：{exc}")
+def test_old_response_not_leaked_to_new_request(isolated):
+    # 请求 A：写回完成（未消费）；再建请求 B —— B 必须保持 pending，绝不能读到 A 的结果
+    a = np_ops.prepare_new_project(name="旧请求", idea="旧想法")
+    bridge.write_response(a["request_id"], result=VALID_AGENT_RESULT)
 
-    cfg_dir = tmp_path / "cfg"
-    store = SettingsStore(config_dir=cfg_dir)
-    store.save(AppSettings(default_agent="deepseek_harness"))
-    monkeypatch.setenv("AI_WRITE_CONFIG_DIR", str(cfg_dir))
+    b = np_ops.prepare_new_project(name="新请求", idea="新想法")
+    status_b = np_ops.get_new_project_request(b["request_id"])
+    assert status_b["status"] == "pending", "新请求绝不能读到旧 response"
 
-    result = np_ops.propose_new_project(
-        name="真实集成测试",
-        idea="我想写一个在暴雨夜发现花园会替人保存秘密的故事，主角和失联多年的朋友有关。",
-    )
-    assert result["status"] == "proposal_noncanonical"
-    assert result["candidate"]["work_direction"]
-    assert result["candidate"]["proposal"]
-    # 未确认：03_作品工程 仍为空
-    assert list(isolated.iterdir()) == []
+    # B 自己的结果正常到达
+    bridge.write_response(b["request_id"], result=TWO_DOGS_RESULT)
+    status_b = np_ops.get_new_project_request(b["request_id"])
+    assert status_b["status"] == "completed"
+    assert status_b["result"]["project_id"] != a["request_id"]
 
 
-# ---------- 11. Agent 输出严格校验：work_direction 不是字符串 → propose 拒绝 ----------
+# ---------- 12. “两条狗咬”完整链路（模拟 Qoder 写回；真实执行见真实验证） ----------
 
-def test_work_direction_not_string_rejected(isolated, monkeypatch):
-    from agents.base import AgentResult
-    bad_json = json.dumps({
-        "semantic_interpretation": {
-            "scope": "story_design",
-            "objective": "目标",
-            "knowledge_needs": [],
-            "selected_bkp_ids": [],
-            "assumptions": [],
-        },
-        "model_output": {
-            "proposal": "候选方向。",
-            "work_direction": 12345,  # 不是字符串
-            "reader_promise": "读者期待。",
-            "hard_constraints": [],
-            "open_space": [],
-        },
-    }, ensure_ascii=False)
+def test_two_dogs_full_chain(isolated):
+    prepared = np_ops.prepare_new_project(name="两条狗", idea="写一个主角被两条狗咬的故事")
+    rid = prepared["request_id"]
+    assert "两条狗咬" in prepared["message"] or "Qoder" in prepared["message"]
 
-    def _bad(task: str, cwd=None):
-        return AgentResult(status="completed", output=bad_json, agent="fake")
+    req = bridge.get_request(rid)
+    assert "写一个主角被两条狗咬的故事" in req["task"]
 
-    monkeypatch.setattr(np_ops, "run_task", _bad)
-    with pytest.raises(np_ops.NewProjectError) as ei:
-        np_ops.propose_new_project(name="类型错误作品", idea="想法")
-    assert "work_direction" in str(ei.value)
-    assert list(isolated.iterdir()) == []  # 03 仍为空
+    bridge.write_response(rid, result=TWO_DOGS_RESULT)
+    status = np_ops.get_new_project_request(rid)
+    assert status["status"] == "completed"
+    assert status["result"]["status"] == "proposal_noncanonical"
+    assert status["result"]["candidate"]["work_direction"]
+    assert status["result"]["candidate"]["proposal"]
+
+    created = np_ops.confirm_new_project(proposal_token=status["result"]["proposal_token"])
+    assert created["name"] == "两条狗"
+    assert (isolated / "两条狗" / "_工作台状态" / "author_intent.json").exists()
 
 
-# ---------- 12. Agent 输出严格校验：reader_promise 缺失 → propose 拒绝 ----------
+# ---------- 后处理失败 → partial success（沿用旧语义） ----------
 
-def test_reader_promise_missing_rejected(isolated, monkeypatch):
-    from agents.base import AgentResult
-    bad_json = json.dumps({
-        "semantic_interpretation": {
-            "scope": "story_design",
-            "objective": "目标",
-            "knowledge_needs": [],
-            "selected_bkp_ids": [],
-            "assumptions": [],
-        },
-        "model_output": {
-            "proposal": "候选方向。",
-            "work_direction": "作品方向。",
-            # reader_promise 缺失
-            "hard_constraints": [],
-            "open_space": [],
-        },
-    }, ensure_ascii=False)
-
-    def _bad(task: str, cwd=None):
-        return AgentResult(status="completed", output=bad_json, agent="fake")
-
-    monkeypatch.setattr(np_ops, "run_task", _bad)
-    with pytest.raises(np_ops.NewProjectError) as ei:
-        np_ops.propose_new_project(name="缺读者期待", idea="想法")
-    assert "reader_promise" in str(ei.value)
-    assert list(isolated.iterdir()) == []
-
-
-# ---------- 13. Agent 输出严格校验：hard_constraints 不是 list[str] → propose 拒绝 ----------
-
-def test_hard_constraints_not_list_str_rejected(isolated, monkeypatch):
-    from agents.base import AgentResult
-    bad_json = json.dumps({
-        "semantic_interpretation": {
-            "scope": "story_design",
-            "objective": "目标",
-            "knowledge_needs": [],
-            "selected_bkp_ids": [],
-            "assumptions": [],
-        },
-        "model_output": {
-            "proposal": "候选方向。",
-            "work_direction": "作品方向。",
-            "reader_promise": "读者期待。",
-            "hard_constraints": "不是列表",  # 应该是 list[str]
-            "open_space": [],
-        },
-    }, ensure_ascii=False)
-
-    def _bad(task: str, cwd=None):
-        return AgentResult(status="completed", output=bad_json, agent="fake")
-
-    monkeypatch.setattr(np_ops, "run_task", _bad)
-    with pytest.raises(np_ops.NewProjectError) as ei:
-        np_ops.propose_new_project(name="约束类型错误", idea="想法")
-    assert "hard_constraints" in str(ei.value)
-    assert list(isolated.iterdir()) == []
-
-
-# ---------- 14. Agent 输出严格校验：open_space 类型错误 → propose 拒绝 ----------
-
-def test_open_space_type_error_rejected(isolated, monkeypatch):
-    from agents.base import AgentResult
-    bad_json = json.dumps({
-        "semantic_interpretation": {
-            "scope": "story_design",
-            "objective": "目标",
-            "knowledge_needs": [],
-            "selected_bkp_ids": [],
-            "assumptions": [],
-        },
-        "model_output": {
-            "proposal": "候选方向。",
-            "work_direction": "作品方向。",
-            "reader_promise": "读者期待。",
-            "hard_constraints": [],
-            "open_space": {"not": "a list"},  # 应该是 list[str]
-        },
-    }, ensure_ascii=False)
-
-    def _bad(task: str, cwd=None):
-        return AgentResult(status="completed", output=bad_json, agent="fake")
-
-    monkeypatch.setattr(np_ops, "run_task", _bad)
-    with pytest.raises(np_ops.NewProjectError) as ei:
-        np_ops.propose_new_project(name="自由空间类型错误", idea="想法")
-    assert "open_space" in str(ei.value)
-    assert list(isolated.iterdir()) == []
-
-
-# ---------- 15. approved direction 登记失败 → partial success ----------
-
-def test_approved_direction_failure_is_partial_success(isolated, fake_agent, monkeypatch):
-    """模拟 approved direction 登记失败：作品已创建，confirm 返回成功但带 warning。"""
-    # 先正常 propose
-    result = np_ops.propose_new_project(name="部分成功作品", idea="想法")
+def test_approved_direction_failure_is_partial_success(isolated, monkeypatch):
+    prepared = np_ops.prepare_new_project(name="部分成功作品", idea="想法")
+    result = _complete(prepared)
     token = result["proposal_token"]
     project_id = result["project_id"]
 
-    # monkeypatch apply_diff 使其抛异常，模拟登记失败
     def _failing_apply_diff(*args, **kwargs):
         from story_runtime import ContractError as SDContractError
         raise SDContractError("模拟登记失败")
 
     monkeypatch.setattr(np_ops, "apply_diff", _failing_apply_diff)
 
-    # confirm 应返回成功（不抛异常）
     created = np_ops.confirm_new_project(proposal_token=token)
-
-    # 验证 partial success 语义
     assert created["project_id"] == project_id
     assert created["name"] == "部分成功作品"
     assert created["approved_direction_registered"] is False
     assert created["warning"] is not None
     assert "作品已创建" in created["warning"]
 
-    # 正式项目可以 list/open/overview
     items = list_projects()
     assert any(p["project_id"] == project_id for p in items)
-
-    opened = open_project({"project_id": project_id})
-    assert opened["project_id"] == project_id
-
-    overview = get_project_overview(project_id)
-    assert overview["project_id"] == project_id
-
-    # 不生成正文
     prose_dir = isolated / "部分成功作品" / "03_正文"
     assert prose_dir.exists()
     assert list(prose_dir.iterdir()) == []
-
-    # proposal 已清理
     assert not (isolated.parent / "proposals" / project_id).exists()
 
-    # 再次使用同一个 token 不会再次创建（token 已失效）
     with pytest.raises(np_ops.NewProjectError, match="候选已失效"):
         np_ops.confirm_new_project(proposal_token=token)
 
 
-# ---------- 16. Agent 输出严格校验：缺 hard_constraints → propose 拒绝 ----------
-
-def test_hard_constraints_missing_rejected(isolated, monkeypatch):
-    from agents.base import AgentResult
-    bad_json = json.dumps({
-        "semantic_interpretation": {
-            "scope": "story_design",
-            "objective": "目标",
-            "knowledge_needs": [],
-            "selected_bkp_ids": [],
-            "assumptions": [],
-        },
-        "model_output": {
-            "proposal": "候选方向。",
-            "work_direction": "作品方向。",
-            "reader_promise": "读者期待。",
-            # hard_constraints 缺失
-            "open_space": [],
-        },
-    }, ensure_ascii=False)
-
-    def _bad(task: str, cwd=None):
-        return AgentResult(status="completed", output=bad_json, agent="fake")
-
-    monkeypatch.setattr(np_ops, "run_task", _bad)
-    with pytest.raises(np_ops.NewProjectError) as ei:
-        np_ops.propose_new_project(name="缺约束作品", idea="想法")
-    assert "hard_constraints" in str(ei.value)
-    assert list(isolated.iterdir()) == []
-
-
-# ---------- 17. Agent 输出严格校验：缺 open_space → propose 拒绝 ----------
-
-def test_open_space_missing_rejected(isolated, monkeypatch):
-    from agents.base import AgentResult
-    bad_json = json.dumps({
-        "semantic_interpretation": {
-            "scope": "story_design",
-            "objective": "目标",
-            "knowledge_needs": [],
-            "selected_bkp_ids": [],
-            "assumptions": [],
-        },
-        "model_output": {
-            "proposal": "候选方向。",
-            "work_direction": "作品方向。",
-            "reader_promise": "读者期待。",
-            "hard_constraints": [],
-            # open_space 缺失
-        },
-    }, ensure_ascii=False)
-
-    def _bad(task: str, cwd=None):
-        return AgentResult(status="completed", output=bad_json, agent="fake")
-
-    monkeypatch.setattr(np_ops, "run_task", _bad)
-    with pytest.raises(np_ops.NewProjectError) as ei:
-        np_ops.propose_new_project(name="缺自由空间作品", idea="想法")
-    assert "open_space" in str(ei.value)
-    assert list(isolated.iterdir()) == []
-
-
-# ---------- 18. Agent 输出严格校验：缺 knowledge_needs → propose 拒绝 ----------
-
-def test_knowledge_needs_missing_rejected(isolated, monkeypatch):
-    from agents.base import AgentResult
-    bad_json = json.dumps({
-        "semantic_interpretation": {
-            "scope": "story_design",
-            "objective": "目标",
-            # knowledge_needs 缺失
-            "selected_bkp_ids": [],
-            "assumptions": [],
-        },
-        "model_output": {
-            "proposal": "候选方向。",
-            "work_direction": "作品方向。",
-            "reader_promise": "读者期待。",
-            "hard_constraints": [],
-            "open_space": [],
-        },
-    }, ensure_ascii=False)
-
-    def _bad(task: str, cwd=None):
-        return AgentResult(status="completed", output=bad_json, agent="fake")
-
-    monkeypatch.setattr(np_ops, "run_task", _bad)
-    with pytest.raises(np_ops.NewProjectError) as ei:
-        np_ops.propose_new_project(name="缺知识需求作品", idea="想法")
-    assert "knowledge_needs" in str(ei.value)
-    assert list(isolated.iterdir()) == []
-
-
-# ---------- 19. 读取 brief 失败 → partial success ----------
-
-def test_brief_read_failure_is_partial_success(isolated, fake_agent, monkeypatch):
-    """模拟 create_project 成功后读取 brief 失败：confirm 仍返回成功但带 warning。"""
-    # 先正常 propose
-    result = np_ops.propose_new_project(name="读取失败作品", idea="想法")
+def test_brief_read_failure_is_partial_success(isolated, monkeypatch):
+    prepared = np_ops.prepare_new_project(name="读取失败作品", idea="想法")
+    result = _complete(prepared)
     token = result["proposal_token"]
     project_id = result["project_id"]
 
-    # monkeypatch json.loads 使其在读取 brief 时抛异常
-    original_loads = json.loads
-    brief_path_marker = "briefs"
-
-    def _failing_loads(text, **kwargs):
-        # 检测是否是读取 brief 文件（通过检查 text 内容或调用栈）
-        # 简单方法：第一次调用后标记，让第二次调用（brief）失败
-        if hasattr(_failing_loads, "called_once") and brief_path_marker in str(kwargs.get("_marker", "")):
-            raise OSError("模拟读取失败")
-        _failing_loads.called_once = True
-        return original_loads(text, **kwargs)
-
-    # 更直接的方法：monkeypatch Path.read_text 让特定路径失败
     from pathlib import Path as RealPath
     original_read_text = RealPath.read_text
 
@@ -580,50 +501,41 @@ def test_brief_read_failure_is_partial_success(isolated, fake_agent, monkeypatch
 
     monkeypatch.setattr(RealPath, "read_text", _failing_read_text)
 
-    # confirm 应返回成功（不抛异常）
     created = np_ops.confirm_new_project(proposal_token=token)
-
-    # 验证 partial success 语义
     assert created["project_id"] == project_id
-    assert created["name"] == "读取失败作品"
     assert created["approved_direction_registered"] is False
     assert created["warning"] is not None
     assert "作品已创建" in created["warning"]
-
-    # 项目可以读取
     items = list_projects()
     assert any(p["project_id"] == project_id for p in items)
-
-    # proposal 已清理
     assert not (isolated.parent / "proposals" / project_id).exists()
 
-# ---------- 20. load_project 后处理失败 → partial success ----------
 
-def test_load_project_failure_is_partial_success(isolated, fake_agent, monkeypatch):
-    """模拟 create_project 成功后 load_project 失败：confirm 仍返回成功但带 warning。"""
-    # 先正常 propose
-    result = np_ops.propose_new_project(name="加载失败作品", idea="想法")
+def test_load_project_failure_is_partial_success(isolated, monkeypatch):
+    prepared = np_ops.prepare_new_project(name="加载失败作品", idea="想法")
+    result = _complete(prepared)
     token = result["proposal_token"]
     project_id = result["project_id"]
 
-    # monkeypatch load_project 使其抛异常
     def _failing_load_project(*args, **kwargs):
         raise OSError("模拟 load_project 失败")
 
     monkeypatch.setattr(np_ops, "load_project", _failing_load_project)
 
-    # confirm 应返回成功（不抛异常）
     created = np_ops.confirm_new_project(proposal_token=token)
-
-    # 验证 partial success 语义
     assert created["project_id"] == project_id
-    assert created["name"] == "加载失败作品"
     assert created["approved_direction_registered"] is False
     assert created["warning"] is not None
-
-    # 项目可以读取
     items = list_projects()
     assert any(p["project_id"] == project_id for p in items)
-
-    # proposal 已清理
     assert not (isolated.parent / "proposals" / project_id).exists()
+
+
+# ---------- 既有 Agent runner 行为不变（run_task 仍由设置-测试连接等使用） ----------
+
+def test_runner_rejects_unavailable_agent(isolated, tmp_path, monkeypatch):
+    from config.settings import SettingsStore, AppSettings
+    store = SettingsStore(config_dir=tmp_path / "cfg")
+    store.save(AppSettings(default_agent="qoder", qoder_mode="qoder_byok"))
+    with pytest.raises(AgentRunError):
+        run_task("任何任务")

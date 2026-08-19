@@ -101,6 +101,23 @@ Bridge 链路：React 唯一入口 `ui/src/bridge/client.ts` ↔ `desktop/main.p
 `AppApi`（`backend/bridge/app_api.py`）。本轮唯一方法 `get_app_status()` 返回
 `{ok, data:{app_name, status, message}}`，用于验证桌面壳 ↔ React 链路。
 
+## Qoder 桥（Go Write 管长期记忆，Qoder 只执行当前任务）
+
+架构（已确认，不重新讨论）：Go Write 绝不直接调用模型 API；模型执行由作者在
+Qoder 桌面端输入 `/gowrite` 完成（使用桌面端已配置好的百炼 Token Plan 模型）。
+
+- Go Write 侧：`prepare_new_project` 只生成唯一 `request_id` + 保存完整
+  Agent task + 指定结果写回位置（`06_工作区/应用开发/.qoder_bridge/`，
+  Local Only，可删除）；`get_new_project_request` 轮询写回结果，校验
+  `request_id` 后把模型最终结果交回现有严格 JSON/字段验证与 StoryDesign。
+- Qoder 侧：用户级自定义命令 `~/.qoder/commands/gowrite.md`（官方 Custom
+  Command；模板见 `06_工作区/应用开发/.qoder_bridge/gowrite.md.template`）。
+  Qoder 读 `active.json` → 读请求文件 → 按 `task` 执行 → 只向该请求指定的
+  `response_path` 写回（必须携带相同 `request_id`）→ 给用户一句完成提示。
+- 安全：`request_id` 防串任务；取消/超时/完成后清理桥文件，旧结果不可能被
+  下一次请求接受；桥文件绝不在 03_作品工程 中；Qoder 会话历史不是记忆来源。
+- 本轮只改“新建作品”（我有个想法）；story_planning / story_writing 未接入。
+
 ## 运行规则
 
 - 正式代码禁止依赖 `06_工作区/应用开发/` 中任何临时文件。

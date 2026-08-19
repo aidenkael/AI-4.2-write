@@ -252,6 +252,8 @@ export async function testAgentConnection(payload: {
 }
 
 // ---------------- 新建作品（"我有个想法"纵切） ----------------
+// Go Write 只准备任务（pending request）；模型执行由作者在 Qoder 桌面端
+// 输入 /gowrite 完成；前端轮询写回结果，出现候选后由作者确认。
 
 export interface StoryCandidate {
   work_direction: string
@@ -271,6 +273,20 @@ export interface ProposeResult {
   message: string
 }
 
+export interface PrepareNewProjectResult {
+  request_id: string
+  name: string
+  status: string
+  message: string
+}
+
+export interface NewProjectRequestStatus {
+  request_id: string
+  status: 'pending' | 'completed' | 'failed' | 'expired' | 'canceled'
+  result?: ProposeResult | null
+  error?: string | null
+}
+
 export interface ConfirmResult {
   project_id: string
   name: string
@@ -281,9 +297,19 @@ export interface ConfirmResult {
   message: string
 }
 
-/** 我有个想法 → 当前 Agent 设置 → StoryDesign 候选（不写正式作品）。 */
-export async function proposeNewProject(payload: { name: string; idea: string }): Promise<ProposeResult> {
-  return call<ProposeResult>('propose_new_project', payload)
+/** 我有个想法 → Go Write 准备本轮 Agent 任务（不运行模型），返回 request_id。 */
+export async function prepareNewProject(payload: { name: string; idea: string }): Promise<PrepareNewProjectResult> {
+  return call<PrepareNewProjectResult>('prepare_new_project', payload)
+}
+
+/** 轮询 Qoder 写回结果：pending 继续等；completed 时 result 含候选。 */
+export async function getNewProjectRequest(requestId: string): Promise<NewProjectRequestStatus> {
+  return call<NewProjectRequestStatus>('get_new_project_request', { request_id: requestId })
+}
+
+/** 取消等待：旧结果不可能再被接受。 */
+export async function cancelNewProjectRequest(requestId: string): Promise<{ request_id: string; status: string }> {
+  return call<{ request_id: string; status: string }>('cancel_new_project_request', { request_id: requestId })
 }
 
 /** 作者明确确认 → 用后台保存的候选创建正式作品。 */

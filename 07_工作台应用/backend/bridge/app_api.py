@@ -20,6 +20,7 @@ from operations.settings import SettingsOpError
 from operations import settings as settings_ops
 from operations.new_project import NewProjectError
 from operations import new_project as new_project_ops
+from operations import qoder_bridge as bridge_ops
 from operations.story_planning import StoryPlanningError
 from operations import story_planning as story_planning_ops
 from operations.story_writing import StoryWritingError
@@ -136,15 +137,45 @@ class AppApi:
             return _err(CODE_BRIDGE_INTERNAL, str(exc))
 
     # ---------------- 新建作品（"我有个想法"纵切） ----------------
-    # 确认前只写临时 pre-project 工作区；只有作者明确确认（带后台 proposal token）
-    # 才调用真实 ProjectWorkspace.create_project。
+    # 确认前只写临时 pre-project 工作区 + 桥文件（06_工作区/应用开发/.qoder_bridge）；
+    # 模型执行由作者在 Qoder 桌面端输入 /gowrite 完成（Go Write 不直接调模型）。
+    # 只有作者明确确认（带后台 proposal token）才调用真实 ProjectWorkspace.create_project。
 
-    def propose_new_project(self, payload: dict) -> dict:
-        """我有个想法 → 当前 Agent 设置 → StoryDesign 候选（proposal_noncanonical）。"""
+    def prepare_new_project(self, payload: dict) -> dict:
+        """我有个想法 → 准备本轮 Agent 任务（pending request），不运行模型。
+
+        准备完成后非侵入尽力把 Qoder 桌面端切到前台（只做窗口切换，绝不
+        模拟键盘/回车/提交；失败静默，作者 Alt+Tab 即可）。
+        """
         try:
-            data = new_project_ops.propose_new_project(
+            data = new_project_ops.prepare_new_project(
                 name=str(payload.get("name") or ""),
                 idea=str(payload.get("idea") or ""),
+            )
+            bridge_ops.focus_qoder_window()
+            return _ok(data)
+        except NewProjectError as exc:
+            return _err(CODE_NEW_PROJECT_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def get_new_project_request(self, payload: dict) -> dict:
+        """轮询 Qoder 写回结果：pending / completed / failed / expired / canceled。"""
+        try:
+            data = new_project_ops.get_new_project_request(
+                request_id=str(payload.get("request_id") or ""),
+            )
+            return _ok(data)
+        except NewProjectError as exc:
+            return _err(CODE_NEW_PROJECT_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def cancel_new_project_request(self, payload: dict) -> dict:
+        """取消等待：旧结果不可能再被接受；下一次请求用全新 request_id。"""
+        try:
+            data = new_project_ops.cancel_new_project_request(
+                request_id=str(payload.get("request_id") or ""),
             )
             return _ok(data)
         except NewProjectError as exc:

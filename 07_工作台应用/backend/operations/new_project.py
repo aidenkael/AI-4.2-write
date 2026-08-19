@@ -1,17 +1,27 @@
 # -*- coding: utf-8 -*-
 """新建作品 Author Operations：第一条真实作者使用链（“我有个想法”）。
 
+架构（已确认）：Go Write 管长期记忆；Qoder 桌面端只作为当前任务的交互式
+Agent 执行器。Go Write 绝不直接调用模型 API，也不使用 qodercli -p 作为
+Token Plan 作者路径。
+
 链路：
-  作者想法 → 读取工作台当前 Agent/模型设置 → Agent 语义与创意工作
-  → 现有 StoryDesign 形成 proposal_noncanonical 候选（临时 pre-project 工作区）
-  → UI 展示 → 作者明确确认 → ProjectWorkspace.create_project 创建正式作品
+  作者想法 → Go Write 准备本轮 Agent 任务（唯一 request_id + 完整 task +
+  结果写回位置）→ 页面提示“请到 Qoder 输入 /gowrite 并回车” →
+  作者在 Qoder 桌面端执行 /gowrite（用桌面端已配置好的百炼 Token Plan 模型）
+  → Qoder 写回 response 文件 → Go Write 检测到结果 → 校验 request_id →
+  现有严格 JSON/字段验证 → 现有 StoryDesign 生成 proposal_noncanonical 候选
+  （临时 pre-project 工作区）→ UI 展示 → 作者明确确认 →
+  ProjectWorkspace.create_project 创建正式作品
 
 约束（遵守现有冻结合同）：
 - 不修改 StoryDesign / ProjectWorkspace；不创建空壳项目。
 - 确认前绝不写 03_作品工程；候选全部落在可删除的临时工作区。
 - 确认必须带后台生成的 proposal token；禁止信任前端自行构造隐藏内容。
-- Token 禁止进入 Prompt / UI / 日志 / Bridge 返回值（在 agent_runner 处理）。
+- Token 禁止进入 Prompt / UI / 日志 / Bridge 返回值。
 - 新增作品只写 Author Intent + 空 Story State + 空索引；不生成正文。
+- 桥文件全部在 06_工作区/应用开发/.qoder_bridge（Local Only，可删除）；
+  绝不用正式作品作为 Agent 桥。
 """
 from __future__ import annotations
 
@@ -22,7 +32,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Optional
 
-from operations.agent_runner import AgentRunError, run_task
+from operations import qoder_bridge as bridge
 
 # ---------------------------------------------------------------------------
 # Frozen runtime imports — NEVER copy their rules; always call them directly.
@@ -61,6 +71,7 @@ _PROPOSALS_ROOT = (
 
 # Agent 任务模板：只要求结构化结果，明确不读文件不写文件
 # 注意：作者想法放在最后，避免模型先回应角色设定而忽略 JSON 输出要求
+# 该模板是唯一业务 Prompt 来源；/gowrite 不复制规则，只执行这里保存的 task。
 _AGENT_TASK_TEMPLATE = """只做语义与创意分析，不读取或修改任何文件。
 
 请针对以下作者想法，直接输出一个合法的 JSON 对象（不要任何额外文字、不要 markdown 代码块标记）。
@@ -161,7 +172,7 @@ def _load_proposal_meta(project_id: str) -> dict[str, Any]:
 
 
 def _cleanup_proposal(project_id: str) -> None:
-    """确认成功后删除临时候选工作区（可删除原则）。"""
+    """删除临时候选工作区（可删除原则）。"""
     shutil.rmtree(_proposal_dir(project_id), ignore_errors=True)
 
 
@@ -326,13 +337,15 @@ def _parse_agent_result(output: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# 提出候选（不写 03_作品工程）
+# 准备本轮 Agent 任务（不运行模型；Qoder 桌面端执行 /gowrite）
 # ---------------------------------------------------------------------------
 
-def propose_new_project(name: str, idea: str) -> dict[str, Any]:
-    """“我有个想法”：临时工作区 + Agent + 现有 StoryDesign → proposal_noncanonical 候选。
+def prepare_new_project(name: str, idea: str) -> dict[str, Any]:
+    """“我有个想法”：Go Write 准备本轮 Agent 任务（pending request）。
 
-    返回给 UI 的最小展示形状（不含内部 JSON；Token 绝不出现）。
+    只做：校验输入 → 临时 pre-project 工作区 → 唯一 request_id → 保存完整
+    task → 指定结果写回位置 → 尽力把 Qoder 切到前台（失败静默）。
+    不调用任何模型 API；模型执行由作者在 Qoder 桌面端输入 /gowrite 完成。
     """
     name = (name or "").strip()
     idea = (idea or "").strip()
@@ -353,23 +366,66 @@ def propose_new_project(name: str, idea: str) -> dict[str, Any]:
     _write_temp_pre_project(proposal_dir, project_id, name, idea)
 
     task = _AGENT_TASK_TEMPLATE.format(name=name, idea=idea)
-    try:
-        result = run_task(task, cwd=str(proposal_dir))
-    except AgentRunError as exc:
-        _cleanup_proposal(project_id)
-        raise NewProjectError(str(exc)) from exc
+    request_id = bridge.create_request(
+        task=task,
+        kind="story_design_propose",
+        meta={"name": name, "idea": idea, "project_id": project_id},
+    )
+    return {
+        "request_id": request_id,
+        "name": name,
+        "status": "task_prepared",
+        "message": "任务已准备好，请到 Qoder 输入 /gowrite 并回车。",
+    }
 
-    if result.status != "completed":
-        _cleanup_proposal(project_id)
-        raise NewProjectError(
-            result.error or f"Agent 未能完成任务（{result.status}）。"
-        )
 
-    parsed = _parse_agent_result(result.output)
+# ---------------------------------------------------------------------------
+# 等待/检测 Qoder 写回结果（request_id 校验 → 严格解析 → StoryDesign 候选）
+# ---------------------------------------------------------------------------
+
+def _response_output_text(response: dict[str, Any]) -> str:
+    """从 response 提取模型最终结果文本。
+
+    result（结构化对象）优先，output（模型原始文本）兜底；都没有则报错。
+    提取后统一走现有 _parse_agent_result 严格校验，不新增第二条宽松通道。
+    """
+    result = response.get("result")
+    if isinstance(result, dict) and result:
+        return json.dumps(result, ensure_ascii=False)
+    output = response.get("output")
+    if isinstance(output, str) and output.strip():
+        return output
+    raise NewProjectError("Qoder 返回结果缺少模型输出。")
+
+
+def _finalize_request(request: dict[str, Any], response: dict[str, Any]) -> dict[str, Any]:
+    """response → request_id 校验 → 现有严格业务解析 → StoryDesign 候选。
+
+    只返回展示形状（同旧 propose 返回），不写 03_作品工程；proposal token
+    来自临时工作区 proposal_meta.json，绝不进入 Prompt / UI 之外的通道。
+    """
+    # 1. request_id 防串任务：不一致直接丢弃，绝不让旧结果串到新请求
+    if response.get("request_id") != request["request_id"]:
+        raise NewProjectError("返回结果与任务不匹配（request_id 不一致），已丢弃。")
+
+    # 2. 状态校验
+    resp_status = response.get("status")
+    if resp_status not in (None, "completed"):
+        err = response.get("error") or f"Qoder 返回状态异常：{resp_status}"
+        raise NewProjectError(err)
+
+    # 3. 提取模型最终结果 → 现有严格 JSON/字段验证
+    raw = _response_output_text(response)
+    parsed = _parse_agent_result(raw)
+
+    # 4. 现有 StoryDesign 生成候选（临时 pre-project 工作区）
+    meta = request.get("meta") or {}
+    project_id = str(meta.get("project_id") or "")
+    proposal_dir = _proposal_dir(project_id)
     try:
         sd_result = run_story_design(
             project_dir=proposal_dir,
-            author_input=idea,
+            author_input=meta.get("idea") or "",
             brief_id=_BRIEF_ID,
             context_id=_CONTEXT_ID,
             candidate_id=_CANDIDATE_ID,
@@ -377,20 +433,18 @@ def propose_new_project(name: str, idea: str) -> dict[str, Any]:
             model_output=parsed["model_output"],
         )
     except SDContractError as exc:
-        _cleanup_proposal(project_id)
         raise NewProjectError(f"StoryDesign 拒绝生成候选：{exc}") from exc
 
     candidate = sd_result["candidate"]
     if candidate.get("status") != "proposal_noncanonical":
-        _cleanup_proposal(project_id)
         raise NewProjectError("候选状态异常（非 proposal_noncanonical），已中止。")
 
-    meta = _load_proposal_meta(project_id)
+    proposal_meta = _load_proposal_meta(project_id)
     content = candidate.get("content") or {}
     return {
-        "proposal_token": meta["proposal_token"],
+        "proposal_token": proposal_meta["proposal_token"],
         "project_id": project_id,
-        "name": name,
+        "name": meta.get("name") or "",
         "status": "proposal_noncanonical",
         "candidate": {
             "work_direction": content.get("work_direction") or "",
@@ -402,6 +456,84 @@ def propose_new_project(name: str, idea: str) -> dict[str, Any]:
         },
         "message": "候选已生成（未写入正式作品，等待你的确认）",
     }
+
+
+def get_new_project_request(request_id: str) -> dict[str, Any]:
+    """轮询 Qoder 写回结果（UI 每 2-3 秒调用一次）。
+
+    返回 status：pending（继续等）/ completed（含候选）/ failed / expired /
+    canceled。终态（completed/failed/expired/canceled）都会清理桥文件，
+    保证旧结果不可能被下一次请求接受。
+    """
+    request_id = (request_id or "").strip()
+    if not request_id:
+        raise NewProjectError("缺少任务标识（request_id）。")
+
+    request = bridge.get_request(request_id)
+    if request is None:
+        return {"request_id": request_id, "status": "failed", "error": "任务已失效，请重新发起。"}
+
+    state = request.get("state")
+    project_id = str((request.get("meta") or {}).get("project_id") or "")
+
+    if state == "canceled":
+        bridge.cleanup_request(request_id)
+        return {"request_id": request_id, "status": "canceled"}
+    if state == "completed":
+        bridge.cleanup_request(request_id)
+        return {"request_id": request_id, "status": "completed", "error": None}
+    if state == "failed":
+        bridge.cleanup_request(request_id)
+        return {
+            "request_id": request_id,
+            "status": "failed",
+            "error": request.get("error") or "任务失败，请重新发起。",
+        }
+
+    # pending：先查超时（有超时要求），再查 response
+    if bridge.is_expired(request):
+        if project_id:
+            _cleanup_proposal(project_id)
+        bridge.cleanup_request(request_id)
+        return {"request_id": request_id, "status": "expired", "error": "任务已超时，请重新发起。"}
+
+    response = bridge.read_response(request_id)
+    if response is None:
+        return {"request_id": request_id, "status": "pending"}
+
+    try:
+        result = _finalize_request(request, response)
+    except NewProjectError as exc:
+        if project_id:
+            _cleanup_proposal(project_id)
+        bridge.cleanup_request(request_id)
+        return {"request_id": request_id, "status": "failed", "error": str(exc)}
+
+    # 成功：清理桥文件（保留临时候选工作区，供确认时使用）
+    bridge.cleanup_request(request_id)
+    return {"request_id": request_id, "status": "completed", "result": result}
+
+
+def cancel_new_project_request(request_id: str) -> dict[str, Any]:
+    """取消等待：标记 canceled、删除可能已存在的 response 与临时候选。
+
+    取消后旧结果不可能被接受（state=canceled 优先于任何迟到的 response）；
+    下一次请求使用全新 request_id，天然隔离。request 文件保留 canceled 状态，
+    由下一次轮询返回 canceled 并清理。
+    """
+    request_id = (request_id or "").strip()
+    if not request_id:
+        raise NewProjectError("缺少任务标识（request_id）。")
+
+    request = bridge.get_request(request_id)
+    if request is not None:
+        bridge.mark_canceled(request_id)
+        project_id = str((request.get("meta") or {}).get("project_id") or "")
+        if project_id:
+            _cleanup_proposal(project_id)
+        # active 不再指向已取消请求，Qoder /gowrite 不会执行已取消的任务
+        bridge.clear_active_if(request_id)
+    return {"request_id": request_id, "status": "canceled"}
 
 
 # ---------------------------------------------------------------------------
