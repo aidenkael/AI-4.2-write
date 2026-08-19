@@ -258,15 +258,6 @@ def _extract_json_from_output(text: str) -> str:
         except (json.JSONDecodeError, ValueError):
             pass
 
-    # 5. LLM 常见错误修复：字符串值内未转义英文双引号（如 他说"你好"）
-    repaired = bridge.repair_llm_json(stripped)
-    if repaired is not None:
-        try:
-            json.loads(repaired)
-            return repaired
-        except (json.JSONDecodeError, ValueError):
-            pass
-
     # 全部失败：返回去掉围栏后的最佳尝试（供错误诊断）
     if stripped.startswith("```"):
         inner_lines = lines[1:]

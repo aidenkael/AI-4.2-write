@@ -314,8 +314,11 @@ def test_output_string_form_accepted(isolated):
     assert status["result"]["candidate"]["work_direction"] == "都市奇幻长篇的开端设计。"
 
 
-def test_response_with_unescaped_quotes_repaired(isolated):
-    """真实 Qoder 写回常见错误：中文内容里的英文双引号未转义 → 修复后完成。"""
+def test_response_with_unescaped_quotes_rejected(isolated):
+    """未转义英文双引号导致的非法 JSON：严格拒绝，Go Write 不再猜测修复。
+
+    产生合法 JSON 是 Qoder 的职责（/gowrite 必须用标准 JSON parser 自验证）。
+    """
     prepared = np_ops.prepare_new_project(name="引号作品", idea="想法")
     rid = prepared["request_id"]
     # 模拟 Qoder 原样写入：字符串值内含未转义的 "（真实复现自两条狗案例）
@@ -347,10 +350,26 @@ def test_response_with_unescaped_quotes_repaired(isolated):
     path.write_text(raw, encoding="utf-8")
 
     status = np_ops.get_new_project_request(rid)
-    assert status["status"] == "completed", status.get("error")
-    assert status["result"]["status"] == "proposal_noncanonical"
-    assert "两条狗" in status["result"]["candidate"]["work_direction"]
-    assert "两条狗" in status["result"]["candidate"]["proposal"]
+    assert status["status"] == "failed", "非法 response 必须严格拒绝，不得自动修复"
+    assert "JSON" in status["error"]
+    assert "result" not in status or status["result"] is None
+    # 临时工作区与桥文件都已清理
+    assert list(isolated.iterdir()) == []
+    assert bridge.get_request(rid) is None
+
+
+def test_response_with_fullwidth_quotes_accepted(isolated):
+    """中文引号 “ ” / 「 」 是合法 JSON 内容，走完整链路直接接受。"""
+    prepared = np_ops.prepare_new_project(name="全角引号作品", idea="想法")
+    rid = prepared["request_id"]
+    result = json.loads(json.dumps(VALID_AGENT_RESULT, ensure_ascii=False))
+    result["model_output"]["work_direction"] = "围绕「主角与秘密」展开，读者期待“真实”。"
+    result["model_output"]["proposal"] = "候选：主角说“我藏了一个秘密”，然后消失。"
+    bridge.write_response(rid, result=result)
+    status = np_ops.get_new_project_request(rid)
+    assert status["status"] == "completed"
+    assert "「主角与秘密」" in status["result"]["candidate"]["work_direction"]
+    assert "“我藏了一个秘密”" in status["result"]["candidate"]["proposal"]
 
 
 # ---------- 8/9. 明确确认 → 真实 create_project；现有链可读；不生成正文 ----------

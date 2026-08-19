@@ -169,82 +169,28 @@ def is_expired(request: dict[str, Any]) -> bool:
 # 结果读取（Go Write 侧）
 # ---------------------------------------------------------------------------
 
-def repair_llm_json(text: str) -> Optional[str]:
-    """对 LLM 常见的“字符串值内未转义英文双引号”做最小修复。
-
-    仅当 json.loads 失败时调用；修复后仍须能通过 json.loads，否则返回 None。
-    规则：处于字符串内时遇到未转义的 '"'，若其后（跳过空白）不是结构符
-    （, ] } : 或已到文件尾），视为内容引号并转义为 \\"。
-    例：{"a": "他说"你好""} → {"a": "他说\"你好\""}
-    只修复这一种常见错误；修复失败返回 None，由调用方转成普通可读错误。
-    """
-    out: list[str] = []
-    in_string = False
-    i = 0
-    n = len(text)
-    while i < n:
-        ch = text[i]
-        if ch == "\\" and i + 1 < n:
-            # 已转义序列原样保留
-            out.append(ch)
-            out.append(text[i + 1])
-            i += 2
-            continue
-        if ch == '"':
-            if not in_string:
-                in_string = True
-                out.append(ch)
-            else:
-                j = i + 1
-                while j < n and text[j] in " \t\r\n":
-                    j += 1
-                if j < n and text[j] not in ",]}:":
-                    # 内容引号：转义而不是结束字符串
-                    out.append("\\")
-                    out.append(ch)
-                else:
-                    in_string = False
-                    out.append(ch)
-            i += 1
-            continue
-        out.append(ch)
-        i += 1
-    return "".join(out)
-
-
 def read_response(request_id: str) -> Optional[dict[str, Any]]:
     """读取 response 文件；不存在返回 None。
 
-    文件存在但不是合法 JSON 时，先做 LLM 常见引号错误的最小修复
-    （repair_llm_json），修复后仍失败才返回携带相同 request_id 的失败信封
-    （由调用方转成普通可读错误；request_id 仍是原值，便于防串校验）。
+    严格验收：文件必须是合法 JSON，否则直接返回携带相同 request_id 的失败
+    信封（由调用方转成普通可读错误；request_id 仍是原值，便于防串校验）。
+    Go Write 绝不根据字符位置猜测或修改 Qoder 写回的原始 JSON —— 产生合法
+    JSON 是 Qoder 的职责（/gowrite 必须用标准 JSON parser 自验证）。
     """
     path = response_path(request_id)
     if not path.exists():
         return None
     try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return None
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        data = None
-        repaired = repair_llm_json(text)
-        if repaired is not None:
-            try:
-                data = json.loads(repaired)
-            except json.JSONDecodeError:
-                data = None
-        if data is None:
-            return {
-                "schema": RESPONSE_SCHEMA,
-                "request_id": request_id,
-                "status": "failed",
-                "result": None,
-                "output": None,
-                "error": "结果文件不是合法 JSON，Go Write 已丢弃。",
-            }
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {
+            "schema": RESPONSE_SCHEMA,
+            "request_id": request_id,
+            "status": "failed",
+            "result": None,
+            "output": None,
+            "error": "结果文件不是合法 JSON，Go Write 已丢弃。",
+        }
     return data
 
 
