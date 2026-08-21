@@ -1,9 +1,17 @@
 # 07_工作台应用
 
-AI-write 正式作者侧桌面应用（UI 1.0，`UI_1_0_BASELINE = APPROVED`）。
+AI-write 正式作者侧桌面应用（UI 1.0，`UI_1_0_BASELINE = APPROVED`）。当前阶段：`REAL_WRITING_USAGE`。
 
-> 当前状态：第一轮最小工程骨架（pywebview 桌面壳 ↔ React ↔ Bridge 验证）。
-> 未接入任何 Skill / 项目数据；operations / agents / tasks / views / config 等后续阶段按需创建。
+## 当前状态（2026-08-22）
+
+- UI 1.0 骨架已建立；`backend/bridge`、`backend/operations`、`backend/agents`、
+  `backend/views`、`backend/config` 与 `ui/src/pages` 已存在并承担真实职责。
+- 新建作品真实纵切 PASS：作者输入 → Go Write 准备任务 → Qoder `/gowrite` →
+  返回候选 → 作者确认。
+- StoryPlan 已接入统一 `/gowrite` 桥模式；仍待真实作者纵切验证。
+- StoryWrite 当前暂不可用：旧后台 AI 路径已禁止，下一阶段再接入统一 Qoder 路径。
+- 作者 AI 执行入口是 Qoder Desktop `/gowrite`；Go Write 不直接调用模型 API；
+  DeepSeek Harness / Qoder CLI 不作为普通作者流程中的隐藏执行器。
 
 ## 逻辑结构
 
@@ -15,7 +23,6 @@ AI-write 正式作者侧桌面应用（UI 1.0，`UI_1_0_BASELINE = APPROVED`）�
    ├─ bridge/
    ├─ operations/
    ├─ agents/
-   ├─ tasks/
    ├─ views/
    └─ config/
 ```
@@ -59,7 +66,7 @@ Electron、Tauri/Rust、FastAPI、WebSocket、Redis、Celery、Neo4j、自研 UI
 
 统一表述：当前无真实需求证据，1.0 不建设；未来由真实 consumer blocker 决定。
 
-## 运行（第一轮骨架）
+## 运行
 
 前置：Python 3；Windows WebView2 Runtime（已安装）；Node.js + npm。
 
@@ -98,25 +105,26 @@ E:\AI-Write\.venv\Scripts\python.exe desktop/main.py --dev
 ```
 
 Bridge 链路：React 唯一入口 `ui/src/bridge/client.ts` ↔ `desktop/main.py` 注册的
-`AppApi`（`backend/bridge/app_api.py`）。本轮唯一方法 `get_app_status()` 返回
-`{ok, data:{app_name, status, message}}`，用于验证桌面壳 ↔ React 链路。
+`AppApi`（`backend/bridge/app_api.py`）。统一返回合同 `{ok, data, error}`；
+当前已暴露真实作品浏览、设置、新建作品、故事规划、正文写作（暂不可用）等方法。
 
 ## Qoder 桥（Go Write 管长期记忆，Qoder 只执行当前任务）
 
 架构（已确认，不重新讨论）：Go Write 绝不直接调用模型 API；模型执行由作者在
 Qoder 桌面端输入 `/gowrite` 完成（使用桌面端已配置好的百炼 Token Plan 模型）。
 
-- Go Write 侧：`prepare_new_project` 只生成唯一 `request_id` + 保存完整
-  Agent task + 指定结果写回位置（`06_工作区/应用开发/.qoder_bridge/`，
-  Local Only，可删除）；`get_new_project_request` 轮询写回结果，校验
-  `request_id` 后把模型最终结果交回现有严格 JSON/字段验证与 StoryDesign。
+- Go Write 侧：`prepare_new_project` / `prepare_story_plan` 只生成唯一 `request_id`
+  + 保存完整 Agent task + 指定结果写回位置（`06_工作区/应用开发/.qoder_bridge/`，
+  Local Only，可删除）；对应的 `get_*_request` 轮询写回结果，校验 `request_id`
+  后把模型最终结果交回现有严格 JSON/字段验证与 StoryDesign / StoryPlan。
 - Qoder 侧：用户级自定义命令 `~/.qoder/commands/gowrite.md`（官方 Custom
   Command；模板见 `06_工作区/应用开发/.qoder_bridge/gowrite.md.template`）。
   Qoder 读 `active.json` → 读请求文件 → 按 `task` 执行 → 只向该请求指定的
   `response_path` 写回（必须携带相同 `request_id`）→ 给用户一句完成提示。
 - 安全：`request_id` 防串任务；取消/超时/完成后清理桥文件，旧结果不可能被
   下一次请求接受；桥文件绝不在 03_作品工程 中；Qoder 会话历史不是记忆来源。
-- 本轮只改“新建作品”（我有个想法）；story_planning / story_writing 未接入。
+- 已接入桥模式的作者链：新建作品（我有个想法）与故事规划（一起往前想）；
+  正文写作暂不可用（旧后台 AI 路径已禁止），待接入统一 Qoder 路径。
 
 ## 运行规则
 
