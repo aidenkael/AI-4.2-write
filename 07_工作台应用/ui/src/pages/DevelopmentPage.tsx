@@ -1,0 +1,13 @@
+import { Check, Clock3, PenLine, Send, Sparkles, ThumbsUp, WandSparkles } from 'lucide-react'
+import { useState } from 'react'
+import { StatusBadge } from '../components/StatusBadge'
+import { useApp, useIllustration } from '../features/app/AppStore'
+
+export function DevelopmentPage() {
+  const { state, actions }=useApp(); const city=useIllustration('city'); const [input,setInput]=useState('主角是否应该向盟友揭露自己掌握的真相，还是继续隐瞒？')
+  return <div className="development-page"><section className="decision panel" style={{backgroundImage:`linear-gradient(90deg,#fff 45%,rgba(255,255,255,.68)),url(${city})`}}><h2><Sparkles/>现在最值得决定什么</h2><p>每一个选择，都会让故事走向不同的可能。</p><label>当前故事问题：<input value={input} onChange={(e)=>setInput(e.target.value)}/></label>
+    {state.developmentStatus==='running'?<div className="running"><span/><strong>AI 正在展开几种可能…</strong></div>:state.candidates.length?<div className="candidates">{state.candidates.map((c,i)=><article key={c.id} className={c.status==='accepted'?'accepted':''}><header><b>{String.fromCharCode(65+i)}</b><h3>{c.title}</h3><StatusBadge status={c.status}/></header><p>{c.body}</p><small>{c.tone}</small><button onClick={()=>actions.acceptCandidate(c.id)} disabled={state.developmentStatus==='accepted'}>{c.status==='accepted'?<><Check/>已采用</>:<>选择此方向</>}</button></article>)}</div>:null}
+    <div className="decision-actions"><button className="primary" onClick={()=>actions.brainstorm(input)} disabled={state.developmentStatus==='running'}><ThumbsUp/>{state.developmentStatus==='running'?'思考中…':'你推荐'}</button><button onClick={()=>actions.brainstorm(`${input}，再提供三个完全不同的方向`)}><WandSparkles/>再想几个</button><button><PenLine/>我自己说</button><button onClick={actions.dismissCandidates}><Clock3/>暂时不决定</button></div></section>
+    <div className="development-summary"><section className="panel confirmed"><h3>● 已经确定 <span>4条</span></h3>{['林砚的真实身份是“港城图书馆的继承人”。','组织“夜幕”的目标是寻找某件古老文献。','林砚与艾琳之间存在旧识，彼此都有所隐瞒。','港城旧城区将成为后续故事的重要场景。'].map(x=><p key={x}>• {x}</p>)}</section><section className="panel future"><h3>✦ 未来可能 <span>3条</span></h3>{['夜幕内部出现分裂，盟友可能反目。','林砚可能发现自己并非唯一的继承者。','港城中隐藏着更高层级的势力介入。'].map(x=><p key={x}>{x}</p>)}</section><section className="panel unresolved"><h3>？ 还没解决 <span>3条</span></h3>{['真相的完整内容是什么？','林砚的父亲当年到底经历了什么？','港城的迷雾现象与真相有何关联？'].map(x=><p key={x}>? {x}</p>)}</section></div>
+    <form className="chatbar" onSubmit={(e)=>{e.preventDefault();actions.brainstorm(input)}}><Sparkles/><input value={input} onChange={(e)=>setInput(e.target.value)} placeholder="和 AI 说说你的想法，或输入新的故事问题…"/><button><Send/>发送</button></form></div>
+}

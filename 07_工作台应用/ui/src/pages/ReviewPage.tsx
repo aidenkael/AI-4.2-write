@@ -1,0 +1,8 @@
+import { CheckCircle2, ChevronDown, Clock3, Search, ShieldCheck, Sparkles, TriangleAlert } from 'lucide-react'
+import { useApp, useIllustration } from '../features/app/AppStore'
+
+const groups=[['priority','优先处理','这些问题可能影响阅读体验，建议优先关注。',TriangleAlert],['watch','值得看看','这些内容建议优化，可进一步强化作品的一致性。',Sparkles],['clear','没有问题的部分','目前检查未发现明显问题，可放心继续创作。',CheckCircle2]] as const
+export function ReviewPage() {
+  const {state,actions}=useApp(); const priority=state.reviews.filter(x=>x.category==='priority').length
+  return <div className="review-page"><section className="review-hero" style={{backgroundImage:`linear-gradient(90deg,rgba(234,244,255,.95),rgba(255,255,255,.32)),url(${useIllustration('desk')})`}}><ShieldCheck/><div><h1>全书检查</h1><p>手动检查长篇作品的常见问题，帮助你发现潜在的连续性、设定与逻辑问题。</p><button className="primary"><Search/>开始检查</button><button><Clock3/>查看历史记录</button></div></section><div className="review-columns">{groups.map(([key,title,desc,Icon])=><section className={`panel review-group ${key}`} key={key}><header><Icon/><div><h2>{title} <span>{key==='priority'?priority:3}</span></h2><p>{desc}</p></div></header>{state.reviews.filter(x=>x.category===key).map(r=><article key={r.id}><button className="issue-title" onClick={()=>actions.toggleReview(r.id)}><span>{r.title}</span>{r.count&&<em>● {r.count}处</em>}<ChevronDown className={r.open?'open':''}/></button><p>{r.detail}</p>{r.open&&key!=='clear'&&<div><button>查看{key==='priority'?'相关章节':'详情'}</button><button>问 AI</button><button onClick={()=>actions.resolveReview(r.id)}>标记已处理</button></div>}</article>)}</section>)}</div><footer className="review-note">检查基于当前内容进行分析，结果仅供参考，请结合创作意图判断。　　上次检查：2024-05-21 14:32</footer></div>
+}

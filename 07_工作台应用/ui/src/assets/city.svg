@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 430">
+ <defs><linearGradient id="sky" x2="0" y2="1"><stop stop-color="#edf5ff"/><stop offset="1" stop-color="#d8e7fa"/></linearGradient><linearGradient id="water"><stop stop-color="#d9e9fa"/><stop offset="1" stop-color="#f8fbff"/></linearGradient><filter id="blur"><feGaussianBlur stdDeviation="10"/></filter></defs>
+ <rect width="1200" height="430" fill="url(#sky)"/><circle cx="450" cy="115" r="85" fill="#fff" opacity=".55" filter="url(#blur)"/>
+ <path d="M0 250Q180 205 320 246T650 228T920 240T1200 200V430H0Z" fill="url(#water)"/>
+ <g fill="#b5cae5" opacity=".7"><path d="M470 245 520 172 565 235 620 132 676 230 745 93 805 236Z"/><path d="M640 240 690 167 735 220 790 104 845 223 910 64 985 232Z"/></g>
+ <g fill="#91abd0"><path d="M610 256V167h50v89m-35-89v-46l11-22 11 22v46m35 89v-115h54v115m12 0v-148h66v148m17 0V86h84v170m22 0V135h69v121m20 0V102h82v154"/><path d="M570 256h630v38H570z"/></g>
+ <g fill="#f7dfa6" opacity=".85"><path d="M630 194h8v13h-8zm24 0h8v13h-8zm62-21h9v14h-9zm28 0h9v14h-9zm35-37h10v15h-10zm36 0h10v15h-10zm60-19h10v16h-10zm36 0h10v16h-10zm57 47h10v15h-10zm35 0h10v15h-10zm47-29h10v15h-10z"/></g>
+ <path d="M0 330Q220 306 440 335T850 329T1200 314" fill="none" stroke="#fff" stroke-width="5" opacity=".7"/>
+ <g transform="translate(990 230)" fill="#263a57"><circle cx="20" cy="17" r="9"/><path d="M10 30h24l16 91H-5Z"/><path d="M25 46 69 72 64 80 22 61Z"/></g>
+ <g stroke="#344b67" stroke-width="5"><path d="M1010 348v-72m-78 72h170M947 296h142"/><path d="M952 296v52m30-52v52m30-52v52m30-52v52m30-52v52"/></g>
+ <g fill="#8ba6c9" opacity=".55"><path d="M35 360c150-85 258-44 386 0Z"/><path d="M120 330c105-75 195-35 284 0Z"/></g>
+</svg>
