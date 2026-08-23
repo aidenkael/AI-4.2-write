@@ -1,10 +1,10 @@
 import { Check, Clock3, PenLine, Send, Sparkles, ThumbsUp, WandSparkles } from 'lucide-react'
 import { useState } from 'react'
 import { StatusBadge } from '../components/StatusBadge'
-import { useApp, useIllustration } from '../features/app/AppStore'
+import { useActiveProject, useApp, useIllustration } from '../features/app/AppStore'
 
 export function DevelopmentPage() {
-  const { state, actions }=useApp(); const city=useIllustration('city'); const [input,setInput]=useState('主角是否应该向盟友揭露自己掌握的真相，还是继续隐瞒？')
+  const { actions }=useApp(); const { project, projectState: state } = useActiveProject(); const city=useIllustration(project.art); const [input,setInput]=useState('主角是否应该向盟友揭露自己掌握的真相，还是继续隐瞒？')
   return <div className="development-page"><section className="decision panel" style={{backgroundImage:`linear-gradient(90deg,#fff 45%,rgba(255,255,255,.68)),url(${city})`}}><h2><Sparkles/>现在最值得决定什么</h2><p>每一个选择，都会让故事走向不同的可能。</p><label>当前故事问题：<input value={input} onChange={(e)=>setInput(e.target.value)}/></label>
     {state.developmentStatus==='running'?<div className="running"><span/><strong>AI 正在展开几种可能…</strong></div>:state.candidates.length?<div className="candidates">{state.candidates.map((c,i)=><article key={c.id} className={c.status==='accepted'?'accepted':''}><header><b>{String.fromCharCode(65+i)}</b><h3>{c.title}</h3><StatusBadge status={c.status}/></header><p>{c.body}</p><small>{c.tone}</small><button onClick={()=>actions.acceptCandidate(c.id)} disabled={state.developmentStatus==='accepted'}>{c.status==='accepted'?<><Check/>已采用</>:<>选择此方向</>}</button></article>)}</div>:null}
     <div className="decision-actions"><button className="primary" onClick={()=>actions.brainstorm(input)} disabled={state.developmentStatus==='running'}><ThumbsUp/>{state.developmentStatus==='running'?'思考中…':'你推荐'}</button><button onClick={()=>actions.brainstorm(`${input}，再提供三个完全不同的方向`)} disabled={state.developmentStatus==='running'}><WandSparkles/>再想几个</button><button onClick={()=>{setInput('');actions.notify('请在上方输入你的故事决定，再发送给 AI') }}><PenLine/>我自己说</button><button onClick={()=>{actions.dismissCandidates();actions.notify('已保留当前问题，暂时不做决定')}}><Clock3/>暂时不决定</button></div></section>

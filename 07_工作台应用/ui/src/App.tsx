@@ -11,12 +11,13 @@ import { WritingPage } from './pages/WritingPage'
 import { StoryMapPage } from './pages/StoryMapPage'
 import { ProjectDataPage } from './pages/ProjectDataPage'
 import { ReviewPage } from './pages/ReviewPage'
+import { ProjectOverviewPage } from './pages/ProjectOverviewPage'
 import './styles.css'
 
 function Router() {
   const { state } = useApp()
   const globalPages = { home: <HomePage />, projects: <ProjectsPage />, materials: <MaterialsPage />, ideas: <IdeasPage />, settings: <SettingsPage /> }
-  const projectPages = { development: <DevelopmentPage />, writing: <WritingPage />, map: <StoryMapPage />, data: <ProjectDataPage />, review: <ReviewPage /> }
+  const projectPages = { overview: <ProjectOverviewPage />, development: <DevelopmentPage />, writing: <WritingPage />, map: <StoryMapPage />, data: <ProjectDataPage />, review: <ReviewPage /> }
   const content = state.projectSection ? <ProjectLayout>{projectPages[state.projectSection]}</ProjectLayout> : globalPages[state.page]
   return <AppShell>{content}</AppShell>
 }

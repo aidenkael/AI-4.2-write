@@ -11,10 +11,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { state, actions } = useApp()
   const active = state.projectSection ? 'projects' : state.page
   const results = [
-    { label: '迷雾之城', run: () => actions.openProject('mist', 'writing') },
+    ...state.projects.map((project) => ({ label: project.title, run: () => actions.openProject(project.id, 'overview') })),
     { label: '素材与学习', run: () => actions.navigate('materials') },
     { label: '灵感箱', run: () => actions.navigate('ideas') },
-    { label: '全书检查', run: () => actions.openProject('mist', 'review') },
+    { label: '全书检查', run: () => actions.openProject(state.activeProjectId, 'review') },
   ].filter((item) => item.label.includes(state.search.trim()))
   return <div className="app-shell">
     <header className="topbar">
