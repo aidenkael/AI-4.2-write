@@ -2,7 +2,7 @@ import type { Candidate, MockWorkbenchService } from '../contracts/ui'
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 export const mockService: MockWorkbenchService = {
   async simulate<T>(value: T, delay = 650) { await wait(delay); return value },
-  async createIdea(content) { await wait(450); return { id: crypto.randomUUID(), kind: '场景', content, note: 'AI 小提示：可以继续发展人物、冲突或氛围。', time: '刚刚', used: false } },
+  async createIdea(content, kind = '场景') { await wait(450); return { id: crypto.randomUUID(), kind, content, note: 'AI 小提示：可以继续发展人物、冲突或氛围。', time: '刚刚', used: false } },
   async generateCandidates(input) {
     await wait(900)
     const items: Candidate[] = [

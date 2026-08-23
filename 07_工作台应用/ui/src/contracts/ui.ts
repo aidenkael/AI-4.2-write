@@ -10,4 +10,4 @@ export interface Idea { id: string; kind: '场景' | '对白' | '链接' | '文�
 export interface Character { id: string; name: string; role: string; identity: string; status: string; relation: string; note: string; color: string }
 export interface ReviewIssue { id: string; category: 'priority' | 'watch' | 'clear'; title: string; detail: string; count?: number; resolved: boolean; open: boolean }
 export interface IllustrationState { defaults: Record<IllustrationKey, string>; custom: Partial<Record<IllustrationKey, string>> }
-export interface MockWorkbenchService { simulate<T>(value: T, delay?: number): Promise<T>; createIdea(content: string): Promise<Idea>; generateCandidates(input: string): Promise<Candidate[]>; generateProse(prompt: string): Promise<string> }
+export interface MockWorkbenchService { simulate<T>(value: T, delay?: number): Promise<T>; createIdea(content: string, kind?: Idea['kind']): Promise<Idea>; generateCandidates(input: string): Promise<Candidate[]>; generateProse(prompt: string): Promise<string> }
