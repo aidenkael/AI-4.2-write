@@ -1,30 +1,22 @@
 # -*- coding: utf-8 -*-
 """Settings feature 的普通设置、Agent discovery 与安全状态检查。
 
-职责：
-- 普通设置（default_agent / qoder 模式 / 模型 / 思考强度 / BYOK 引用）读写
-- Token 走 keyring（save / has / delete / get，get 仅后台测试连接用）
-- Agent 状态 / 能力查询（经 registry，真实数据，无假数据）
-- Qoder 自带模型 / BYOK provider-model 动态读取（不硬编码名单）
-- 测试连接（无副作用任务 + 临时目录，绝不修改作品）
-
-安全：本层返回给 Bridge 的任何数据都不得包含 Token 明文。
+职责：持久化执行选择、协调本机 Agent 发现、安装官方位置的交互命令；不保存密钥。
 """
 from __future__ import annotations
 
 from typing import Any, Optional
 
 from agents.registry import discover_all as registry_discover_all
-from config.secrets import BYOK_SECRET_ID, SecretStore
 from config.settings import (
     EXECUTION_MODE_DIRECT,
     REASONING_EFFORT_OPTIONS,
     VALID_AGENTS,
     VALID_EXECUTION_MODES,
-    VALID_QODER_MODES,
     AppSettings,
     SettingsStore,
 )
+from agents.qoder import install_command as install_qoder_command
 
 class SettingsOpError(Exception):
     """设置操作错误（面向 UI 的稳定错误类型，普通用户可读）。"""
@@ -36,58 +28,11 @@ def get_agent_settings() -> dict:
     """当前设置 + 规范化本机 discovery + secret presence（无明文）。"""
     store = SettingsStore()
     settings = store.load()
-    secret = SecretStore()
-
     agents = registry_discover_all()
-
-    has_secret = False
-    if settings.byok_secret_id:
-        try:
-            has_secret = secret.has_secret(settings.byok_secret_id)
-        except Exception:  # noqa: BLE001
-            has_secret = False
 
     return {
         "settings": settings.to_dict(),
         "agents": agents,
-        "byok": {
-            "secret_id": settings.byok_secret_id,
-            "has_secret": has_secret,
-        },
-        "reasoning_effort_options": list(REASONING_EFFORT_OPTIONS),
-    }
-
-
-def get_agent_options() -> dict:
-    """旧 Bridge 方法兼容：选项仍从 normalized discovery 派生。"""
-    qoder = next((item for item in registry_discover_all() if item["agent_id"] == "qoder"), None)
-    profiles = ((qoder or {}).get("direct") or {}).get("execution_profiles") or []
-    native = next((profile for profile in profiles if profile.get("id") == "native"), None)
-    provider_map: dict[str, dict] = {}
-    for profile in profiles:
-        if profile.get("type") != "byok" or not profile.get("provider_id"):
-            continue
-        provider_id = str(profile["provider_id"])
-        provider = provider_map.setdefault(provider_id, {
-            "key": provider_id, "display_name": provider_id, "types": [],
-        })
-        provider["types"].append({
-            "key": str(profile.get("id") or "").split(":")[-1],
-            "display_name": profile.get("display_name"),
-            "models": [
-                {
-                    "key": model.get("id"), "display_name": model.get("display_name"),
-                    "is_reasoning": bool(model.get("reasoning_efforts")),
-                    "efforts": model.get("reasoning_efforts") or [],
-                }
-                for model in profile.get("models") or []
-            ],
-        })
-    return {
-        "qoder_models": [model["id"] for model in (native or {}).get("models") or []],
-        "qoder_models_error": (native or {}).get("error"),
-        "byok_providers": list(provider_map.values()),
-        "byok_error": None,
         "reasoning_effort_options": list(REASONING_EFFORT_OPTIONS),
     }
 
@@ -116,10 +61,6 @@ def save_agent_settings(payload: dict) -> dict:
     direct_profile_id = _str_or_none(payload.get("direct_profile_id", current.direct_profile_id))
     direct_model = _str_or_none(payload.get("direct_model", current.direct_model))
 
-    mode = payload.get("qoder_mode", current.qoder_mode)
-    if mode not in VALID_QODER_MODES:
-        raise SettingsOpError(f"Qoder 使用模式无效：{mode}")
-
     effort = payload.get("reasoning_effort", current.reasoning_effort)
     if effort is not None and effort not in REASONING_EFFORT_OPTIONS:
         raise SettingsOpError(f"思考强度无效：{effort}（可选：{'、'.join(REASONING_EFFORT_OPTIONS)}）")
@@ -127,33 +68,13 @@ def save_agent_settings(payload: dict) -> dict:
     if execution_mode == EXECUTION_MODE_DIRECT:
         _validate_direct_selection(direct_agent, direct_profile_id, direct_model)
 
-    qoder_mode = mode
-    qoder_model = _str_or_none(payload.get("qoder_model", current.qoder_model))
-    byok_provider = _str_or_none(payload.get("byok_provider", current.byok_provider))
-    byok_model = _str_or_none(payload.get("byok_model", current.byok_model))
-    if direct_agent == "qoder" and direct_profile_id:
-        if direct_profile_id == "native":
-            qoder_mode = "qoder_native"
-            qoder_model = direct_model
-        elif direct_profile_id.startswith("byok:"):
-            qoder_mode = "qoder_byok"
-            parts = direct_profile_id.split(":")
-            byok_provider = parts[1] if len(parts) > 1 else byok_provider
-            byok_model = direct_model
-
     settings = AppSettings(
         default_execution_mode=execution_mode,
         interactive_agent=interactive_agent,
         direct_agent=direct_agent,
         direct_profile_id=direct_profile_id,
         direct_model=direct_model,
-        default_agent=direct_agent,
-        qoder_mode=qoder_mode,
-        qoder_model=qoder_model,
         reasoning_effort=effort,
-        byok_provider=byok_provider,
-        byok_model=byok_model,
-        byok_secret_id=current.byok_secret_id,  # Token 引用保持原样，不接受前端改动
     )
     store.save(settings)
     return settings.to_dict()
@@ -176,30 +97,13 @@ def _validate_direct_selection(agent_id: str, profile_id: Optional[str], model_i
             raise SettingsOpError("所选模型当前不可用，请刷新后重新选择")
 
 
-def save_byok_secret(token: str) -> dict:
-    """保存 BYOK Token 到 keyring；配置只写 secret_id 引用。"""
-    if not isinstance(token, str) or not token.strip():
-        raise SettingsOpError("Token 不能为空")
-    secret = SecretStore()
-    secret.save_secret(BYOK_SECRET_ID, token.strip())
-
-    store = SettingsStore()
-    settings = store.load()
-    settings.byok_secret_id = BYOK_SECRET_ID
-    store.save(settings)
-    return {"secret_id": BYOK_SECRET_ID, "has_secret": True}
-
-
-def delete_byok_secret() -> dict:
-    """删除 keyring 中的 Token，并清空配置里的引用；状态立即变为未配置。"""
-    secret = SecretStore()
-    secret.delete_secret(BYOK_SECRET_ID)
-
-    store = SettingsStore()
-    settings = store.load()
-    settings.byok_secret_id = None
-    store.save(settings)
-    return {"secret_id": None, "has_secret": False}
+def install_or_repair_interactive_command(payload: dict) -> dict:
+    if not isinstance(payload, dict) or payload.get("agent") != "qoder":
+        raise SettingsOpError("当前仅 Qoder CN 支持安装 /gowrite 命令")
+    result = install_qoder_command()
+    if result["errors"] and not result["command_ready"]:
+        raise SettingsOpError("；".join(result["errors"]))
+    return result
 
 
 def _str_or_none(value: Any) -> Optional[str]:

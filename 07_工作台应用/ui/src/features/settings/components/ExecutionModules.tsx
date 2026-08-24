@@ -12,7 +12,7 @@ const authLabels: Record<string, string> = {
 }
 
 const cliKindLabels: Record<string, string> = {
-  current_cli: '当前 CLI', current_npm_cli: '当前 npm CLI', legacy_qodercli: '旧版 CLI（兼容）', not_detected: '未检测',
+  qoder_cn: 'Qoder CN CLI', not_detected: '未检测',
 }
 
 const EnvironmentEvidence = ({ label, version, status, path }: {
@@ -25,7 +25,7 @@ const EnvironmentEvidence = ({ label, version, status, path }: {
 export function ExecutionModules({ controller }: { controller: SettingsController }) {
   const {
     draft, agents, interactiveAgent, directAgent, directProfile, connection,
-    testing, saving, directValid, interactiveValid, canSave, update, refresh, save, test,
+    testing, saving, directValid, interactiveValid, canSave, update, refresh, save, test, repairInteractive,
   } = controller
   if (!draft) return null
 
@@ -50,6 +50,7 @@ export function ExecutionModules({ controller }: { controller: SettingsControlle
         path={interactiveAgent.desktop.path}
       /> : null}
       {interactiveAgent?.interactive.repair_hint ? <p className="settings-warning">{interactiveAgent.interactive.repair_hint}</p> : null}
+      {interactiveAgent?.agent_id === 'qoder' && !interactiveAgent.interactive.command_ready ? <button onClick={repairInteractive} disabled={saving}>安装/修复 /gowrite 命令</button> : null}
       {!interactiveValid ? <small>当前选择不会被标记为可执行，保存后也不会伪装成已连接。</small> : null}
     </article>
 

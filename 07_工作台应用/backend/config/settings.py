@@ -14,11 +14,6 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Optional
 
-# Qoder 使用模式
-QODER_MODE_NATIVE = "qoder_native"
-QODER_MODE_BYOK = "qoder_byok"
-VALID_QODER_MODES = (QODER_MODE_NATIVE, QODER_MODE_BYOK)
-
 # 当前注册的 Agent（与 registry 一致；Codex 未实现，不出现在候选里）
 VALID_AGENTS = ("deepseek_harness", "qoder")
 
@@ -41,17 +36,22 @@ class AppSettings:
     direct_profile_id: Optional[str] = None
     direct_model: Optional[str] = None
 
-    # 旧字段保留给现有 agent_runner；Settings feature 保存时同步更新。
-    default_agent: str = "qoder"
-    qoder_mode: str = QODER_MODE_NATIVE  # qoder_native | qoder_byok
-    qoder_model: Optional[str] = None      # Qoder 自带模型名（动态列表取值）
-    reasoning_effort: Optional[str] = None  # low / medium / high
-    byok_provider: Optional[str] = None    # BYOK 服务商 key（动态列表取值）
-    byok_model: Optional[str] = None       # BYOK 模型 key（动态列表取值）
-    byok_secret_id: Optional[str] = None   # keyring 引用 id（非 Token 明文）
+    reasoning_effort: Optional[str] = None
+    # Constructor-only migration shims for older callers. They are deliberately
+    # excluded from persisted JSON and never form part of the new contract.
+    default_agent: Optional[str] = None
+    qoder_mode: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        if self.default_agent in VALID_AGENTS:
+            self.interactive_agent = self.default_agent
+            self.direct_agent = self.default_agent
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        data = asdict(self)
+        data.pop("default_agent", None)
+        data.pop("qoder_mode", None)
+        return data
 
     @classmethod
     def from_dict(cls, raw: dict) -> "AppSettings":
@@ -60,7 +60,7 @@ class AppSettings:
         known = {f.name for f in fields(cls)}
         data = {k: v for k, v in raw.items() if k in known}
         settings = cls(**data)
-        legacy_agent = str(raw.get("default_agent") or settings.default_agent)
+        legacy_agent = str(raw.get("default_agent") or "qoder")
         if "interactive_agent" not in raw:
             settings.interactive_agent = legacy_agent
         if "direct_agent" not in raw:
@@ -68,15 +68,10 @@ class AppSettings:
         if "direct_profile_id" not in raw:
             if legacy_agent == "deepseek_harness":
                 settings.direct_profile_id = "headless"
-            elif raw.get("qoder_mode") == QODER_MODE_BYOK and raw.get("byok_provider"):
-                settings.direct_profile_id = f"byok:{raw['byok_provider']}"
             elif raw.get("qoder_model"):
-                settings.direct_profile_id = "native"
+                settings.direct_profile_id = "qoder_cn"
         if "direct_model" not in raw:
-            settings.direct_model = None if legacy_agent != "qoder" else (
-                raw.get("byok_model") if raw.get("qoder_mode") == QODER_MODE_BYOK
-                else raw.get("qoder_model")
-            )
+            settings.direct_model = raw.get("qoder_model") if legacy_agent == "qoder" else None
         return settings
 
 

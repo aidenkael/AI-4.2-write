@@ -1,107 +1,17 @@
-# -*- coding: utf-8 -*-
-"""Bridge 设置接口 targeted tests（统一 {ok, data, error} 合同 + 无 Token 明文）。"""
-import json
-import uuid
-
-import pytest
-
 from bridge.app_api import AppApi
-from config.secrets import SecretStore
 from operations import settings as ops
 
-TEST_SERVICE = f"ai-write-test-{uuid.uuid4().hex[:8]}"
 
-
-@pytest.fixture()
-def bridge(tmp_path, monkeypatch):
+def test_settings_bridge_contract(tmp_path, monkeypatch):
     monkeypatch.setenv("AI_WRITE_CONFIG_DIR", str(tmp_path))
-    values = {}
-    class FakeKeyring:
-        def set_password(self, service, secret_id, token): values[(service, secret_id)] = token
-        def get_password(self, service, secret_id): return values.get((service, secret_id))
-        def delete_password(self, service, secret_id): values.pop((service, secret_id), None)
-    monkeypatch.setattr("config.secrets._keyring", FakeKeyring())
-    monkeypatch.setattr(ops, "SecretStore", lambda: SecretStore(service=TEST_SERVICE))
-    monkeypatch.setattr(ops, "registry_discover_all", lambda: [
-        {
-            "agent_id": "qoder", "display_name": "Qoder", "installed": True,
-            "available": True, "version": "test", "errors": [],
-            "interactive": {"available": True, "bridge_ready": False, "command_name": "/gowrite", "command_ready": False},
-            "direct": {"available": False, "auth_status": "not_authenticated", "execution_profiles": [], "capabilities": {}},
-        },
-        {
-            "agent_id": "deepseek_harness", "display_name": "Harness", "installed": True,
-            "available": True, "version": "test", "errors": [],
-            "interactive": {"available": True, "bridge_ready": False, "command_name": "/gowrite", "command_ready": False},
-            "direct": {"available": True, "auth_status": "configured", "execution_profiles": [{"id": "headless", "display_name": "Headless", "type": "harness_profile", "available": True, "model_selection": "managed", "models": []}], "capabilities": {}},
-        },
-    ])
-    return AppApi()
+    monkeypatch.setattr(ops, "registry_discover_all", lambda: [{"agent_id": "qoder", "installed": True, "direct": {"auth_status": "authenticated", "execution_profiles": [{"id": "qoder_cn", "available": True, "model_selection": "selectable", "models": [{"id": "real"}]}]}}])
+    api = AppApi()
+    assert api.get_agent_settings()["ok"] is True
+    response = api.save_agent_settings({"default_execution_mode": "direct", "direct_agent": "qoder", "direct_profile_id": "qoder_cn", "direct_model": "real"})
+    assert response["ok"] is True and response["data"]["settings"]["direct_model"] == "real"
 
 
-def _json_str(obj) -> str:
-    return json.dumps(obj, ensure_ascii=False, default=str)
-
-
-def test_get_agent_settings_contract(bridge):
-    resp = bridge.get_agent_settings()
-    assert resp["ok"] is True
-    assert resp["error"] is None
-    data = resp["data"]
-    assert "settings" in data and "agents" in data and "byok" in data
-    ids = {a["agent_id"] for a in data["agents"]}
-    assert ids == {"deepseek_harness", "qoder"}
-
-
-def test_get_agent_options_contract(bridge):
-    resp = bridge.get_agent_options()
-    assert resp["ok"] is True
-    assert "reasoning_effort_options" in resp["data"]
-
-
-def test_save_agent_settings_contract(bridge):
-    resp = bridge.save_agent_settings({
-        "default_agent": "qoder",
-        "qoder_mode": "qoder_native",
-        "qoder_model": "Qwen3.8-Max",
-        "reasoning_effort": "medium",
-    })
-    assert resp["ok"] is True
-    assert resp["data"]["settings"]["default_agent"] == "qoder"
-
-    bad = bridge.save_agent_settings({"default_agent": "codex"})
-    assert bad["ok"] is False
-    assert bad["error"]["code"] == "SETTINGS_ERROR"
-
-
-def test_byok_secret_never_returns_plaintext(bridge):
-    token = "sk-BRIDGE-SECRET-98765"
-    resp = bridge.save_byok_secret(token)
-    assert resp["ok"] is True
-    assert resp["data"]["has_secret"] is True
-    assert token not in _json_str(resp)  # 保存返回值无明文
-
-    # 保存后读取任何设置接口都不含明文
-    for method in (bridge.get_agent_settings, bridge.get_agent_options):
-        out = _json_str(method())
-        assert token not in out, f"{method.__name__} 泄漏 Token 明文"
-
-    # 测试连接（BYOK 未配置 provider/model 时不真实调用）也不含明文
-    conn = bridge.test_agent_connection({
-        "agent": "qoder", "qoder_mode": "qoder_byok",
-    })
-    assert conn["ok"] is True
-    assert token not in _json_str(conn)
-
-    # 删除后状态立即未配置
-    resp2 = bridge.delete_byok_secret()
-    assert resp2["ok"] is True
-    assert resp2["data"]["has_secret"] is False
-    assert bridge.get_agent_settings()["data"]["byok"]["has_secret"] is False
-
-
-def test_test_agent_connection_contract(bridge):
-    resp = bridge.test_agent_connection({"agent": "qoder", "qoder_mode": "qoder_byok"})
-    assert resp["ok"] is True
-    assert resp["data"]["status"] == "not_configured"
-    assert resp["data"]["agent"] == "qoder"
+def test_install_command_bridge(tmp_path, monkeypatch):
+    monkeypatch.setattr(ops, "install_qoder_command", lambda: {"installed_paths": [str(tmp_path / "gowrite.md")], "command_ready": True, "errors": []})
+    response = AppApi().install_or_repair_interactive_command({"agent": "qoder"})
+    assert response["ok"] is True and response["data"]["command_ready"] is True

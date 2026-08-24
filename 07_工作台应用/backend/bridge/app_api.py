@@ -94,13 +94,6 @@ class AppApi:
         except Exception as exc:  # noqa: BLE001
             return _err(CODE_BRIDGE_INTERNAL, str(exc))
 
-    def get_agent_options(self) -> dict:
-        """动态选项：Qoder 自带模型 / BYOK provider-model / 思考强度档位。"""
-        try:
-            return _ok(settings_ops.get_agent_options())
-        except Exception as exc:  # noqa: BLE001
-            return _err(CODE_BRIDGE_INTERNAL, str(exc))
-
     def save_agent_settings(self, settings: dict) -> dict:
         """保存普通设置（不含 Token）；非法 Agent / 模式 / 思考强度会被拒绝。"""
         try:
@@ -111,19 +104,12 @@ class AppApi:
         except Exception as exc:  # noqa: BLE001
             return _err(CODE_BRIDGE_INTERNAL, str(exc))
 
-    def save_byok_secret(self, token: str) -> dict:
-        """保存 BYOK Token 到 keyring；配置只写 secret_id 引用。"""
+    def install_or_repair_interactive_command(self, payload: dict) -> dict:
+        """安装或修复当前 Agent 官方位置的 /gowrite 命令。"""
         try:
-            return _ok(settings_ops.save_byok_secret(token))
+            return _ok(settings_ops.install_or_repair_interactive_command(payload))
         except SettingsOpError as exc:
             return _err(CODE_SETTINGS_ERROR, str(exc))
-        except Exception as exc:  # noqa: BLE001
-            return _err(CODE_BRIDGE_INTERNAL, str(exc))
-
-    def delete_byok_secret(self) -> dict:
-        """删除 keyring 中的 BYOK Token，状态立即变为未配置。"""
-        try:
-            return _ok(settings_ops.delete_byok_secret())
         except Exception as exc:  # noqa: BLE001
             return _err(CODE_BRIDGE_INTERNAL, str(exc))
 

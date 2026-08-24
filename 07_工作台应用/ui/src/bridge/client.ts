@@ -211,52 +211,18 @@ export interface AgentEnvironment {
   direct: DirectEnvironment
 }
 
-export interface ByokModel {
-  key: string | null
-  display_name: string | null
-  is_reasoning?: boolean | null
-  efforts?: string[]
-}
-
-export interface ByokType {
-  key: string | null
-  display_name: string | null
-  models: ByokModel[]
-}
-
-export interface ByokProvider {
-  key: string | null
-  display_name: string | null
-  types: ByokType[]
-}
-
 export interface AgentSettings {
   default_execution_mode: ExecutionMode
   interactive_agent: string
   direct_agent: string
   direct_profile_id: string | null
   direct_model: string | null
-  default_agent: string
-  qoder_mode: string
-  qoder_model: string | null
   reasoning_effort: string | null
-  byok_provider: string | null
-  byok_model: string | null
-  byok_secret_id: string | null
 }
 
 export interface AgentSettingsData {
   settings: AgentSettings
   agents: AgentEnvironment[]
-  byok: { secret_id: string | null; has_secret: boolean }
-  reasoning_effort_options: string[]
-}
-
-export interface AgentOptionsData {
-  qoder_models: string[]
-  qoder_models_error: string | null
-  byok_providers: ByokProvider[]
-  byok_error: string | null
   reasoning_effort_options: string[]
 }
 
@@ -272,24 +238,14 @@ export async function getAgentSettings(): Promise<AgentSettingsData> {
   return call<AgentSettingsData>('get_agent_settings')
 }
 
-/** 动态选项：Qoder 自带模型 / BYOK provider-model / 思考强度。 */
-export async function getAgentOptions(): Promise<AgentOptionsData> {
-  return call<AgentOptionsData>('get_agent_options')
-}
-
 /** 保存普通设置（不含 Token）。 */
 export async function saveAgentSettings(settings: Partial<AgentSettings>): Promise<{ settings: AgentSettings }> {
   return call<{ settings: AgentSettings }>('save_agent_settings', settings)
 }
 
-/** 保存 BYOK Token 到 keyring（只返回 secret_id + has_secret，绝不明文）。 */
-export async function saveByokSecret(token: string): Promise<{ secret_id: string; has_secret: boolean }> {
-  return call<{ secret_id: string; has_secret: boolean }>('save_byok_secret', token)
-}
-
-/** 删除 BYOK Token；删除后状态立即变为未配置。 */
-export async function deleteByokSecret(): Promise<{ secret_id: string | null; has_secret: boolean }> {
-  return call<{ secret_id: string | null; has_secret: boolean }>('delete_byok_secret')
+/** 在官方 Qoder CN 命令位置安装/修复唯一 Go Write 命令定义。 */
+export async function installOrRepairInteractiveCommand(agent: string): Promise<{ installed_paths: string[]; command_ready: boolean; errors: string[] }> {
+  return call('install_or_repair_interactive_command', { agent })
 }
 
 /** 测试连接（无副作用任务 + 临时目录）；BYOK 未配置 Token 时返回 not_configured。 */

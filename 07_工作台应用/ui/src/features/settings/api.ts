@@ -1,8 +1,7 @@
 import {
-  deleteByokSecret,
   getAgentSettings,
+  installOrRepairInteractiveCommand,
   saveAgentSettings,
-  saveByokSecret,
   testAgentConnection,
   type AgentSettingsData,
   type ConnectionTestResult,
@@ -13,8 +12,7 @@ export interface SettingsApi {
   load(): Promise<AgentSettingsData>
   save(draft: SettingsDraft): Promise<AgentSettingsData['settings']>
   test(agent: string, profileId: string | null, model: string | null, effort: string | null): Promise<ConnectionTestResult>
-  saveSecret(token: string): Promise<{ secret_id: string; has_secret: boolean }>
-  deleteSecret(): Promise<{ secret_id: string | null; has_secret: boolean }>
+  repairInteractive(agent: string): Promise<{ installed_paths: string[]; command_ready: boolean; errors: string[] }>
 }
 
 export const settingsApi: SettingsApi = {
@@ -26,6 +24,5 @@ export const settingsApi: SettingsApi = {
   test(agent, profileId, model, effort) {
     return testAgentConnection({ agent, profile_id: profileId, model, reasoning_effort: effort })
   },
-  saveSecret: saveByokSecret,
-  deleteSecret: deleteByokSecret,
+  repairInteractive: installOrRepairInteractiveCommand,
 }

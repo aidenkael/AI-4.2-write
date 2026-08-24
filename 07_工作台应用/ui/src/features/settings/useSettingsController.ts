@@ -112,26 +112,13 @@ export function useSettingsController(api: SettingsApi = settingsApi) {
     }
   }, [api, directValid, draft])
 
-  const saveSecret = useCallback(async (token: string) => {
-    if (!token.trim()) return
+  const repairInteractive = useCallback(async () => {
+    if (!draft) return
     setSaving(true)
     try {
-      await api.saveSecret(token.trim())
-      await load(false)
-      setNotice({ kind: 'success', message: '凭据已保存到系统安全存储' })
-    } catch (error) {
-      setNotice({ kind: 'error', message: friendlyError(error) })
-    } finally {
-      setSaving(false)
-    }
-  }, [api, load])
-
-  const deleteSecret = useCallback(async () => {
-    setSaving(true)
-    try {
-      await api.deleteSecret()
-      await load(false)
-      setNotice({ kind: 'success', message: '已删除安全凭据' })
+      const result = await api.repairInteractive(draft.interactive_agent)
+      await load(true)
+      setNotice({ kind: result.command_ready ? 'success' : 'error', message: result.command_ready ? '/gowrite 命令已安装/修复' : result.errors.join('；') || '命令安装失败' })
     } catch (error) {
       setNotice({ kind: 'error', message: friendlyError(error) })
     } finally {
@@ -142,7 +129,7 @@ export function useSettingsController(api: SettingsApi = settingsApi) {
   return {
     data, draft, agents, interactiveAgent, directAgent, directProfile,
     loading, saving, testing, notice, connection, directValid, interactiveValid, canSave,
-    update, refresh: () => load(false), save, test, saveSecret, deleteSecret,
+    update, refresh: () => load(false), save, test, repairInteractive,
   }
 }
 
