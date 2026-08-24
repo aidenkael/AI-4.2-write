@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { BridgeError, type AgentEnvironment, type AgentSettingsData, type ExecutionProfile } from '../../bridge/client'
+import { BridgeError, type AgentEnvironment, type AgentSettingsData } from '../../bridge/client'
 import { settingsApi, type SettingsApi } from './api'
 import type { ConnectionState, SettingsDraft, SettingsNotice } from './types'
 
@@ -7,9 +7,7 @@ const toDraft = (data: AgentSettingsData): SettingsDraft => ({
   default_execution_mode: data.settings.default_execution_mode,
   interactive_agent: data.settings.interactive_agent,
   direct_agent: data.settings.direct_agent,
-  direct_profile_id: data.settings.direct_profile_id,
   direct_model: data.settings.direct_model,
-  reasoning_effort: data.settings.reasoning_effort,
 })
 
 const friendlyError = (error: unknown) => {
@@ -64,14 +62,10 @@ export function useSettingsController(api: SettingsApi = settingsApi) {
     () => agents.find((agent) => agent.agent_id === draft?.direct_agent) ?? null,
     [agents, draft?.direct_agent],
   )
-  const directProfile = useMemo<ExecutionProfile | null>(
-    () => directAgent?.direct.execution_profiles.find((profile) => profile.id === draft?.direct_profile_id) ?? null,
-    [directAgent, draft?.direct_profile_id],
-  )
   const directValid = Boolean(
-    directProfile?.available && (
-      directProfile.model_selection !== 'selectable' ||
-      directProfile.models.some((model) => model.id === draft?.direct_model && model.selectable)
+    directAgent?.direct.available && (
+      directAgent.direct.model_selection !== 'selectable' ||
+      directAgent.direct.models.some((model) => model.id === draft?.direct_model && model.selectable)
     ),
   )
   const interactiveValid = Boolean(interactiveAgent?.interactive.command_ready && interactiveAgent.interactive.bridge_ready)
@@ -99,12 +93,7 @@ export function useSettingsController(api: SettingsApi = settingsApi) {
     setTesting(true)
     setConnection(null)
     try {
-      setConnection(await api.test(
-        draft.direct_agent,
-        draft.direct_profile_id,
-        draft.direct_model,
-        draft.reasoning_effort,
-      ))
+      setConnection(await api.test(draft.direct_agent, draft.direct_model))
     } catch (error) {
       setConnection({ agent: draft.direct_agent, status: 'failed', message: friendlyError(error) })
     } finally {
@@ -127,7 +116,7 @@ export function useSettingsController(api: SettingsApi = settingsApi) {
   }, [api, load])
 
   return {
-    data, draft, agents, interactiveAgent, directAgent, directProfile,
+    data, draft, agents, interactiveAgent, directAgent,
     loading, saving, testing, notice, connection, directValid, interactiveValid, canSave,
     update, refresh: () => load(false), save, test, repairInteractive,
   }

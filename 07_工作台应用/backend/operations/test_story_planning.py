@@ -199,7 +199,7 @@ def test_propose_uses_real_load_project(isolated, real_project, fake_agent):
 
 def test_agent_settings_consumed(isolated, real_project, tmp_path, monkeypatch):
     store = SettingsStore(config_dir=tmp_path / "cfg")
-    store.save(AppSettings(default_agent="deepseek_harness"))
+    store.save(AppSettings(direct_agent="deepseek_harness"))
 
     bridge_root = tmp_path / ".bridge"
     monkeypatch.setattr(bridge, "get_bridge_root", lambda: bridge_root)

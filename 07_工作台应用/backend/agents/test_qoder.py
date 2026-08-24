@@ -22,8 +22,9 @@ def test_direct_command_uses_cn_contract(tmp_path):
     adapter = QoderAdapter(launch=[sys.executable, "-c", "import sys; print('|'.join(sys.argv[1:]))"])
     result = adapter.run(AgentRequest(task="task", cwd=str(tmp_path), model="actual-model", reasoning_effort="high"))
     assert result.status == "completed"
-    for item in ("-p", "-o", "json", "--cwd", str(tmp_path), "--model", "actual-model", "--reasoning-effort", "high"):
+    for item in ("-p", "-o", "json", "--cwd", str(tmp_path), "--model", "actual-model"):
         assert item in result.output.split("|")
+    assert "--reasoning-effort" not in result.output
 
 
 def test_json_result_and_error_handling():

@@ -54,7 +54,9 @@ def discover_all() -> list[dict[str, Any]]:
                 "direct": {
                     "available": False,
                     "auth_status": "not_detected",
-                    "execution_profiles": [],
+                    "model_selection": "none",
+                    "models": [],
+                    "managed_model": None,
                     "capabilities": {},
                 },
             })

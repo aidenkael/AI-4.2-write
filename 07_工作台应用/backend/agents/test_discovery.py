@@ -12,7 +12,7 @@ def test_qoder_discovery_keeps_desktop_and_cli_separate(monkeypatch):
     env = QoderAdapter.discover()
     assert env["desktop"]["version"] == "1.24.2"
     assert env["cli"]["kind"] == "qoder_cn"
-    assert env["direct"]["execution_profiles"][0]["models"][0]["id"] == "actual"
+    assert env["direct"]["models"][0]["id"] == "actual"
 
 
 def test_harness_discovery_unavailable(monkeypatch):

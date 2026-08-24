@@ -74,7 +74,7 @@ class DeepSeekHarnessAdapter(AgentAdapter):
                 },
                 "direct": {
                     "available": False, "auth_status": "not_detected",
-                    "execution_profiles": [], "capabilities": {},
+                    "model_selection": "none", "models": [], "managed_model": None, "capabilities": {},
                 },
             }
 
@@ -121,24 +121,7 @@ class DeepSeekHarnessAdapter(AgentAdapter):
                 provider = provider_match.group(1).strip(" '\"") if provider_match else None
                 model = model_match.group(1).strip(" '\"") if model_match else None
 
-        profiles: list[dict] = []
         headless_available = bool(headless_dump and provider and model)
-        if headless_dump:
-            profiles.append({
-                "id": "headless",
-                "display_name": "Harness Headless",
-                "type": "harness_profile",
-                "available": headless_available,
-                "model_selection": "managed",
-                "provider_id": provider,
-                "models": ([{
-                    "id": model,
-                    "display_name": model,
-                    "selectable": False,
-                    "selected": True,
-                }] if model else []),
-                "error": None if headless_available else "未检测到 profile 的当前 provider/model",
-            })
 
         web_dump = dump_profile("web")
         command_ready = bool(web_dump and re.search(r"(?im)^\s*(?:-\s*)?(?:id|name):\s*[^\r\n]*gowrite", web_dump))
@@ -178,7 +161,9 @@ class DeepSeekHarnessAdapter(AgentAdapter):
             "direct": {
                 "available": headless_available,
                 "auth_status": auth_status,
-                "execution_profiles": profiles,
+                "model_selection": "managed" if model else "none",
+                "models": [],
+                "managed_model": ({"id": model, "display_name": model, "provider_id": provider} if model else None),
                 "capabilities": cls(launch=launch).capabilities(),
                 "executable_path": " ".join(launch),
             },

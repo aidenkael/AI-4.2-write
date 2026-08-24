@@ -594,6 +594,6 @@ def test_load_project_failure_is_partial_success(isolated, monkeypatch):
 def test_runner_rejects_unavailable_agent(isolated, tmp_path, monkeypatch):
     from config.settings import SettingsStore, AppSettings
     store = SettingsStore(config_dir=tmp_path / "cfg")
-    store.save(AppSettings(default_agent="qoder", qoder_mode="qoder_byok"))
+    store.save(AppSettings(default_execution_mode="direct", direct_agent="qoder"))
     with pytest.raises(AgentRunError):
         run_task("任何任务")

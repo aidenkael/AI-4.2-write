@@ -148,19 +148,6 @@ export interface DiscoveredModel {
   display_name: string
   selectable: boolean
   selected?: boolean
-  reasoning_efforts?: string[]
-}
-
-export interface ExecutionProfile {
-  id: string
-  display_name: string
-  type: string
-  available: boolean
-  model_selection: 'selectable' | 'managed' | 'none'
-  provider_id?: string | null
-  models: DiscoveredModel[]
-  reasoning_effort_options?: string[]
-  error?: string | null
 }
 
 export interface InteractiveEnvironment {
@@ -175,7 +162,9 @@ export interface InteractiveEnvironment {
 export interface DirectEnvironment {
   available: boolean
   auth_status: string
-  execution_profiles: ExecutionProfile[]
+  model_selection: 'selectable' | 'managed' | 'none'
+  models: DiscoveredModel[]
+  managed_model?: { id: string; display_name: string; provider_id?: string | null } | null
   capabilities: Record<string, unknown>
 }
 
@@ -215,15 +204,12 @@ export interface AgentSettings {
   default_execution_mode: ExecutionMode
   interactive_agent: string
   direct_agent: string
-  direct_profile_id: string | null
   direct_model: string | null
-  reasoning_effort: string | null
 }
 
 export interface AgentSettingsData {
   settings: AgentSettings
   agents: AgentEnvironment[]
-  reasoning_effort_options: string[]
 }
 
 export interface ConnectionTestResult {
@@ -251,9 +237,7 @@ export async function installOrRepairInteractiveCommand(agent: string): Promise<
 /** 测试连接（无副作用任务 + 临时目录）；BYOK 未配置 Token 时返回 not_configured。 */
 export async function testAgentConnection(payload: {
   agent: string
-  profile_id?: string | null
   model?: string | null
-  reasoning_effort?: string | null
 }): Promise<ConnectionTestResult> {
   return call<ConnectionTestResult>('test_agent_connection', payload)
 }

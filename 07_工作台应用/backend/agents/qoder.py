@@ -109,21 +109,19 @@ class QoderAdapter(AgentAdapter):
             if listed.returncode: auth_status = "not_authenticated"; errors.append(listed.stderr.strip() or "Qoder CN CLI 未能读取模型目录")
             else: models = _parse_models(listed.stdout); auth_status = "authenticated" if models else "unknown"
         except Exception as exc: errors.append(str(exc))
-        profile = {"id": "qoder_cn", "display_name": "Qoder CN", "type": "agent_managed", "available": bool(cli_path and models), "model_selection": "selectable", "models": [{**model, "selectable": True} for model in models], "reasoning_effort_options": ["none", "low", "medium", "high", "xhigh", "max"], "error": None if cli_path and models else "Qoder CN 模型目录当前不可用"}
         ready = command_ready()
-        return {"agent_id": cls.name, "display_name": "Qoder CN", "installed": bool(desktop["installed"] or cli_path), "available": bool(cli_path and models), "version": " / ".join(value for value in (desktop["version"], cli_version) if value) or None, "errors": errors, "desktop": desktop, "cli": {"detected": bool(cli_path), "usable": bool(cli_path), "status": "usable" if cli_path else "not_detected", "kind": "qoder_cn", "path": cli_path, "resolved_command": [cli_path] if cli_path else [], "version": cli_version}, "interactive": {"available": bool(desktop["installed"]), "bridge_ready": bool(desktop["installed"] and ready), "command_name": "/gowrite", "command_ready": ready, "relevant_status": {"cli_command": str(_command_paths()[0]), "ide_command": str(_command_paths()[1])}, "repair_hint": None if ready else "未安装 Go Write 的 /gowrite 命令，可使用“安装/修复命令”。"}, "direct": {"available": bool(cli_path and models), "auth_status": auth_status, "execution_profiles": [profile], "capabilities": cls(cli_path=cli_path).capabilities() if cli_path else {}}}
+        return {"agent_id": cls.name, "display_name": "Qoder CN", "installed": bool(desktop["installed"] or cli_path), "available": bool(cli_path and models), "version": " / ".join(value for value in (desktop["version"], cli_version) if value) or None, "errors": errors, "desktop": desktop, "cli": {"detected": bool(cli_path), "usable": bool(cli_path), "status": "usable" if cli_path else "not_detected", "kind": "qoder_cn", "path": cli_path, "resolved_command": [cli_path] if cli_path else [], "version": cli_version}, "interactive": {"available": bool(desktop["installed"]), "bridge_ready": bool(desktop["installed"] and ready), "command_name": "/gowrite", "command_ready": ready, "relevant_status": {"cli_command": str(_command_paths()[0]), "ide_command": str(_command_paths()[1])}, "repair_hint": None if ready else "未安装 Go Write 的 /gowrite 命令，可使用“安装/修复命令”。"}, "direct": {"available": bool(cli_path and models), "auth_status": auth_status, "model_selection": "selectable", "models": [{**model, "selectable": True} for model in models], "managed_model": None, "capabilities": cls(cli_path=cli_path).capabilities() if cli_path else {}}}
 
     def __init__(self, cli_path: Optional[str] = None, launch: Optional[list[str]] = None, timeout: Optional[float] = None) -> None:
         self._launch = launch if launch is not None else [cli_path or _default_cli()]; self._timeout = timeout; self._proc: Optional[subprocess.Popen[str]] = None; self._lock = threading.Lock(); self._cancelled = threading.Event()
 
     def capabilities(self) -> dict[str, Any]:
-        return {"run": True, "cwd": True, "final_output": True, "cancel": True, "stream": False, "resume": False, "session": False, "model_selection": "cli_flag", "reasoning_effort": True, "byok": False}
+        return {"run": True, "cwd": True, "final_output": True, "cancel": True, "stream": False, "resume": False, "session": False, "model_selection": "cli_flag", "reasoning_effort": False, "byok": False}
 
     def run(self, request: AgentRequest) -> AgentResult:
         self._cancelled.clear(); cmd = self._launch + ["-p", "-o", "json"]
         if request.cwd: cmd += ["--cwd", request.cwd]
         if request.model: cmd += ["--model", request.model]
-        if request.reasoning_effort: cmd += ["--reasoning-effort", request.reasoning_effort]
         cmd += ["--permission-mode", _PERMISSION_MODE, request.task]
         with self._lock:
             if self._proc is not None: return AgentResult(status="failed", error="adapter 已有任务在运行", agent=self.name)

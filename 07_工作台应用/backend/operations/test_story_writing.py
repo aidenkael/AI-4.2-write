@@ -156,7 +156,7 @@ def test_propose_uses_real_load_project(isolated, real_project, fake_agent):
 
 def test_agent_settings_consumed(isolated, real_project, tmp_path, monkeypatch):
     store = SettingsStore(config_dir=tmp_path / "cfg")
-    store.save(AppSettings(default_agent="deepseek_harness"))
+    store.save(AppSettings(direct_agent="deepseek_harness"))
 
     _fake, calls = _make_two_stage_agent()
     monkeypatch.setattr(sw_ops, "run_task", _fake)
@@ -558,7 +558,7 @@ def test_real_agent_propose_smoke(isolated, real_project, tmp_path, monkeypatch)
 
     cfg_dir = tmp_path / "cfg"
     store = SettingsStore(config_dir=cfg_dir)
-    store.save(AppSettings(default_agent="deepseek_harness"))
+    store.save(AppSettings(direct_agent="deepseek_harness"))
     monkeypatch.setenv("AI_WRITE_CONFIG_DIR", str(cfg_dir))
 
     result = sw_ops.propose_story_write(
