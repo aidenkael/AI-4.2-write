@@ -81,6 +81,32 @@ def test_get_agent_settings_shape(config_dir):
     assert data["byok"]["has_secret"] is False
 
 
+def test_get_agent_settings_rediscovers_environment_on_refresh(config_dir, monkeypatch):
+    calls = 0
+
+    def discover():
+        nonlocal calls
+        calls += 1
+        return [{
+            "agent_id": "qoder",
+            "display_name": "Qoder",
+            "installed": True,
+            "available": False,
+            "version": f"Desktop refresh-{calls}",
+            "errors": [],
+            "interactive": {"available": True, "bridge_ready": False, "command_name": "/gowrite", "command_ready": False},
+            "direct": {"available": False, "auth_status": "not_detected", "execution_profiles": [], "capabilities": {}},
+        }]
+
+    monkeypatch.setattr(ops, "registry_discover_all", discover)
+
+    first = ops.get_agent_settings()["agents"][0]["version"]
+    second = ops.get_agent_settings()["agents"][0]["version"]
+
+    assert first == "Desktop refresh-1"
+    assert second == "Desktop refresh-2"
+
+
 def test_get_agent_settings_no_token_plaintext(config_dir):
     ops.save_byok_secret("sk-SECRET-PLAINTEXT-111")
     data = ops.get_agent_settings()

@@ -43,6 +43,143 @@ from agents.base import AgentAdapter, AgentRequest, AgentResult
 _DEFAULT_PERMISSION_MODE = "dontAsk"  # SDK 取值；CLI 路径翻译为 dont_ask
 
 
+def _first_output_line(probe: subprocess.CompletedProcess[str]) -> Optional[str]:
+    """取本机版本探针的第一行；失败时不把错误文本伪装成版本。"""
+    if probe.returncode != 0:
+        return None
+    return next((line.strip() for line in probe.stdout.splitlines() if line.strip()), None)
+
+
+def _read_wrapper(path: str) -> str:
+    p = Path(path)
+    if p.suffix.upper() not in (".CMD", ".BAT"):
+        return ""
+    try:
+        return p.read_text(encoding="utf-8", errors="ignore")[:5000]
+    except OSError:
+        return ""
+
+
+def _is_qoder_dispatcher(path: str) -> bool:
+    """判断公开 ``qoder`` 是否只是 Desktop/旧 CLI 的分发入口。"""
+    p = Path(path)
+    if p.stem.lower() != "qoder":
+        return False
+    wrapper = _read_wrapper(path)
+    return any(marker in wrapper for marker in (
+        "BRIDGE_DISPATCHER", "qoder-npm-dispatcher", "qoder-dispatcher.ps1",
+    ))
+
+
+def _legacy_cli_candidates() -> list[str]:
+    """列出真正的旧版 qodercli 入口，不返回公开 qoder dispatcher。"""
+    candidates: list[str] = []
+    legacy_override = os.environ.get("QODERCLI_PATH")
+    if legacy_override:
+        candidates.append(legacy_override)
+    found = shutil.which("qodercli")
+    if found:
+        candidates.append(found)
+    user_cli = Path.home() / ".qoder" / "bin" / "qodercli" / "qodercli.exe"
+    if user_cli.is_file():
+        candidates.append(str(user_cli))
+    return candidates
+
+
+def _actual_cli_entry(candidate: str) -> str:
+    """把公开 dispatcher 规范化为其实际 qodercli，避免混报 Desktop/CLI。"""
+    if not _is_qoder_dispatcher(candidate):
+        return candidate
+    candidate_key = os.path.normcase(os.path.abspath(candidate))
+    for legacy in _legacy_cli_candidates():
+        if not Path(legacy).is_file():
+            continue
+        if os.path.normcase(os.path.abspath(legacy)) != candidate_key:
+            return legacy
+    return candidate
+
+
+def _desktop_candidates() -> list[str]:
+    """从 Desktop 安装位置发现 Qoder，不借用 qoder/qodercli 的 CLI 状态。"""
+    candidates: list[str] = []
+    explicit = os.environ.get("QODER_IDE_BIN")
+    if explicit:
+        candidates.append(explicit)
+    if os.name == "nt":
+        for env_name in ("ProgramFiles", "LOCALAPPDATA"):
+            root = os.environ.get(env_name)
+            if not root:
+                continue
+            base = Path(root)
+            candidates.extend((
+                str(base / "Qoder" / "Qoder.exe"),
+                str(base / "Programs" / "Qoder" / "Qoder.exe"),
+            ))
+        public = shutil.which("qoder")
+        if public:
+            public_path = Path(public)
+            if public_path.parent.name.lower() == "bin":
+                candidates.append(str(public_path.parent.parent / "Qoder.exe"))
+    return candidates
+
+
+def _discover_desktop() -> dict[str, Any]:
+    """返回独立 Desktop 证据；只执行本机 ``--version``，不触发模型。"""
+    seen: set[str] = set()
+    for raw in _desktop_candidates():
+        candidate = Path(raw)
+        key = os.path.normcase(os.path.abspath(str(candidate)))
+        if key in seen:
+            continue
+        seen.add(key)
+        if not candidate.is_file():
+            continue
+
+        desktop_path = candidate
+        launcher_path: Optional[Path] = None
+        if candidate.name.lower() == "qoder.exe":
+            native = candidate.parent / "bin" / "code.cmd"
+            launcher_path = native if native.is_file() else None
+        elif candidate.parent.name.lower() == "bin":
+            installed_exe = candidate.parent.parent / "Qoder.exe"
+            if installed_exe.is_file():
+                desktop_path = installed_exe
+            native = candidate.parent / "code.cmd"
+            launcher_path = native if native.is_file() else candidate
+        else:
+            launcher_path = candidate
+
+        version: Optional[str] = None
+        version_error: Optional[str] = None
+        if launcher_path:
+            try:
+                probe = subprocess.run(
+                    [str(launcher_path), "--version"], capture_output=True, text=True,
+                    encoding="utf-8", errors="replace", timeout=12,
+                )
+                version = _first_output_line(probe)
+                if not version:
+                    version_error = "Desktop 版本探针未返回可用版本"
+            except Exception as exc:  # noqa: BLE001
+                version_error = f"Desktop 版本检测失败：{exc}"
+        return {
+            "installed": True,
+            "status": "installed" if version else "installed_version_unknown",
+            "path": str(desktop_path),
+            "launcher_path": str(launcher_path) if launcher_path else None,
+            "version": version,
+            "error": version_error,
+        }
+    return {
+        "installed": False,
+        "status": "not_detected",
+        "path": None,
+        "launcher_path": None,
+        "version": None,
+        "error": None,
+    }
+
+
 def _default_cli() -> str:
     """解析可执行的 Qoder Agent CLI。
 
@@ -68,7 +205,8 @@ def _default_cli() -> str:
 
     errors: list[str] = []
     seen: set[str] = set()
-    for candidate in candidates:
+    for raw_candidate in candidates:
+        candidate = _actual_cli_entry(raw_candidate)
         key = os.path.normcase(os.path.abspath(candidate))
         if key in seen:
             continue
@@ -91,15 +229,10 @@ def _default_cli() -> str:
 
 def _find_legacy_cli() -> Optional[str]:
     """找到 dispatcher 最终调用的 qodercli，用于绕过 Windows CMD 编码层。"""
-    for env_name in ("QODER_CLI_BIN", "QODERCLI_PATH"):
-        value = os.environ.get(env_name)
-        if value and Path(value).is_file():
-            return value
-    found = shutil.which("qodercli")
-    if found:
-        return found
-    user_cli = Path.home() / ".qoder" / "bin" / "qodercli" / "qodercli.exe"
-    return str(user_cli) if user_cli.is_file() else None
+    for candidate in _legacy_cli_candidates():
+        if Path(candidate).is_file():
+            return candidate
+    return None
 
 
 def _resolve_cmd(cli_path: str) -> list[str]:
@@ -117,10 +250,7 @@ def _resolve_cmd(cli_path: str) -> list[str]:
     p = Path(cli_path)
     if p.suffix.upper() not in (".CMD", ".BAT"):
         return [cli_path]
-    try:
-        wrapper = p.read_text(encoding="utf-8", errors="ignore")[:5000]
-    except OSError:
-        wrapper = ""
+    wrapper = _read_wrapper(cli_path)
     # Qoder CN 的 qoder.cmd → ~/.qoder/entry dispatcher → qodercli。直接解析
     # 最终 CLI，保留原有绕过 CMD/CP936 的中文参数修复。
     if p.stem.lower() == "qoder" and (
@@ -169,19 +299,10 @@ class QoderAdapter(AgentAdapter):
         errors: list[str] = []
         config_dir = Path.home() / ".qoder"
 
-        ide_path = os.environ.get("QODER_IDE_BIN") or shutil.which("qoder")
-        ide_available = bool(ide_path and Path(ide_path).exists())
-        ide_version: Optional[str] = None
-        if ide_available:
-            try:
-                probe = subprocess.run(
-                    [str(ide_path), "ide", "--version"], capture_output=True,
-                    text=True, encoding="utf-8", errors="replace", timeout=12,
-                )
-                lines = [line.strip() for line in probe.stdout.splitlines() if line.strip()]
-                ide_version = lines[0] if lines else None
-            except Exception as exc:  # noqa: BLE001
-                errors.append(f"Qoder IDE 版本检测失败：{exc}")
+        desktop = _discover_desktop()
+        desktop_installed = bool(desktop["installed"])
+        if desktop.get("error"):
+            errors.append(str(desktop["error"]))
 
         command_path = config_dir / "commands" / "gowrite.md"
         command_ready = False
@@ -194,17 +315,34 @@ class QoderAdapter(AgentAdapter):
 
         cli_path: Optional[str] = None
         cli_version: Optional[str] = None
+        cli_usable = False
+        cli_kind = "not_detected"
+        launch: list[str] = []
         auth_status = "not_detected"
         allow_byok = False
         profiles: list[dict[str, Any]] = []
         try:
             cli_path = _default_cli()
             launch = _resolve_cmd(cli_path)
+            cli_kind = "legacy_qodercli" if any(
+                "qodercli" in str(part).lower() for part in (cli_path, *launch)
+            ) else "current_cli"
+            help_probe = subprocess.run(
+                launch + ["--help"], capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=12,
+            )
+            help_text = f"{help_probe.stdout}\n{help_probe.stderr}"
+            cli_usable = (
+                "--print" in help_text
+                and "--list-models" in help_text
+            )
+            if not cli_usable:
+                raise RuntimeError("检测到 CLI 文件，但未通过直接执行能力验证")
             version_probe = subprocess.run(
                 launch + ["--version"], capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=12,
             )
-            cli_version = next((x.strip() for x in version_probe.stdout.splitlines() if x.strip()), None)
+            cli_version = _first_output_line(version_probe)
 
             logged_in: Optional[bool] = None
             status_probe = subprocess.run(
@@ -280,43 +418,71 @@ class QoderAdapter(AgentAdapter):
             errors.append(str(exc))
 
         direct_available = any(profile.get("available") for profile in profiles)
-        installed = ide_available or cli_path is not None
-        if ide_version and cli_version and ide_version != cli_version:
-            environment_version = f"IDE {ide_version} / CLI {cli_version}"
+        installed = desktop_installed or cli_path is not None
+        components = []
+        if desktop.get("version"):
+            components.append(f"Desktop {desktop['version']}")
+        if cli_version:
+            legacy_suffix = "（旧版兼容）" if cli_kind == "legacy_qodercli" else ""
+            components.append(f"CLI {cli_version}{legacy_suffix}")
+        environment_version = " / ".join(components) or None
+        bridge_ready = desktop_installed and command_ready
+        if not desktop_installed:
+            interactive_hint = "未检测到 Qoder Desktop；交互桥不可用。"
+        elif not command_ready:
+            interactive_hint = "已检测到 Qoder Desktop，但未检测到适用于当前 Desktop 的 /gowrite 命令文件。"
         else:
-            environment_version = cli_version or ide_version
+            interactive_hint = None
         return {
             "agent_id": cls.name,
             "display_name": "Qoder / Qoder CN",
             "installed": installed,
-            "available": installed,
+            "available": bridge_ready or direct_available,
             "version": environment_version,
             "errors": errors,
+            "desktop": desktop,
+            "cli": {
+                "detected": cli_path is not None,
+                "usable": cli_usable,
+                "status": (
+                    auth_status if cli_usable
+                    else "unusable" if cli_path
+                    else "not_detected"
+                ),
+                "kind": cli_kind,
+                "path": cli_path,
+                "resolved_command": launch if cli_path else [],
+                "version": cli_version,
+            },
             "interactive": {
-                "available": ide_available,
-                "bridge_ready": command_ready,
+                "available": desktop_installed,
+                "bridge_ready": bridge_ready,
                 "command_name": "/gowrite",
                 "command_ready": command_ready,
                 "command_path": str(command_path),
                 "relevant_status": {
-                    "ide_version": ide_version,
+                    "desktop_path": desktop.get("path"),
+                    "desktop_version": desktop.get("version"),
+                    "desktop_status": desktop.get("status"),
                     "config_dir": str(config_dir) if config_dir.is_dir() else None,
                 },
-                "repair_hint": None if command_ready else "未检测到适用于当前 Qoder 安装的 /gowrite 命令文件。",
+                "repair_hint": interactive_hint,
             },
             "direct": {
                 "available": direct_available,
                 "auth_status": auth_status,
                 "execution_profiles": profiles,
                 "capabilities": {
-                    "run": cli_path is not None,
+                    "run": cli_usable,
                     "cancel": True,
                     "model_selection": "profile",
                     "reasoning_effort": True,
                     "byok": allow_byok,
                 },
                 "executable_path": cli_path,
+                "resolved_command": launch if cli_path else [],
                 "cli_version": cli_version,
+                "cli_kind": cli_kind,
             },
         }
 

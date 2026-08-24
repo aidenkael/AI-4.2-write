@@ -179,6 +179,25 @@ export interface DirectEnvironment {
   capabilities: Record<string, unknown>
 }
 
+export interface DesktopEnvironment {
+  installed: boolean
+  status: string
+  path: string | null
+  launcher_path: string | null
+  version: string | null
+  error?: string | null
+}
+
+export interface CliEnvironment {
+  detected: boolean
+  usable: boolean
+  status: string
+  kind: string
+  path: string | null
+  resolved_command: string[]
+  version: string | null
+}
+
 export interface AgentEnvironment {
   agent_id: string
   display_name: string
@@ -186,6 +205,8 @@ export interface AgentEnvironment {
   available: boolean
   version: string | null
   errors: string[]
+  desktop?: DesktopEnvironment
+  cli?: CliEnvironment
   interactive: InteractiveEnvironment
   direct: DirectEnvironment
 }
