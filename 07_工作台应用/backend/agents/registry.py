@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+from typing import Any
+
 from agents.base import AgentAdapter, AgentRequest, AgentResult  # noqa: F401
 from agents.deepseek_harness import DeepSeekHarnessAdapter
 from agents.qoder import QoderAdapter
@@ -26,3 +28,34 @@ def get_agent(name: str) -> AgentAdapter:
     if name not in _REGISTRY:
         raise KeyError(f"未知 Agent: {name}")
     return _REGISTRY[name]()
+
+
+def discover_all() -> list[dict[str, Any]]:
+    """读取所有注册 Agent 的本机能力；单个 Agent 失败不阻断其余发现。"""
+    environments: list[dict[str, Any]] = []
+    for name in available():
+        adapter_type = _REGISTRY[name]
+        try:
+            environments.append(adapter_type.discover())
+        except Exception as exc:  # noqa: BLE001 — discovery 边界必须稳定
+            environments.append({
+                "agent_id": name,
+                "display_name": name,
+                "installed": False,
+                "available": False,
+                "version": None,
+                "errors": [str(exc) or type(exc).__name__],
+                "interactive": {
+                    "available": False,
+                    "bridge_ready": False,
+                    "command_name": "/gowrite",
+                    "command_ready": False,
+                },
+                "direct": {
+                    "available": False,
+                    "auth_status": "not_detected",
+                    "execution_profiles": [],
+                    "capabilities": {},
+                },
+            })
+    return environments

@@ -195,12 +195,23 @@ def test_byok_request_overrides_default_model(tmp_path):
 # ---------- 8. provider/model 目录能通过官方 SDK取得 ----------
 # 真实 SDK 读取（复用 qodercli 登录，只读目录，无费用）；CLI 不可用时跳过。
 
-def test_list_byok_providers_via_sdk():
-    try:
-        _default_cli()
-    except RuntimeError as exc:
-        pytest.skip(f"Qoder CLI 不可用：{exc}")
-    a = QoderAdapter()
+def test_list_byok_providers_via_sdk(monkeypatch):
+    import types
+
+    class FakeClient:
+        def __init__(self, options): self.options = options
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): return None
+        async def list_byok_providers(self):
+            return [{"key": "local", "display_name": "Local", "types": []}]
+
+    fake_sdk = types.SimpleNamespace(
+        QoderAgentOptions=lambda **kwargs: kwargs,
+        QoderSDKClient=FakeClient,
+        qodercli_auth=lambda: "fake-auth",
+    )
+    monkeypatch.setitem(sys.modules, "qoder_agent_sdk", fake_sdk)
+    a = QoderAdapter(launch=[sys.executable, "-c", "pass"])
     providers = a.list_byok_providers()
     assert providers is not None, "CLI 应支持 get_byok_config 或返回 None（较旧版本）"
     # 官方 BYOKProviderInfo 目录：至少包含 provider 的 key 与 display_name
@@ -210,15 +221,16 @@ def test_list_byok_providers_via_sdk():
     assert first.get("key") and first.get("display_name")
 
 
-def test_list_qoder_models_dynamic():
+def test_list_qoder_models_dynamic(monkeypatch):
     """Qoder 自带模型目录动态读取（不硬编码名单）。"""
-    try:
-        _default_cli()
-    except RuntimeError as exc:
-        pytest.skip(f"Qoder CLI 不可用：{exc}")
-    a = QoderAdapter()
+    class Result:
+        returncode = 0
+        stdout = "MODEL\nlocal-a\nlocal-b\n"
+        stderr = ""
+    monkeypatch.setattr("agents.qoder.subprocess.run", lambda *_args, **_kwargs: Result())
+    a = QoderAdapter(launch=[sys.executable, "-c", "pass"])
     models = a.list_qoder_models()
-    assert isinstance(models, list) and models
+    assert models == ["local-a", "local-b"]
     assert all(isinstance(m, str) and m.strip() for m in models)
 
 

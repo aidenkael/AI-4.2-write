@@ -15,7 +15,27 @@ TEST_SERVICE = f"ai-write-test-{uuid.uuid4().hex[:8]}"
 @pytest.fixture()
 def bridge(tmp_path, monkeypatch):
     monkeypatch.setenv("AI_WRITE_CONFIG_DIR", str(tmp_path))
+    values = {}
+    class FakeKeyring:
+        def set_password(self, service, secret_id, token): values[(service, secret_id)] = token
+        def get_password(self, service, secret_id): return values.get((service, secret_id))
+        def delete_password(self, service, secret_id): values.pop((service, secret_id), None)
+    monkeypatch.setattr("config.secrets._keyring", FakeKeyring())
     monkeypatch.setattr(ops, "SecretStore", lambda: SecretStore(service=TEST_SERVICE))
+    monkeypatch.setattr(ops, "registry_discover_all", lambda: [
+        {
+            "agent_id": "qoder", "display_name": "Qoder", "installed": True,
+            "available": True, "version": "test", "errors": [],
+            "interactive": {"available": True, "bridge_ready": False, "command_name": "/gowrite", "command_ready": False},
+            "direct": {"available": False, "auth_status": "not_authenticated", "execution_profiles": [], "capabilities": {}},
+        },
+        {
+            "agent_id": "deepseek_harness", "display_name": "Harness", "installed": True,
+            "available": True, "version": "test", "errors": [],
+            "interactive": {"available": True, "bridge_ready": False, "command_name": "/gowrite", "command_ready": False},
+            "direct": {"available": True, "auth_status": "configured", "execution_profiles": [{"id": "headless", "display_name": "Headless", "type": "harness_profile", "available": True, "model_selection": "managed", "models": []}], "capabilities": {}},
+        },
+    ])
     return AppApi()
 
 
@@ -29,7 +49,7 @@ def test_get_agent_settings_contract(bridge):
     assert resp["error"] is None
     data = resp["data"]
     assert "settings" in data and "agents" in data and "byok" in data
-    ids = {a["id"] for a in data["agents"]}
+    ids = {a["agent_id"] for a in data["agents"]}
     assert ids == {"deepseek_harness", "qoder"}
 
 

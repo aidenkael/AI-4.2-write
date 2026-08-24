@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """普通设置存储（不含任何 Token）。
 
-- 保存内容：default_agent / qoder_mode / qoder_model / reasoning_effort /
-  byok_provider / byok_model / byok_secret_id（keyring 引用，非明文）。
+- 保存交互桥/直接执行的选择标识，以及兼容旧运行入口所需的 Qoder 字段。
 - Token 永不写入本文件（见 secrets.py，真正 Token 在 Windows 凭据存储）。
 - 配置文件默认放用户主目录 ~/.ai-write/settings.json（可用环境变量
   AI_WRITE_CONFIG_DIR 覆盖，测试用临时目录）。
@@ -23,6 +22,10 @@ VALID_QODER_MODES = (QODER_MODE_NATIVE, QODER_MODE_BYOK)
 # 当前注册的 Agent（与 registry 一致；Codex 未实现，不出现在候选里）
 VALID_AGENTS = ("deepseek_harness", "qoder")
 
+EXECUTION_MODE_INTERACTIVE = "interactive_bridge"
+EXECUTION_MODE_DIRECT = "direct"
+VALID_EXECUTION_MODES = (EXECUTION_MODE_INTERACTIVE, EXECUTION_MODE_DIRECT)
+
 # Qoder CLI / SDK 当前真实支持的 reasoning effort 档位（来自官方枚举，不硬编码模型名）
 REASONING_EFFORT_OPTIONS = ("none", "low", "medium", "high", "xhigh", "max")
 
@@ -32,6 +35,13 @@ SETTINGS_FILENAME = "settings.json"
 class AppSettings:
     """AI-write 应用普通设置（可 JSON 序列化，不含 Token）。"""
 
+    default_execution_mode: str = EXECUTION_MODE_INTERACTIVE
+    interactive_agent: str = "qoder"
+    direct_agent: str = "qoder"
+    direct_profile_id: Optional[str] = None
+    direct_model: Optional[str] = None
+
+    # 旧字段保留给现有 agent_runner；Settings feature 保存时同步更新。
     default_agent: str = "qoder"
     qoder_mode: str = QODER_MODE_NATIVE  # qoder_native | qoder_byok
     qoder_model: Optional[str] = None      # Qoder 自带模型名（动态列表取值）
@@ -45,10 +55,29 @@ class AppSettings:
 
     @classmethod
     def from_dict(cls, raw: dict) -> "AppSettings":
-        """只取已知字段；未知字段（如误入的 Token）一律丢弃。"""
+        """只取已知字段，并从旧 settings.json 做最小兼容迁移。"""
+        raw = raw or {}
         known = {f.name for f in fields(cls)}
-        data = {k: v for k, v in (raw or {}).items() if k in known}
-        return cls(**data)
+        data = {k: v for k, v in raw.items() if k in known}
+        settings = cls(**data)
+        legacy_agent = str(raw.get("default_agent") or settings.default_agent)
+        if "interactive_agent" not in raw:
+            settings.interactive_agent = legacy_agent
+        if "direct_agent" not in raw:
+            settings.direct_agent = legacy_agent
+        if "direct_profile_id" not in raw:
+            if legacy_agent == "deepseek_harness":
+                settings.direct_profile_id = "headless"
+            elif raw.get("qoder_mode") == QODER_MODE_BYOK and raw.get("byok_provider"):
+                settings.direct_profile_id = f"byok:{raw['byok_provider']}"
+            elif raw.get("qoder_model"):
+                settings.direct_profile_id = "native"
+        if "direct_model" not in raw:
+            settings.direct_model = None if legacy_agent != "qoder" else (
+                raw.get("byok_model") if raw.get("qoder_mode") == QODER_MODE_BYOK
+                else raw.get("qoder_model")
+            )
+        return settings
 
 
 class SettingsError(Exception):

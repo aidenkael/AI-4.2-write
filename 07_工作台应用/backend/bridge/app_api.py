@@ -128,7 +128,7 @@ class AppApi:
             return _err(CODE_BRIDGE_INTERNAL, str(exc))
 
     def test_agent_connection(self, payload: dict) -> dict:
-        """测试连接：无副作用任务 + 临时目录；BYOK 未配置 Token 时不真实调用。"""
+        """测试连接：只检查本机 discovery/profile/auth，不执行模型。"""
         try:
             return _ok(settings_ops.test_agent_connection(payload))
         except SettingsOpError as exc:

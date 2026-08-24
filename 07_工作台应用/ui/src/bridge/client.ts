@@ -141,20 +141,53 @@ export async function getProjectOverview(projectId: string): Promise<ProjectOver
 
 // ---------------- Agent / 模型 / Token 设置 ----------------
 
-export interface AgentCapabilities {
-  run: boolean
-  cancel: boolean
-  model_selection: string
-  byok?: boolean
-  reasoning_effort?: boolean
-  [key: string]: unknown
+export type ExecutionMode = 'interactive_bridge' | 'direct'
+
+export interface DiscoveredModel {
+  id: string
+  display_name: string
+  selectable: boolean
+  selected?: boolean
+  reasoning_efforts?: string[]
 }
 
-export interface AgentInfo {
+export interface ExecutionProfile {
   id: string
+  display_name: string
+  type: string
   available: boolean
-  capabilities: AgentCapabilities | null
-  error: string | null
+  model_selection: 'selectable' | 'managed' | 'none'
+  provider_id?: string | null
+  models: DiscoveredModel[]
+  reasoning_effort_options?: string[]
+  error?: string | null
+}
+
+export interface InteractiveEnvironment {
+  available: boolean
+  bridge_ready: boolean
+  command_name: string
+  command_ready: boolean
+  relevant_status?: Record<string, string | null>
+  repair_hint?: string | null
+}
+
+export interface DirectEnvironment {
+  available: boolean
+  auth_status: string
+  execution_profiles: ExecutionProfile[]
+  capabilities: Record<string, unknown>
+}
+
+export interface AgentEnvironment {
+  agent_id: string
+  display_name: string
+  installed: boolean
+  available: boolean
+  version: string | null
+  errors: string[]
+  interactive: InteractiveEnvironment
+  direct: DirectEnvironment
 }
 
 export interface ByokModel {
@@ -177,6 +210,11 @@ export interface ByokProvider {
 }
 
 export interface AgentSettings {
+  default_execution_mode: ExecutionMode
+  interactive_agent: string
+  direct_agent: string
+  direct_profile_id: string | null
+  direct_model: string | null
   default_agent: string
   qoder_mode: string
   qoder_model: string | null
@@ -188,8 +226,9 @@ export interface AgentSettings {
 
 export interface AgentSettingsData {
   settings: AgentSettings
-  agents: AgentInfo[]
+  agents: AgentEnvironment[]
   byok: { secret_id: string | null; has_secret: boolean }
+  reasoning_effort_options: string[]
 }
 
 export interface AgentOptionsData {
@@ -218,14 +257,7 @@ export async function getAgentOptions(): Promise<AgentOptionsData> {
 }
 
 /** 保存普通设置（不含 Token）。 */
-export async function saveAgentSettings(settings: {
-  default_agent: string
-  qoder_mode?: string
-  qoder_model?: string | null
-  reasoning_effort?: string | null
-  byok_provider?: string | null
-  byok_model?: string | null
-}): Promise<{ settings: AgentSettings }> {
+export async function saveAgentSettings(settings: Partial<AgentSettings>): Promise<{ settings: AgentSettings }> {
   return call<{ settings: AgentSettings }>('save_agent_settings', settings)
 }
 
@@ -242,11 +274,9 @@ export async function deleteByokSecret(): Promise<{ secret_id: string | null; ha
 /** 测试连接（无副作用任务 + 临时目录）；BYOK 未配置 Token 时返回 not_configured。 */
 export async function testAgentConnection(payload: {
   agent: string
-  qoder_mode?: string
-  qoder_model?: string | null
+  profile_id?: string | null
+  model?: string | null
   reasoning_effort?: string | null
-  byok_provider?: string | null
-  byok_model?: string | null
 }): Promise<ConnectionTestResult> {
   return call<ConnectionTestResult>('test_agent_connection', payload)
 }

@@ -30,7 +30,40 @@ TEST_SERVICE = f"ai-write-test-{uuid.uuid4().hex[:8]}"
 def config_dir(tmp_path, monkeypatch):
     """把普通设置目录指到临时目录；keyring 用测试服务名。"""
     monkeypatch.setenv("AI_WRITE_CONFIG_DIR", str(tmp_path))
+    values = {}
+    class FakeKeyring:
+        def set_password(self, service, secret_id, token): values[(service, secret_id)] = token
+        def get_password(self, service, secret_id): return values.get((service, secret_id))
+        def delete_password(self, service, secret_id): values.pop((service, secret_id), None)
+    monkeypatch.setattr("config.secrets._keyring", FakeKeyring())
     monkeypatch.setattr(ops, "SecretStore", lambda: SecretStore(service=TEST_SERVICE))
+    monkeypatch.setattr(ops, "registry_discover_all", lambda: [
+        {
+            "agent_id": "qoder", "display_name": "Qoder", "installed": True,
+            "available": True, "version": "test", "errors": [],
+            "interactive": {"available": True, "bridge_ready": True, "command_name": "/gowrite", "command_ready": True},
+            "direct": {
+                "available": True, "auth_status": "authenticated", "capabilities": {},
+                "execution_profiles": [{
+                    "id": "native", "display_name": "Qoder account", "type": "native_account",
+                    "available": True, "model_selection": "selectable",
+                    "models": [{"id": "local-model", "display_name": "Local Model", "selectable": True}],
+                }],
+            },
+        },
+        {
+            "agent_id": "deepseek_harness", "display_name": "Harness", "installed": True,
+            "available": True, "version": "test", "errors": [],
+            "interactive": {"available": True, "bridge_ready": False, "command_name": "/gowrite", "command_ready": False},
+            "direct": {
+                "available": True, "auth_status": "configured", "capabilities": {},
+                "execution_profiles": [{
+                    "id": "headless", "display_name": "Headless", "type": "harness_profile",
+                    "available": True, "model_selection": "managed", "models": [],
+                }],
+            },
+        },
+    ])
     return tmp_path
 
 
@@ -38,12 +71,12 @@ def config_dir(tmp_path, monkeypatch):
 
 def test_get_agent_settings_shape(config_dir):
     data = ops.get_agent_settings()
-    assert set(data.keys()) == {"settings", "agents", "byok"}
+    assert set(data.keys()) == {"settings", "agents", "byok", "reasoning_effort_options"}
     # 两个真实 Agent 都出现，无假数据
-    ids = {a["id"] for a in data["agents"]}
+    ids = {a["agent_id"] for a in data["agents"]}
     assert ids == {"deepseek_harness", "qoder"}
     for a in data["agents"]:
-        assert "available" in a and "capabilities" in a and "error" in a
+        assert "available" in a and "interactive" in a and "direct" in a
     # 默认 byok 未配置
     assert data["byok"]["has_secret"] is False
 
@@ -84,6 +117,20 @@ def test_save_agent_settings_valid(config_dir):
     data = ops.get_agent_settings()
     assert data["settings"]["default_agent"] == "qoder"
     assert data["settings"]["qoder_model"] == "Qwen3.8-Max"
+
+
+def test_save_new_direct_selection(config_dir):
+    saved = ops.save_agent_settings({
+        "default_execution_mode": "direct",
+        "interactive_agent": "qoder",
+        "direct_agent": "deepseek_harness",
+        "direct_profile_id": "headless",
+        "direct_model": None,
+    })
+    assert saved["default_execution_mode"] == "direct"
+    assert saved["direct_agent"] == "deepseek_harness"
+    assert saved["direct_profile_id"] == "headless"
+    assert saved["default_agent"] == "deepseek_harness"
 
 
 def test_save_agent_settings_invalid_agent(config_dir):
@@ -143,7 +190,33 @@ def test_connection_qoder_byok_not_configured(config_dir):
         "byok_model": "qwen-max",
     })
     assert r["status"] == "not_configured"
-    assert "Token" in r["message"]
+    assert "未发送模型请求" in r["message"]
+
+
+def test_connection_is_discovery_only(config_dir, monkeypatch):
+    def must_not_construct(_name):
+        raise AssertionError("routine connection test must not construct/run an adapter")
+    monkeypatch.setattr("agents.registry.get_agent", must_not_construct)
+    result = ops.test_agent_connection({
+        "agent": "deepseek_harness", "profile_id": "headless",
+    })
+    assert result["status"] == "ok"
+    assert "未调用模型" in result["message"]
+
+
+def test_invalid_stored_selection_is_preserved(config_dir):
+    from config.settings import AppSettings, SettingsStore
+    SettingsStore().save(AppSettings(
+        default_execution_mode="direct",
+        direct_agent="qoder",
+        direct_profile_id="removed-profile",
+        direct_model="removed-model",
+    ))
+    loaded = ops.get_agent_settings()["settings"]
+    assert loaded["direct_profile_id"] == "removed-profile"
+    assert loaded["direct_model"] == "removed-model"
+    with pytest.raises(ops.SettingsOpError):
+        ops.save_agent_settings(loaded)
 
 
 def test_connection_unknown_agent(config_dir):

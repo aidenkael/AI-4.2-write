@@ -28,6 +28,7 @@ QoderAdapter 内部支持两种原生路径，业务层仍只看到同一个 Qod
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shutil
 import subprocess
@@ -43,17 +44,62 @@ _DEFAULT_PERMISSION_MODE = "dontAsk"  # SDK 取值；CLI 路径翻译为 dont_as
 
 
 def _default_cli() -> str:
-    """解析 qodercli 可执行入口（QODERCLI_PATH → PATH 上的 qodercli）。"""
-    env = os.environ.get("QODERCLI_PATH")
-    if env:
-        p = Path(env)
-        if p.exists():
-            return str(p)
-        raise RuntimeError(f"环境变量 QODERCLI_PATH 指向不存在的文件: {env}")
-    cli = shutil.which("qodercli")
-    if cli:
-        return cli
-    raise RuntimeError("找不到 Qoder CLI（可用 launch 参数或环境变量 QODERCLI_PATH 指定）")
+    """解析可执行的 Qoder Agent CLI。
+
+    新版 Qoder CN 的公开 ``qoder`` 是统一 dispatcher，旧安装则可能只提供
+    ``qodercli``。显式覆盖优先，其后逐一用本机 ``--help`` 验证 Agent CLI
+    flags；不会仅凭文件名猜测入口。
+    """
+    candidates: list[str] = []
+    for env_name in ("QODER_CLI_BIN", "QODERCLI_PATH"):
+        value = os.environ.get(env_name)
+        if value:
+            p = Path(value)
+            if not p.is_file():
+                raise RuntimeError(f"环境变量 {env_name} 指向不存在的文件: {value}")
+            candidates.append(str(p))
+    for command in ("qoder", "qodercli"):
+        found = shutil.which(command)
+        if found:
+            candidates.append(found)
+    user_cli = Path.home() / ".qoder" / "bin" / "qodercli" / "qodercli.exe"
+    if user_cli.is_file():
+        candidates.append(str(user_cli))
+
+    errors: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = os.path.normcase(os.path.abspath(candidate))
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            cmd = _resolve_cmd(candidate)
+            probe = subprocess.run(
+                cmd + ["--help"], capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=12,
+            )
+            help_text = f"{probe.stdout}\n{probe.stderr}"
+            if "--print" in help_text and "--list-models" in help_text:
+                return candidate
+            errors.append(f"{Path(candidate).name} 不是 Agent CLI")
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{Path(candidate).name}: {exc}")
+    detail = "；".join(errors[-3:])
+    raise RuntimeError(f"找不到可用的 Qoder Agent CLI{f'（{detail}）' if detail else ''}")
+
+
+def _find_legacy_cli() -> Optional[str]:
+    """找到 dispatcher 最终调用的 qodercli，用于绕过 Windows CMD 编码层。"""
+    for env_name in ("QODER_CLI_BIN", "QODERCLI_PATH"):
+        value = os.environ.get(env_name)
+        if value and Path(value).is_file():
+            return value
+    found = shutil.which("qodercli")
+    if found:
+        return found
+    user_cli = Path.home() / ".qoder" / "bin" / "qodercli" / "qodercli.exe"
+    return str(user_cli) if user_cli.is_file() else None
 
 
 def _resolve_cmd(cli_path: str) -> list[str]:
@@ -71,6 +117,19 @@ def _resolve_cmd(cli_path: str) -> list[str]:
     p = Path(cli_path)
     if p.suffix.upper() not in (".CMD", ".BAT"):
         return [cli_path]
+    try:
+        wrapper = p.read_text(encoding="utf-8", errors="ignore")[:5000]
+    except OSError:
+        wrapper = ""
+    # Qoder CN 的 qoder.cmd → ~/.qoder/entry dispatcher → qodercli。直接解析
+    # 最终 CLI，保留原有绕过 CMD/CP936 的中文参数修复。
+    if p.stem.lower() == "qoder" and (
+        "BRIDGE_DISPATCHER" in wrapper or "qoder-npm-dispatcher" in wrapper
+        or "qoder-dispatcher.ps1" in wrapper
+    ):
+        legacy = _find_legacy_cli()
+        if legacy and os.path.normcase(os.path.abspath(legacy)) != os.path.normcase(os.path.abspath(cli_path)):
+            return _resolve_cmd(legacy)
     npm_dir = p.parent
     # 定位 Node.js：优先 npm 目录下的 node.exe，其次系统 PATH
     node_exe = shutil.which("node")
@@ -103,6 +162,163 @@ class QoderAdapter(AgentAdapter):
     """Qoder Adapter：CLI 自带模型路径 + SDK BYOK 路径。"""
 
     name = "qoder"
+
+    @classmethod
+    def discover(cls) -> dict[str, Any]:
+        """发现 Qoder/Qoder CN 的交互与直接执行能力，不发送模型请求。"""
+        errors: list[str] = []
+        config_dir = Path.home() / ".qoder"
+
+        ide_path = os.environ.get("QODER_IDE_BIN") or shutil.which("qoder")
+        ide_available = bool(ide_path and Path(ide_path).exists())
+        ide_version: Optional[str] = None
+        if ide_available:
+            try:
+                probe = subprocess.run(
+                    [str(ide_path), "ide", "--version"], capture_output=True,
+                    text=True, encoding="utf-8", errors="replace", timeout=12,
+                )
+                lines = [line.strip() for line in probe.stdout.splitlines() if line.strip()]
+                ide_version = lines[0] if lines else None
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"Qoder IDE 版本检测失败：{exc}")
+
+        command_path = config_dir / "commands" / "gowrite.md"
+        command_ready = False
+        if command_path.is_file():
+            try:
+                command_text = command_path.read_text(encoding="utf-8", errors="replace")
+                command_ready = ".qoder_bridge" in command_text and "request_id" in command_text
+            except OSError:
+                command_ready = False
+
+        cli_path: Optional[str] = None
+        cli_version: Optional[str] = None
+        auth_status = "not_detected"
+        allow_byok = False
+        profiles: list[dict[str, Any]] = []
+        try:
+            cli_path = _default_cli()
+            launch = _resolve_cmd(cli_path)
+            version_probe = subprocess.run(
+                launch + ["--version"], capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=12,
+            )
+            cli_version = next((x.strip() for x in version_probe.stdout.splitlines() if x.strip()), None)
+
+            logged_in: Optional[bool] = None
+            status_probe = subprocess.run(
+                launch + ["status", "-o", "json"], capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=12,
+            )
+            if status_probe.returncode == 0:
+                try:
+                    status = json.loads(status_probe.stdout)
+                    logged_in = bool(status.get("logged_in"))
+                    allow_byok = bool(status.get("allow_byok"))
+                    cli_version = str(status.get("version") or cli_version or "") or None
+                    auth_status = "authenticated" if logged_in else "not_authenticated"
+                except (ValueError, TypeError):
+                    auth_status = "unknown"
+            else:
+                auth_status = "unknown"
+
+            native_models: list[str] = []
+            native_error: Optional[str] = None
+            if logged_in:
+                try:
+                    native_models = cls(cli_path=cli_path).list_qoder_models()
+                except Exception as exc:  # noqa: BLE001
+                    native_error = str(exc)
+            elif logged_in is False:
+                native_error = "Qoder CLI 当前未登录"
+            profiles.append({
+                "id": "native",
+                "display_name": "Qoder 账户",
+                "type": "native_account",
+                "available": bool(logged_in and native_models),
+                "model_selection": "selectable",
+                "models": [
+                    {"id": model, "display_name": model, "selectable": True}
+                    for model in native_models
+                ],
+                "reasoning_effort_options": ["none", "low", "medium", "high", "xhigh", "max"],
+                "error": native_error,
+            })
+
+            if allow_byok and logged_in:
+                try:
+                    providers = cls(cli_path=cli_path).list_byok_providers() or []
+                    for provider in providers:
+                        provider_id = str(provider.get("key") or "").strip()
+                        for provider_type in provider.get("types") or []:
+                            type_id = str(provider_type.get("key") or "").strip()
+                            models = provider_type.get("models") or []
+                            if not provider_id or not type_id:
+                                continue
+                            profiles.append({
+                                "id": f"byok:{provider_id}:{type_id}",
+                                "display_name": str(provider_type.get("display_name") or provider.get("display_name") or provider_id),
+                                "type": "byok",
+                                "provider_id": provider_id,
+                                "available": bool(models),
+                                "model_selection": "selectable",
+                                "models": [
+                                    {
+                                        "id": str(model.get("key") or ""),
+                                        "display_name": str(model.get("display_name") or model.get("key") or ""),
+                                        "selectable": True,
+                                        "reasoning_efforts": model.get("efforts") or [],
+                                    }
+                                    for model in models if model.get("key")
+                                ],
+                                "reasoning_effort_options": ["none", "low", "medium", "high", "xhigh", "max"],
+                            })
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(f"Qoder BYOK 目录读取失败：{exc}")
+        except Exception as exc:  # noqa: BLE001
+            errors.append(str(exc))
+
+        direct_available = any(profile.get("available") for profile in profiles)
+        installed = ide_available or cli_path is not None
+        if ide_version and cli_version and ide_version != cli_version:
+            environment_version = f"IDE {ide_version} / CLI {cli_version}"
+        else:
+            environment_version = cli_version or ide_version
+        return {
+            "agent_id": cls.name,
+            "display_name": "Qoder / Qoder CN",
+            "installed": installed,
+            "available": installed,
+            "version": environment_version,
+            "errors": errors,
+            "interactive": {
+                "available": ide_available,
+                "bridge_ready": command_ready,
+                "command_name": "/gowrite",
+                "command_ready": command_ready,
+                "command_path": str(command_path),
+                "relevant_status": {
+                    "ide_version": ide_version,
+                    "config_dir": str(config_dir) if config_dir.is_dir() else None,
+                },
+                "repair_hint": None if command_ready else "未检测到适用于当前 Qoder 安装的 /gowrite 命令文件。",
+            },
+            "direct": {
+                "available": direct_available,
+                "auth_status": auth_status,
+                "execution_profiles": profiles,
+                "capabilities": {
+                    "run": cli_path is not None,
+                    "cancel": True,
+                    "model_selection": "profile",
+                    "reasoning_effort": True,
+                    "byok": allow_byok,
+                },
+                "executable_path": cli_path,
+                "cli_version": cli_version,
+            },
+        }
 
     def __init__(
         self,

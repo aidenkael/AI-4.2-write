@@ -1,5 +1,5 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
-import type { AiService, Candidate, Chapter, GlobalPage, IllustrationKey, Idea, Material, Project, ProjectDataRecord, ProjectSection, ReviewIssue, WorkStatus } from '../../contracts/ui'
+import type { Candidate, Chapter, GlobalPage, IllustrationKey, Idea, Material, Project, ProjectDataRecord, ProjectSection, ReviewIssue, WorkStatus } from '../../contracts/ui'
 import { defaultIllustrations } from '../../assets/illustrations'
 import { chapters as seedChapters, characters, materials as seedMaterials, projects as seedProjects, reviewIssues as seedReviewIssues, seedIdeas } from '../../mock/data'
 import { mockService } from '../../mock/service'
@@ -10,7 +10,7 @@ interface ProjectMockState {
 }
 interface AppState {
   page: GlobalPage; projectSection: ProjectSection | null; activeProjectId: string; projects: Project[]; projectStates: Record<string, ProjectMockState>
-  materials: Material[]; services: AiService[]; ideas: Idea[]
+  materials: Material[]; ideas: Idea[]
   illustrations: { defaults: Record<IllustrationKey, string>; custom: Partial<Record<IllustrationKey, string>> }
   search: string; toast: string | null; dialog: { title: string; content: string } | null; preferences: Record<string, boolean>
 }
@@ -21,7 +21,7 @@ interface Actions {
   brainstorm(input: string): Promise<void>; acceptCandidate(id: string): void; dismissCandidates(): void
   setProsePrompt(value: string): void; generateProse(prompt?: string): Promise<void>; editProse(value: string): void; acceptProse(): void; discardProse(): void
   toggleReview(id: string): void; resolveReview(id: string): void
-  createMaterial(input: Pick<Material, 'title' | 'type'>): string; createService(input: Pick<AiService, 'name' | 'url' | 'model'>): string
+  createMaterial(input: Pick<Material, 'title' | 'type'>): string
   createProjectData(input: Pick<ProjectDataRecord, 'category' | 'title' | 'summary' | 'meta'>): string; editProjectData(id: string, changes: Pick<ProjectDataRecord, 'title' | 'summary'>): void
   setIllustration(key: IllustrationKey, url: string): void; resetIllustration(key: IllustrationKey): void
   setSearch(value: string): void; notify(message: string): void; openDialog(title: string, content: string): void; closeDialog(): void; setPreference(key: string, value: boolean): void
@@ -49,11 +49,6 @@ const initial: AppState = {
   page: 'home', projectSection: null, activeProjectId: 'mist', projects: initialProjects,
   projectStates: Object.fromEntries(initialProjects.map((project) => [project.id, makeProjectState(project)])),
   materials: seedMaterials.map((material) => ({ ...material, knowledge: [...material.knowledge] })),
-  services: [
-    { id: 'deepseek', name: 'DeepSeek', url: 'https://api.deepseek.com', model: 'deepseek-chat', connected: true, isDefault: true },
-    { id: 'openai', name: 'OpenAI 兼容服务', url: 'https://api.openai-proxy.com/v1', model: 'gpt-5', connected: true },
-    { id: 'ollama', name: '本地服务 Ollama', url: 'http://127.0.0.1:11434', model: 'llama3', connected: true },
-  ],
   ideas: seedIdeas.map((idea) => ({ ...idea })), illustrations: { defaults: defaultIllustrations, custom: {} },
   search: '', toast: null, dialog: null, preferences: { autosave: true, sound: false, compactMap: false },
 }
@@ -98,7 +93,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     toggleReview(id) { setState((current) => updateProject(current, current.activeProjectId, (project) => ({ ...project, reviews: project.reviews.map((issue) => issue.id === id ? { ...issue, open: !issue.open } : issue) }))) },
     resolveReview(id) { setState((current) => updateProject(current, current.activeProjectId, (project) => ({ ...project, reviews: project.reviews.map((issue) => issue.id === id ? { ...issue, resolved: true, category: 'clear' } : issue) }))) },
     createMaterial({ title, type }) { const id = `material-${crypto.randomUUID()}`; const material: Material = { id, title, type, status: type === '专题研究' ? '处理中' : '需要处理', date: '刚刚', summary: '新建的 Mock 素材，等待继续整理。', knowledge: ['等待提炼的知识点'] }; setState((current) => ({ ...current, materials: [material, ...current.materials] })); return id },
-    createService({ name, url, model }) { const id = `service-${crypto.randomUUID()}`; setState((current) => ({ ...current, services: [...current.services, { id, name, url, model, connected: true }] })); return id },
     createProjectData(input) { const id = `data-${crypto.randomUUID()}`; setState((current) => updateProject(current, current.activeProjectId, (project) => ({ ...project, data: [{ id, ...input }, ...project.data] }))); return id },
     editProjectData(id, changes) { setState((current) => updateProject(current, current.activeProjectId, (project) => ({ ...project, data: project.data.map((record) => record.id === id ? { ...record, ...changes } : record) }))) },
     setIllustration(key, url) { setState((current) => ({ ...current, illustrations: { ...current.illustrations, custom: { ...current.illustrations.custom, [key]: url } } })) },

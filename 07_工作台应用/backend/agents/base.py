@@ -40,6 +40,11 @@ class AgentAdapter:
 
     name: str = ""
 
+    @classmethod
+    def discover(cls) -> dict[str, Any]:
+        """返回供设置页使用的规范化本机环境描述；不得执行模型请求。"""
+        raise NotImplementedError
+
     def capabilities(self) -> dict[str, Any]:
         raise NotImplementedError
 

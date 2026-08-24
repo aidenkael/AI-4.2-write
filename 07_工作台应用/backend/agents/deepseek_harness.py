@@ -17,9 +17,12 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import threading
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Optional
 
@@ -50,6 +53,136 @@ class DeepSeekHarnessAdapter(AgentAdapter):
     """DeepSeek Harness headless 子进程 Adapter。"""
 
     name = "deepseek_harness"
+
+    @classmethod
+    def discover(cls) -> dict:
+        """发现本机 Harness profiles、已配置模型与 web 状态，不执行模型。"""
+        errors: list[str] = []
+        try:
+            launch = _default_launch()
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "agent_id": cls.name,
+                "display_name": "DeepSeek Harness",
+                "installed": False,
+                "available": False,
+                "version": None,
+                "errors": [str(exc)],
+                "interactive": {
+                    "available": False, "bridge_ready": False,
+                    "command_name": "/gowrite", "command_ready": False,
+                },
+                "direct": {
+                    "available": False, "auth_status": "not_detected",
+                    "execution_profiles": [], "capabilities": {},
+                },
+            }
+
+        version: Optional[str] = None
+        try:
+            probe = subprocess.run(
+                launch + ["--version"], capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=12,
+            )
+            version = next((line.strip() for line in probe.stdout.splitlines() if line.strip()), None)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"Harness 版本检测失败：{exc}")
+
+        dsh_home = Path(os.environ.get("DSH_HOME") or (Path.home() / ".dsh"))
+        credentials_path = dsh_home / ".credentials.yaml"
+        auth_status = "configured" if credentials_path.is_file() and credentials_path.stat().st_size > 0 else "not_detected"
+
+        def dump_profile(profile: str) -> Optional[str]:
+            try:
+                result = subprocess.run(
+                    launch + ["--profile", profile, "--dump-config"],
+                    capture_output=True, text=True, encoding="utf-8",
+                    errors="replace", timeout=20,
+                )
+                if result.returncode != 0:
+                    errors.append(result.stderr.strip() or f"Harness {profile} profile 读取失败")
+                    return None
+                return result.stdout
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"Harness {profile} profile 读取失败：{exc}")
+                return None
+
+        headless_dump = dump_profile("headless")
+        provider: Optional[str] = None
+        model: Optional[str] = None
+        if headless_dump:
+            block = re.search(
+                r"(?ms)^- id: agent-default-model\s+.*?(?=^- id:|\Z)",
+                headless_dump,
+            )
+            if block:
+                provider_match = re.search(r"(?m)^\s+provider:\s*([^\r\n#]+)", block.group(0))
+                model_match = re.search(r"(?m)^\s+model:\s*([^\r\n#]+)", block.group(0))
+                provider = provider_match.group(1).strip(" '\"") if provider_match else None
+                model = model_match.group(1).strip(" '\"") if model_match else None
+
+        profiles: list[dict] = []
+        headless_available = bool(headless_dump and provider and model)
+        if headless_dump:
+            profiles.append({
+                "id": "headless",
+                "display_name": "Harness Headless",
+                "type": "harness_profile",
+                "available": headless_available,
+                "model_selection": "managed",
+                "provider_id": provider,
+                "models": ([{
+                    "id": model,
+                    "display_name": model,
+                    "selectable": False,
+                    "selected": True,
+                }] if model else []),
+                "error": None if headless_available else "未检测到 profile 的当前 provider/model",
+            })
+
+        web_dump = dump_profile("web")
+        command_ready = bool(web_dump and re.search(r"(?im)^\s*(?:-\s*)?(?:id|name):\s*[^\r\n]*gowrite", web_dump))
+        web_url = os.environ.get("DSH_WEB_URL", "http://127.0.0.1:3080")
+        parsed_url = urllib.parse.urlsplit(web_url)
+        safe_host = parsed_url.hostname or "local"
+        if parsed_url.port:
+            safe_host = f"{safe_host}:{parsed_url.port}"
+        safe_web_url = urllib.parse.urlunsplit((parsed_url.scheme or "http", safe_host, parsed_url.path, "", ""))
+        web_running = False
+        try:
+            with urllib.request.urlopen(web_url, timeout=2) as response:  # noqa: S310 — localhost/default 可覆盖
+                web_running = 200 <= response.status < 400
+        except Exception:
+            web_running = False
+        web_profile_available = bool(web_dump)
+
+        return {
+            "agent_id": cls.name,
+            "display_name": "DeepSeek Harness",
+            "installed": True,
+            "available": True,
+            "version": version,
+            "errors": errors,
+            "interactive": {
+                "available": web_profile_available,
+                "bridge_ready": command_ready and web_running,
+                "command_name": "/gowrite",
+                "command_ready": command_ready,
+                "relevant_status": {
+                    "profile": "web",
+                    "runtime": "running" if web_running else "stopped",
+                    "url": safe_web_url,
+                },
+                "repair_hint": None if command_ready else "Harness 已提供命令运行时，但当前 profile 未配置 Go Write 的 /gowrite 插件。",
+            },
+            "direct": {
+                "available": headless_available,
+                "auth_status": auth_status,
+                "execution_profiles": profiles,
+                "capabilities": cls(launch=launch).capabilities(),
+                "executable_path": " ".join(launch),
+            },
+        }
 
     def __init__(
         self,

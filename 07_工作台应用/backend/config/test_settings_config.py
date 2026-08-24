@@ -24,6 +24,16 @@ from config.settings import (
 TEST_SERVICE = f"ai-write-test-{uuid.uuid4().hex[:8]}"
 
 
+@pytest.fixture(autouse=True)
+def fake_keyring(monkeypatch):
+    values = {}
+    class FakeKeyring:
+        def set_password(self, service, secret_id, token): values[(service, secret_id)] = token
+        def get_password(self, service, secret_id): return values.get((service, secret_id))
+        def delete_password(self, service, secret_id): values.pop((service, secret_id), None)
+    monkeypatch.setattr("config.secrets._keyring", FakeKeyring())
+
+
 # ---------- 1. 普通设置保存/读取 ----------
 
 def test_settings_save_load_roundtrip(tmp_path):
@@ -49,6 +59,21 @@ def test_settings_defaults_when_file_missing(tmp_path):
     store = SettingsStore(config_dir=tmp_path)
     assert store.load() == AppSettings()
     assert store.load().default_agent == "qoder"
+    assert store.load().default_execution_mode == "interactive_bridge"
+
+
+def test_legacy_settings_migrate_without_replacing_identifiers(tmp_path):
+    p = tmp_path / "settings.json"
+    p.write_text(json.dumps({
+        "default_agent": "qoder",
+        "qoder_mode": "qoder_native",
+        "qoder_model": "legacy-local-model",
+    }), encoding="utf-8")
+    loaded = SettingsStore(config_dir=tmp_path).load()
+    assert loaded.interactive_agent == "qoder"
+    assert loaded.direct_agent == "qoder"
+    assert loaded.direct_profile_id == "native"
+    assert loaded.direct_model == "legacy-local-model"
 
 
 def test_settings_ignores_unknown_fields(tmp_path):
