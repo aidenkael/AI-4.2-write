@@ -228,12 +228,20 @@ def build_context(
         query = "；".join(knowledge_needs)
         package = retrieval(query)
         selected_id_set = set(selected_knowledge_ids)
+        ambiguous_ids: set[str] = set()
         if getattr(package, "status", "INSUFFICIENT_BKP") == "OK":
             # Retrieval only recalls candidates.  A model/Skill must explicitly
             # select ids after considering scope and boundary; rank is not a
             # substitute for literary/semantic judgment.
-            for hit in list(getattr(package, "hits", [])):
-                if hit.source_anchor not in selected_id_set or len(selected) >= max_bkp_hits:
+            hits = list(getattr(package, "hits", []))
+            # A bare source_anchor can collide across books.  If one selected
+            # id recalls more than one candidate the reference is ambiguous:
+            # inject none of the colliding hits and record a stable gap.
+            for anchor in selected_id_set:
+                if sum(1 for hit in hits if hit.source_anchor == anchor) > 1:
+                    ambiguous_ids.add(anchor)
+            for hit in hits:
+                if hit.source_anchor not in selected_id_set or hit.source_anchor in ambiguous_ids or len(selected) >= max_bkp_hits:
                     continue
                 selected.append({
                     "book_id": hit.book_id,
@@ -249,8 +257,10 @@ def build_context(
         gaps = list(getattr(package, "gaps", []))
         if getattr(package, "status", "INSUFFICIENT_BKP") == "OK" and not selected:
             gaps.append("模型/Skill 未选择可用 BKP；Context 不注入未审查候选。")
-        elif selected_id_set - {hit["knowledge_id"] for hit in selected}:
+        elif selected_id_set - ambiguous_ids - {hit["knowledge_id"] for hit in selected}:
             gaps.append("部分模型/Skill 选择的 BKP id 不在本次有效召回中。")
+        for anchor in sorted(ambiguous_ids):
+            gaps.append(f"AMBIGUOUS_BKP_REF: 选择 id {anchor} 在本次召回中命中多张 BKP 卡，未注入任何碰撞候选。")
         retrieval_info = {
             "query": query,
             "status": getattr(package, "status", "INSUFFICIENT_BKP"),

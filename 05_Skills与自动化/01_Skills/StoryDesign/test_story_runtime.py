@@ -280,6 +280,47 @@ class StoryRuntimeTest(unittest.TestCase):
         self.assertEqual(context["selected_bkp_hits"][0]["knowledge_id"], "K001")
         self.assertIn("evidence", context["selected_bkp_hits"][0]["provenance"])
 
+    def _collision_package(self, extra_hits=()):
+        def make(book_id, statement):
+            hit = Hit(1)
+            hit.book_id = book_id; hit.book_title = book_id
+            hit.source_anchor = "K001"; hit.statement = statement
+            return hit
+        package = Package()
+        package.hits = [make("book_a", "statement A"), make("book_b", "statement B"), *extra_hits]
+        return package
+
+    def test_ambiguous_bare_id_injects_none_of_the_colliding_hits(self):
+        # Regression: book_a/K001 与 book_b/K001 同锚点碰撞，裸 id 选择不得静默注入任一碰撞候选。
+        context = build_context(
+            context_id="context-ambiguous", brief=self.brief(), intent=INTENT, state=STATE,
+            retrieval=lambda query: self._collision_package(), selected_knowledge_ids=["K001"],
+        )
+        self.assertEqual(context["selected_bkp_hits"], [])
+        self.assertEqual(context["status"], "CURRENT_WITH_BKP_GAP")
+        ambiguous = [g for g in context["retrieval"]["gaps"] if g.startswith("AMBIGUOUS_BKP_REF")]
+        self.assertEqual(len(ambiguous), 1)
+        self.assertIn("K001", ambiguous[0])
+
+    def test_ambiguous_id_does_not_block_unique_selection_or_create_false_missing_gap(self):
+        context = build_context(
+            context_id="context-mixed", brief=self.brief(), intent=INTENT, state=STATE,
+            retrieval=lambda query: self._collision_package([Hit(2)]), selected_knowledge_ids=["K001", "K002"],
+        )
+        self.assertEqual([h["knowledge_id"] for h in context["selected_bkp_hits"]], ["K002"])
+        self.assertEqual(context["status"], "CURRENT")
+        self.assertTrue(any(g.startswith("AMBIGUOUS_BKP_REF") for g in context["retrieval"]["gaps"]))
+        self.assertFalse(any("不在本次有效召回" in g for g in context["retrieval"]["gaps"]))
+
+    def test_missing_selected_id_keeps_gap_behavior(self):
+        context = build_context(
+            context_id="context-missing", brief=self.brief(), intent=INTENT, state=STATE,
+            retrieval=fake_retrieve_ok, selected_knowledge_ids=["K001", "K999"],
+        )
+        self.assertEqual([h["knowledge_id"] for h in context["selected_bkp_hits"]], ["K001"])
+        self.assertIn("部分模型/Skill 选择的 BKP id 不在本次有效召回中。", context["retrieval"]["gaps"])
+        self.assertFalse(any(g.startswith("AMBIGUOUS_BKP_REF") for g in context["retrieval"]["gaps"]))
+
     def test_trace_is_provenance_linked(self):
         brief, context, candidate = self.brief(), self.context(), self.candidate()
         trace = trace_record(trace_id="t1", brief=brief, context=context, candidate=candidate)
