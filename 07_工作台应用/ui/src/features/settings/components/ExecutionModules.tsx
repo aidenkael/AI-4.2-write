@@ -12,7 +12,7 @@ const authLabels: Record<string, string> = {
 }
 
 const cliKindLabels: Record<string, string> = {
-  current_cli: '当前 CLI', legacy_qodercli: '旧版 CLI（兼容）', not_detected: '未检测',
+  current_cli: '当前 CLI', current_npm_cli: '当前 npm CLI', legacy_qodercli: '旧版 CLI（兼容）', not_detected: '未检测',
 }
 
 const EnvironmentEvidence = ({ label, version, status, path }: {

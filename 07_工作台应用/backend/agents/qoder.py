@@ -72,7 +72,7 @@ def _is_qoder_dispatcher(path: str) -> bool:
 
 
 def _legacy_cli_candidates() -> list[str]:
-    """列出真正的旧版 qodercli 入口，不返回公开 qoder dispatcher。"""
+    """列出兼容 qodercli 入口，不返回公开 qoder dispatcher。"""
     candidates: list[str] = []
     legacy_override = os.environ.get("QODERCLI_PATH")
     if legacy_override:
@@ -86,16 +86,41 @@ def _legacy_cli_candidates() -> list[str]:
     return candidates
 
 
+def _official_npm_package(cli_path: str) -> Optional[dict[str, Any]]:
+    """确认入口归属当前官方全局 npm 包，而不是只根据文件名判断版本。"""
+    package_file = (
+        Path(cli_path).parent / "node_modules" / "@qoder-ai" / "qodercli" / "package.json"
+    )
+    try:
+        package = json.loads(package_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if package.get("name") != "@qoder-ai/qodercli" or not package.get("version"):
+        return None
+    return package
+
+
+def _official_npm_qoder_entry(cli_path: str) -> Optional[str]:
+    """由当前 npm 包的 qodercli 兼容入口定位其公开 qoder 命令。"""
+    if not _official_npm_package(cli_path):
+        return None
+    for name in ("qoder.cmd", "qoder"):
+        candidate = Path(cli_path).parent / name
+        if candidate.is_file() and "qoder-npm-dispatcher.cjs" in _read_wrapper(str(candidate)):
+            return str(candidate)
+    return None
+
+
 def _actual_cli_entry(candidate: str) -> str:
-    """把公开 dispatcher 规范化为其实际 qodercli，避免混报 Desktop/CLI。"""
+    """优先当前 npm qoder，且不把 Desktop dispatcher 当成直连 CLI。"""
     if not _is_qoder_dispatcher(candidate):
-        return candidate
+        return _official_npm_qoder_entry(candidate) or candidate
     candidate_key = os.path.normcase(os.path.abspath(candidate))
     for legacy in _legacy_cli_candidates():
         if not Path(legacy).is_file():
             continue
         if os.path.normcase(os.path.abspath(legacy)) != candidate_key:
-            return legacy
+            return _official_npm_qoder_entry(legacy) or legacy
     return candidate
 
 
@@ -183,9 +208,9 @@ def _discover_desktop() -> dict[str, Any]:
 def _default_cli() -> str:
     """解析可执行的 Qoder Agent CLI。
 
-    新版 Qoder CN 的公开 ``qoder`` 是统一 dispatcher，旧安装则可能只提供
-    ``qodercli``。显式覆盖优先，其后逐一用本机 ``--help`` 验证 Agent CLI
-    flags；不会仅凭文件名猜测入口。
+    新版官方 npm 包的公开 ``qoder`` 优先；Qoder CN Desktop 的同名 dispatcher
+    不作为直连 CLI。旧安装可能只提供 ``qodercli``。显式覆盖优先，其后逐一
+    用本机 ``--help`` 验证 Agent CLI flags；不会仅凭文件名猜测入口。
     """
     candidates: list[str] = []
     for env_name in ("QODER_CLI_BIN", "QODERCLI_PATH"):
@@ -251,16 +276,21 @@ def _resolve_cmd(cli_path: str) -> list[str]:
     if p.suffix.upper() not in (".CMD", ".BAT"):
         return [cli_path]
     wrapper = _read_wrapper(cli_path)
+    npm_dir = p.parent
     # Qoder CN 的 qoder.cmd → ~/.qoder/entry dispatcher → qodercli。直接解析
-    # 最终 CLI，保留原有绕过 CMD/CP936 的中文参数修复。
+    # 当前 npm qoder 或兼容 qodercli，保留绕过 CMD/CP936 的中文参数修复。
     if p.stem.lower() == "qoder" and (
         "BRIDGE_DISPATCHER" in wrapper or "qoder-npm-dispatcher" in wrapper
         or "qoder-dispatcher.ps1" in wrapper
     ):
+        npm_dispatcher = npm_dir / "node_modules" / "@qoder-ai" / "qodercli" / "bundle" / "qoder-npm-dispatcher.cjs"
+        if "qoder-npm-dispatcher" in wrapper and npm_dispatcher.is_file():
+            node_exe = shutil.which("node")
+            if node_exe:
+                return [node_exe, str(npm_dispatcher)]
         legacy = _find_legacy_cli()
         if legacy and os.path.normcase(os.path.abspath(legacy)) != os.path.normcase(os.path.abspath(cli_path)):
             return _resolve_cmd(legacy)
-    npm_dir = p.parent
     # 定位 Node.js：优先 npm 目录下的 node.exe，其次系统 PATH
     node_exe = shutil.which("node")
     if not node_exe:
@@ -324,9 +354,12 @@ class QoderAdapter(AgentAdapter):
         try:
             cli_path = _default_cli()
             launch = _resolve_cmd(cli_path)
-            cli_kind = "legacy_qodercli" if any(
-                "qodercli" in str(part).lower() for part in (cli_path, *launch)
-            ) else "current_cli"
+            cli_kind = (
+                "current_npm_cli" if _official_npm_package(cli_path)
+                else "legacy_qodercli" if any(
+                    "qodercli" in str(part).lower() for part in (cli_path, *launch)
+                ) else "current_cli"
+            )
             help_probe = subprocess.run(
                 launch + ["--help"], capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=12,

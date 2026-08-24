@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from agents.deepseek_harness import DeepSeekHarnessAdapter
-from agents.qoder import QoderAdapter, _default_cli, _discover_desktop
+from agents.qoder import QoderAdapter, _default_cli, _discover_desktop, _resolve_cmd
 
 
 class Probe:
@@ -118,6 +118,52 @@ def test_qoder_command_dispatcher_is_not_reported_as_cli(tmp_path, monkeypatch):
     )
 
     assert _default_cli() == str(legacy)
+
+
+def test_qoder_current_npm_cli_is_preferred_over_desktop_dispatcher(tmp_path, monkeypatch):
+    desktop_dispatcher = tmp_path / "desktop" / "qoder.cmd"
+    desktop_dispatcher.parent.mkdir()
+    desktop_dispatcher.write_text(
+        "set BRIDGE_DISPATCHER=%USERPROFILE%\\.qoder\\entry\\qoder.cmd",
+        encoding="utf-8",
+    )
+    npm_dir = tmp_path / "npm"
+    compatibility_entry = npm_dir / "qodercli.cmd"
+    public_entry = npm_dir / "qoder.cmd"
+    package = npm_dir / "node_modules" / "@qoder-ai" / "qodercli" / "package.json"
+    package.parent.mkdir(parents=True)
+    compatibility_entry.write_text("@echo off", encoding="utf-8")
+    public_entry.write_text("qoder-npm-dispatcher.cjs", encoding="utf-8")
+    package.write_text(
+        '{"name":"@qoder-ai/qodercli","version":"1.1.28"}', encoding="utf-8",
+    )
+    monkeypatch.delenv("QODER_CLI_BIN", raising=False)
+    monkeypatch.delenv("QODERCLI_PATH", raising=False)
+    monkeypatch.setattr(
+        "agents.qoder.shutil.which",
+        lambda name: str(desktop_dispatcher) if name == "qoder" else str(compatibility_entry),
+    )
+    monkeypatch.setattr("agents.qoder._resolve_cmd", lambda path: [path])
+    monkeypatch.setattr(
+        "agents.qoder.subprocess.run",
+        lambda cmd, **_kwargs: Probe("--print --list-models\\n") if "--help" in cmd else Probe(),
+    )
+
+    assert _default_cli() == str(public_entry)
+
+
+def test_qoder_current_npm_entry_resolves_to_its_public_dispatcher(tmp_path, monkeypatch):
+    npm_dir = tmp_path / "npm"
+    public_entry = npm_dir / "qoder.cmd"
+    dispatcher = npm_dir / "node_modules" / "@qoder-ai" / "qodercli" / "bundle" / "qoder-npm-dispatcher.cjs"
+    dispatcher.parent.mkdir(parents=True)
+    public_entry.parent.mkdir(exist_ok=True)
+    public_entry.write_text("qoder-npm-dispatcher.cjs", encoding="utf-8")
+    dispatcher.write_text("// dispatcher", encoding="utf-8")
+    monkeypatch.setattr("os.name", "nt")
+    monkeypatch.setattr("agents.qoder.shutil.which", lambda name: "C:/node.exe" if name == "node" else None)
+
+    assert _resolve_cmd(str(public_entry)) == ["C:/node.exe", str(dispatcher)]
 
 
 def test_qoder_command_without_desktop_does_not_enable_bridge(tmp_path, monkeypatch):
