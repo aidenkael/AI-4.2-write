@@ -31,6 +31,18 @@ export function ExecutionModules({ controller }: { controller: SettingsControlle
 
   const interactiveAgents = agents.filter((agent) => agent.interactive.bridge_ready)
   const selectedModelAvailable = directAgent?.direct.models.some((model) => model.id === draft.direct_model) ?? false
+  const selectedCustomModelAvailable = directAgent?.direct.custom_models.some((model) => model.id === draft.direct_custom_model) ?? false
+  // 语义标签：Harness 的“内置”列表就是受管默认模型（profile 配置），如实标注；
+  // 可选手目录按 provider 分组展示（DeepSeek / qwen-token-plan-cn 等全部来自
+  // 配置本身，不硬编码 provider/model 名，也不把不同 provider 混成“自定义模型”）。
+  const nativeModelsLabel = directAgent?.direct.model_selection === 'managed'
+    ? '受管默认（当前 profile 配置）'
+    : '内置模型'
+  const providerGroups = directAgent?.direct.provider_models?.length
+    ? directAgent.direct.provider_models
+    : null
+  const customModelsLabel = providerGroups ? '可选模型（按服务商分组）' : '自定义模型'
+  const flatCustom = directAgent?.direct.custom_models ?? []
   return <div className="execution-settings">
     <section className="mode-choice">
       <div><h3>默认执行方式</h3><p>交互桥在 Agent 会话中执行；直接执行由 Go Write 调用本机 Agent adapter。</p></div>
@@ -51,16 +63,25 @@ export function ExecutionModules({ controller }: { controller: SettingsControlle
         path={interactiveAgent.desktop.path}
       /> : null}
       {interactiveAgent?.interactive.repair_hint ? <p className="settings-warning">{interactiveAgent.interactive.repair_hint}</p> : null}
-      {interactiveAgent?.agent_id === 'qoder' && !interactiveAgent.interactive.command_ready ? <button onClick={repairInteractive} disabled={saving}>安装/修复 /gowrite 命令</button> : null}
+      {interactiveAgent?.agent_id === 'qoder' && !interactiveAgent.interactive.command_ready ? <button onClick={repairInteractive} disabled={saving}>{saving ? '安装/检测中…' : '安装/修复 /gowrite 命令'}</button> : null}
       {!interactiveValid ? <small>当前选择不会被标记为可执行，保存后也不会伪装成已连接。</small> : null}
     </article>
 
     <article className={`execution-card ${draft.default_execution_mode === 'direct' ? 'selected' : ''}`}>
       <header><span className="provider p1"><Wifi /></span><div><h3>B. 直接执行模式</h3><p>按 Agent 与其当前已验证模型运行。</p></div><button onClick={refresh}><RefreshCw />重新检测</button></header>
       <div className="execution-form direct-fields">
-        <label>执行 Agent<select value={draft.direct_agent} onChange={(event) => { update('direct_agent', event.target.value); update('direct_model', null) }}>{agents.map((agent) => <option key={agent.agent_id} value={agent.agent_id}>{agent.display_name}</option>)}</select></label>
-        {directAgent?.direct.model_selection === 'selectable' ? <label>模型<select value={draft.direct_model ?? ''} onChange={(event) => update('direct_model', event.target.value || null)}><option value="">请选择已发现模型</option>{directAgent.direct.models.filter((model) => model.selectable).map((model) => <option key={model.id} value={model.id}>{model.display_name}</option>)}{draft.direct_model && !selectedModelAvailable ? <option value={draft.direct_model}>已保存但当前不可用：{draft.direct_model}</option> : null}</select></label> : null}
-        {directAgent?.direct.model_selection === 'managed' ? <div className="managed-model"><span>模型</span><strong>Agent 管理：{directAgent.direct.managed_model?.display_name ?? '未检测'}</strong></div> : null}
+        <label>执行 Agent<select value={draft.direct_agent} onChange={(event) => { update('direct_agent', event.target.value); update('direct_model', null); update('direct_custom_model', null) }}>{agents.map((agent) => <option key={agent.agent_id} value={agent.agent_id}>{agent.display_name}</option>)}</select></label>
+        <label>{nativeModelsLabel}<select value={draft.direct_model ?? ''} onChange={(event) => { update('direct_model', event.target.value || null); update('direct_custom_model', null) }}><option value="">{directAgent?.direct.models.length ? '请选择' : '当前未发现可选模型'}</option>{directAgent?.direct.models.filter((model) => model.selectable).map((model) => <option key={model.id} value={model.id}>{model.display_name}</option>)}{draft.direct_model && !selectedModelAvailable ? <option value={draft.direct_model}>已保存但当前未检测到/不可用：{draft.direct_model}</option> : null}</select></label>
+        <label>{customModelsLabel}<select value={draft.direct_custom_model ?? ''} onChange={(event) => { update('direct_custom_model', event.target.value || null); update('direct_model', null) }}><option value="">{providerGroups || flatCustom.length ? '请选择路由' : '当前未发现可调用自定义模型'}</option>
+          {providerGroups ? providerGroups.map((group) => (
+            <optgroup key={group.provider_id} label={group.provider_id}>
+              {group.models.filter((model) => model.selectable).map((model) => <option key={model.id} value={model.id}>{model.display_name}</option>)}
+              {draft.direct_custom_model?.startsWith(`harness:${group.provider_id}:`) && !group.models.some((m) => m.id === draft.direct_custom_model && m.selectable)
+                ? <option value={draft.direct_custom_model}>已保存但当前未检测到/不可用：{draft.direct_custom_model}</option> : null}
+            </optgroup>
+          )) : flatCustom.filter((model) => model.selectable).map((model) => <option key={model.id} value={model.id}>{model.display_name}</option>)}
+          {!providerGroups && draft.direct_custom_model && !selectedCustomModelAvailable ? <option value={draft.direct_custom_model}>已保存但当前未检测到/不可用：{draft.direct_custom_model}</option> : null}
+        </select></label>
       </div>
       {directAgent?.cli ? <EnvironmentEvidence
         label="Qoder CLI"
@@ -72,6 +93,12 @@ export function ExecutionModules({ controller }: { controller: SettingsControlle
       <footer><button onClick={test} disabled={!directValid || testing}><Wifi />{testing ? '检查中…' : '测试连接'}</button>{connection ? <span className={`connection-result ${connection.status}`}>{connection.message}</span> : null}</footer>
     </article>
 
-    <div className="settings-savebar"><span>{canSave ? '当前默认模式配置有效' : '当前默认模式尚未就绪，请选择可用配置'}</span><button className="primary" onClick={save} disabled={!canSave || saving}>{saving ? '保存中…' : '保存执行设置'}</button></div>
+    <div className="settings-savebar">
+      <span>
+        {canSave ? '当前默认模式配置有效' : '当前默认模式尚未就绪，请选择可用配置'}
+        {controller.data?.discovery?.source === 'cache' ? ' · 环境显示为本机上次检测结果' : ''}
+      </span>
+      <button className="primary" onClick={save} disabled={!canSave || saving}>{saving ? '保存中…' : '保存执行设置'}</button>
+    </div>
   </div>
 }

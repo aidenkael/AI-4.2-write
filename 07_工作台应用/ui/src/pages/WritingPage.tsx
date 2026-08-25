@@ -1,12 +1,233 @@
-import { Bot, Check, ChevronDown, CircleCheck, MoreHorizontal, PenLine, Plus, RefreshCw, Sparkles, Type } from 'lucide-react'
-import { useActiveProject, useApp } from '../features/app/AppStore'
+import { Bot, Check, CircleCheck, FolderOpen, PenLine, RefreshCw, Sparkles, X } from 'lucide-react'
+import { ExecutionSummary } from '../components/ExecutionSummary'
+import { useApp } from '../features/app/AppStore'
+import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
+import { useWritingController } from '../features/writing/useWritingController'
 import { StatusBadge } from '../components/StatusBadge'
 
 export function WritingPage() {
-  const { actions }=useApp(); const { projectState: state } = useActiveProject(); const chapter=state.chapters.find(c=>c.id===state.activeChapterId)??state.chapters[0]
-  return <div className="writing-layout"><aside className="panel chapters"><header><h2>章节目录</h2><button aria-label="新章节" onClick={actions.addChapter}><Plus/></button></header>{state.chapters.map(c=><button key={c.id} className={chapter.id===c.id?'active':''} onClick={()=>actions.setChapter(c.id)}>{c.done&&<CircleCheck/>}<span>{c.title}<small>{c.words?`${c.words.toLocaleString()} 字`:'未开始'}</small></span></button>)}<button className="new-chapter" onClick={actions.addChapter}><Plus/>新章节</button></aside>
-    <section className="panel editor"><header><h2>{chapter.title}</h2><span><button className="icon-button" onClick={()=>actions.notify(`当前章节 ${chapter.words.toLocaleString()} 字`)}>{chapter.words.toLocaleString()} 字 <ChevronDown/></button><button className="icon-button" aria-label="排版设置" onClick={()=>actions.openDialog('排版设置', '正文编辑区的字号与排版将在正式应用层提供；当前 Mock 保留内容编辑与字数同步。')}><Type/></button><button className="icon-button" aria-label="更多编辑操作" onClick={()=>actions.openDialog('编辑操作', '可用的 Mock 操作：复制章节、导出候选稿、查看版本记录。')}><MoreHorizontal/></button></span></header><textarea aria-label="正文编辑区" value={chapter.content} onChange={(e)=>actions.updateChapter(e.target.value)} placeholder="从这里开始写作…"/><footer><span>{chapter.words.toLocaleString()} 字　　预计阅读 9 分钟</span><span><CircleCheck/>自动保存中…</span><span>上次保存：14:32:05</span></footer></section>
-    <aside className="writing-side"><section className="panel assistant"><header><h2><Sparkles/>AI 助手</h2></header><h3>现在建议</h3><div className="suggestion">💡 本章营造了怀旧与悬疑并存的氛围，可以深入探索仓库中发现的旧物或线索。</div><button onClick={()=>actions.setProsePrompt('继续探索仓库里的旧物线索')}><PenLine/>接下来怎么写</button><button onClick={()=>actions.setProsePrompt('给我几个不同的情节方案')}><Bot/>给我几个方案</button><button onClick={()=>actions.setProjectSection('review')}>▣ 帮我看看问题</button></section>
-    <section className="panel prose-candidate"><header><h2><Sparkles/>AI 候选稿</h2>{state.writingStatus!=='idle'&&<StatusBadge status={state.writingStatus}/>}</header>{state.writingStatus==='running'?<div className="running"><span/>AI 正在续写候选正文…</div>:<><textarea value={state.proseCandidate} onChange={(e)=>actions.editProse(e.target.value)} placeholder="输入你希望 AI 接下来写什么，然后生成候选稿。"/><input value={state.prosePrompt} onChange={(e)=>actions.setProsePrompt(e.target.value)} placeholder="这一段想写什么？"/><div>{state.writingStatus==='waiting_confirmation'?<><button className="primary" onClick={actions.acceptProse}><Check/>采用</button><button onClick={()=>actions.generateProse()}><RefreshCw/>换一种</button><button onClick={actions.discardProse}>不用了</button></>:state.writingStatus==='accepted'?<><span className="accepted-note"><Check/>候选正文已采用并更新编辑区</span><button onClick={actions.discardProse}>继续协作</button></>:<button className="primary wide" onClick={()=>actions.generateProse()}><Sparkles/>生成候选正文</button>}</div></>}</section></aside>
-  </div>
+  const { actions } = useApp()
+  const { selected } = useFormalProjectShell()
+  const c = useWritingController({ projectId: selected?.project_id ?? null, notify: actions.notify })
+  const { state } = c
+  const selectedChapter =
+    state.writingSurface?.chapters.find((ch) => ch.chapter_number === state.selectedChapterNumber) ??
+    state.writingSurface?.chapters[0] ??
+    null
+  const canGenerate = !!selected && state.authorInput.trim().length > 0 && !state.requestId
+
+  // 未选择正式作品：安全空态 + 返回作品列表；绝不在这里自动挑选项目
+  if (!selected) {
+    return (
+      <div className="writing-layout">
+        <aside className="panel chapters">
+          <header>
+            <h2>章节目录</h2>
+          </header>
+          <div className="empty-state">请先选择正式作品。</div>
+        </aside>
+        <section className="panel editor">
+          <header>
+            <h2>正在写</h2>
+          </header>
+          <div className="empty-state">
+            <p>请先在「我的作品」中选择一部正式作品。</p>
+            <button className="primary" onClick={() => actions.navigate('projects')}>
+              <FolderOpen />
+              返回作品列表
+            </button>
+          </div>
+        </section>
+      </div>
+    )
+  }
+
+  return (
+    <div className="writing-layout">
+      <aside className="panel chapters">
+        <header>
+          <h2>章节目录</h2>
+        </header>
+        {state.writingSurface?.chapters.map((ch) => (
+          <button
+            key={ch.chapter_number}
+            className={selectedChapter?.chapter_number === ch.chapter_number ? 'active' : ''}
+            onClick={() => c.selectChapter(ch.chapter_number)}
+          >
+            {ch.scene_count > 0 && <CircleCheck />}
+            <span>
+              <span>{ch.title}</span>
+              <small>
+                {ch.words ? `${ch.words.toLocaleString()} 字` : '未开始'}
+                {ch.scene_count > 0 ? ` · ${ch.scene_count} 段` : ''}
+              </small>
+            </span>
+          </button>
+        ))}
+      </aside>
+
+      <section className="panel editor">
+        <header>
+          <h2>{selectedChapter ? selectedChapter.title : '已采用正文'}</h2>
+          <span>
+            <span className="readonly-label">
+              <CircleCheck size={15} />
+              已采用正文（只读）
+            </span>
+            {state.writingSurface ? `${state.writingSurface.total_words.toLocaleString()} 字` : ''}
+          </span>
+        </header>
+        <textarea
+          aria-label="已采用正文（只读）"
+          value={selectedChapter?.content ?? ''}
+          readOnly
+          placeholder="还没有已采用的正文。在右侧写下这一段想写什么，生成候选并确认后，正文会出现在这里。"
+        />
+        <footer>
+          <span>
+            {selectedChapter ? `${selectedChapter.words.toLocaleString()} 字` : ''}
+            {selectedChapter && selectedChapter.scene_count > 0
+              ? `　已收录 ${selectedChapter.scene_count} 段`
+              : ''}
+          </span>
+          <span>
+            <CircleCheck size={15} />
+            正式正文，来自作品工程
+          </span>
+        </footer>
+      </section>
+
+      <aside className="writing-side">
+        <section className="panel assistant">
+          <header>
+            <h2>
+              <Sparkles />
+              AI 助手
+            </h2>
+          </header>
+          <h3>现在建议</h3>
+          <div className="suggestion">
+            写下这一段想写什么。AI 会先挑选相关上下文、再生成候选正文；候选未经你确认不会写入正式作品。
+          </div>
+          <button onClick={() => c.setAuthorInput('顺着上一段继续写下去')}>
+            <PenLine />
+            接下来怎么写
+          </button>
+          <button onClick={() => c.setAuthorInput('给我几个接下来可以发展的情节方向')}>
+            <Bot />
+            给我几个方案
+          </button>
+          <button onClick={() => actions.setProjectSection('review')}>▣ 检查这段</button>
+        </section>
+
+        <section className="panel prose-candidate">
+          <header>
+            <h2>
+              <Sparkles />
+              AI 候选稿
+            </h2>
+            {(state.status === 'running' ||
+              state.status === 'waiting_confirmation' ||
+              state.status === 'accepted' ||
+              state.status === 'failed') && <StatusBadge status={state.status} />}
+          </header>
+
+          {state.status === 'loading' && (
+            <div className="running">
+              <span />
+              正在加载正式写作数据…
+            </div>
+          )}
+
+          {(state.status === 'running' ||
+            state.status === 'waiting_gowrite' ||
+            state.status === 'waiting_prose_gowrite') && (
+            <>
+              <div className="running">
+                <span />
+                {state.status === 'waiting_gowrite' && (
+                  <>{state.phaseMessage ?? '等待 Qoder /gowrite：正在选择本次写作上下文'}</>
+                )}
+                {state.status === 'waiting_prose_gowrite' && (
+                  <>{state.phaseMessage ?? '上下文已准备好，请再次执行 /gowrite 生成正文'}</>
+                )}
+                {state.status === 'running' && (
+                  <>{state.execution?.execution_mode === 'direct' ? '后台 AI 正在执行（直接模式）…' : '正在准备执行…'}</>
+                )}
+              </div>
+              {state.execution?.execution_mode === 'interactive_bridge' && (
+                <p className="muted-note execution-summary">
+                  交互桥已就绪：任务已交给 Qoder，请在 Qoder 会话中执行 /gowrite。
+                </p>
+              )}
+              <div className="candidate-actions">
+                <button onClick={() => void c.cancel()}>
+                  <X />
+                  取消
+                </button>
+              </div>
+            </>
+          )}
+
+          {state.status === 'confirming' && (
+            <>
+              <textarea
+                aria-label="候选正文（只读）"
+                className="candidate-view"
+                value={state.candidate?.draft_text ?? ''}
+                readOnly
+              />
+              <div className="confirming-note">正在采用…</div>
+            </>
+          )}
+
+          {state.status === 'waiting_confirmation' && state.candidate && (
+            <>
+              <ExecutionSummary execution={state.execution} />
+              <textarea
+                aria-label="候选正文（只读）"
+                className="candidate-view"
+                value={state.candidate.draft_text}
+                readOnly
+              />
+              <div className="candidate-actions">
+                <button className="primary" onClick={() => void c.confirm()}>
+                  <Check />
+                  采用
+                </button>
+                <button onClick={() => void c.regenerate()}>
+                  <RefreshCw />
+                  换一种
+                </button>
+                <button onClick={() => void c.discard()}>不用了</button>
+              </div>
+            </>
+          )}
+
+          {state.status === 'accepted' && (
+            <span className="accepted-note">
+              <Check />
+              已采用，正文已从正式作品刷新。
+            </span>
+          )}
+
+          {(state.status === 'idle' || state.status === 'failed' || state.status === 'accepted') && (
+            <>
+              <input
+                value={state.authorInput}
+                onChange={(e) => c.setAuthorInput(e.target.value)}
+                placeholder="这一段想写什么？"
+              />
+              <button className="primary wide" disabled={!canGenerate} onClick={() => void c.generate()}>
+                <Sparkles />
+                生成候选正文
+              </button>
+            </>
+          )}
+
+          {state.error && <p className="error-text">{state.error}</p>}
+        </section>
+      </aside>
+    </div>
+  )
 }

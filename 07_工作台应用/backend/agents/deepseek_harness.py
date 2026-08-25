@@ -17,10 +17,11 @@
 from __future__ import annotations
 
 import os
-import re
+import json
 import shutil
 import subprocess
 import threading
+import tempfile
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -30,6 +31,166 @@ from agents.base import AgentAdapter, AgentRequest, AgentResult
 
 # 本机已验证可用的默认安装位（仅作回退默认；优先：launch 参数 → DSH_BIN → PATH dsh）
 _LOCAL_DSH_BIN = Path(r"E:\DeepSeek Harness\node_modules\@deepseek-ai\dsh\lib\bin.js")
+
+
+def _harness_package_root(launch: list[str]) -> Optional[str]:
+    """Resolve the Harness package root (nearest ancestor containing node_modules).
+
+    ``bin.js`` lives at ``<root>/node_modules/@deepseek-ai/dsh/lib/bin.js``.
+    Falls back to None when the launch is not a real filesystem path (tests) —
+    the ``node -e`` yaml import then resolves from the process cwd.
+    """
+    if len(launch) < 2:
+        return None
+    try:
+        candidate = Path(launch[-1]).resolve()
+    except OSError:
+        return None
+    for parent in [candidate, *candidate.parents]:
+        if (parent / "node_modules").is_dir():
+            return str(parent)
+    return None
+
+
+def _harness_config_snapshot(launch: list[str], dsh_home: Path) -> dict:
+    """Read only non-secret route metadata from the Harness YAML documents.
+
+    Generic provider discovery: enumerates every configured ``llm-pi-ai``
+    provider and every model under it. A malformed provider must never hide
+    another provider's routes (per-provider isolation). Only route/model ids
+    and credential *names* are projected; credential values never leave the
+    credentials file.
+    """
+    settings = dsh_home / "settings.yaml"
+    credentials = dsh_home / ".credentials.yaml"
+    if not settings.is_file():
+        return {"routes": [], "default": {}, "providers": []}
+    # Use Harness's own YAML dependency; the script deliberately projects only
+    # route/model ids and credential *names*, never credential values.
+    code = """
+import fs from 'node:fs'; import YAML from 'yaml';
+const settings = YAML.parse(fs.readFileSync(process.argv[1], 'utf8')) || {};
+const credentials = fs.existsSync(process.argv[2]) ? (YAML.parse(fs.readFileSync(process.argv[2], 'utf8')) || {}) : {};
+const refs = new Set(Object.keys(credentials));
+const providers = settings['llm-pi-ai']?.providers || {};
+const providersOut = Object.entries(providers).map(([provider, profile]) => {
+  const models = Array.isArray(profile?.models) ? profile.models : [];
+  const apiKeyEnv = typeof profile?.apiKeyEnv === 'string' ? profile.apiKeyEnv : null;
+  const credentialConfigured = !apiKeyEnv || refs.has(apiKeyEnv);
+  return {
+    provider,
+    apiKeyEnv,
+    credentialConfigured,
+    models: models
+      .map((model) => ({
+        model: String(model?.id || ''),
+        name: typeof model?.name === 'string' ? model.name : null,
+      }))
+      .filter((entry) => entry.model),
+  };
+}).filter((p) => p.models.length > 0);
+const routes = providersOut.flatMap((p) =>
+  p.models.map((m) => ({
+    provider: p.provider, model: m.model, name: m.name,
+    credentialConfigured: p.credentialConfigured,
+  })),
+);
+console.log(JSON.stringify({routes, providers: providersOut, default: settings['agent-default-model'] || {}}));
+"""
+    root = _harness_package_root(launch)
+    result = subprocess.run(
+        [launch[0], "--input-type=module", "-e", code, str(settings), str(credentials)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=12, cwd=root,
+    )
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or "Harness 设置解析失败")
+    return json.loads(result.stdout)
+
+
+def _custom_id(provider: str, model: str) -> str:
+    return f"harness:{provider}:{model}"
+
+
+def _model_selection_kind(native_models: list, custom_models: list) -> str:
+    """真话语义（供 discover 使用，纯函数便于 fixture 测试）：
+
+    - 存在可选自定义路由 → ``selectable``（可选手 = 受管默认 + 自定义路由）；
+    - 只有受管默认模型（profile 配置）→ ``managed``；
+    - 都没有 → ``none``。
+    绝不因为只有一个受管模型就伪造可选手目录。
+    """
+    if any(item.get("selectable") for item in custom_models):
+        return "selectable"
+    if native_models:
+        return "managed"
+    return "none"
+
+
+def _selection_from_custom(custom_model: str, routes: list[dict]) -> tuple[str, str]:
+    for route in routes:
+        if _custom_id(str(route["provider"]), str(route["model"])) == custom_model and route.get("credentialConfigured"):
+            return str(route["provider"]), str(route["model"])
+    raise RuntimeError("所选 Harness 自定义模型路由当前不可用")
+
+
+def _provider_models(snapshot: dict, *, selectable_only: bool = False) -> list[dict]:
+    """Generic provider-grouped route catalog (no provider-specific names).
+
+    - enumerates every configured provider and every model under it;
+    - preserves exact provider id + model id (id = ``harness:<provider>:<model>``);
+    - keeps display names separate from callable ids;
+    - de-duplicates exact duplicate (provider, model) routes only.
+    ``selectable_only=True`` drops routes whose credential is not configured.
+    """
+    grouped: dict[str, list[dict]] = {}
+    seen: set[tuple[str, str]] = set()
+    for route in snapshot.get("routes", []):
+        provider = str(route.get("provider") or "")
+        model = str(route.get("model") or "")
+        if not provider or not model:
+            continue
+        if (provider, model) in seen:
+            continue
+        seen.add((provider, model))
+        selectable = bool(route.get("credentialConfigured"))
+        if selectable_only and not selectable:
+            continue
+        grouped.setdefault(provider, []).append({
+            "id": _custom_id(provider, model),
+            "display_name": route.get("name") or model,
+            "selectable": selectable,
+            "provider_id": provider,
+            "model_id": model,
+            "source": "custom",
+        })
+    return [
+        {"provider_id": provider, "display_name": provider, "models": models}
+        for provider, models in grouped.items()
+    ]
+
+
+def _effective_headless_model(config_dump: str) -> tuple[Optional[str], Optional[str]]:
+    """Read the official composed ``--dump-config`` output for its named plugin.
+
+    The installed CLI exposes no structured dump switch.  This small YAML-list
+    scanner follows the actual plugin boundary instead of searching arbitrary
+    text with a format-dependent regex.
+    """
+    current_id: Optional[str] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    for raw in config_dump.splitlines():
+        stripped = raw.strip()
+        if stripped.startswith("- id:"):
+            if current_id == "agent-default-model":
+                break
+            current_id = stripped.partition(":")[2].strip()
+            provider = model = None
+        elif current_id == "agent-default-model" and stripped.startswith("provider:"):
+            provider = stripped.partition(":")[2].strip(" '\"") or None
+        elif current_id == "agent-default-model" and stripped.startswith("model:"):
+            model = stripped.partition(":")[2].strip(" '\"") or None
+    return provider, model
 
 
 def _default_launch() -> list[str]:
@@ -74,7 +235,8 @@ class DeepSeekHarnessAdapter(AgentAdapter):
                 },
                 "direct": {
                     "available": False, "auth_status": "not_detected",
-                    "model_selection": "none", "models": [], "managed_model": None, "capabilities": {},
+                    "model_selection": "none", "models": [], "custom_models": [],
+                    "provider_models": [], "managed_model": None, "capabilities": {},
                 },
             }
 
@@ -108,23 +270,41 @@ class DeepSeekHarnessAdapter(AgentAdapter):
                 return None
 
         headless_dump = dump_profile("headless")
-        provider: Optional[str] = None
-        model: Optional[str] = None
-        if headless_dump:
-            block = re.search(
-                r"(?ms)^- id: agent-default-model\s+.*?(?=^- id:|\Z)",
-                headless_dump,
-            )
-            if block:
-                provider_match = re.search(r"(?m)^\s+provider:\s*([^\r\n#]+)", block.group(0))
-                model_match = re.search(r"(?m)^\s+model:\s*([^\r\n#]+)", block.group(0))
-                provider = provider_match.group(1).strip(" '\"") if provider_match else None
-                model = model_match.group(1).strip(" '\"") if model_match else None
+        provider, model = _effective_headless_model(headless_dump) if headless_dump else (None, None)
+        if headless_dump and not model:
+            errors.append("Harness Headless 组合配置未公开有效模型")
 
-        headless_available = bool(headless_dump and provider and model)
+        try:
+            snapshot = _harness_config_snapshot(launch, dsh_home)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"Harness 自定义模型设置读取失败：{exc}")
+            snapshot = {"routes": [], "default": {}, "providers": []}
+        provider_models = _provider_models(snapshot)
+        # 扁平自定义路由（向后兼容旧 UI/保存校验；按 provider 分组的权威视图
+        # 见 provider_models —— 绝不硬编码 DeepSeek / Flash / Pro / token-plan）。
+        custom_models = [
+            {key: entry[key] for key in (
+                "id", "display_name", "selectable", "provider_id", "model_id", "source",
+            )}
+            for provider_group in provider_models
+            for entry in provider_group["models"]
+        ]
+        # 友好显示名来自 Harness 自身配置（pi-ai providers 的 name 字段），
+        # 不硬编码 Flash/Pro 名称；找不到时如实显示模型 id。
+        name_by_model: dict[str, str] = {
+            str(route["model"]): str(route.get("name") or route["model"])
+            for route in snapshot.get("routes", [])
+        }
+        native_display = name_by_model.get(model) or model
+        # The base headless stack owns this route; it remains separate from
+        # user-configured pi-ai profiles even when names happen to coincide.
+        native_models = ([{"id": model, "display_name": native_display, "selectable": True,
+                           "provider_id": provider, "model_id": model, "source": "native"}]
+                         if provider and model else [])
+        headless_available = bool(headless_dump and (native_models or any(item["selectable"] for item in custom_models)))
 
         web_dump = dump_profile("web")
-        command_ready = bool(web_dump and re.search(r"(?im)^\s*(?:-\s*)?(?:id|name):\s*[^\r\n]*gowrite", web_dump))
+        command_ready = bool(web_dump and any("gowrite" in line.lower() for line in web_dump.splitlines()))
         web_url = os.environ.get("DSH_WEB_URL", "http://127.0.0.1:3080")
         parsed_url = urllib.parse.urlsplit(web_url)
         safe_host = parsed_url.hostname or "local"
@@ -161,9 +341,15 @@ class DeepSeekHarnessAdapter(AgentAdapter):
             "direct": {
                 "available": headless_available,
                 "auth_status": auth_status,
-                "model_selection": "managed" if model else "none",
-                "models": [],
-                "managed_model": ({"id": model, "display_name": model, "provider_id": provider} if model else None),
+                # 真话语义：只有受管默认模型（无自定义路由）时如实报 managed；
+                # 存在可选自定义路由时报 selectable（可选手 = 受管默认 + 自定义）。
+                "model_selection": _model_selection_kind(native_models, custom_models),
+                "models": native_models,
+                "custom_models": custom_models,
+                # 按 provider 分组的可选手目录（通用解析；DeepSeek / token-plan 等
+                # 全部来自配置本身，不硬编码任何 provider/model 名）。
+                "provider_models": provider_models,
+                "managed_model": ({"id": model, "display_name": native_display, "provider_id": provider} if model else None),
                 "capabilities": cls(launch=launch).capabilities(),
                 "executable_path": " ".join(launch),
             },
@@ -176,6 +362,7 @@ class DeepSeekHarnessAdapter(AgentAdapter):
     ) -> None:
         """launch：可执行起点 argv（如 ["node", ".../bin.js"] 或 ["dsh"]）。"""
         self._launch = launch if launch is not None else _default_launch()
+        self._dsh_home = Path(os.environ.get("DSH_HOME") or (Path.home() / ".dsh"))
         self._timeout = timeout
         self._proc: Optional[subprocess.Popen] = None
         self._lock = threading.Lock()
@@ -197,9 +384,54 @@ class DeepSeekHarnessAdapter(AgentAdapter):
 
     # ---------------- 执行 ----------------
 
+    def _selection_overlay(self, request: AgentRequest, temporary: Path) -> list[str]:
+        """Create a one-process settings override; never edit Harness home."""
+        if bool(request.model) == bool(request.custom_model):
+            raise RuntimeError("请选择一个 Harness 内置模型或自定义模型")
+        base_provider, base_model = _effective_headless_model(
+            subprocess.run(self._launch + ["--profile", "headless", "--dump-config"], capture_output=True,
+                           text=True, encoding="utf-8", errors="replace", timeout=20).stdout
+        )
+        if request.custom_model:
+            provider, model = _selection_from_custom(
+                request.custom_model, _harness_config_snapshot(self._launch, self._dsh_home).get("routes", []),
+            )
+        else:
+            if not base_provider or request.model != base_model:
+                raise RuntimeError("所选 Harness 内置模型当前不可用")
+            provider, model = base_provider, base_model
+        source = self._dsh_home / "settings.yaml"
+        if not source.is_file():
+            raise RuntimeError("Harness 设置文件未检测到")
+        settings_copy = temporary / "settings.yaml"
+        patch_file = temporary / "selection.patch.yml"
+        code = """
+import fs from 'node:fs'; import YAML from 'yaml';
+const document = YAML.parse(fs.readFileSync(process.argv[1], 'utf8')) || {};
+document['agent-default-model'] = { provider: process.argv[3], model: process.argv[4] };
+fs.writeFileSync(process.argv[2], YAML.stringify(document), { mode: 0o600 });
+"""
+        root = _harness_package_root(self._launch)
+        result = subprocess.run([self._launch[0], "--input-type=module", "-e", code, str(source), str(settings_copy), provider, model], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=12, cwd=root)
+        if result.returncode:
+            raise RuntimeError(result.stderr.strip() or "Harness 临时选择配置创建失败")
+        patch_file.write_text(f"- id: settings\n  config:\n    path: {settings_copy.as_posix()}\n", encoding="utf-8")
+        return ["--patch", str(patch_file)]
+
     def run(self, request: AgentRequest) -> AgentResult:
         self._cancelled.clear()
-        cmd = self._launch + ["--profile", "headless", request.task]
+        temporary_context = None
+        if request.model or request.custom_model:
+            try:
+                temporary_context = tempfile.TemporaryDirectory(prefix="ai-write-harness-")
+                overlay = self._selection_overlay(request, Path(temporary_context.name))
+            except Exception as exc:  # noqa: BLE001
+                return AgentResult(status="failed", error=str(exc), agent=self.name)
+            cmd = self._launch + ["--profile", "headless"] + overlay + [request.task]
+        else:
+            # The settings operation never reaches this path.  Keep it for
+            # adapter-level callers that intentionally exercise raw launch.
+            cmd = self._launch + ["--profile", "headless", request.task]
         with self._lock:
             if self._proc is not None:
                 return AgentResult(status="failed", error="adapter 已有任务在运行", agent=self.name)
@@ -239,6 +471,8 @@ class DeepSeekHarnessAdapter(AgentAdapter):
         finally:
             with self._lock:
                 self._proc = None
+            if temporary_context is not None:
+                temporary_context.cleanup()
 
         if self._cancelled.is_set():
             return AgentResult(

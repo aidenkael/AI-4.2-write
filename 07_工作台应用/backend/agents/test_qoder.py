@@ -18,6 +18,50 @@ def test_dynamic_cn_model_parser():
     assert [row["id"] for row in _parse_models("MODEL\nAuto\nReal Model\n")] == ["Auto", "Real Model"]
 
 
+def test_parser_v1129_catalog_splits_native_and_custom():
+    """已安装 Qoder CN v1.1.29 的真实 --list-models 输出形状（fixture）。
+
+    最后一行是自定义路由：`名称 (Provider) (provider/model)`，其 modelID 是
+    尾部 `provider/model`（与 ~/.qoder-cn/settings.json 的 model.name 一致）；
+    其余为内置模型。每个可选项的 id 就是 CLI --model 接受的精确标识。
+    """
+    fixture = """MODEL
+Auto
+Qwen3.8-Max
+DeepSeek-V4-Pro
+DeepSeek-V4-Flash
+Qwen-3.8-Max (QwenCloud-China) (qwencloud-cn/qwen3.8-max-tp)
+"""
+    rows = _parse_models(fixture)
+    natives = [r for r in rows if r["kind"] == "native"]
+    customs = [r for r in rows if r["kind"] == "custom"]
+    assert [r["id"] for r in natives] == ["Auto", "Qwen3.8-Max", "DeepSeek-V4-Pro", "DeepSeek-V4-Flash"]
+    assert len(customs) == 1
+    assert customs[0]["id"] == "qwencloud-cn/qwen3.8-max-tp"
+    assert customs[0]["display_name"] == "Qwen-3.8-Max（QwenCloud-China）"
+    # 去重：同一 id 只保留一次
+    rows2 = _parse_models("MODEL\nA\nA\nB (P) (p/m)\nB (P) (p/m)\n")
+    ids = [r["id"] for r in rows2]
+    assert ids == ["A", "p/m"]
+
+
+def test_parser_does_not_split_plain_parens_names():
+    """没有 `(provider/model)` 尾缀的普通名字不得被误判为自定义路由。"""
+    rows = _parse_models("MODEL\nSome Model (v2)\nPlain\n")
+    assert all(r["kind"] == "native" for r in rows)
+    assert [r["id"] for r in rows] == ["Some Model (v2)", "Plain"]
+
+
+def test_direct_command_passes_custom_model_id(tmp_path):
+    """CLI 合同：Custom 路由用 modelID（provider/model），经 --model 原样传入。"""
+    adapter = QoderAdapter(launch=[sys.executable, "-c", "import sys; print('|'.join(sys.argv[1:]))"])
+    result = adapter.run(AgentRequest(task="task", cwd=str(tmp_path), custom_model="qwencloud-cn/qwen3.8-max-tp"))
+    assert result.status == "completed"
+    parts = result.output.split("|")
+    assert "--model" in parts
+    assert "qwencloud-cn/qwen3.8-max-tp" in parts
+
+
 def test_direct_command_uses_cn_contract(tmp_path):
     adapter = QoderAdapter(launch=[sys.executable, "-c", "import sys; print('|'.join(sys.argv[1:]))"])
     result = adapter.run(AgentRequest(task="task", cwd=str(tmp_path), model="actual-model", reasoning_effort="high"))

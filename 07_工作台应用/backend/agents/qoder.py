@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -46,10 +47,26 @@ def _default_cli() -> str:
     raise RuntimeError(f"找不到可用的 Qoder CN CLI{f'（{detail}）' if detail else ''}")
 
 
-def _discover_desktop() -> dict[str, Any]:
+def _desktop_candidates() -> list[Path]:
+    """Installed Qoder Desktop/IDE executables, derived from the current install.
+
+    The upgraded CN IDE ships as ``Qoder CN IDE.exe`` / ``QoderCN.exe`` under
+    ``Program Files``; the older international build used ``Qoder/Qoder.exe``.
+    Keep an env override first so a custom location always wins.
+    """
     override = os.environ.get("QODER_CN_DESKTOP_PATH")
-    candidates = [Path(override)] if override else []
-    if os.name == "nt" and os.environ.get("ProgramFiles"): candidates.append(Path(os.environ["ProgramFiles"]) / "Qoder" / "Qoder.exe")
+    candidates: list[Path] = [Path(override)] if override else []
+    if os.name == "nt" and os.environ.get("ProgramFiles"):
+        candidates.append(Path(os.environ["ProgramFiles"]) / "Qoder CN IDE" / "Qoder CN IDE.exe")
+        candidates.append(Path(os.environ["ProgramFiles"]) / "QoderCN" / "QoderCN.exe")
+        candidates.append(Path(os.environ["ProgramFiles"]) / "Qoder" / "Qoder.exe")
+    if os.name == "nt" and os.environ.get("LOCALAPPDATA"):
+        candidates.append(Path(os.environ["LOCALAPPDATA"]) / "Programs" / "Qoder CN IDE" / "Qoder CN IDE.exe")
+    return candidates
+
+
+def _discover_desktop() -> dict[str, Any]:
+    candidates = _desktop_candidates()
     path = next((candidate for candidate in candidates if candidate.is_file()), None)
     if not path: return {"installed": False, "status": "not_detected", "path": None, "launcher_path": None, "version": None, "error": None}
     try:
@@ -62,38 +79,142 @@ def _discover_desktop() -> dict[str, Any]:
     except Exception as exc: return {"installed": True, "status": "installed_version_unknown", "path": str(path), "launcher_path": str(path), "version": None, "error": f"Desktop 版本检测失败：{exc}"}
 
 
+# Qoder CN CLI --model contract (v1.1.29 --help): "Default and New Models use
+# model name; Custom uses modelID".  Custom routes are listed with an explicit
+# `` (Provider) (provider/model)`` route suffix; the trailing ``provider/model``
+# token is the modelID the CLI accepts for that custom route.
+_CUSTOM_ROUTE_RE = re.compile(r"^(?P<name>.+?)\s+\((?P<provider>[^()]+)\)\s+\((?P<route>[^()/]+/[^()/]+)\)$")
+
+
 def _parse_models(output: str) -> list[dict[str, str]]:
+    """Parse only the catalog emitted by this CLI executable.
+
+    Returns entries with ``id`` (exact CLI identifier: model name for native,
+    ``provider/model`` modelID for custom routes), ``display_name``, and
+    ``kind`` (``native`` / ``custom``).  The CLI emits one flat catalog with no
+    explicit classification; the only structural signal for a custom route is
+    the trailing ``(provider/model)`` token that the CLI itself documents as
+    the custom modelID.
+    """
     try:
-        raw = json.loads(output); rows = raw.get("models", raw) if isinstance(raw, dict) else raw
+        raw = json.loads(output)
+        rows = raw.get("models", raw) if isinstance(raw, dict) else raw
         if isinstance(rows, list):
-            parsed = [{"id": str(item.get("id") or item.get("name")).strip(), "display_name": str(item.get("name") or item.get("id")).strip()} if isinstance(item, dict) else {"id": str(item).strip(), "display_name": str(item).strip()} for item in rows]
-            return [item for item in parsed if item["id"]]
-    except ValueError: pass
-    rows = [line.strip() for line in output.splitlines() if line.strip()]
-    if rows and rows[0].upper() in {"MODEL", "MODELS"}: rows = rows[1:]
-    return [{"id": row, "display_name": row} for row in rows]
+            parsed: list[dict[str, str]] = []
+            for item in rows:
+                if not isinstance(item, dict):
+                    continue
+                model_id = str(item.get("id") or item.get("name") or "").strip()
+                if not model_id:
+                    continue
+                display = str(item.get("name") or item.get("id") or model_id).strip()
+                route = str(item.get("modelID") or item.get("route") or "").strip()
+                if route:
+                    parsed.append({"id": route, "display_name": display, "kind": "custom"})
+                else:
+                    parsed.append({"id": model_id, "display_name": display, "kind": "native"})
+            return [entry for entry in parsed if entry["id"]]
+    except ValueError:
+        pass
+    rows = [line.strip() for line in output.splitlines()]
+    heading = next((index for index, row in enumerate(rows) if row.upper() in {"MODEL", "MODELS"}), None)
+    if heading is None:
+        return []
+    rows = [row for row in rows[heading + 1:] if row]
+    parsed = []
+    for row in rows:
+        custom_match = _CUSTOM_ROUTE_RE.match(row)
+        if custom_match:
+            parsed.append({
+                "id": custom_match.group("route"),
+                "display_name": f"{custom_match.group('name')}（{custom_match.group('provider')}）",
+                "kind": "custom",
+            })
+        else:
+            parsed.append({"id": row, "display_name": row, "kind": "native"})
+    # 去重：同一模型 id 只保留一次（不发明 CLI 未区分的重复路由别名）
+    seen: set[str] = set()
+    unique: list[dict[str, str]] = []
+    for entry in parsed:
+        key = entry["id"]
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(entry)
+    return unique
+
+
+_QODER_DESKTOP_DATA_DIRS = (".qoder", ".qoder-cn")
+_QODER_COMMAND_NAME = "gowrite.md"
 
 
 def _command_paths() -> list[Path]:
-    return [Path.home() / ".qoder-cn" / "commands" / "gowrite.md", Path.home() / ".lingma" / "commands" / "gowrite.md"]
+    """Supported command locations, derived from the installed CN IDE contract.
+
+    The installed Qoder CN IDE (v1.1.29) recognises both ``.qoder`` and
+    ``.qoder-cn`` as user data roots (its bundle lists both in the accepted
+    data-root set).  User slash commands are markdown files under
+    ``<root>/commands/<name>.md``; install/readiness covers every supported
+    root so the bridge is detected regardless of which app instance is active.
+    """
+    return [
+        Path.home() / data_dir / "commands" / _QODER_COMMAND_NAME
+        for data_dir in _QODER_DESKTOP_DATA_DIRS
+    ]
 
 
 def command_definition() -> str:
     return "---\ndescription: Execute the active Go Write request and write its response\n---\nRead `06_工作区/应用开发/.qoder_bridge/active.json`, then read the referenced request. Execute only its `task`. Write one UTF-8 JSON response to the request's `response_path` with schema `gowrite_response/v1`, the same `request_id`, status `completed` or `failed`, and either `output` or `error`. Do not invent or alter Go Write business rules; the request task is authoritative.\n"
 
 
-def command_ready() -> bool:
+def command_locations() -> list[dict[str, Any]]:
+    """Per-location command readiness facts (real path + real content state)."""
     definition = command_definition()
-    return any(path.is_file() and path.read_text(encoding="utf-8", errors="replace") == definition for path in _command_paths())
+    locations = []
+    for path in _command_paths():
+        exists = path.is_file()
+        matches = False
+        if exists:
+            try:
+                matches = path.read_text(encoding="utf-8") == definition
+            except (OSError, UnicodeError):
+                matches = False
+        locations.append({
+            "path": str(path),
+            "exists": exists,
+            "matches": matches,
+            "ready": exists and matches,
+        })
+    return locations
+
+
+def command_ready() -> bool:
+    """Ready when the exact definition exists at any supported location."""
+    return any(location["ready"] for location in command_locations())
 
 
 def install_command() -> dict[str, Any]:
-    installed, errors = [], []
-    for path in _command_paths():
+    paths = _command_paths()
+    errors: list[str] = []
+    installed_paths: list[str] = []
+    for path in paths:
         try:
-            path.parent.mkdir(parents=True, exist_ok=True); path.write_text(command_definition(), encoding="utf-8"); installed.append(str(path))
-        except OSError as exc: errors.append(f"{path}: {exc}")
-    return {"installed_paths": installed, "command_ready": command_ready(), "errors": errors}
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(command_definition(), encoding="utf-8", newline="\n")
+            installed_paths.append(str(path))
+        except (OSError, UnicodeError) as exc:
+            errors.append(f"{path}: 写入 Qoder Desktop 命令失败：{exc}")
+
+    ready = command_ready()
+    if not ready and not errors:
+        errors.append("命令已写入，但任何受支持的 Qoder 命令位置都不符合 /gowrite 命令格式")
+    return {
+        "installed_paths": installed_paths,
+        "command_ready": ready,
+        "status": "installed" if ready else "error",
+        "restart_required": False,
+        "errors": errors,
+    }
 
 
 class QoderAdapter(AgentAdapter):
@@ -107,10 +228,49 @@ class QoderAdapter(AgentAdapter):
             cli_version = _first_line(subprocess.run([cli_path, "--version"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=12))
             listed = subprocess.run([cli_path, "--list-models"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20)
             if listed.returncode: auth_status = "not_authenticated"; errors.append(listed.stderr.strip() or "Qoder CN CLI 未能读取模型目录")
-            else: models = _parse_models(listed.stdout); auth_status = "authenticated" if models else "unknown"
+            else:
+                models = _parse_models(listed.stdout)
+                if models:
+                    auth_status = "authenticated"
+                else:
+                    auth_status = "unknown"
+                    errors.append("Qoder CN CLI 未返回可识别的模型目录")
         except Exception as exc: errors.append(str(exc))
         ready = command_ready()
-        return {"agent_id": cls.name, "display_name": "Qoder CN", "installed": bool(desktop["installed"] or cli_path), "available": bool(cli_path and models), "version": " / ".join(value for value in (desktop["version"], cli_version) if value) or None, "errors": errors, "desktop": desktop, "cli": {"detected": bool(cli_path), "usable": bool(cli_path), "status": "usable" if cli_path else "not_detected", "kind": "qoder_cn", "path": cli_path, "resolved_command": [cli_path] if cli_path else [], "version": cli_version}, "interactive": {"available": bool(desktop["installed"]), "bridge_ready": bool(desktop["installed"] and ready), "command_name": "/gowrite", "command_ready": ready, "relevant_status": {"cli_command": str(_command_paths()[0]), "ide_command": str(_command_paths()[1])}, "repair_hint": None if ready else "未安装 Go Write 的 /gowrite 命令，可使用“安装/修复命令”。"}, "direct": {"available": bool(cli_path and models), "auth_status": auth_status, "model_selection": "selectable", "models": [{**model, "selectable": True} for model in models], "managed_model": None, "capabilities": cls(cli_path=cli_path).capabilities() if cli_path else {}}}
+        locations = command_locations()
+        native_models = [{"id": m["id"], "display_name": m["display_name"], "selectable": True, "source": "native"} for m in models if m.get("kind") != "custom"]
+        custom_models = [{"id": m["id"], "display_name": m["display_name"], "selectable": True, "source": "custom"} for m in models if m.get("kind") == "custom"]
+        # This installed CLI exposes custom routes in the same --list-models
+        # catalog; the trailing ``(provider/model)`` token is the custom modelID.
+        # Each displayed id is the exact identifier the CLI accepts via --model.
+        return {
+            "agent_id": cls.name,
+            "display_name": "Qoder CN",
+            "installed": bool(desktop["installed"] or cli_path),
+            "available": bool(cli_path and models),
+            "version": " / ".join(value for value in (desktop["version"], cli_version) if value) or None,
+            "errors": errors,
+            "desktop": desktop,
+            "cli": {"detected": bool(cli_path), "usable": bool(cli_path), "status": "usable" if cli_path else "not_detected", "kind": "qoder_cn", "path": cli_path, "resolved_command": [cli_path] if cli_path else [], "version": cli_version},
+            "interactive": {
+                "available": bool(desktop["installed"]),
+                "bridge_ready": bool(desktop["installed"] and ready),
+                "command_name": "/gowrite",
+                "command_ready": ready,
+                "command_locations": locations,
+                "relevant_status": {"qoder_desktop_command": "; ".join(loc["path"] for loc in locations)},
+                "repair_hint": None if ready else "未安装 Go Write 的 /gowrite 命令（或已安装位置不符合格式），可使用“安装/修复命令”。",
+            },
+            "direct": {
+                "available": bool(cli_path and models),
+                "auth_status": auth_status,
+                "model_selection": "selectable" if models else "none",
+                "models": native_models,
+                "custom_models": custom_models,
+                "managed_model": None,
+                "capabilities": cls(cli_path=cli_path).capabilities() if cli_path else {},
+            },
+        }
 
     def __init__(self, cli_path: Optional[str] = None, launch: Optional[list[str]] = None, timeout: Optional[float] = None) -> None:
         self._launch = launch if launch is not None else [cli_path or _default_cli()]; self._timeout = timeout; self._proc: Optional[subprocess.Popen[str]] = None; self._lock = threading.Lock(); self._cancelled = threading.Event()
@@ -119,9 +279,12 @@ class QoderAdapter(AgentAdapter):
         return {"run": True, "cwd": True, "final_output": True, "cancel": True, "stream": False, "resume": False, "session": False, "model_selection": "cli_flag", "reasoning_effort": False, "byok": False}
 
     def run(self, request: AgentRequest) -> AgentResult:
+        # CLI contract: native models use their model name; custom routes use
+        # their modelID (the ``provider/model`` token from --list-models).
         self._cancelled.clear(); cmd = self._launch + ["-p", "-o", "json"]
         if request.cwd: cmd += ["--cwd", request.cwd]
-        if request.model: cmd += ["--model", request.model]
+        selected_model = request.custom_model or request.model
+        if selected_model: cmd += ["--model", selected_model]
         cmd += ["--permission-mode", _PERMISSION_MODE, request.task]
         with self._lock:
             if self._proc is not None: return AgentResult(status="failed", error="adapter 已有任务在运行", agent=self.name)

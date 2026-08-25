@@ -1,18 +1,25 @@
 # -*- coding: utf-8 -*-
 """新建作品 Author Operations：第一条真实作者使用链（“我有个想法”）。
 
-架构（已确认）：Go Write 管长期记忆；Qoder 桌面端只作为当前任务的交互式
-Agent 执行器。Go Write 绝不直接调用模型 API，也不使用 qodercli -p 作为
-Token Plan 作者路径。
+架构（已确认）：Go Write 管长期记忆；执行器按已保存 Settings 决定：
+- Interactive（交互桥，默认）：Go Write 准备任务 → 作者在 Qoder 桌面端执行
+  /gowrite（桌面端已配置好的模型）→ 写回 response；
+- Direct（直连）：仅当 Settings 显式配置 Direct + 有效 Agent/模型时，通过现有
+  Agent registry/adapter 后台执行同一任务（prepare 立即返回，可轮询/取消）。
 
-链路：
+链路（统一请求生命周期，两种模式共用同一任务文本与同一 finalize）：
   作者想法 → Go Write 准备本轮 Agent 任务（唯一 request_id + 完整 task +
-  结果写回位置）→ 页面提示“请到 Qoder 输入 /gowrite 并回车” →
-  作者在 Qoder 桌面端执行 /gowrite（用桌面端已配置好的百炼 Token Plan 模型）
-  → Qoder 写回 response 文件 → Go Write 检测到结果 → 校验 request_id →
-  现有严格 JSON/字段验证 → 现有 StoryDesign 生成 proposal_noncanonical 候选
-  （临时 pre-project 工作区）→ UI 展示 → 作者明确确认 →
-  ProjectWorkspace.create_project 创建正式作品
+  结果写回位置）→ Interactive 提示作者 /gowrite；Direct 后台执行
+  → 写回同一响应信封 → request_id 校验 → 严格 JSON/字段验证
+  → 现有 StoryDesign 生成 proposal_noncanonical 候选（临时 pre-project 工作区）
+  → UI 展示 → 作者明确确认 → ProjectWorkspace.create_project 创建正式作品
+
+知识选择绑定（与 StoryPlan/StoryWrite 同一 P0 规则）：
+- knowledge_needs = []：不调用 KnowledgeRetrieve、不要求快照，0 BKP 合法；
+- knowledge_needs 非空：模型在本次执行内运行唯一一次确定性检索命令
+  （retrieval_snapshot.py --request <request_id> "<query>"），从该显示包选择
+  scoped ref 并回显 package_fingerprint；finalize 绝不再次检索；
+  同一捕获包绑定给 run_story_design(retrieval=bound_package)。
 
 约束（遵守现有冻结合同）：
 - 不修改 StoryDesign / ProjectWorkspace；不创建空壳项目。
@@ -20,11 +27,12 @@ Token Plan 作者路径。
 - 确认必须带后台生成的 proposal token；禁止信任前端自行构造隐藏内容。
 - Token 禁止进入 Prompt / UI / 日志 / Bridge 返回值。
 - 新增作品只写 Author Intent + 空 Story State + 空索引；不生成正文。
-- 桥文件全部在 06_工作区/应用开发/.qoder_bridge（Local Only，可删除）；
-  绝不用正式作品作为 Agent 桥。
+- 桥文件全部在 06_工作区/应用开发/.qoder_bridge（Local Only，可删除）。
 """
 from __future__ import annotations
 
+import datetime
+import hashlib
 import json
 import shutil
 import sys
@@ -32,7 +40,24 @@ import uuid
 from pathlib import Path
 from typing import Any, Optional
 
+from operations import agent_runner
+from operations import execution_audit as audit
+from operations import execution_tasks
 from operations import qoder_bridge as bridge
+from operations.agent_runner import AgentRunError
+from config.settings import EXECUTION_MODE_DIRECT, SettingsStore
+from operations.story_planning import (  # noqa: E402  复用同一 P0 检索包机制
+    _DIRECT_BUSY_ERROR,
+    _MAX_BKP_HITS,
+    _bound_package,
+    _package_fingerprint,
+    _package_from_snapshot,
+    _package_snapshot_dict,
+    _retrieve_package,
+)
+
+# Direct 执行任务管理器（与 StoryPlan/StoryWrite/Review 共用同一单活跃槽）
+_exec_task_manager = execution_tasks.manager
 
 # ---------------------------------------------------------------------------
 # Frozen runtime imports — NEVER copy their rules; always call them directly.
@@ -69,13 +94,30 @@ _PROPOSALS_ROOT = (
     Path(__file__).resolve().parents[3] / "06_工作区" / "应用开发" / ".proposals"
 )
 
-# Agent 任务模板：只要求结构化结果，明确不读文件不写文件
-# 注意：作者想法放在最后，避免模型先回应角色设定而忽略 JSON 输出要求
-# 该模板是唯一业务 Prompt 来源；/gowrite 不复制规则，只执行这里保存的 task。
-_AGENT_TASK_TEMPLATE = """只做语义与创意分析，不读取或修改任何文件。
+# 请求级检索快照 CLI（Agent 在执行内运行；唯一确定性检索入口）
+_RETRIEVAL_SCRIPT = Path(__file__).resolve().parent / "retrieval_snapshot.py"
 
-请针对以下作者想法，直接输出一个合法的 JSON 对象（不要任何额外文字、不要 markdown 代码块标记）。
-结构必须如下：
+# Agent 任务模板：两阶段。第一阶段语义分析；第二阶段（仅 knowledge_needs 非空）
+# 运行确定性检索命令查看真实候选，然后从该候选中选择 scoped ref。模型不得在
+# 见到检索结果前编造/选择 BKP id。作者想法放在最后，避免模型先回应角色设定。
+_AGENT_TASK_TEMPLATE = """你是 Go Write 的故事设计执行器。必须严格按下列顺序执行：先完成语义分析；若 knowledge_needs 非空，必须在生成最终 JSON 之前先用本地命令/工具执行下面给出的检索命令并读取其结果；完成检索与选择后，才输出最终 JSON。本任务不是纯文本生成任务；中间的工具调用属于任务执行过程，不属于最终回复。
+
+流程分两个阶段：
+
+第一阶段：语义分析
+针对作者想法，先完成语义分析（objective / knowledge_needs / assumptions）。knowledge_needs 为空列表是合法的。
+
+第二阶段：知识检索与选择（仅当 knowledge_needs 非空；必须执行）
+若 knowledge_needs 非空，在生成最终 JSON 之前，你必须先用可用的本地命令/工具执行以下确定性只读检索命令：
+  python {retrieval_command} --request {request_id} "<query>"
+其中 <query> 是把你第一阶段列出的全部 knowledge_needs 用中文分号（；）连接成的单个字符串。
+该命令会把本次检索包写入当前请求的临时快照，然后输出 JSON；每个候选项的 selection_ref 为 "book_id/source_anchor"。
+你必须读取该命令实际输出的 package：只从中选择 0 到 {max_bkp_hits} 个 selection_ref 填入 semantic_interpretation.selected_bkp_ids；并把命令输出的 package_fingerprint 原样填入 semantic_interpretation.package_ref。
+严禁编造命令输出中不存在的 selection_ref 或 package_fingerprint；没有合适候选时 selected_bkp_ids 保持空列表。
+若 knowledge_needs 为空：不要运行检索命令，selected_bkp_ids 必须为 []，package_ref 必须为空字符串 ""。
+
+最终回复
+最终回复必须只有合法 JSON 对象（不要任何额外文字、不要 markdown 代码块标记）。结构必须如下：
 
 {{
   "semantic_interpretation": {{
@@ -83,6 +125,7 @@ _AGENT_TASK_TEMPLATE = """只做语义与创意分析，不读取或修改任何
     "objective": "本次设计的目标（一句话）",
     "knowledge_needs": [],
     "selected_bkp_ids": [],
+    "package_ref": "",
     "assumptions": ["AI 解读中的假设，作者尚未确认"]
   }},
   "model_output": {{
@@ -99,7 +142,7 @@ _AGENT_TASK_TEMPLATE = """只做语义与创意分析，不读取或修改任何
 作者作品名：{name}
 作者想法：{idea}
 
-直接输出 JSON，不要输出任何其他内容。"""
+最终回复必须只有合法 JSON；但在生成最终回复之前，若 knowledge_needs 非空，你必须先调用工具执行检索命令并读取结果。工具调用属于任务执行过程，不属于最终回复。"""
 
 # StoryDesign 候选/工件 id（临时工作区内）
 _BRIEF_ID = "brief-idea-001"
@@ -124,7 +167,7 @@ def _proposal_dir(project_id: str) -> Path:
     return get_proposals_root() / project_id
 
 
-def _write_temp_pre_project(proposal_dir: Path, project_id: str, name: str, idea: str) -> None:
+def _write_temp_pre_project(proposal_dir: Path, project_id: str, name: str, idea: str, proposal_turn_id: str) -> None:
     """构造 StoryDesign 所需的临时 Author Intent + 空 Story State。
 
     内容明确属于 proposal / pre-project：project_id 用 generate_project_id(name)
@@ -160,6 +203,7 @@ def _write_temp_pre_project(proposal_dir: Path, project_id: str, name: str, idea
         "name": name,
         "idea": idea,
         "proposal_token": uuid.uuid4().hex,
+        "proposal_turn_id": proposal_turn_id,
     }
     write_json(proposal_dir / "proposal_meta.json", meta)
 
@@ -174,6 +218,118 @@ def _load_proposal_meta(project_id: str) -> dict[str, Any]:
 def _cleanup_proposal(project_id: str) -> None:
     """删除临时候选工作区（可删除原则）。"""
     shutil.rmtree(_proposal_dir(project_id), ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# 知识选择绑定（P0，与 StoryPlan/StoryWrite 同规则；快照在 proposal 工作区）
+# ---------------------------------------------------------------------------
+
+def _snapshot_path(proposal_dir: Path) -> Path:
+    return proposal_dir / "retrieval" / "package.json"
+
+
+def _write_snapshot(
+    *,
+    request_id: str,
+    project_id: str,
+    proposal_turn_id: str,
+    query: str,
+    package: Any,
+    proposal_dir: Path,
+) -> Path:
+    snapshot = {
+        "schema": "gowrite_retrieval_snapshot/v1",
+        "request_id": request_id,
+        "project_id": project_id,
+        "proposal_turn_id": proposal_turn_id,
+        "query": query,
+        "package_fingerprint": _package_fingerprint(package),
+        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+        "package": _package_snapshot_dict(package),
+    }
+    path = _snapshot_path(proposal_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def _load_snapshot(proposal_dir: Path) -> tuple[dict[str, Any] | None, str | None]:
+    path = _snapshot_path(proposal_dir)
+    if not path.exists():
+        return None, "检索包快照缺失：Agent 未在本轮执行内生成检索快照。"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None, "检索包快照无法解析（已被篡改或损坏）。"
+    if not isinstance(data, dict) or not isinstance(data.get("package"), dict):
+        return None, "检索包快照结构无效（缺少 package 对象）。"
+    return data, None
+
+
+def _validate_snapshot(
+    snapshot: dict[str, Any],
+    *,
+    request_id: str,
+    project_id: str,
+    proposal_turn_id: str,
+    query: str,
+    package_ref: str,
+) -> None:
+    if snapshot.get("request_id") != request_id:
+        raise NewProjectError("检索包快照 request_id 与当前任务不一致，已拒绝。")
+    if snapshot.get("project_id") != project_id:
+        raise NewProjectError("检索包快照 project_id 与当前任务不一致，已拒绝。")
+    if snapshot.get("proposal_turn_id") != proposal_turn_id:
+        raise NewProjectError("检索包快照 proposal_turn_id 与当前任务不一致，已拒绝。")
+    if snapshot.get("query") != query:
+        raise NewProjectError("检索包快照查询与本次 knowledge_needs 不一致（query mismatch），已拒绝。")
+    if not package_ref:
+        raise NewProjectError("Agent 输出缺少检索包身份（package_ref）。")
+    if snapshot.get("package_fingerprint") != package_ref:
+        raise NewProjectError("Agent 选择的检索包身份（package_ref）与绑定快照不一致，已拒绝。")
+
+
+def execute_request_scoped_retrieval(query: str, request_id: str) -> Any:
+    """Agent 侧（执行内）的唯一一次确定性检索调用（显式绑定 request_id）。"""
+    request = bridge.get_request(request_id)
+    if request is None:
+        raise NewProjectError("任务文件不存在或不可读，无法生成检索快照。")
+    meta = request.get("meta") or {}
+    project_id = str(meta.get("project_id") or "")
+    proposal_turn_id = str(meta.get("proposal_turn_id") or "")
+    if not project_id or not proposal_turn_id:
+        raise NewProjectError("任务缺少 project_id / proposal_turn_id 元数据。")
+    proposal_dir = _proposal_dir(project_id)
+    audit.append_event(
+        request_id, audit.EVENT_RETRIEVAL_REQUESTED, "knowledge_retrieve",
+        details={"query": query[:200]},
+    )
+    try:
+        package = _retrieve_package(query)  # 唯一一次 KnowledgeRetrieve 执行
+    except NewProjectError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise NewProjectError(f"知识检索失败：{exc}") from exc
+    _write_snapshot(
+        request_id=request_id,
+        project_id=project_id,
+        proposal_turn_id=proposal_turn_id,
+        query=query,
+        package=package,
+        proposal_dir=proposal_dir,
+    )
+    audit.append_event(
+        request_id, audit.EVENT_RETRIEVAL_PACKAGE_BUILT, "knowledge_retrieve",
+        details={
+            "query": query[:200],
+            "candidate_count": getattr(package, "candidate_count", len(getattr(package, "hits", []))),
+            "refs": [
+                f"{getattr(hit, 'book_id', '')}/{getattr(hit, 'source_anchor', '')}"
+                for hit in getattr(package, "hits", [])
+            ],
+        },
+    )
+    return package
 
 
 # ---------------------------------------------------------------------------
@@ -199,22 +355,17 @@ def _extract_json_from_output(text: str) -> str:
     2. 去掉 markdown 代码块包裹（含 ```json 等带语言标记的变体）
     3. 找文本中第一个 ``` 代码块围栏，提取其中内容
     4. 找最外层 { ... } 匹配
-
-    所有策略只负责提取，不做字段校验；字段校验由调用方完成。
-    全部失败时，返回去掉代码块后的最佳尝试（让调用方报精确错误）。
     """
     stripped = text.strip()
     if not stripped:
         return stripped
 
-    # 1. 直接解析
     try:
         json.loads(stripped)
         return stripped
     except (json.JSONDecodeError, ValueError):
         pass
 
-    # 2. 标准 markdown 代码块（首行 ``` 且末行 ```）
     if stripped.startswith("```"):
         lines = stripped.splitlines()
         if len(lines) >= 2 and lines[-1].strip() == "```":
@@ -225,7 +376,6 @@ def _extract_json_from_output(text: str) -> str:
             except (json.JSONDecodeError, ValueError):
                 pass
 
-    # 3. 查找任意位置的代码块围栏（处理模型先输出文字再给代码块的情况）
     lines = stripped.splitlines()
     fence_start = None
     for i, line in enumerate(lines):
@@ -247,7 +397,6 @@ def _extract_json_from_output(text: str) -> str:
                 except (json.JSONDecodeError, ValueError):
                     pass
 
-    # 4. 最外层花括号匹配
     first_brace = stripped.find("{")
     last_brace = stripped.rfind("}")
     if first_brace != -1 and last_brace > first_brace:
@@ -258,7 +407,6 @@ def _extract_json_from_output(text: str) -> str:
         except (json.JSONDecodeError, ValueError):
             pass
 
-    # 全部失败：返回去掉围栏后的最佳尝试（供错误诊断）
     if stripped.startswith("```"):
         inner_lines = lines[1:]
         if inner_lines and inner_lines[-1].strip() == "```":
@@ -280,7 +428,6 @@ def _parse_agent_result(output: str) -> dict[str, Any]:
 
     非法结构化结果：抛 NewProjectError（普通可读错误），不猜数据补齐、不落盘。
     严格类型检查：字段缺失或类型错误一律拒绝，不自动修复。
-    JSON 提取使用 _extract_json_from_output 的多策略链；提取后做严格字段校验。
     """
     text = _extract_json_from_output(output)
     try:
@@ -294,7 +441,6 @@ def _parse_agent_result(output: str) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise NewProjectError("Agent 输出不是合法结构化结果（应为 JSON 对象）。")
 
-    # --- semantic_interpretation 严格校验 ---
     si = data.get("semantic_interpretation")
     if not isinstance(si, dict):
         raise NewProjectError("Agent 输出缺少 semantic_interpretation（应为对象）。")
@@ -308,11 +454,12 @@ def _parse_agent_result(output: str) -> dict[str, Any]:
     if "selected_bkp_ids" not in si:
         raise NewProjectError("Agent 输出缺少 semantic_interpretation.selected_bkp_ids（应为列表）。")
     _validate_str_list(si["selected_bkp_ids"], "semantic_interpretation.selected_bkp_ids")
+    if "package_ref" not in si or not isinstance(si.get("package_ref"), str):
+        raise NewProjectError("Agent 输出缺少 semantic_interpretation.package_ref（应为字符串）。")
     if "assumptions" not in si:
         raise NewProjectError("Agent 输出缺少 semantic_interpretation.assumptions（应为列表）。")
     _validate_str_list(si["assumptions"], "semantic_interpretation.assumptions")
 
-    # --- model_output 严格校验 ---
     mo = data.get("model_output")
     if not isinstance(mo, dict):
         raise NewProjectError("Agent 输出缺少 model_output（应为对象）。")
@@ -337,15 +484,14 @@ def _parse_agent_result(output: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# 准备本轮 Agent 任务（不运行模型；Qoder 桌面端执行 /gowrite）
+# 准备本轮 Agent 任务（不运行模型；Interactive 提示 /gowrite，Direct 后台执行）
 # ---------------------------------------------------------------------------
 
 def prepare_new_project(name: str, idea: str) -> dict[str, Any]:
-    """“我有个想法”：Go Write 准备本轮 Agent 任务（pending request）。
+    """“我有个想法”：按已保存 Settings 执行模式准备本轮 Agent 任务。
 
-    只做：校验输入 → 临时 pre-project 工作区 → 唯一 request_id → 保存完整
-    task → 指定结果写回位置 → 尽力把 Qoder 切到前台（失败静默）。
-    不调用任何模型 API；模型执行由作者在 Qoder 桌面端输入 /gowrite 完成。
+    Interactive：创建 pending request，提示作者到 Qoder 执行 /gowrite；
+    Direct：通过配置的 Agent/模型后台执行（prepare 立即返回，可轮询/取消）。
     """
     name = (name or "").strip()
     idea = (idea or "").strip()
@@ -359,36 +505,174 @@ def prepare_new_project(name: str, idea: str) -> dict[str, Any]:
         raise NewProjectError(str(exc)) from exc
 
     project_id = generate_project_id(name)
+    proposal_turn_id = uuid.uuid4().hex[:12]
     proposal_dir = _proposal_dir(project_id)
     if proposal_dir.exists():
-        # 同一作品名的旧候选已存在：先清掉，保证每次提案从干净状态开始
         shutil.rmtree(proposal_dir, ignore_errors=True)
-    _write_temp_pre_project(proposal_dir, project_id, name, idea)
+    _write_temp_pre_project(proposal_dir, project_id, name, idea, proposal_turn_id)
 
-    task = _AGENT_TASK_TEMPLATE.format(name=name, idea=idea)
-    request_id = bridge.create_request(
+    # 解析执行配置（Settings 契约；agent_runner._build_adapter 负责直连解析）
+    settings = SettingsStore().load()
+    execution_mode = settings.default_execution_mode
+
+    # 预生成 request_id（检索命令需要内嵌真实 id；Interactive/Direct 共用）
+    request_id = uuid.uuid4().hex
+    task = _AGENT_TASK_TEMPLATE.format(
+        name=name,
+        idea=idea,
+        retrieval_command=f'"{_RETRIEVAL_SCRIPT}"',
+        request_id=request_id,
+        max_bkp_hits=_MAX_BKP_HITS,
+    )
+
+    direct_adapter = None
+    direct_agent_request = None
+    execution_agent = settings.interactive_agent
+    execution_model = None
+    if execution_mode == EXECUTION_MODE_DIRECT:
+        try:
+            direct_adapter, direct_agent_request = agent_runner._build_adapter()
+        except AgentRunError as exc:
+            _cleanup_proposal(project_id)
+            raise NewProjectError(f"直连执行配置不可用：{exc}") from exc
+        except Exception as exc:  # noqa: BLE001
+            _cleanup_proposal(project_id)
+            raise NewProjectError(f"直连执行配置不可用：{exc}") from exc
+        execution_agent = direct_adapter.name
+        execution_model = direct_agent_request.custom_model or direct_agent_request.model
+        if _exec_task_manager.is_busy():
+            _cleanup_proposal(project_id)
+            raise NewProjectError(_DIRECT_BUSY_ERROR)
+
+    bridge.create_request(
         task=task,
         kind="story_design_propose",
-        meta={"name": name, "idea": idea, "project_id": project_id},
+        meta={
+            "name": name,
+            "idea": idea,
+            "project_id": project_id,
+            "proposal_turn_id": proposal_turn_id,
+            "execution": {
+                "execution_mode": execution_mode,
+                "agent_id": execution_agent,
+                "model": execution_model,
+            },
+        },
+        request_id=request_id,
     )
+
+    # 把 request_id 持久化到 proposal_meta.json，使"丢弃已完成但未确认候选"
+    # 能按 request_id 定位并清理工作区（proposal token 随之失效）。
+    meta_path = proposal_dir / "proposal_meta.json"
+    if meta_path.exists():
+        _meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        _meta["request_id"] = request_id
+        write_json(meta_path, _meta)
+
+    # 验证式审计（operation.started；交互桥只标 waiting，绝不声称 Agent 已启动）
+    # 必须先于 Direct worker 创建（worker 内 append_event 依赖进程内 recorder）。
+    execution_facts = {
+        "execution_mode": execution_mode,
+        "agent_id": execution_agent,
+        "model": execution_model,
+    }
+    recorder = audit.AuditRecorder(
+        request_id, "new_project", project_id, execution=execution_facts,
+    )
+    if execution_mode != EXECUTION_MODE_DIRECT:
+        recorder.event(audit.EVENT_BRIDGE_WAITING, component="new_project")
+
+    message = "任务已准备好，请到 Qoder 输入 /gowrite 并回车。"
+    if execution_mode == EXECUTION_MODE_DIRECT:
+        message = "任务已通过直连模式后台执行，正在校验结果。"
+        _start_direct_execution(
+            direct_adapter, direct_agent_request, task, request_id,
+            project_id=project_id,
+        )
+
     return {
         "request_id": request_id,
         "name": name,
         "status": "task_prepared",
-        "message": "任务已准备好，请到 Qoder 输入 /gowrite 并回车。",
+        "execution_mode": execution_mode,
+        "agent_id": execution_agent,
+        "model": execution_model,
+        "message": message,
     }
 
 
 # ---------------------------------------------------------------------------
-# 等待/检测 Qoder 写回结果（request_id 校验 → 严格解析 → StoryDesign 候选）
+# Direct 后台执行
+# ---------------------------------------------------------------------------
+
+def _start_direct_execution(
+    adapter: Any,
+    agent_request: Any,
+    task: str,
+    request_id: str,
+    *,
+    project_id: str,
+) -> None:
+    execution = {
+        "execution_mode": "direct",
+        "agent_id": adapter.name,
+        "model": agent_request.custom_model or agent_request.model,
+    }
+    worker = lambda: _dispatch_direct_worker(adapter, agent_request, task, request_id)  # noqa: E731
+    if not _exec_task_manager.start(request_id=request_id, worker=worker, adapter=adapter, execution=execution):
+        _cleanup_proposal(project_id)
+        bridge.cleanup_request(request_id)
+        raise NewProjectError(_DIRECT_BUSY_ERROR)
+
+
+def _dispatch_direct_worker(adapter: Any, agent_request: Any, task: str, request_id: str) -> None:
+    """后台 worker：执行唯一一次 Direct Agent 调用并写回现有响应信封。"""
+    agent_request.task = task
+    agent_request.cwd = str(_REPO_ROOT)
+    audit.append_event(
+        request_id, audit.EVENT_AGENT_DIRECT_PROCESS_STARTED, "new_project",
+        details={"agent": adapter.name},
+    )
+    try:
+        result = adapter.run(agent_request)
+    except Exception as exc:  # noqa: BLE001
+        audit.append_event(request_id, audit.EVENT_AGENT_FAILED, "new_project", details={"error": str(exc)[:200]})
+        _finish_direct(request_id, status="failed", error=f"直连执行失败：{exc}")
+        return
+    if _exec_task_manager.is_canceled(request_id):
+        return
+    if result.status != "completed":
+        audit.append_event(
+            request_id,
+            audit.EVENT_AGENT_FAILED if result.status != "cancelled" else audit.EVENT_AGENT_CANCELED,
+            "new_project", details={"error": (result.error or "")[:200]},
+        )
+        _finish_direct(
+            request_id,
+            status="failed",
+            error=result.error or f"直连执行未完成（status={result.status}）。",
+        )
+        return
+    audit.append_event(request_id, audit.EVENT_AGENT_COMPLETED, "new_project")
+    _finish_direct(request_id, status="completed", output=result.output or "")
+
+
+def _finish_direct(request_id: str, *, status: str, output: str = "", error: str | None = None) -> None:
+    # 审计记录不在这里收尾（finalize 事件由 get_new_project_request 追加后 finish）
+    if _exec_task_manager.is_canceled(request_id):
+        return
+    bridge.write_response(request_id, status=status, output=output or None, error=error)
+    _exec_task_manager.finish(
+        request_id,
+        execution_tasks.TASK_COMPLETED if status == "completed" else execution_tasks.TASK_FAILED,
+    )
+
+
+# ---------------------------------------------------------------------------
+# 等待/检测写回结果（request_id 校验 → 严格解析 → StoryDesign 候选）
 # ---------------------------------------------------------------------------
 
 def _response_output_text(response: dict[str, Any]) -> str:
-    """从 response 提取模型最终结果文本。
-
-    result（结构化对象）优先，output（模型原始文本）兜底；都没有则报错。
-    提取后统一走现有 _parse_agent_result 严格校验，不新增第二条宽松通道。
-    """
     result = response.get("result")
     if isinstance(result, dict) and result:
         return json.dumps(result, ensure_ascii=False)
@@ -399,29 +683,59 @@ def _response_output_text(response: dict[str, Any]) -> str:
 
 
 def _finalize_request(request: dict[str, Any], response: dict[str, Any]) -> dict[str, Any]:
-    """response → request_id 校验 → 现有严格业务解析 → StoryDesign 候选。
-
-    只返回展示形状（同旧 propose 返回），不写 03_作品工程；proposal token
-    来自临时工作区 proposal_meta.json，绝不进入 Prompt / UI 之外的通道。
-    """
-    # 1. request_id 防串任务：不一致直接丢弃，绝不让旧结果串到新请求
+    """response → request_id 校验 → 现有严格业务解析 → StoryDesign 候选。"""
     if response.get("request_id") != request["request_id"]:
         raise NewProjectError("返回结果与任务不匹配（request_id 不一致），已丢弃。")
 
-    # 2. 状态校验
     resp_status = response.get("status")
     if resp_status not in (None, "completed"):
         err = response.get("error") or f"Qoder 返回状态异常：{resp_status}"
         raise NewProjectError(err)
 
-    # 3. 提取模型最终结果 → 现有严格 JSON/字段验证
     raw = _response_output_text(response)
     parsed = _parse_agent_result(raw)
 
-    # 4. 现有 StoryDesign 生成候选（临时 pre-project 工作区）
     meta = request.get("meta") or {}
     project_id = str(meta.get("project_id") or "")
+    proposal_turn_id = str(meta.get("proposal_turn_id") or "")
     proposal_dir = _proposal_dir(project_id)
+
+    # 知识选择绑定（P0：只从精确捕获包选择，绝不再次检索）
+    knowledge_needs = list(parsed["semantic_interpretation"].get("knowledge_needs") or [])
+    selected_refs = list(parsed["semantic_interpretation"].get("selected_bkp_ids") or [])
+    package_ref = str(parsed["semantic_interpretation"].get("package_ref") or "")
+    retrieval = None
+    if knowledge_needs:
+        query = "；".join(knowledge_needs)
+        snapshot, load_error = _load_snapshot(proposal_dir)
+        if load_error:
+            _cleanup_proposal(project_id)
+            raise NewProjectError(load_error)
+        try:
+            _validate_snapshot(
+                snapshot,
+                request_id=request["request_id"],
+                project_id=project_id,
+                proposal_turn_id=proposal_turn_id,
+                query=query,
+                package_ref=package_ref,
+            )
+        except NewProjectError:
+            _cleanup_proposal(project_id)
+            raise
+        package = _package_from_snapshot(snapshot)
+        retrieval = _bound_package(package, query)
+        audit.append_event(
+            request["request_id"], audit.EVENT_RETRIEVAL_SELECTED, "knowledge_retrieve",
+            details={"query": query, "refs": selected_refs, "package_ref": package_ref},
+        )
+    elif selected_refs or package_ref:
+        _cleanup_proposal(project_id)
+        raise NewProjectError("没有知识需求却选择了 BKP 卡或检索包身份，已拒绝。")
+
+    audit.append_event(
+        request["request_id"], audit.EVENT_SKILL_STARTED, "new_project", details={"skill": "StoryDesign"},
+    )
     try:
         sd_result = run_story_design(
             project_dir=proposal_dir,
@@ -431,9 +745,24 @@ def _finalize_request(request: dict[str, Any], response: dict[str, Any]) -> dict
             candidate_id=_CANDIDATE_ID,
             semantic_interpretation=parsed["semantic_interpretation"],
             model_output=parsed["model_output"],
+            retrieval=retrieval,
         )
     except SDContractError as exc:
+        audit.append_event(
+            request["request_id"], audit.EVENT_SKILL_FAILED, "new_project", details={"skill": "StoryDesign"},
+        )
         raise NewProjectError(f"StoryDesign 拒绝生成候选：{exc}") from exc
+    audit.append_event(
+        request["request_id"], audit.EVENT_SKILL_COMPLETED, "new_project", details={"skill": "StoryDesign"},
+    )
+    audit.append_event(
+        request["request_id"], audit.EVENT_CONTEXT_BOUND, "context_compiler",
+        details={"context_id": _CONTEXT_ID, "refs": selected_refs},
+    )
+    audit.append_event(
+        request["request_id"], audit.EVENT_CANDIDATE_CREATED, "new_project",
+        details={"candidate_id": _CANDIDATE_ID},
+    )
 
     candidate = sd_result["candidate"]
     if candidate.get("status") != "proposal_noncanonical":
@@ -441,6 +770,7 @@ def _finalize_request(request: dict[str, Any], response: dict[str, Any]) -> dict
 
     proposal_meta = _load_proposal_meta(project_id)
     content = candidate.get("content") or {}
+    retrieval_info = (sd_result.get("context") or {}).get("retrieval") or {}
     return {
         "proposal_token": proposal_meta["proposal_token"],
         "project_id": project_id,
@@ -454,16 +784,21 @@ def _finalize_request(request: dict[str, Any], response: dict[str, Any]) -> dict
             "open_space": content.get("open_space") or [],
             "unknowns": content.get("unknowns") or [],
         },
+        "knowledge": {
+            "retrieval_status": retrieval_info.get("status"),
+            "retrieved_count": retrieval_info.get("candidate_count", 0),
+            "selected_count": len(selected_refs),
+            "gaps": retrieval_info.get("gaps", []),
+        },
+        "execution": dict(meta.get("execution") or {}),
         "message": "候选已生成（未写入正式作品，等待你的确认）",
     }
 
 
 def get_new_project_request(request_id: str) -> dict[str, Any]:
-    """轮询 Qoder 写回结果（UI 每 2-3 秒调用一次）。
+    """轮询写回结果（UI 每 2-3 秒调用一次）。
 
-    返回 status：pending（继续等）/ completed（含候选）/ failed / expired /
-    canceled。终态（completed/failed/expired/canceled）都会清理桥文件，
-    保证旧结果不可能被下一次请求接受。
+    返回 status：pending（继续等）/ completed（含候选）/ failed / expired / canceled。
     """
     request_id = (request_id or "").strip()
     if not request_id:
@@ -478,52 +813,93 @@ def get_new_project_request(request_id: str) -> dict[str, Any]:
 
     if state == "canceled":
         bridge.cleanup_request(request_id)
+        _exec_task_manager.remove(request_id)
+        audit.finish_file(request_id, audit.STATUS_CANCELED)
         return {"request_id": request_id, "status": "canceled"}
     if state == "completed":
         bridge.cleanup_request(request_id)
+        _exec_task_manager.remove(request_id)
         return {"request_id": request_id, "status": "completed", "error": None}
     if state == "failed":
         bridge.cleanup_request(request_id)
+        _exec_task_manager.remove(request_id)
+        audit.finish_file(
+            request_id, audit.STATUS_FAILED, error=request.get("error") or "任务失败，请重新发起。",
+        )
         return {
             "request_id": request_id,
             "status": "failed",
             "error": request.get("error") or "任务失败，请重新发起。",
         }
 
-    # pending：先查超时（有超时要求），再查 response
     if bridge.is_expired(request):
         if project_id:
             _cleanup_proposal(project_id)
+        _exec_task_manager.cancel(request_id)
+        _exec_task_manager.remove(request_id)
         bridge.cleanup_request(request_id)
+        audit.finish_file(request_id, audit.STATUS_FAILED, error="任务已超时，请重新发起。")
         return {"request_id": request_id, "status": "expired", "error": "任务已超时，请重新发起。"}
 
     response = bridge.read_response(request_id)
     if response is None:
         return {"request_id": request_id, "status": "pending"}
 
+    if response.get("request_id") != request_id:
+        bridge.cleanup_request(request_id)
+        _exec_task_manager.remove(request_id)
+        return {"request_id": request_id, "status": "failed", "error": "返回结果与任务不匹配（request_id 不一致），已丢弃。"}
+
+    audit.append_event(
+        request_id, audit.EVENT_BRIDGE_RESPONSE_RECEIVED, "new_project",
+        details={"execution_mode": (request.get("meta") or {}).get("execution", {}).get("execution_mode")},
+    )
     try:
         result = _finalize_request(request, response)
     except NewProjectError as exc:
         if project_id:
             _cleanup_proposal(project_id)
         bridge.cleanup_request(request_id)
+        _exec_task_manager.remove(request_id)
+        audit.finish_file(request_id, audit.STATUS_FAILED, error=str(exc))
         return {"request_id": request_id, "status": "failed", "error": str(exc)}
 
-    # 成功：清理桥文件（保留临时候选工作区，供确认时使用）
     bridge.cleanup_request(request_id)
+    _exec_task_manager.remove(request_id)
+    audit.finish_file(request_id, audit.STATUS_COMPLETED)
     return {"request_id": request_id, "status": "completed", "result": result}
 
 
-def cancel_new_project_request(request_id: str) -> dict[str, Any]:
-    """取消等待：标记 canceled、删除可能已存在的 response 与临时候选。
-
-    取消后旧结果不可能被接受（state=canceled 优先于任何迟到的 response）；
-    下一次请求使用全新 request_id，天然隔离。request 文件保留 canceled 状态，
-    由下一次轮询返回 canceled 并清理。
+def _cleanup_discarded_proposal(request_id: str) -> None:
+    """丢弃已完成但未确认的候选：按 proposal_meta.json 中持久化的 request_id
+    定位并删除其临时 proposal 工作区（proposal token 随之失效，confirm 将拒绝）。
     """
+    root = get_proposals_root()
+    if not root.exists():
+        return
+    for meta_file in root.glob("*/proposal_meta.json"):
+        try:
+            meta = json.loads(meta_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if meta.get("request_id") != request_id:
+            continue
+        project_id = str(meta.get("project_id") or "")
+        if project_id:
+            _cleanup_proposal(project_id)
+        else:
+            shutil.rmtree(meta_file.parent, ignore_errors=True)
+        return
+
+
+def cancel_new_project_request(request_id: str) -> dict[str, Any]:
+    """取消等待：终止运行中的 Direct adapter（如有）、标记 canceled、
+    删除 response 与临时候选。幂等。"""
     request_id = (request_id or "").strip()
     if not request_id:
         raise NewProjectError("缺少任务标识（request_id）。")
+
+    _exec_task_manager.cancel(request_id)
 
     request = bridge.get_request(request_id)
     if request is not None:
@@ -531,8 +907,11 @@ def cancel_new_project_request(request_id: str) -> dict[str, Any]:
         project_id = str((request.get("meta") or {}).get("project_id") or "")
         if project_id:
             _cleanup_proposal(project_id)
-        # active 不再指向已取消请求，Qoder /gowrite 不会执行已取消的任务
         bridge.clear_active_if(request_id)
+        audit.finish_file(request_id, audit.STATUS_CANCELED)
+    else:
+        _cleanup_discarded_proposal(request_id)
+    _exec_task_manager.remove(request_id)
     return {"request_id": request_id, "status": "canceled"}
 
 
@@ -554,7 +933,6 @@ def confirm_new_project(proposal_token: str) -> dict[str, Any]:
     if not proposal_token:
         raise NewProjectError("缺少候选确认标识（proposal token）。")
 
-    # 用 token 反查项目：token 存在 proposal_meta.json 中
     root = get_proposals_root()
     matched: Optional[Path] = None
     if root.exists():
@@ -573,14 +951,12 @@ def confirm_new_project(proposal_token: str) -> dict[str, Any]:
     project_id = meta["project_id"]
     name = meta["name"]
 
-    # 读取后台保存的候选（designs/design-idea-001.json），只信这一版
     candidate_path = matched / "designs" / f"{_CANDIDATE_ID}.json"
     if not candidate_path.exists():
         raise NewProjectError("候选数据缺失，请重新生成。")
     candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
     content = candidate.get("content") or {}
 
-    # 正式 Author Intent（必须通过 frozen validate_author_intent；project_id/intent_rev 由 create_project 注入）
     author_intent = {
         "work_direction": content.get("work_direction") or "",
         "reader_promise": content.get("reader_promise") or "",
@@ -595,14 +971,11 @@ def confirm_new_project(proposal_token: str) -> dict[str, Any]:
     except (PWContractError, PWWorkspaceError) as exc:
         raise NewProjectError(str(exc)) from exc
 
-    # --- create_project 已成功：从此刻起，本次"创建作品"已经成功 ---
-    # 后续任何后处理失败都只记录 partial success，不抛异常。
     project_dir = Path(created["project_dir"])
     direction_registered = False
     warning: Optional[str] = None
     state_rev: Optional[int] = None
     try:
-        # 读取 brief/context（临时工作区内，与 candidate 同一 project_id）
         brief = json.loads((matched / "briefs" / f"{_BRIEF_ID}.json").read_text(encoding="utf-8"))
         context = json.loads((matched / "contexts" / f"{_CONTEXT_ID}.json").read_text(encoding="utf-8"))
         loaded = load_project(project_dir)
@@ -639,14 +1012,17 @@ def confirm_new_project(proposal_token: str) -> dict[str, Any]:
         state_rev = new_state.get("state_rev")
         direction_registered = True
     except Exception:  # noqa: BLE001 — 任何后处理异常都算 partial success
-        # 作品已创建成功；approved direction 登记失败不阻塞整体成功。
-        # 如实记录 partial success，允许作者进入作品概览。
-        # 注意：底层异常文本不返回前端（仅记录 warning 固定提示）。
         direction_registered = False
         warning = "作品已创建，但故事方向的规划登记未完成。正式 Author Intent 已保存。"
     finally:
-        # 无论后处理成功还是失败，都清理临时候选，避免作者再次确认同一 proposal
         _cleanup_proposal(project_id)
+
+    # 审计：作者确认（authority.confirmed）；request_id 可能为空（兼容旧候选）
+    audit.append_event(
+        str(meta.get("request_id") or ""), audit.EVENT_AUTHORITY_CONFIRMED, "new_project",
+        details={"project_id": created["project_id"], "direction_registered": direction_registered},
+    )
+    audit.finish_file(str(meta.get("request_id") or ""), audit.STATUS_COMPLETED)
 
     return {
         "project_id": created["project_id"],

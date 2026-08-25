@@ -57,6 +57,9 @@ __pycache__/
 # 应用开发临时产物（UI、接口、pywebview、Agent 接入等；Local Only）
 06_工作区/应用开发/
 
+# 执行审计记录（验证式可观测性数据；Local Only，可删除）
+06_工作区/运行审计/
+
 # 07_工作台应用 前端构建产物（npm run build 生成）
 07_工作台应用/ui/dist/
 

@@ -148,6 +148,9 @@ export interface DiscoveredModel {
   display_name: string
   selectable: boolean
   selected?: boolean
+  provider_id?: string | null
+  model_id?: string | null
+  source?: 'native' | 'custom'
 }
 
 export interface InteractiveEnvironment {
@@ -159,11 +162,20 @@ export interface InteractiveEnvironment {
   repair_hint?: string | null
 }
 
+export interface ProviderModelGroup {
+  provider_id: string
+  display_name: string
+  models: DiscoveredModel[]
+}
+
 export interface DirectEnvironment {
   available: boolean
   auth_status: string
   model_selection: 'selectable' | 'managed' | 'none'
   models: DiscoveredModel[]
+  custom_models: DiscoveredModel[]
+  /** 按 provider 分组的可选手目录（通用解析；不硬编码任何 provider/model 名）。 */
+  provider_models?: ProviderModelGroup[] | null
   managed_model?: { id: string; display_name: string; provider_id?: string | null } | null
   capabilities: Record<string, unknown>
 }
@@ -205,11 +217,17 @@ export interface AgentSettings {
   interactive_agent: string
   direct_agent: string
   direct_model: string | null
+  direct_custom_model: string | null
 }
 
 export interface AgentSettingsData {
   settings: AgentSettings
   agents: AgentEnvironment[]
+  /** 本机发现的来源：cache = 复用上次检测快照；fresh = 本次刚执行发现。 */
+  discovery?: {
+    source: 'cache' | 'fresh'
+    discovered_at: string | null
+  } | null
 }
 
 export interface ConnectionTestResult {
@@ -224,20 +242,37 @@ export async function getAgentSettings(): Promise<AgentSettingsData> {
   return call<AgentSettingsData>('get_agent_settings')
 }
 
+/** 显式“重新检测”：强制刷新本机 Agent/模型目录并更新后端 last-known 快照。 */
+export async function discoverAgents(): Promise<{
+  agents: AgentEnvironment[]
+  discovery: AgentSettingsData['discovery']
+}> {
+  return call<{ agents: AgentEnvironment[]; discovery: AgentSettingsData['discovery'] }>('discover_agent_environment')
+}
+
 /** 保存普通设置（不含 Token）。 */
 export async function saveAgentSettings(settings: Partial<AgentSettings>): Promise<{ settings: AgentSettings }> {
   return call<{ settings: AgentSettings }>('save_agent_settings', settings)
 }
 
 /** 在官方 Qoder CN 命令位置安装/修复唯一 Go Write 命令定义。 */
-export async function installOrRepairInteractiveCommand(agent: string): Promise<{ installed_paths: string[]; command_ready: boolean; errors: string[] }> {
-  return call('install_or_repair_interactive_command', { agent })
+export interface InteractiveRepairResult {
+  installed_paths: string[]
+  command_ready: boolean
+  status: 'installed' | 'restart_required' | 'error'
+  restart_required: boolean
+  errors: string[]
+}
+
+export async function installOrRepairInteractiveCommand(agent: string): Promise<InteractiveRepairResult> {
+  return call<InteractiveRepairResult>('install_or_repair_interactive_command', { agent })
 }
 
 /** 测试连接（无副作用任务 + 临时目录）；BYOK 未配置 Token 时返回 not_configured。 */
 export async function testAgentConnection(payload: {
   agent: string
   model?: string | null
+  custom_model?: string | null
 }): Promise<ConnectionTestResult> {
   return call<ConnectionTestResult>('test_agent_connection', payload)
 }
@@ -261,6 +296,7 @@ export interface ProposeResult {
   name: string
   status: string
   candidate: StoryCandidate
+  execution?: Record<string, unknown>
   message: string
 }
 
@@ -268,6 +304,9 @@ export interface PrepareNewProjectResult {
   request_id: string
   name: string
   status: string
+  execution_mode?: string
+  agent_id?: string | null
+  model?: string | null
   message: string
 }
 
@@ -309,7 +348,11 @@ export async function confirmNewProject(payload: { proposal_token: string }): Pr
 }
 
 // ---------------- 故事规划（"一起往前想"纵切） ----------------
-// 统一 /gowrite 桥模式：Go Write 准备任务 → Qoder /gowrite → 结果返回
+// 双执行模式（由已保存 Settings 决定，UI 不分支 Agent/模型）：
+// - Interactive：Go Write 准备任务 → Qoder 桌面端 /gowrite → 结果返回（pending 等待）；
+// - Direct：Go Write 通过配置的 Agent/模型后台执行（prepare 立即返回，可轮询/取消）。
+// 两种模式共用同一请求生命周期与同一严格 finalize。确认前只写临时 planning
+// 工作区；只有作者明确确认（带后台 planning token）才写入正式 approved_plan。
 
 export interface StoryPlanCandidate {
   proposal: string
@@ -322,6 +365,7 @@ export interface ProposeStoryPlanResult {
   name: string
   status: string
   candidate: StoryPlanCandidate
+  execution?: Record<string, unknown>
   message: string
 }
 
@@ -337,6 +381,9 @@ export interface PrepareStoryPlanResult {
   project_id: string
   name: string
   status: string
+  execution_mode?: string
+  agent_id?: string | null
+  model?: string | null
   message: string
 }
 
@@ -347,7 +394,7 @@ export interface StoryPlanRequestStatus {
   error?: string | null
 }
 
-/** 一起往前想 → Go Write 准备本轮 Agent 任务（不运行模型），返回 request_id。 */
+/** 一起往前想 → 按已保存 Settings 准备本轮任务（Interactive 等待 /gowrite；Direct 后台执行），返回 request_id。 */
 export async function prepareStoryPlan(payload: {
   project_id: string
   author_question: string
@@ -355,12 +402,12 @@ export async function prepareStoryPlan(payload: {
   return call<PrepareStoryPlanResult>('prepare_story_plan', payload)
 }
 
-/** 轮询 Qoder 写回结果：pending 继续等；completed 时 result 含候选。 */
+/** 轮询执行结果：pending（Interactive 等待 /gowrite 或 Direct 执行中）继续等；completed 时 result 含候选。 */
 export async function getStoryPlanRequest(requestId: string): Promise<StoryPlanRequestStatus> {
   return call<StoryPlanRequestStatus>('get_story_plan_request', { request_id: requestId })
 }
 
-/** 取消等待：旧结果不可能再被接受。 */
+/** 取消/丢弃：终止运行中的 Direct adapter（如有）；已完成未确认候选经后端清理使 planning_token 失效。 */
 export async function cancelStoryPlanRequest(requestId: string): Promise<{ request_id: string; status: string }> {
   return call<{ request_id: string; status: string }>('cancel_story_plan_request', { request_id: requestId })
 }
@@ -374,6 +421,31 @@ export async function confirmStoryPlan(payload: {
 }
 
 // ---------------- 正文写作（"这一段想写什么"纵切） ----------------
+// 统一请求生命周期：prepare → 执行（Direct 后台两阶段 / Interactive 两次
+// /gowrite 两阶段）→ 轮询 → 候选 → confirm
+// Interactive 阶段状态机：pending_selection →（Stage 1 验收 + Context 编译）
+// → pending_prose → completed / failed / canceled。
+
+export interface PrepareStoryWriteResult {
+  request_id: string
+  project_id: string
+  name: string
+  status: string
+  execution_mode: string
+  phase?: string | null
+  agent_id: string
+  model: string | null
+  message: string
+}
+
+export interface StoryWriteRequestStatus {
+  request_id: string
+  status: 'pending' | 'completed' | 'failed' | 'expired' | 'canceled'
+  phase?: string | null
+  message?: string | null
+  result?: ProposeStoryWriteResult | null
+  error?: string | null
+}
 
 export interface ProposeStoryWriteResult {
   writing_token: string
@@ -382,6 +454,7 @@ export interface ProposeStoryWriteResult {
   scene_ref: string
   chapter_number: number
   draft_text: string
+  execution: Record<string, unknown>
   message: string
 }
 
@@ -394,12 +467,22 @@ export interface ConfirmStoryWriteResult {
   message: string
 }
 
-/** 正文写作：当前暂不可用（正在接入统一 Qoder 执行方式）。 */
-export async function proposeStoryWrite(payload: {
+/** 这一段想写什么 → 按已保存 Settings 准备本轮任务（Direct 后台两阶段 / Interactive 两阶段 /gowrite）。 */
+export async function prepareStoryWrite(payload: {
   project_id: string
   author_input: string
-}): Promise<ProposeStoryWriteResult> {
-  return call<ProposeStoryWriteResult>('propose_story_write', payload)
+}): Promise<PrepareStoryWriteResult> {
+  return call<PrepareStoryWriteResult>('prepare_story_write', payload)
+}
+
+/** 轮询执行结果：pending（含 phase 与作者提示）继续等；completed 时 result 含正文候选。 */
+export async function getStoryWriteRequest(requestId: string): Promise<StoryWriteRequestStatus> {
+  return call<StoryWriteRequestStatus>('get_story_write_request', { request_id: requestId })
+}
+
+/** 取消等待：终止运行中的 Direct adapter；旧结果不可能再被接受。 */
+export async function cancelStoryWriteRequest(requestId: string): Promise<{ request_id: string; status: string }> {
+  return call<{ request_id: string; status: string }>('cancel_story_write_request', { request_id: requestId })
 }
 
 /** 作者明确"保留这段" → accept_prose 写入正式 03_正文。 */
@@ -408,4 +491,411 @@ export async function confirmStoryWrite(payload: {
   writing_token: string
 }): Promise<ConfirmStoryWriteResult> {
   return call<ConfirmStoryWriteResult>('confirm_story_write', payload)
+}
+
+// ---------------- 正式写作面（WritingPage 只读 read model） ----------------
+// 数据源：03_作品工程/<project>/03_正文 + accepted_text_index（唯一权威）。
+// 绝不返回临时候选；绝无写副作用。
+
+export interface StoryWriteChapter {
+  chapter_number: number
+  title: string
+  content: string
+  words: number
+  scene_count: number
+}
+
+export interface StoryWriteSurface {
+  project_id: string
+  name: string
+  chapters: StoryWriteChapter[]
+  active_chapter_number: number
+  total_words: number
+}
+
+/** 获取正式已采用正文写作面（只读；按章排序，active = 最新已接受章）。 */
+export async function getStoryWriteSurface(projectId: string): Promise<StoryWriteSurface> {
+  return call<StoryWriteSurface>('get_story_write_surface', { project_id: projectId })
+}
+
+// ---------------- 灵感箱（真实本地收件箱，非权威、无模型） ----------------
+
+export type IdeaKind = 'text' | 'link'
+
+export interface IdeaItem {
+  id: string
+  content: string
+  kind: IdeaKind
+  created_at: string
+  used_project_ids: string[]
+}
+
+/** 列出全部灵感（created_at 倒序）。 */
+export async function listIdeas(): Promise<IdeaItem[]> {
+  const data = await call<{ ideas: IdeaItem[] }>('list_ideas')
+  return data.ideas
+}
+
+/** 新增一条灵感（kind: text|link）。 */
+export async function createIdea(payload: { content: string; kind: IdeaKind }): Promise<IdeaItem> {
+  const data = await call<{ idea: IdeaItem }>('create_idea', payload)
+  return data.idea
+}
+
+/** 删除一条灵感（幂等）。 */
+export async function deleteIdea(ideaId: string): Promise<{ deleted: string }> {
+  return call<{ deleted: string }>('delete_idea', { idea_id: ideaId })
+}
+
+/** 可选：把一条灵感标记为已用于某作品（非权威）。 */
+export async function markIdeaUsed(payload: { idea_id: string; project_id: string }): Promise<IdeaItem> {
+  const data = await call<{ idea: IdeaItem }>('mark_idea_used', payload)
+  return data.idea
+}
+
+// ---------------- 素材目录（真实 canonical catalog；仅显式动作） ----------------
+
+export interface MaterialItem {
+  id: string
+  name: string
+  type: string
+  author: string
+  tags: string[]
+  notes: string
+  purification_status: string
+  knowledge_status: string
+  file_count: number
+  /** 作者面分组：usable（可用于写作）/ needs_organization（待整理）/ needs_update（需更新）。 */
+  author_group: 'usable' | 'needs_organization' | 'needs_update'
+  /** 写作时能否被知识检索调用（只有已定稿可用知识才为 true）。 */
+  writing_callable: boolean
+  why: string
+  next_step: string
+}
+
+export interface MaterialInboxFile {
+  path: string
+  filename: string
+  sha256: string
+  suffix: string
+  unsupported: boolean
+  exact_duplicate_matches: string[]
+  possible_existing_candidates: string[]
+}
+
+export interface MaterialIntakeResult {
+  ok: boolean
+  new_ids: string[]
+  attached: string[]
+  duplicates_removed: unknown[]
+  reviews: string[]
+  moves: unknown[]
+  git_outcome: string
+  git_warning: string | null
+  message: string
+}
+
+/** 只读读取 canonical 素材 ledger 投影。 */
+export async function listMaterials(): Promise<MaterialItem[]> {
+  const data = await call<{ materials: MaterialItem[] }>('list_materials')
+  return data.materials
+}
+
+/** 显式触发 MaterialIntake catalog refresh（确定性、无模型）。 */
+export async function refreshMaterials(): Promise<{ assets: number; files: number; containers: number; message: string }> {
+  return call('refresh_materials')
+}
+
+/** 只读扫描 00_待入库。 */
+export async function scanMaterialInbox(): Promise<{ inbox: string; files: MaterialInboxFile[] }> {
+  return call('scan_material_inbox')
+}
+
+/** 作者显式选择的入库决策（走 MaterialIntake 确定性 intake 事务）。 */
+export async function applyMaterialIntake(plan: { items: unknown[] }): Promise<MaterialIntakeResult> {
+  return call<MaterialIntakeResult>('apply_material_intake', { plan })
+}
+
+// ---------------- 素材工作流（导入 → 分类 → 提纯 → 蒸馏） ----------------
+
+export interface PickFilesResult {
+  supported: boolean
+  paths: string[]
+  message: string
+}
+
+export interface ImportedFile {
+  path: string
+  filename: string
+  size: number
+}
+
+export interface SkippedFile {
+  path: string
+  reason: string
+}
+
+export interface ImportMaterialResult {
+  inbox: string
+  imported: ImportedFile[]
+  skipped: SkippedFile[]
+  message: string
+}
+
+export interface ClassifyMaterialResult {
+  status: 'ready' | 'pending'
+  request_id?: string | null
+  plan: { items: unknown[] }
+  ambiguous?: string[]
+  agent_required?: boolean
+  agent_used?: boolean
+  message: string
+}
+
+export interface ClassifyRequestStatus {
+  request_id: string
+  status: 'pending' | 'completed' | 'failed' | 'expired' | 'canceled'
+  plan?: { items: unknown[] } | null
+  message?: string | null
+  error?: string | null
+}
+
+export interface SourcePrepareResult {
+  asset_id: string
+  status: string
+  message: string
+  output_tail?: string | null
+}
+
+export interface BookDistillResult {
+  asset_id: string | null
+  status: string
+  request_id?: string | null
+  output_dir?: string | null
+  message: string
+}
+
+export interface BookDistillRequestStatus {
+  request_id: string
+  status: 'pending' | 'completed' | 'failed' | 'expired' | 'canceled'
+  result?: BookDistillResult | null
+  message?: string | null
+  error?: string | null
+}
+
+export interface MaterialDetail {
+  id: string
+  name: string
+  type: string
+  writing_callable: boolean
+  why: string
+  next_step: string
+  stage: string
+  purification_status: string
+  knowledge_status: string
+}
+
+/** 本地文件选择（pywebview 原生对话框）。 */
+export async function pickMaterialFiles(): Promise<PickFilesResult> {
+  return call<PickFilesResult>('pick_material_files', {})
+}
+
+/** 把本地文件字节 stage 到 MaterialIntake 收件箱（00_待入库）。 */
+export async function importMaterialFiles(files: Array<{ path: string }>): Promise<ImportMaterialResult> {
+  return call<ImportMaterialResult>('import_material_files', { files })
+}
+
+/** Agent 辅助入库：scan → 确定性事实 → 仅对无法定论文件调一次 Agent。 */
+export async function classifyMaterialInbox(): Promise<ClassifyMaterialResult> {
+  return call<ClassifyMaterialResult>('classify_material_inbox', {})
+}
+
+/** 轮询交互式分类结果。 */
+export async function getMaterialClassifyRequest(requestId: string): Promise<ClassifyRequestStatus> {
+  return call<ClassifyRequestStatus>('get_material_classify_request', { request_id: requestId })
+}
+
+/** 取消交互式分类。 */
+export async function cancelMaterialClassifyRequest(requestId: string): Promise<{ request_id: string; status: string }> {
+  return call<{ request_id: string; status: string }>('cancel_material_classify_request', { request_id: requestId })
+}
+
+/** 对指定素材显式运行真实 SourcePrepare（确定性，无模型）。 */
+export async function runSourcePrepare(assetId: string): Promise<SourcePrepareResult> {
+  return call<SourcePrepareResult>('run_source_prepare', { asset_id: assetId })
+}
+
+/** 对 SourcePrepare PASS 素材显式运行真实 BookDistill。 */
+export async function runBookDistill(assetId: string): Promise<BookDistillResult> {
+  return call<BookDistillResult>('run_book_distill', { asset_id: assetId })
+}
+
+/** 轮询 Interactive 蒸馏结果。 */
+export async function getBookDistillRequest(requestId: string): Promise<BookDistillRequestStatus> {
+  return call<BookDistillRequestStatus>('get_book_distill_request', { request_id: requestId })
+}
+
+/** 取消 Interactive 蒸馏。 */
+export async function cancelBookDistillRequest(requestId: string): Promise<{ request_id: string; status: string }> {
+  return call<{ request_id: string; status: string }>('cancel_book_distill_request', { request_id: requestId })
+}
+
+/** 单素材作者面详情（写作时能否调用 / 阶段 / 下一步；零模型）。 */
+export async function getMaterialDetail(assetId: string): Promise<MaterialDetail> {
+  return call<MaterialDetail>('get_material_detail', { asset_id: assetId })
+}
+
+// ---------------- 作品资料 / 故事地图（只读正式 Story State 投影） ----------------
+
+export interface ProjectDataEntry {
+  id: string | null
+  label: string
+  record: unknown
+}
+
+export interface ProjectDataSections {
+  characters: ProjectDataEntry[]
+  relationships: ProjectDataEntry[]
+  canon_facts: ProjectDataEntry[]
+  occurred_events: ProjectDataEntry[]
+  open_threads: ProjectDataEntry[]
+  approved_plan: ProjectDataEntry[]
+}
+
+export interface ProjectData {
+  project_id: string
+  name: string
+  state_rev: number | null
+  last_authority_source: string | null
+  work_direction: string
+  reader_promise: string
+  sections: ProjectDataSections
+}
+
+/** 只读正式 Story State 投影（ProjectData / StoryMap 共用）。 */
+export async function getProjectData(projectId: string): Promise<ProjectData> {
+  return call<ProjectData>('get_project_data', { project_id: projectId })
+}
+
+// ---------------- 作品检查（真实、显式、范围受控的 AI 检查） ----------------
+
+export interface ReviewSurface {
+  project_id: string
+  name: string
+  active_plan_count: number
+  open_thread_count: number
+  chapters: Array<{ chapter_number: number }>
+  latest_chapter_number: number | null
+  has_accepted_prose: boolean
+}
+
+export interface ReviewIssue {
+  severity: 'priority' | 'watch'
+  title: string
+  detail: string
+  evidence?: string | null
+  suggestion: string
+}
+
+export interface ReviewReport {
+  review_token: string
+  project_id: string
+  name: string
+  chapter_number: number
+  summary: string
+  issues: ReviewIssue[]
+  strengths: string[]
+  knowledge: { retrieved_count: number; selected_count: number }
+  execution: Record<string, unknown>
+  message: string
+}
+
+export interface PrepareReviewResult {
+  request_id: string
+  project_id: string
+  name: string
+  chapter_number: number
+  status: string
+  execution_mode: string
+  agent_id: string
+  model: string | null
+  message: string
+}
+
+export interface ReviewRequestStatus {
+  request_id: string
+  status: 'pending' | 'completed' | 'failed' | 'expired' | 'canceled'
+  result?: ReviewReport | null
+  error?: string | null
+}
+
+/** 确定性只读检查面（无模型）。 */
+export async function getReviewSurface(projectId: string): Promise<ReviewSurface> {
+  return call<ReviewSurface>('get_review_surface', { project_id: projectId })
+}
+
+/** 作者显式"开始检查"→ 后台发起一次 Agent 检查。 */
+export async function prepareReview(payload: { project_id: string; chapter_number?: number }): Promise<PrepareReviewResult> {
+  return call<PrepareReviewResult>('prepare_review', payload)
+}
+
+/** 轮询检查结果：pending 继续等；completed 时 result 含报告。 */
+export async function getReviewRequest(requestId: string): Promise<ReviewRequestStatus> {
+  return call<ReviewRequestStatus>('get_review_request', { request_id: requestId })
+}
+
+/** 取消/丢弃检查：终止运行中的 Direct adapter（如有）。 */
+export async function cancelReviewRequest(requestId: string): Promise<{ request_id: string; status: string }> {
+  return call<{ request_id: string; status: string }>('cancel_review_request', { request_id: requestId })
+}
+
+// ---------------- 执行记录（验证式审计；只读，显式清理） ----------------
+
+export interface ExecutionAuditSummary {
+  request_id: string | null
+  operation: string | null
+  project_id: string | null
+  execution_mode: string | null
+  agent_id: string | null
+  model: string | null
+  status: string | null
+  started_at: string | null
+  finished_at: string | null
+  duration_ms: number | null
+  event_count: number
+  error: string | null
+}
+
+export interface ExecutionAuditEvent {
+  seq: number
+  at: string
+  kind: string
+  component: string
+  verified: boolean
+  details?: Record<string, unknown> | null
+}
+
+export interface ExecutionAuditRecord extends ExecutionAuditSummary {
+  schema: string
+  events: ExecutionAuditEvent[]
+}
+
+/** 最近执行记录列表（摘要字段；按时间倒序）。 */
+export async function listExecutionAudits(payload?: {
+  limit?: number
+  operation?: string
+  status?: string
+  project_id?: string
+}): Promise<ExecutionAuditSummary[]> {
+  return call<ExecutionAuditSummary[]>('list_execution_audits', payload ?? {})
+}
+
+/** 单条执行记录（完整事件时间线）；record 为 null 表示不存在。 */
+export async function getExecutionAudit(requestId: string): Promise<{ record: ExecutionAuditRecord | null }> {
+  return call<{ record: ExecutionAuditRecord | null }>('get_execution_audit', { request_id: requestId })
+}
+
+/** 显式清理：只删除 06_工作区/运行审计。 */
+export async function clearExecutionAudits(): Promise<{ cleared_files: number; message: string }> {
+  return call<{ cleared_files: number; message: string }>('clear_execution_audits', {})
 }

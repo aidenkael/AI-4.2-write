@@ -21,6 +21,7 @@ class AppSettings:
     interactive_agent: str = "qoder"
     direct_agent: str = "qoder"
     direct_model: Optional[str] = None
+    direct_custom_model: Optional[str] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -39,6 +40,9 @@ class AppSettings:
             data["direct_agent"] = legacy_agent
         if "direct_model" not in data and data.get("direct_agent", legacy_agent) == "qoder":
             data["direct_model"] = raw.get("qoder_model")
+        if data.get("direct_model") and data.get("direct_custom_model"):
+            # Older or manually edited files cannot keep an ambiguous choice.
+            data["direct_custom_model"] = None
         return cls(**data)
 
 

@@ -1,21 +1,106 @@
-import { BookOpen, Clock3, Edit3, FileCheck2, Folder, Globe2, MapPin, Plus, Search, Star, UserRound } from 'lucide-react'
+import { Compass, FileCheck2, Globe2, MapPin, Search, Star, UserRound } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { EmptyAvatar } from '../components/EmptyAvatar'
-import { MockFormDialog } from '../components/MockFormDialog'
-import { useActiveProject, useApp, useIllustration } from '../features/app/AppStore'
-import type { ProjectDataRecord } from '../contracts/ui'
+import { useApp } from '../features/app/AppStore'
+import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
+import { useProjectDataController } from '../features/projectData/useProjectDataController'
+import type { ProjectDataEntry, ProjectDataSections } from '../bridge/client'
 
-const cats = [['人物', UserRound], ['地点', MapPin], ['世界与规则', Globe2], ['重要事件', Star], ['已确认设定', FileCheck2], ['项目资料', Folder]] as const
+type CategoryKey = keyof ProjectDataSections
+
+const categories: Array<{ key: CategoryKey; label: string; Icon: typeof UserRound }> = [
+  { key: 'characters', label: '人物', Icon: UserRound },
+  { key: 'relationships', label: '关系', Icon: MapPin },
+  { key: 'canon_facts', label: '已确认设定', Icon: FileCheck2 },
+  { key: 'occurred_events', label: '重要事件', Icon: Star },
+  { key: 'open_threads', label: '未解决线索', Icon: Globe2 },
+  { key: 'approved_plan', label: '已确认规划', Icon: Compass },
+]
+
+function renderRecord(entry: ProjectDataEntry): Array<{ key: string; value: string }> {
+  const record = entry.record
+  if (!record || typeof record !== 'object' || Array.isArray(record)) return []
+  const fields: Array<{ key: string; value: string }> = []
+  for (const [k, v] of Object.entries(record as Record<string, unknown>)) {
+    if (k === 'id' || k === 'authority') continue
+    if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+      fields.push({ key: k, value: String(v) })
+    } else if (Array.isArray(v)) {
+      const text = v.filter((x) => typeof x === 'string').join('、')
+      if (text) fields.push({ key: k, value: text })
+    }
+  }
+  return fields
+}
+
+/**
+ * 作品资料：只读正式 Story State 投影。
+ *
+ * - 数据来自 getProjectData（真实 Story State），零写回、零模型；
+ * - 不实现任意 Canon 编辑；改方向/事实请到「故事发展」。
+ */
 export function ProjectDataPage() {
-  const { actions } = useApp(); const { projectState } = useActiveProject(); const [cat,setCat]=useState('人物'); const [selectedId,setSelectedId]=useState(projectState.data[0]?.id ?? ''); const [query,setQuery]=useState(''); const [creating,setCreating]=useState(false); const [editing,setEditing]=useState<ProjectDataRecord|null>(null); const [title,setTitle]=useState(''); const [summary,setSummary]=useState('')
-  const entries=useMemo(()=>projectState.data.filter((record)=>record.category===cat&&(record.title.includes(query)||record.summary.includes(query))),[projectState.data,cat,query]); const selected=projectState.data.find((record)=>record.id===selectedId)??projectState.data[0]
-  const openCreate=()=>{setTitle('');setSummary('');setCreating(true)}; const openEdit=(record:ProjectDataRecord)=>{setTitle(record.title);setSummary(record.summary);setEditing(record)}
-  const submitCreate=(event:React.FormEvent<HTMLFormElement>)=>{event.preventDefault();const id=actions.createProjectData({category:cat,title:title.trim(),summary:summary.trim(),meta:cat});setSelectedId(id);setCreating(false)}
-  const submitEdit=(event:React.FormEvent<HTMLFormElement>)=>{event.preventDefault();if(editing){actions.editProjectData(editing.id,{title:title.trim(),summary:summary.trim()});setSelectedId(editing.id)}setEditing(null)}
-  return <div className="data-layout"><aside className="panel data-menu"><button className="primary" onClick={openCreate}><Plus/>新建资料</button>{cats.map(([label,Icon])=><button key={label} className={cat===label?'active':''} onClick={()=>{setCat(label);setQuery('')}}><Icon/>{label}</button>)}<div style={{backgroundImage:`url(${useIllustration('mountains')})`}}/></aside>
-    <section className="panel data-main"><header><h2>{cat} <small>共 {entries.length} 项</small></h2><label><Search/><input value={query} onChange={(event)=>setQuery(event.target.value)} placeholder={`搜索${cat}`}/></label></header>{entries.map((record)=>record.category==='人物'?<article key={record.id} className={selectedId===record.id?'selected':''} onClick={()=>setSelectedId(record.id)}><EmptyAvatar name={record.title} color={record.color??'#326cff'} large/><div><h2>{record.title} <span className="soft-tag">{record.role}</span></h2><p><b>身份：</b>{record.identity}</p><p><b>当前状态：</b>{record.status}</p><p><b>相关关系：</b>{record.relation}</p><p><b>备注：</b>{record.summary}</p></div><span>{record.meta}<button onClick={(event)=>{event.stopPropagation();actions.setProjectSection('writing')}}><BookOpen/>查看相关章节</button><button onClick={(event)=>{event.stopPropagation();openEdit(record)}}><Edit3/>编辑资料</button></span></article>:<article key={record.id} className={`record-item ${selectedId===record.id?'selected':''}`} onClick={()=>setSelectedId(record.id)}><span className="record-icon">☆</span><div><h2>{record.title}</h2><p>{record.summary}</p><small>{record.meta}</small></div><span><button onClick={(event)=>{event.stopPropagation();openEdit(record)}}><Edit3/>编辑资料</button></span></article>)}{entries.length===0&&<div className="empty-state">没有匹配的{cat}资料</div>}</section>
-    <aside className="panel recent-data"><h2><Clock3/>最近更新的资料</h2>{[selected,...projectState.data.filter((record)=>record.id!==selected?.id).slice(0,3)].filter(Boolean).map((record)=><button key={record.id} onClick={()=>{setCat(record.category);setSelectedId(record.id)}}><span className="record-icon">{record.title.slice(0,1)}</span><span><strong>{record.title}</strong><small>{record.category}　·　编辑者：你</small></span><time>今天</time></button>)}<button className="wide" onClick={()=>actions.openDialog('全部资料更新','这里将按时间显示当前作品的全部资料变更记录。')}>查看全部资料更新 →</button></aside>
-    {creating&&<MockFormDialog title={`新建${cat}资料`} onClose={()=>setCreating(false)} onSubmit={submitCreate}><label>名称<input autoFocus value={title} onChange={(event)=>setTitle(event.target.value)} required/></label><label>说明<textarea value={summary} onChange={(event)=>setSummary(event.target.value)} required/></label></MockFormDialog>}
-    {editing&&<MockFormDialog title="编辑资料" onClose={()=>setEditing(null)} onSubmit={submitEdit}><label>名称<input autoFocus value={title} onChange={(event)=>setTitle(event.target.value)} required/></label><label>说明<textarea value={summary} onChange={(event)=>setSummary(event.target.value)} required/></label></MockFormDialog>}
-  </div>
+  const { actions } = useApp()
+  const { selected } = useFormalProjectShell()
+  const controller = useProjectDataController(selected?.project_id ?? null)
+  const [cat, setCat] = useState<CategoryKey>('characters')
+  const [query, setQuery] = useState('')
+
+  const entries = useMemo(() => {
+    const list = controller.data?.sections[cat] ?? []
+    const q = query.trim()
+    if (!q) return list
+    return list.filter((e) => e.label.includes(q) || JSON.stringify(e.record).includes(q))
+  }, [controller.data, cat, query])
+
+  if (!selected) {
+    return <div className="empty-state">请先选择正式作品。</div>
+  }
+
+  return (
+    <div className="data-layout">
+      <aside className="panel data-menu">
+        {categories.map(({ key, label, Icon }) => (
+          <button key={key} className={cat === key ? 'active' : ''} onClick={() => { setCat(key); setQuery('') }}>
+            <Icon /> {label}
+          </button>
+        ))}
+        <div className="muted-note">只读投影，来自正式作品状态。</div>
+      </aside>
+
+      <section className="panel data-main">
+        <header>
+          <h2>{categories.find((c) => c.key === cat)?.label} <small>共 {entries.length} 项</small></h2>
+          <label>
+            <Search />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索…" />
+          </label>
+        </header>
+
+        {controller.loading && <div className="empty-state">正在加载正式作品数据…</div>}
+        {controller.error && <p className="error-text">{controller.error}</p>}
+
+        {!controller.loading && !controller.error && entries.length === 0 && (
+          <div className="empty-state">暂无{categories.find((c) => c.key === cat)?.label}条目。</div>
+        )}
+
+        {entries.map((entry) => (
+          <article className="record-item" key={`${cat}-${entry.id ?? entry.label}`}>
+            <div>
+              <h2>{entry.label || '（未命名条目）'}</h2>
+              {renderRecord(entry).map((f) => (
+                <p key={f.key}><b>{f.key}：</b>{f.value}</p>
+              ))}
+            </div>
+          </article>
+        ))}
+
+        <footer className="data-note">
+          <p className="muted-note">需要改变故事方向或事实？到「故事发展」确认新的方向，而不是直接改这里。</p>
+          <button onClick={() => actions.setProjectSection('development')}>
+            <Compass /> 去故事发展
+          </button>
+        </footer>
+      </section>
+    </div>
+  )
 }

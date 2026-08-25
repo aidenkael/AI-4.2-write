@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { BridgeError, type AgentEnvironment, type AgentSettingsData } from '../../bridge/client'
+import { BridgeError, type AgentEnvironment, type AgentSettings, type AgentSettingsData } from '../../bridge/client'
 import { settingsApi, type SettingsApi } from './api'
 import type { ConnectionState, SettingsDraft, SettingsNotice } from './types'
 
@@ -8,7 +8,19 @@ const toDraft = (data: AgentSettingsData): SettingsDraft => ({
   interactive_agent: data.settings.interactive_agent,
   direct_agent: data.settings.direct_agent,
   direct_model: data.settings.direct_model,
+  direct_custom_model: data.settings.direct_custom_model,
 })
+
+const sameDraft = (a: SettingsDraft | null, b: AgentSettings | null): boolean => {
+  if (!a || !b) return false
+  return (
+    a.default_execution_mode === b.default_execution_mode &&
+    a.interactive_agent === b.interactive_agent &&
+    a.direct_agent === b.direct_agent &&
+    a.direct_model === b.direct_model &&
+    a.direct_custom_model === b.direct_custom_model
+  )
+}
 
 const friendlyError = (error: unknown) => {
   const message = error instanceof Error ? error.message : ''
@@ -32,6 +44,8 @@ export function useSettingsController(api: SettingsApi = settingsApi) {
   const [notice, setNotice] = useState<SettingsNotice | null>(null)
   const [connection, setConnection] = useState<ConnectionState>(null)
 
+  // 挂载只读取“已保存设置 + last-known 发现快照”：
+  // 不强制重跑发现；只有“重新检测”才触发 discover()。
   const load = useCallback(async (resetDraft = false) => {
     setLoading(true)
     setNotice(null)
@@ -47,6 +61,23 @@ export function useSettingsController(api: SettingsApi = settingsApi) {
   }, [api])
 
   useEffect(() => { void load(true) }, [load])
+
+  // 显式“重新检测”：只刷新本机 Agent/模型目录快照，不改已保存配置。
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    setNotice(null)
+    try {
+      const snapshot = await api.discover()
+      setData((current) => current
+        ? { ...current, agents: snapshot.agents, discovery: snapshot.discovery }
+        : current)
+      setNotice({ kind: 'success', message: '已重新检测本机环境；已保存配置未改变。' })
+    } catch (error) {
+      setNotice({ kind: 'error', message: friendlyError(error) })
+    } finally {
+      setLoading(false)
+    }
+  }, [api])
 
   const update = useCallback(<K extends keyof SettingsDraft,>(key: K, value: SettingsDraft[K]) => {
     setDraft((current) => current ? { ...current, [key]: value } : current)
@@ -64,13 +95,16 @@ export function useSettingsController(api: SettingsApi = settingsApi) {
   )
   const directValid = Boolean(
     directAgent?.direct.available && (
-      directAgent.direct.model_selection !== 'selectable' ||
-      directAgent.direct.models.some((model) => model.id === draft?.direct_model && model.selectable)
+      directAgent.direct.models.some((model) => model.id === draft?.direct_model && model.selectable) ||
+      directAgent.direct.custom_models.some((model) => model.id === draft?.direct_custom_model && model.selectable)
     ),
   )
   const interactiveValid = Boolean(interactiveAgent?.interactive.command_ready && interactiveAgent.interactive.bridge_ready)
+  // 已保存配置 = 与后端持久化值一致；即使当前发现未包含所选模型（本页未重跑检测），
+  // 原样保存/展示也应成立，绝不因未检测而作废已保存选择。
+  const isSavedConfig = sameDraft(draft, data?.settings ?? null)
   const canSave = Boolean(draft && (
-    draft.default_execution_mode === 'direct' ? directValid : interactiveValid
+    isSavedConfig || (draft.default_execution_mode === 'direct' ? directValid : interactiveValid)
   ))
 
   const save = useCallback(async () => {
@@ -93,7 +127,7 @@ export function useSettingsController(api: SettingsApi = settingsApi) {
     setTesting(true)
     setConnection(null)
     try {
-      setConnection(await api.test(draft.direct_agent, draft.direct_model))
+      setConnection(await api.test(draft.direct_agent, draft.direct_model, draft.direct_custom_model))
     } catch (error) {
       setConnection({ agent: draft.direct_agent, status: 'failed', message: friendlyError(error) })
     } finally {
@@ -106,19 +140,25 @@ export function useSettingsController(api: SettingsApi = settingsApi) {
     setSaving(true)
     try {
       const result = await api.repairInteractive(draft.interactive_agent)
-      await load(true)
-      setNotice({ kind: result.command_ready ? 'success' : 'error', message: result.command_ready ? '/gowrite 命令已安装/修复' : result.errors.join('；') || '命令安装失败' })
+      await refresh()
+      if (result.status === 'restart_required' || result.restart_required) {
+        setNotice({ kind: 'info', message: '命令已安装，但 Qoder Desktop 需要重启或重新加载后才能识别 /gowrite。' })
+      } else if (result.status === 'installed' && result.command_ready) {
+        setNotice({ kind: 'success', message: '/gowrite 命令已安装/修复，已重新检测并可用' })
+      } else {
+        setNotice({ kind: 'error', message: result.errors.join('；') || '命令安装失败' })
+      }
     } catch (error) {
       setNotice({ kind: 'error', message: friendlyError(error) })
     } finally {
       setSaving(false)
     }
-  }, [api, load])
+  }, [api, refresh])
 
   return {
     data, draft, agents, interactiveAgent, directAgent,
-    loading, saving, testing, notice, connection, directValid, interactiveValid, canSave,
-    update, refresh: () => load(false), save, test, repairInteractive,
+    loading, saving, testing, notice, connection, directValid, interactiveValid, canSave, isSavedConfig,
+    update, refresh, save, test, repairInteractive,
   }
 }
 

@@ -56,6 +56,8 @@ def discover_all() -> list[dict[str, Any]]:
                     "auth_status": "not_detected",
                     "model_selection": "none",
                     "models": [],
+                    "custom_models": [],
+                    "provider_models": [],
                     "managed_model": None,
                     "capabilities": {},
                 },

@@ -25,6 +25,15 @@ from operations.story_planning import StoryPlanningError
 from operations import story_planning as story_planning_ops
 from operations.story_writing import StoryWritingError
 from operations import story_writing as story_writing_ops
+from operations.ideas import IdeasError
+from operations import ideas as ideas_ops
+from operations.materials import MaterialsError
+from operations import materials as materials_ops
+from operations.project_data import ProjectDataError
+from operations import project_data as project_data_ops
+from operations.review import ReviewError
+from operations import review as review_ops
+from operations import execution_audit as audit_ops
 from views import project as project_views
 
 # 稳定错误码（client.ts 依赖 code 字段）
@@ -33,6 +42,10 @@ CODE_SETTINGS_ERROR = "SETTINGS_ERROR"
 CODE_NEW_PROJECT_ERROR = "NEW_PROJECT_ERROR"
 CODE_STORY_PLANNING_ERROR = "STORY_PLANNING_ERROR"
 CODE_STORY_WRITING_ERROR = "STORY_WRITING_ERROR"
+CODE_IDEAS_ERROR = "IDEAS_ERROR"
+CODE_MATERIALS_ERROR = "MATERIALS_ERROR"
+CODE_PROJECT_DATA_ERROR = "PROJECT_DATA_ERROR"
+CODE_REVIEW_ERROR = "REVIEW_ERROR"
 CODE_BRIDGE_INTERNAL = "BRIDGE_INTERNAL"
 
 
@@ -88,9 +101,20 @@ class AppApi:
     # 读取只回 has_secret；get_secret 仅后台测试连接使用）。
 
     def get_agent_settings(self) -> dict:
-        """当前设置 + 各 Agent 真实状态/能力 + BYOK Token 是否已配置（无明文）。"""
+        """当前设置 + last-known 本机 Agent 状态/能力 + BYOK Token 是否已配置（无明文）。
+
+        打开设置页默认**不重跑**昂贵发现：复用进程内上次发现快照；首次无快照
+        时才执行一次真实发现。
+        """
         try:
             return _ok(settings_ops.get_agent_settings())
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def discover_agent_environment(self) -> dict:
+        """显式“重新检测”：强制刷新本机 Agent / 模型目录并更新 last-known 快照。"""
+        try:
+            return _ok(settings_ops.discover_agent_environment())
         except Exception as exc:  # noqa: BLE001
             return _err(CODE_BRIDGE_INTERNAL, str(exc))
 
@@ -187,13 +211,19 @@ class AppApi:
     # 才写入正式 Story State 的 approved_plan。
 
     def prepare_story_plan(self, payload: dict) -> dict:
-        """一起往前想 → 准备本轮 Agent 任务（pending request），不运行模型。"""
+        """一起往前想 → 按已保存 Settings 执行模式准备本轮任务。
+
+        Interactive：创建 pending request，提示作者到 Qoder 执行 /gowrite；
+        Direct：Go Write 通过配置的 Agent/模型直接执行并写回同一响应信封。
+        """
         try:
             data = story_planning_ops.prepare_story_plan(
                 project_id=str(payload.get("project_id") or ""),
                 author_question=str(payload.get("author_question") or ""),
             )
-            bridge_ops.focus_qoder_window()
+            # 只有交互模式需要把 Qoder 桌面端切到前台；直连模式由后台执行
+            if data.get("execution_mode") != "direct":
+                bridge_ops.focus_qoder_window()
             return _ok(data)
         except StoryPlanningError as exc:
             return _err(CODE_STORY_PLANNING_ERROR, str(exc))
@@ -240,13 +270,47 @@ class AppApi:
     # ---------------- 正文写作（"这一段想写什么"纵切） ----------------
     # 确认前只写临时 writing 工作区；只有作者明确确认（带后台 writing token）
     # 才通过 ProjectWorkspace.accept_prose 写入正式 03_正文。
+    # StoryWrite 仅支持 Direct 后台执行（交互桥显式未接入，绝不回退）。
 
-    def propose_story_write(self, payload: dict) -> dict:
-        """正文写作：当前暂不可用（正在接入统一 Qoder 执行方式）。"""
-        return _err(
-            CODE_STORY_WRITING_ERROR,
-            "正文写作正在接入统一的 Qoder 执行方式，当前暂不可用。",
-        )
+    def prepare_story_write(self, payload: dict) -> dict:
+        """这一段想写什么 → 按已保存 Settings 执行模式准备本轮任务。"""
+        try:
+            data = story_writing_ops.prepare_story_write(
+                project_id=str(payload.get("project_id") or ""),
+                author_input=str(payload.get("author_input") or ""),
+            )
+            # 只有交互模式需要把 Qoder 桌面端切到前台（阶段 1 等待第一次 /gowrite）
+            if data.get("execution_mode") != "direct":
+                bridge_ops.focus_qoder_window()
+            return _ok(data)
+        except StoryWritingError as exc:
+            return _err(CODE_STORY_WRITING_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def get_story_write_request(self, payload: dict) -> dict:
+        """轮询 Direct 执行结果：pending / completed / failed / expired / canceled。"""
+        try:
+            data = story_writing_ops.get_story_write_request(
+                request_id=str(payload.get("request_id") or ""),
+            )
+            return _ok(data)
+        except StoryWritingError as exc:
+            return _err(CODE_STORY_WRITING_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def cancel_story_write_request(self, payload: dict) -> dict:
+        """取消等待：终止运行中的 Direct adapter；旧结果不可能再被接受。"""
+        try:
+            data = story_writing_ops.cancel_story_write_request(
+                request_id=str(payload.get("request_id") or ""),
+            )
+            return _ok(data)
+        except StoryWritingError as exc:
+            return _err(CODE_STORY_WRITING_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
 
     def confirm_story_write(self, payload: dict) -> dict:
         """作者明确"保留这段" → accept_prose 写入正式 03_正文。"""
@@ -258,5 +322,307 @@ class AppApi:
             return _ok(data)
         except StoryWritingError as exc:
             return _err(CODE_STORY_WRITING_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def get_story_write_surface(self, payload: dict) -> dict:
+        """WritingPage 正式写作面（只读）：正式已采用正文 + accepted index 派生。
+
+        绝不返回临时候选；绝无写副作用；path containment + SHA 校验失败显式报错。
+        """
+        try:
+            data = story_writing_ops.get_story_write_surface(
+                project_id=str(payload.get("project_id") or ""),
+            )
+            return _ok(data)
+        except StoryWritingError as exc:
+            return _err(CODE_STORY_WRITING_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    # ---------------- 灵感箱（真实本地收件箱，非权威、无模型） ----------------
+
+    def list_ideas(self) -> dict:
+        """列出全部灵感（created_at 倒序）；无任何模型调用。"""
+        try:
+            return _ok(ideas_ops.list_ideas())
+        except IdeasError as exc:
+            return _err(CODE_IDEAS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def create_idea(self, payload: dict) -> dict:
+        """新增一条灵感（原子写入；kind: text|link）。"""
+        try:
+            return _ok(ideas_ops.create_idea(
+                content=str(payload.get("content") or ""),
+                kind=str(payload.get("kind") or "text"),
+            ))
+        except IdeasError as exc:
+            return _err(CODE_IDEAS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def delete_idea(self, payload: dict) -> dict:
+        """删除一条灵感（幂等）。"""
+        try:
+            return _ok(ideas_ops.delete_idea(
+                idea_id=str(payload.get("idea_id") or ""),
+            ))
+        except IdeasError as exc:
+            return _err(CODE_IDEAS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def mark_idea_used(self, payload: dict) -> dict:
+        """可选：把一条灵感标记为已用于某作品（非权威）。"""
+        try:
+            return _ok(ideas_ops.mark_idea_used(
+                idea_id=str(payload.get("idea_id") or ""),
+                project_id=str(payload.get("project_id") or ""),
+            ))
+        except IdeasError as exc:
+            return _err(CODE_IDEAS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    # ---------------- 素材目录（真实 canonical catalog；仅显式动作） ----------------
+
+    def list_materials(self) -> dict:
+        """只读读取 canonical 素材 ledger 投影；零模型 / 零写副作用。"""
+        try:
+            return _ok(materials_ops.list_materials())
+        except MaterialsError as exc:
+            return _err(CODE_MATERIALS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def refresh_materials(self) -> dict:
+        """显式触发 MaterialIntake catalog refresh（确定性、无模型）。"""
+        try:
+            return _ok(materials_ops.refresh_materials())
+        except MaterialsError as exc:
+            return _err(CODE_MATERIALS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def scan_material_inbox(self) -> dict:
+        """只读扫描 00_待入库（MaterialIntake inbox scan）。"""
+        try:
+            return _ok(materials_ops.scan_material_inbox())
+        except MaterialsError as exc:
+            return _err(CODE_MATERIALS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def apply_material_intake(self, payload: dict) -> dict:
+        """作者显式选择的入库决策：走 MaterialIntake 确定性 intake 事务。"""
+        try:
+            plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else None
+            if plan is None:
+                return _err(CODE_MATERIALS_ERROR, "入库计划格式错误。")
+            return _ok(materials_ops.apply_material_intake(plan))
+        except MaterialsError as exc:
+            return _err(CODE_MATERIALS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def pick_material_files(self, payload: dict) -> dict:
+        """本地文件选择（pywebview 原生对话框；Python 侧控制路径来源）。"""
+        try:
+            return _ok(materials_ops.pick_material_files())
+        except MaterialsError as exc:
+            return _err(CODE_MATERIALS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def import_material_files(self, payload: dict) -> dict:
+        """把本地文件字节 stage 到 MaterialIntake 收件箱（00_待入库）。"""
+        try:
+            files = payload.get("files") if isinstance(payload.get("files"), list) else None
+            if files is None:
+                return _err(CODE_MATERIALS_ERROR, "导入文件列表格式错误。")
+            return _ok(materials_ops.import_material_files(files))
+        except MaterialsError as exc:
+            return _err(CODE_MATERIALS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def classify_material_inbox(self, payload: dict) -> dict:
+        """Agent 辅助入库：scan → 确定性事实 → 仅对无法定论文件调一次 Agent。"""
+        try:
+            return _ok(materials_ops.classify_material_inbox())
+        except MaterialsError as exc:
+            return _err(CODE_MATERIALS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def get_material_classify_request(self, payload: dict) -> dict:
+        """轮询交互式分类：pending / completed（含 plan）/ failed / canceled。"""
+        try:
+            return _ok(materials_ops.get_material_classify_request(
+                request_id=str(payload.get("request_id") or ""),
+            ))
+        except MaterialsError as exc:
+            return _err(CODE_MATERIALS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def cancel_material_classify_request(self, payload: dict) -> dict:
+        try:
+            return _ok(materials_ops.cancel_material_classify_request(
+                request_id=str(payload.get("request_id") or ""),
+            ))
+        except MaterialsError as exc:
+            return _err(CODE_MATERIALS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def run_source_prepare(self, payload: dict) -> dict:
+        """对指定素材显式运行真实 SourcePrepare（确定性，无模型）。"""
+        try:
+            return _ok(materials_ops.run_source_prepare(
+                asset_id=str(payload.get("asset_id") or ""),
+            ))
+        except MaterialsError as exc:
+            return _err(CODE_MATERIALS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def run_book_distill(self, payload: dict) -> dict:
+        """对 SourcePrepare PASS 素材显式运行真实 BookDistill（含 Agent 阅读阶段）。"""
+        try:
+            return _ok(materials_ops.run_book_distill(
+                asset_id=str(payload.get("asset_id") or ""),
+            ))
+        except MaterialsError as exc:
+            return _err(CODE_MATERIALS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def get_book_distill_request(self, payload: dict) -> dict:
+        """轮询 Interactive 蒸馏：pending / completed / failed / canceled。"""
+        try:
+            return _ok(materials_ops.get_book_distill_request(
+                request_id=str(payload.get("request_id") or ""),
+            ))
+        except MaterialsError as exc:
+            return _err(CODE_MATERIALS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def cancel_book_distill_request(self, payload: dict) -> dict:
+        try:
+            return _ok(materials_ops.cancel_book_distill_request(
+                request_id=str(payload.get("request_id") or ""),
+            ))
+        except MaterialsError as exc:
+            return _err(CODE_MATERIALS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def get_material_detail(self, payload: dict) -> dict:
+        """单素材作者面详情（写作时能否调用 / 阶段 / 下一步；零模型）。"""
+        try:
+            return _ok(materials_ops.get_material_detail(
+                asset_id=str(payload.get("asset_id") or ""),
+            ))
+        except MaterialsError as exc:
+            return _err(CODE_MATERIALS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    # ---------------- 作品资料 / 故事地图（只读正式 Story State 投影） ----------------
+
+    def get_project_data(self, payload: dict) -> dict:
+        """只读正式 Story State 投影（ProjectData / StoryMap 共用；零写回、零模型）。"""
+        try:
+            return _ok(project_data_ops.get_project_data(
+                project_id=str(payload.get("project_id") or ""),
+            ))
+        except ProjectDataError as exc:
+            return _err(CODE_PROJECT_DATA_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    # ---------------- 作品检查（真实、显式、范围受控的 AI 检查） ----------------
+
+    def get_review_surface(self, payload: dict) -> dict:
+        """确定性只读检查面（无模型）：正式身份 / 规划数 / 线索数 / 章节目录。"""
+        try:
+            return _ok(review_ops.get_review_surface(
+                project_id=str(payload.get("project_id") or ""),
+            ))
+        except ReviewError as exc:
+            return _err(CODE_REVIEW_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def prepare_review(self, payload: dict) -> dict:
+        """作者显式"开始检查"→ 后台发起一次 Agent 检查（Direct；异步轮询/取消）。"""
+        try:
+            chapter_number = payload.get("chapter_number")
+            if chapter_number is not None:
+                chapter_number = int(chapter_number)
+            data = review_ops.prepare_review(
+                project_id=str(payload.get("project_id") or ""),
+                chapter_number=chapter_number,
+            )
+            return _ok(data)
+        except ReviewError as exc:
+            return _err(CODE_REVIEW_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def get_review_request(self, payload: dict) -> dict:
+        """轮询检查结果：pending / completed（含报告）/ failed / expired / canceled。"""
+        try:
+            return _ok(review_ops.get_review_request(
+                request_id=str(payload.get("request_id") or ""),
+            ))
+        except ReviewError as exc:
+            return _err(CODE_REVIEW_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def cancel_review_request(self, payload: dict) -> dict:
+        """取消/丢弃检查：终止运行中的 Direct adapter（如有）。"""
+        try:
+            return _ok(review_ops.cancel_review_request(
+                request_id=str(payload.get("request_id") or ""),
+            ))
+        except ReviewError as exc:
+            return _err(CODE_REVIEW_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    # ---------------- 执行记录（验证式审计；只读，显式清理） ----------------
+
+    def list_execution_audits(self, payload: dict) -> dict:
+        """最近执行记录列表（摘要字段；按时间倒序）。"""
+        try:
+            return _ok(audit_ops.list_execution_audits(
+                limit=int(payload.get("limit") or 50),
+                operation=str(payload.get("operation") or "") or None,
+                status=str(payload.get("status") or "") or None,
+                project_id=str(payload.get("project_id") or "") or None,
+            ))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def get_execution_audit(self, payload: dict) -> dict:
+        """单条执行记录（完整事件时间线）；不存在返回 data=None。"""
+        try:
+            record = audit_ops.get_execution_audit(
+                request_id=str(payload.get("request_id") or ""),
+            )
+            return _ok({"record": record})
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def clear_execution_audits(self, payload: dict) -> dict:
+        """显式清理：只删除 06_工作区/运行审计。"""
+        try:
+            return _ok(audit_ops.clear_execution_audits())
         except Exception as exc:  # noqa: BLE001
             return _err(CODE_BRIDGE_INTERNAL, str(exc))

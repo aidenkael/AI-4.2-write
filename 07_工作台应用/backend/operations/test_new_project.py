@@ -44,6 +44,7 @@ VALID_AGENT_RESULT = {
         "objective": "设计一个可推进的故事发动机。",
         "knowledge_needs": [],
         "selected_bkp_ids": [],
+        "package_ref": "",
         "assumptions": ["主角与秘密的因果尚未确认"],
     },
     "model_output": {
@@ -64,6 +65,7 @@ TWO_DOGS_RESULT = {
         "objective": "围绕“主角被两条狗咬”设计一个有张力的故事方向。",
         "knowledge_needs": [],
         "selected_bkp_ids": [],
+        "package_ref": "",
         "assumptions": ["两条狗的来历与动机是故事核心悬念，作者尚未确认"],
     },
     "model_output": {
@@ -218,7 +220,7 @@ def test_work_direction_not_string_rejected(isolated):
     bad = {
         "semantic_interpretation": {
             "scope": "story_design", "objective": "目标",
-            "knowledge_needs": [], "selected_bkp_ids": [], "assumptions": [],
+            "knowledge_needs": [], "selected_bkp_ids": [], "package_ref": "", "assumptions": [],
         },
         "model_output": {
             "proposal": "候选方向。", "work_direction": 12345,
@@ -237,7 +239,7 @@ def test_reader_promise_missing_rejected(isolated):
     bad = {
         "semantic_interpretation": {
             "scope": "story_design", "objective": "目标",
-            "knowledge_needs": [], "selected_bkp_ids": [], "assumptions": [],
+            "knowledge_needs": [], "selected_bkp_ids": [], "package_ref": "", "assumptions": [],
         },
         "model_output": {
             "proposal": "候选方向。", "work_direction": "作品方向。",
@@ -255,7 +257,7 @@ def test_hard_constraints_not_list_str_rejected(isolated):
     bad = {
         "semantic_interpretation": {
             "scope": "story_design", "objective": "目标",
-            "knowledge_needs": [], "selected_bkp_ids": [], "assumptions": [],
+            "knowledge_needs": [], "selected_bkp_ids": [], "package_ref": "", "assumptions": [],
         },
         "model_output": {
             "proposal": "候选方向。", "work_direction": "作品方向。",
@@ -273,7 +275,7 @@ def test_open_space_missing_rejected(isolated):
     bad = {
         "semantic_interpretation": {
             "scope": "story_design", "objective": "目标",
-            "knowledge_needs": [], "selected_bkp_ids": [], "assumptions": [],
+            "knowledge_needs": [], "selected_bkp_ids": [], "package_ref": "", "assumptions": [],
         },
         "model_output": {
             "proposal": "候选方向。", "work_direction": "作品方向。",

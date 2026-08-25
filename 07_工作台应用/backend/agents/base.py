@@ -21,6 +21,7 @@ class AgentRequest:
     task: str
     cwd: Optional[str] = None  # 子进程工作目录（None = 继承调用方）
     model: Optional[str] = None  # 可选：通用模型选择（多个 Agent 都可能需要）
+    custom_model: Optional[str] = None  # 可选：Adapter 自己解析的本地自定义路由选择
     reasoning_effort: Optional[str] = None  # 可选：通用推理强度（多个 Agent 都可能需要）
 
 

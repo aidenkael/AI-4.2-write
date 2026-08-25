@@ -1,10 +1,134 @@
-import { CheckCircle2, ChevronDown, Clock3, Search, ShieldCheck, Sparkles, TriangleAlert } from 'lucide-react'
-import { useState } from 'react'
-import { useActiveProject, useApp, useIllustration } from '../features/app/AppStore'
+import { CheckCircle2, FolderOpen, Search, ShieldCheck, Sparkles, TriangleAlert, X } from 'lucide-react'
+import { ExecutionSummary } from '../components/ExecutionSummary'
+import { useApp } from '../features/app/AppStore'
+import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
+import { useReviewController } from '../features/review/useReviewController'
 
-const groups=[['priority','优先处理','这些问题可能影响阅读体验，建议优先关注。',TriangleAlert],['watch','值得看看','这些内容建议优化，可进一步强化作品的一致性。',Sparkles],['clear','没有问题的部分','目前检查未发现明显问题，可放心继续创作。',CheckCircle2]] as const
+const severityMeta = {
+  priority: { label: '优先处理', Icon: TriangleAlert, cls: 'priority' },
+  watch: { label: '值得看看', Icon: Sparkles, cls: 'watch' },
+} as const
+
+/**
+ * 作品检查：真实、显式、范围受控的 AI 检查。
+ *
+ * - 页面加载只读（确定性检查面），零模型；
+ * - 只有作者按下"开始检查"才发起一次 Agent 检查（默认最新已接受章节）；
+ * - 报告非权威、零写回；不提供"标记已处理"持久化。
+ */
 export function ReviewPage() {
-  const {actions}=useApp(); const { projectState: state } = useActiveProject(); const priority=state.reviews.filter(x=>x.category==='priority').length; const [checking,setChecking]=useState(false)
-  const runCheck=async()=>{setChecking(true);await new Promise((resolve)=>setTimeout(resolve,700));setChecking(false);actions.notify('全书检查已完成，结果已更新（Mock）')}
-  return <div className="review-page"><section className="review-hero" style={{backgroundImage:`linear-gradient(90deg,rgba(234,244,255,.95),rgba(255,255,255,.32)),url(${useIllustration('desk')})`}}><ShieldCheck/><div><h1>全书检查</h1><p>手动检查长篇作品的常见问题，帮助你发现潜在的连续性、设定与逻辑问题。</p><button className="primary" onClick={runCheck} disabled={checking}><Search/>{checking?'检查中…':'开始检查'}</button><button onClick={()=>actions.openDialog('检查历史记录','2024-05-21 14:32：已完成一次 Mock 全书检查；结果保留在当前前端会话。')}><Clock3/>查看历史记录</button></div></section><div className="review-columns">{groups.map(([key,title,desc,Icon])=><section className={`panel review-group ${key}`} key={key}><header><Icon/><div><h2>{title} <span>{key==='priority'?priority:3}</span></h2><p>{desc}</p></div></header>{state.reviews.filter(x=>x.category===key).map(r=><article key={r.id}><button className="issue-title" onClick={()=>actions.toggleReview(r.id)}><span>{r.title}</span>{r.count&&<em>● {r.count}处</em>}<ChevronDown className={r.open?'open':''}/></button><p>{r.detail}</p>{r.open&&key!=='clear'&&<div><button onClick={()=>actions.setProjectSection('writing')}>查看{key==='priority'?'相关章节':'详情'}</button><button onClick={()=>actions.openDialog('问 AI', `已针对「${r.title}」准备 Mock 分析入口。`)}>问 AI</button><button onClick={()=>{actions.resolveReview(r.id);actions.notify('该问题已标记为处理完成')}}>标记已处理</button></div>}</article>)}</section>)}</div><footer className="review-note">检查基于当前内容进行分析，结果仅供参考，请结合创作意图判断。　　上次检查：2024-05-21 14:32</footer></div>
+  const { actions } = useApp()
+  const { selected } = useFormalProjectShell()
+  const controller = useReviewController(selected?.project_id ?? null)
+  const { surface, surfaceLoading, surfaceError, report, status, error, selectedChapter, execution } = controller
+
+  if (!selected) {
+    return (
+      <div className="empty-state">
+        <p>请先在「我的作品」中选择一部正式作品。</p>
+        <button className="primary" onClick={() => actions.navigate('projects')}>
+          <FolderOpen /> 返回作品列表
+        </button>
+      </div>
+    )
+  }
+
+  const running = status === 'running'
+  const priorityCount = report?.issues.filter((i) => i.severity === 'priority').length ?? 0
+
+  return (
+    <div className="review-page">
+      <section className="review-hero">
+        <ShieldCheck />
+        <div>
+          <h1>作品检查</h1>
+          <p>只检查你选择的章节范围内的内容，结果仅供参考，不会写入正式作品。</p>
+          <button
+            className="primary"
+            disabled={running || !surface?.has_accepted_prose}
+            title={!surface?.has_accepted_prose ? '需要先有已接受的正文才能开始检查' : undefined}
+            onClick={() => void controller.start()}
+          >
+            <Search /> {running ? (execution?.execution_mode === 'direct' ? '后台 AI 正在执行（直接模式）…' : '检查中…') : '开始检查'}
+          </button>
+          {running && (
+            <button onClick={() => void controller.cancel()}>
+              <X /> 取消
+            </button>
+          )}
+        </div>
+      </section>
+      {running && <ExecutionSummary execution={execution} />}
+
+      <section className="panel review-surface">
+        <h2>检查面（只读）</h2>
+        {surfaceLoading && <p className="muted-note">正在加载…</p>}
+        {surfaceError && <p className="error-text">{surfaceError}</p>}
+        {!surfaceLoading && !surfaceError && surface && (
+          <div className="review-stats">
+            <span><strong>{surface.active_plan_count}</strong> 条有效规划</span>
+            <span><strong>{surface.open_thread_count}</strong> 条未解决线索</span>
+            <span><strong>{surface.chapters.length}</strong> 个已接受章节</span>
+          </div>
+        )}
+        {surface && surface.has_accepted_prose && (
+          <div className="review-chapters">
+            <label>
+              检查章节：
+              <select
+                value={selectedChapter ?? surface.latest_chapter_number ?? 1}
+                onChange={(e) => controller.selectChapter(Number(e.target.value))}
+              >
+                {surface.chapters.map((c) => (
+                  <option key={c.chapter_number} value={c.chapter_number}>第 {c.chapter_number} 章</option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
+      </section>
+
+      {error && <p className="error-text">{error}</p>}
+
+      {report && (
+        <div className="review-columns">
+          <ExecutionSummary execution={execution} />
+          <section className="panel review-group summary">
+            <header><CheckCircle2 /><div><h2>检查结论</h2><p>第 {report.chapter_number} 章 · 结果仅供参考</p></div></header>
+            <p>{report.summary}</p>
+          </section>
+
+          {(['priority', 'watch'] as const).map((sev) => {
+            const issues = report.issues.filter((i) => i.severity === sev)
+            const meta = severityMeta[sev]
+            return (
+              <section className={`panel review-group ${meta.cls}`} key={sev}>
+                <header><meta.Icon /><div><h2>{meta.label} <span>{issues.length}</span></h2></div></header>
+                {issues.length === 0 && <p className="muted-note">无。</p>}
+                {issues.map((issue, idx) => (
+                  <article key={idx}>
+                    <h3>{issue.title}</h3>
+                    <p>{issue.detail}</p>
+                    {issue.evidence && <small>依据：{issue.evidence}</small>}
+                    {issue.suggestion && <p className="suggestion">建议：{issue.suggestion}</p>}
+                  </article>
+                ))}
+              </section>
+            )
+          })}
+
+          {report.strengths.length > 0 && (
+            <section className="panel review-group strength">
+              <header><CheckCircle2 /><div><h2>做得好的地方</h2></div></header>
+              <ul>{report.strengths.map((s, idx) => <li key={idx}>{s}</li>)}</ul>
+            </section>
+          )}
+        </div>
+      )}
+
+      {report && priorityCount === 0 && (
+        <footer className="review-note">本次检查未发现优先处理的问题；结果基于当前章节，可随内容变化重新检查。</footer>
+      )}
+    </div>
+  )
 }

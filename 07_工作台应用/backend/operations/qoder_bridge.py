@@ -93,12 +93,17 @@ def create_request(
     kind: str,
     meta: Optional[dict[str, Any]] = None,
     timeout_seconds: Optional[int] = None,
+    request_id: Optional[str] = None,
+    phase: Optional[str] = None,
 ) -> str:
     """生成唯一 request_id，保存完整 Agent task，并成为当前活跃请求。
 
     返回 request_id。request 文件包含 response_path，Qoder 只按此路径写回。
+    ``request_id`` 可选：调用方预生成时（如任务文本需要内嵌 request_id）
+    可显式传入；缺省自动生成。``phase`` 可选：两阶段交互桥的阶段标记
+    （缺省不写入；其它操作不受影响）。
     """
-    request_id = uuid.uuid4().hex
+    request_id = request_id or uuid.uuid4().hex
     timeout = timeout_seconds or DEFAULT_TASK_TIMEOUT_SECONDS
     created = datetime.now(timezone.utc)
     expires = created + timedelta(seconds=timeout)
@@ -114,6 +119,8 @@ def create_request(
         "response_path": str(response_path(request_id)),
         "meta": meta or {},
     }
+    if phase is not None:
+        request["phase"] = phase
 
     requests_dir = _requests_dir()
     requests_dir.mkdir(parents=True, exist_ok=True)
@@ -249,6 +256,34 @@ def clear_active_if(request_id: str) -> None:
             _active_path().unlink(missing_ok=True)
         except OSError:
             pass
+
+
+def clear_response(request_id: str) -> None:
+    """只删除 response 文件（两阶段交互桥：阶段间消费后清除，等第二次 /gowrite）。"""
+    try:
+        response_path(request_id).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def set_request_task(request_id: str, task: str, *, phase: Optional[str] = None) -> bool:
+    """原地更新请求文件的任务文本（两阶段交互桥：阶段 1 验收后换成阶段 2 任务）。
+
+    保持 state/kind/meta/expires_at 不变；请求仍处于 pending，active 指针不动。
+    请求不存在或已终态时返回 False。
+    """
+    req = get_request(request_id)
+    if req is None:
+        return False
+    if req.get("state") != "pending":
+        return False
+    req["task"] = task
+    if phase is not None:
+        req["phase"] = phase
+    request_path(request_id).write_text(
+        json.dumps(req, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return True
 
 
 def cleanup_request(request_id: str) -> None:
