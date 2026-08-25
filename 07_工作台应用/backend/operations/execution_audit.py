@@ -22,10 +22,18 @@
 子进程；主进程先创建审计文件（operation.started / bridge.waiting），子进程
 通过 append_event()（load→append→save）写入 retrieval 事件，主进程 finalize
 再补 retrieval.selected / context.bound / candidate.created 并 finish()。
+
+事件身份模型（跨进程安全）：
+- 每个事件携带全局唯一 ``event_id``（uuid4().hex），主进程 recorder 与跨进程
+  append_event() 各自独立生成；合并时以 ``event_id`` 为唯一身份，绝不使用
+  seq 去重（seq 只作展示/顺序元数据，合并后重排为 1..N）。
+- 旧版记录（无 event_id）读取时从不可变字段推导确定性 legacy 身份保留，
+  不删除、不失效既有审计文件。
 """
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import shutil
 import threading
@@ -93,6 +101,55 @@ def _now_ts() -> float:
 
 def new_request_id() -> str:
     return uuid.uuid4().hex
+
+
+def _event_identity(event: dict[str, Any]) -> str:
+    """全局唯一事件身份。
+
+    - 新事件：``event_id``（uuid4().hex，主进程 recorder 与跨进程 append_event
+      各自独立生成，保证全局唯一）；
+    - 旧版事件（无 event_id）：从现有不可变字段推导确定性临时身份
+      （seq/at/kind/component/verified/details 的 SHA-256），只用于合并时
+      保留旧事件，绝不作为新事件的持久身份。
+    """
+    eid = event.get("event_id")
+    if isinstance(eid, str) and eid:
+        return f"eid:{eid}"
+    canonical = json.dumps(
+        {
+            "seq": event.get("seq"),
+            "at": event.get("at"),
+            "kind": event.get("kind"),
+            "component": event.get("component"),
+            "verified": event.get("verified"),
+            "details": event.get("details"),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    )
+    return "legacy:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _normalize_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """展示/顺序规范化：seq 只作顺序元数据，绝不作身份。
+
+    - 按 (at, 原始 seq, 事件身份) 确定性排序（at 相同秒内保持各写入方顺序，
+      跨写入方用唯一身份打破平局）；
+    - 重新分配连续 seq = 1..N；
+    - 原地更新事件对象；返回同一列表。
+    """
+    ordered = sorted(
+        events,
+        key=lambda e: (
+            str(e.get("at") or ""),
+            int(e.get("seq") or 0),
+            _event_identity(e),
+        ),
+    )
+    for i, event in enumerate(ordered, start=1):
+        event["seq"] = i
+    return ordered
 
 
 class AuditRecorder:
@@ -166,8 +223,9 @@ class AuditRecorder:
         verified: bool = True,
         details: Optional[dict[str, Any]] = None,
     ) -> None:
-        self._seq += 1
+        self._seq += 1  # 仅作本写入方顺序提示；合并时会被重新分配，绝不作为身份
         event = {
+            "event_id": uuid.uuid4().hex,  # 全局唯一合并身份
             "seq": self._seq,
             "at": _now_iso(),
             "kind": kind,
@@ -205,22 +263,24 @@ class AuditRecorder:
     def _merged_events(self) -> list[dict[str, Any]]:
         """合并进程内事件 + 磁盘已有事件（子进程如 retrieval CLI 追加的）。
 
-        按 seq 去重合并：子进程（跨进程 append_event）与主进程 recorder
-        各自维护 seq；合并后以 seq 排序。避免 finish 覆盖丢失子进程事件。
+        - 合并身份 = ``event_id``（全局唯一），绝不使用 seq 去重；
+        - 进程内事件优先，磁盘事件 setdefault 补充（同一身份只保留一份）；
+        - 旧版事件（无 event_id）用确定性 legacy 身份保留，不丢弃；
+        - 合并后按 (at, 原始 seq, 身份) 排序并重排 seq = 1..N（仅展示顺序）。
         """
-        by_seq: dict[int, dict[str, Any]] = {}
+        merged: dict[str, dict[str, Any]] = {}
         for event in self._events:
-            by_seq[int(event.get("seq") or 0)] = event
+            merged[_event_identity(event)] = event
         try:
             path = audit_path(self.request_id)
             if path.exists():
                 existing = json.loads(path.read_text(encoding="utf-8"))
                 for event in existing.get("events") or []:
                     if isinstance(event, dict):
-                        by_seq.setdefault(int(event.get("seq") or 0), event)
+                        merged.setdefault(_event_identity(event), event)
         except (OSError, json.JSONDecodeError, TypeError, ValueError):  # noqa: BLE001
             pass
-        return [by_seq[seq] for seq in sorted(by_seq)]
+        return _normalize_events(list(merged.values()))
 
     def _flush_locked(self, error: Optional[str] = None) -> None:
         try:
@@ -268,16 +328,19 @@ def append_event(
             return
         if record.get("status") in _TERMINAL_STATUSES:
             return  # 终态记录不再追加
-        seq = max((int(e.get("seq") or 0) for e in events), default=0) + 1
+        # 新事件必须携带全局唯一 event_id；seq 只是顺序提示（磁盘当前末尾 +1，
+        # 合并/规范化时重排）——绝不从 max(seq) 推断唯一性，seq 绝不参与去重。
+        seq_hint = max((int(e.get("seq") or 0) for e in events), default=0) + 1
         events.append({
-            "seq": seq,
+            "event_id": uuid.uuid4().hex,
+            "seq": seq_hint,
             "at": _now_iso(),
             "kind": kind,
             "component": component,
             "verified": bool(verified),
             **({"details": details} if details else {}),
         })
-        record["events"] = events
+        record["events"] = _normalize_events(events)
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(path)
@@ -325,6 +388,7 @@ def finish_file(
             record["execution_mode"] = execution.get("execution_mode") or record.get("execution_mode")
             record["agent_id"] = execution.get("agent_id") or record.get("agent_id")
             record["model"] = execution.get("model") or record.get("model")
+        record["events"] = _normalize_events(record.get("events") or [])
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(path)
