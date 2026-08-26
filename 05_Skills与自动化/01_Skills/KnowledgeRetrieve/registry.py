@@ -43,7 +43,7 @@ def _reference_source(bkp_dir: Path, identity: dict) -> dict | None:
 def _method_source(method_dir: Path, identity: dict) -> dict | None:
     if identity.get("schema_version") != METHOD_SCHEMA_VERSION:
         return None
-    if not str(identity.get("schema_status", "")).startswith("FINALIZED"):
+    if identity.get("schema_status") != "FINALIZED_RETRIEVAL_READY":
         return None  # 未定稿的方法包不可检索（确定性门控）
     if not identity.get("source_id"):
         return None

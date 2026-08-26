@@ -67,7 +67,7 @@ def fake_retrieve_ok(query):
 
 
 def fake_retrieve_gap(query):
-    return Package("INSUFFICIENT_BKP", 0)
+    return Package("INSUFFICIENT_KNOWLEDGE", 0)
 
 
 def fake_retrieve_must_not_be_called(query):

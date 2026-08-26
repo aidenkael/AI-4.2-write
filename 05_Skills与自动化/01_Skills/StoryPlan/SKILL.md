@@ -25,7 +25,7 @@ reader promise / reader expectation、人物欲望与选择、关系变化、冲
 ## 模型执行提示
 
 1. 强模型先基于 Author Intent、Story State、已确认 StoryDesign 与 planning target 自由规划；第一轮不默认注入 BKP。
-2. 之后先诊断真实薄弱点（中段无推动力、关系长期不变、reader promise 长期不兑现、悬念拖太久、只有强度升级、角色长期缺席、缺少 irreversible choice 等）；只有真实问题暴露明确知识缺口才调用 KnowledgeRetrieve 或额外 stance。`NO_USEFUL_BKP` / `INSUFFICIENT_BKP` / 0 张 BKP 都是正常结果。
+2. 之后先诊断真实薄弱点（中段无推动力、关系长期不变、reader promise 长期不兑现、悬念拖太久、只有强度升级、角色长期缺席、缺少 irreversible choice 等）；只有真实问题暴露明确知识缺口才调用 KnowledgeRetrieve 或额外 stance。`NO_USEFUL_BKP` / `INSUFFICIENT_KNOWLEDGE` / 0 张 BKP 都是正常结果。
 3. 作者未决定的死亡、背叛、谜底、关系归宿、最终反派、世界规则等保持 deliberate ambiguity；不为结构完整自动补成事实。
 4. 不默认生成全书章纲、卷名、章数、高潮位点等固定结构；作者可见内容优先保留人物动机、关系变化和具体后果。
 5. 专业 stance（character / reader / structure / continuity / research）只在具体缺陷触发时使用，不默认全开，不固化为多 Agent 流水线。

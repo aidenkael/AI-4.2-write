@@ -233,7 +233,7 @@ def build_context(
         package = retrieval(query)
         selected_id_set = set(selected_knowledge_ids)
         gaps = list(getattr(package, "gaps", []))
-        if getattr(package, "status", "INSUFFICIENT_BKP") == "OK":
+        if getattr(package, "status", "INSUFFICIENT_KNOWLEDGE") == "OK":
             # Retrieval only recalls candidates.  A model/Skill must explicitly
             # select refs after considering scope and boundary; rank is not a
             # substitute for literary/semantic judgment.
@@ -282,11 +282,11 @@ def build_context(
                 gaps.append("部分模型/Skill 选择的知识 ref 不在本次有效召回中。")
             for ref in sorted(selected_id_set - unknown_ids - ambiguous_ids - used_refs):
                 gaps.append(f"KNOWLEDGE_LIMIT: 选择 ref {ref} 超过上限 {max_knowledge_hits} 条，未注入。")
-        if getattr(package, "status", "INSUFFICIENT_BKP") == "OK" and not selected:
+        if getattr(package, "status", "INSUFFICIENT_KNOWLEDGE") == "OK" and not selected:
             gaps.append("模型/Skill 未选择可用知识；Context 不注入未审查候选。")
         retrieval_info = {
             "query": query,
-            "status": getattr(package, "status", "INSUFFICIENT_BKP"),
+            "status": getattr(package, "status", "INSUFFICIENT_KNOWLEDGE"),
             "gaps": gaps,
             "candidate_count": getattr(package, "candidate_count", 0),
         }

@@ -282,5 +282,81 @@ class KnowledgeRetrieveMultiSourceTest(unittest.TestCase):
                 retrieve_run.CATALOG = None
 
 
+class KnowledgeRetrieveMethodGateTest(unittest.TestCase):
+    """FINALIZED_RETRIEVAL_READY 精确门控：其他 FINALIZED_* 状态不可检索。"""
+
+    def _build_method_only_fixture(self, tmp: Path, schema_status: str, source_id: str = "book_8001") -> Path:
+        root = Path(tmp)
+        method = root / "02_素材知识库" / f"{source_id}_方法书" / "method"
+        (method / "knowledge").mkdir(parents=True)
+        (method / "identity.json").write_text(json.dumps({
+            "schema_version": "gowrite_method_knowledge/v1",
+            "schema_status": schema_status,
+            "source_kind": "method_source", "source_id": source_id,
+            "title": "方法书", "author": "乙", "maturity": "source_bound",
+            "source_snapshot": {"source_sha256": "a" * 64},
+        }, ensure_ascii=False), encoding="utf-8")
+        (method / "knowledge" / "cards.md").write_text(
+            "## M0001｜测试卡\n"
+            "- statement: 测试方法卡。\n"
+            "- method_kind: principle\n"
+            "- dimension: 叙事节奏\n"
+            "- evidence:\n"
+            "  - sections/S0001.md#L1-L2\n",
+            encoding="utf-8")
+        return root
+
+    def test_finalized_retrieval_ready_is_searchable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._build_method_only_fixture(Path(tmp), "FINALIZED_RETRIEVAL_READY")
+            sources = discover_sources(str(root))
+            keys = [f"{s['source_kind']}/{s['source_id']}" for s in sources]
+            self.assertIn("method_source/book_8001", keys)
+
+    def test_finalized_bare_not_searchable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._build_method_only_fixture(Path(tmp), "FINALIZED")
+            sources = discover_sources(str(root))
+            method_sources = [s for s in sources if s["source_kind"] == "method_source"]
+            self.assertEqual(method_sources, [])
+
+    def test_finalized_draft_not_searchable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._build_method_only_fixture(Path(tmp), "FINALIZED_DRAFT")
+            sources = discover_sources(str(root))
+            method_sources = [s for s in sources if s["source_kind"] == "method_source"]
+            self.assertEqual(method_sources, [])
+
+    def test_finalized_invalid_not_searchable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._build_method_only_fixture(Path(tmp), "FINALIZED_INVALID")
+            sources = discover_sources(str(root))
+            method_sources = [s for s in sources if s["source_kind"] == "method_source"]
+            self.assertEqual(method_sources, [])
+
+    def test_finalized_validated_not_searchable_for_method(self):
+        """FINALIZED_VALIDATED 是已验证知识包状态，不应作为方法包被接受。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._build_method_only_fixture(Path(tmp), "FINALIZED_VALIDATED")
+            sources = discover_sources(str(root))
+            method_sources = [s for s in sources if s["source_kind"] == "method_source"]
+            self.assertEqual(method_sources, [])
+
+
+class KnowledgeRetrieveInsufficientTest(unittest.TestCase):
+    """INSUFFICIENT_KNOWLEDGE 统一状态：无有效知识时返回统一多源合同。"""
+
+    def test_insufficient_knowledge_on_empty_catalog(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            retrieve_run.BASE_DIR = str(Path(tmp))
+            retrieve_run.CATALOG = None
+            try:
+                pkg = retrieve_run.retrieve("任意查询", top_k=5)
+                self.assertEqual(pkg.status, "INSUFFICIENT_KNOWLEDGE")
+            finally:
+                retrieve_run.BASE_DIR = str(Path(__file__).resolve().parents[3])
+                retrieve_run.CATALOG = None
+
+
 if __name__ == "__main__":
     unittest.main()

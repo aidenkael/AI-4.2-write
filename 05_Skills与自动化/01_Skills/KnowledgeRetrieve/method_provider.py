@@ -145,10 +145,10 @@ def _cards_to_items(cards: list[dict], *, source_kind: str, source_id: str,
 
 
 def load_method_package(method_dir: Path) -> list[KnowledgeItem]:
-    """加载一个已定稿（FINALIZED_*）方法知识包为通用知识条目。"""
+    """加载一个已定稿（FINALIZED_RETRIEVAL_READY）方法知识包为通用知识条目。"""
     method_dir = Path(method_dir)
     identity = _load_identity(method_dir)
-    if not str(identity.get("schema_status", "")).startswith("FINALIZED"):
+    if identity.get("schema_status") != "FINALIZED_RETRIEVAL_READY":
         raise ValueError(f"方法包未定稿（{identity.get('schema_status')!r}），不可加载")
     cards, errors = parse_cards_generic(method_dir / "knowledge" / "cards.md")
     if errors:

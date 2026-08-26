@@ -13,6 +13,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import catalog  # noqa: E402
 import intake  # noqa: E402
@@ -199,6 +201,25 @@ def test_draft_method_package_not_callable(tmp_path):
 
     ledger = _refresh(root)
     assert ledger["assets"][0]["knowledge"]["status"] == "未开始"
+
+
+@pytest.mark.parametrize("bad_status", [
+    "FINALIZED",
+    "FINALIZED_DRAFT",
+    "FINALIZED_INVALID",
+    "FINALIZED_VALIDATED",
+])
+def test_non_retrieval_ready_finalized_not_callable(tmp_path, bad_status):
+    """只有 FINALIZED_RETRIEVAL_READY 才算 finalized；其他 FINALIZED_* 不使方法包 callable。"""
+    asset, sha = _asset()
+    root = _make_repo(tmp_path, [asset])
+    (root / catalog.MATERIAL_DIR_NAME / "02_研究资料" / asset["name"]).mkdir(parents=True)
+    (root / catalog.MATERIAL_DIR_NAME / asset["files"][0]["path"]).write_bytes(b"method book content")
+    _write_method_identity(root, asset["id"], asset["name"], sha, schema_status=bad_status)
+
+    ledger = _refresh(root)
+    know = ledger["assets"][0]["knowledge"]
+    assert know["status"] == "未开始", f"schema_status={bad_status!r} 不应让方法包变为 callable"
 
 
 def test_stale_source_fingerprint_marks_needs_update(tmp_path):

@@ -170,7 +170,7 @@ def retrieve(query: str, top_k: int = 15) -> RetrievalPackage:
         return RetrievalPackage(
             query=query,
             query_understanding=understanding,
-            status="INSUFFICIENT_BKP",
+            status="INSUFFICIENT_KNOWLEDGE",
             gaps=gaps,
         )
 
@@ -217,7 +217,7 @@ def retrieve(query: str, top_k: int = 15) -> RetrievalPackage:
             query=query,
             query_understanding=understanding,
             hits=hits,
-            status="INSUFFICIENT_BKP",
+            status="INSUFFICIENT_KNOWLEDGE",
             gaps=[
                 "候选召回得分极低，当前知识资产中可能没有真正相关的知识",
                 "建议：检查知识资产是否覆盖该创作维度，或补充新的来源素材",

@@ -184,7 +184,7 @@ def find_method(distill_dir: Path, asset_id: str) -> dict | None:
 
     合同：02_素材知识库/<asset_id>_<名称>/method/identity.json，
     schema_version = gowrite_method_knowledge/v1；
-    只有 schema_status 以 FINALIZED 开头（FINALIZED_RETRIEVAL_READY）才是可用证据。
+    只有 schema_status == FINALIZED_RETRIEVAL_READY 才是可用证据。
     """
     if distill_dir is None or not distill_dir.exists():
         return None
@@ -205,7 +205,7 @@ def find_method(distill_dir: Path, asset_id: str) -> dict | None:
         schema_status = str(data.get("schema_status", ""))
         ss = data.get("source_snapshot", {}) or {}
         return {
-            "finalized": schema_status.startswith("FINALIZED"),
+            "finalized": schema_status == "FINALIZED_RETRIEVAL_READY",
             "source_sha256": ss.get("source_sha256") or "",
             "dir_rel": f"{DISTILL_DIR_NAME}/{d.name}",
             "author": data.get("author") or "",
