@@ -546,7 +546,10 @@ class TestControlCharScan:
 class TestFrozenRuntimeProductionChanges:
     def test_no_frozen_runtime_modified(self):
         import subprocess
-        base_sha = "fbe806f3aeec57629cf5139602a12df92772beae"
+        # 基线 = 方法知识生命周期授权变更（任务书显式重开：方法类资产生命周期 +
+        # 检索身份/目录泛化 + 最小 Context 选择管道）合入后的提交；
+        # 基线之后的任何冻结 runtime 生产变更仍然被拒绝。
+        base_sha = "4b9264a"
         result = subprocess.run(
             ["git", "diff", "--name-only", base_sha, "--",
              "05_Skills与自动化/01_Skills/StoryDesign/",
