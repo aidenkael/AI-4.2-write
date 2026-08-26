@@ -33,6 +33,7 @@ from operations.project_data import ProjectDataError
 from operations import project_data as project_data_ops
 from operations.review import ReviewError
 from operations import review as review_ops
+from operations import author_operation as author_operation_ops
 from operations import execution_audit as audit_ops
 from views import project as project_views
 
@@ -597,6 +598,30 @@ class AppApi:
             return _err(CODE_BRIDGE_INTERNAL, str(exc))
 
     # ---------------- 执行记录（验证式审计；只读，显式清理） ----------------
+
+    def focus_qoder(self, payload: dict | None = None) -> dict:
+        """尽力把已运行的 Qoder 桌面端切到前台（非侵入；失败静默）。
+
+        只做窗口切换，绝不模拟键盘/回车/提交；供全局任务条"前往 Qoder
+        执行 /gowrite"按钮使用。
+        """
+        try:
+            focused = bridge_ops.focus_qoder_window()
+            return _ok({"focused": focused})
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def get_active_author_operation(self, payload: dict | None = None) -> dict:
+        """恢复当前待办作者操作（App 协调器 remount/reload 用；仅非机密事实）。
+
+        返回 data：操作事实 dict，或 None（当前无待办操作）。
+        Interactive pending 可恢复；Direct 仅当 in-process worker 仍在；
+        进程重启后的孤儿 Direct 请求 fail closed（state=orphaned）。
+        """
+        try:
+            return _ok(author_operation_ops.get_active_author_operation())
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
 
     def list_execution_audits(self, payload: dict) -> dict:
         """最近执行记录列表（摘要字段；按时间倒序）。"""

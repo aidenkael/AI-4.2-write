@@ -1,24 +1,33 @@
 import { Check, FolderOpen, PenLine, Plus, RefreshCw, Sparkles, X } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ExecutionSummary } from '../components/ExecutionSummary'
 import { PageHeader } from '../components/PageHeader'
 import { defaultIllustrations } from '../assets/illustrations'
 import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { useNewProjectController } from '../features/projects/useNewProjectController'
+import { useAuthorTask } from '../features/tasks/AuthorTaskCoordinator'
 
 /**
  * 我的作品：真实正式项目列表 + 真实新建作品生命周期。
  *
  * - 每个项目只显示真实项目名；打开/继续写作先经后端校验；
- * - 新建作品：作品名 + 一句话想法 → Generate → 后端候选 → 确认 → 创建正式项目。
+ * - 新建作品：作品名 + 一句话想法 → Generate → 后端候选 → 确认 → 创建正式项目；
+ * - 新建作品任务属于 App 级协调器：离开本页任务继续、候选保留，
+ *   返回（含任务条"返回查看"）时自动打开对话框并显示候选。
  */
 export function ProjectsPage() {
   const { actions } = useApp()
   const { projects, loading, error, reload, openProjectById } = useFormalProjectShell()
+  const { task } = useAuthorTask()
   const [openingId, setOpeningId] = useState<string | null>(null)
   const [showNew, setShowNew] = useState(false)
   const np = useNewProjectController({ notify: actions.notify })
+
+  // 协调器存在 new_project 任务时自动打开对话框（返回后候选仍可见）
+  useEffect(() => {
+    if (task?.kind === 'new_project') setShowNew(true)
+  }, [task])
 
   const openAndNavigate = async (projectId: string, section: 'overview' | 'writing') => {
     setOpeningId(projectId)

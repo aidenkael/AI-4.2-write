@@ -223,7 +223,7 @@ def test_agent_settings_consumed(isolated, real_project, tmp_path, monkeypatch):
     captured_tasks: list[str] = []
     original_create = bridge.create_request
 
-    def _capture_create(task, kind, meta=None, timeout_seconds=None):
+    def _capture_create(task, kind, meta=None, timeout_seconds=None, **kwargs):
         captured_tasks.append(task)
         return original_create(task, kind, meta=meta, timeout_seconds=timeout_seconds)
 
@@ -527,7 +527,7 @@ def test_agent_prompt_excludes_superseded(isolated, real_project, fake_agent, tm
     captured_tasks: list[str] = []
     original_create = bridge.create_request
 
-    def _capture_create(task, kind, meta=None, timeout_seconds=None):
+    def _capture_create(task, kind, meta=None, timeout_seconds=None, **kwargs):
         captured_tasks.append(task)
         return original_create(task, kind, meta=meta, timeout_seconds=timeout_seconds)
 
@@ -787,7 +787,7 @@ def _propose_with_snapshot(project_id, knowledge_needs, selected_bkp_ids, packag
     request_id = prepare_result["request_id"]
 
     query = "；".join(knowledge_needs)
-    shown_package = sp_ops.execute_request_scoped_retrieval(query)  # 唯一一次检索调用
+    shown_package = sp_ops.execute_request_scoped_retrieval(query, request_id)  # 唯一一次检索调用
     fingerprint = sp_ops._package_fingerprint(shown_package)
 
     agent_json = _agent_json(
@@ -872,7 +872,7 @@ def test_catalog_mutation_after_snapshot_no_fresh_retrieval(isolated, real_proje
     request_id = prepare_result["request_id"]
 
     # Agent 侧唯一一次检索调用 → 快照写入（包 A）
-    shown = sp_ops.execute_request_scoped_retrieval("信息层次")
+    shown = sp_ops.execute_request_scoped_retrieval("信息层次", request_id)
     fingerprint = sp_ops._package_fingerprint(shown)
     assert calls == ["信息层次"]
 
@@ -912,7 +912,7 @@ def test_snapshot_unparseable_rejects_knowledge_selection(isolated, real_project
 
     prepare_result = sp_ops.prepare_story_plan(project_id=real_project["project_id"], author_question="往前想")
     request_id = prepare_result["request_id"]
-    sp_ops.execute_request_scoped_retrieval("信息层次")
+    sp_ops.execute_request_scoped_retrieval("信息层次", request_id)
 
     # 篡改快照为不可解析内容
     turn_dir = _latest_turn_dir(real_project["project_id"], isolated.parent / ".planning")
@@ -934,7 +934,7 @@ def test_snapshot_identity_mismatch_rejects_knowledge_selection(isolated, real_p
         """每个 mismatch 子用例用全新的 planning turn（失败的 finalize 会清理该 turn）。"""
         prepare_result = sp_ops.prepare_story_plan(project_id=real_project["project_id"], author_question="往前想")
         request_id = prepare_result["request_id"]
-        sp_ops.execute_request_scoped_retrieval("信息层次")
+        sp_ops.execute_request_scoped_retrieval("信息层次", request_id)
         turn_dir = _latest_turn_dir(real_project["project_id"], planning_root)
         snapshot_path = turn_dir / "retrieval" / "package.json"
         if mutate is not None:
@@ -1070,14 +1070,19 @@ def test_bound_package_rejects_unrelated_query(isolated, real_project):
 
 # Agent 侧唯一一次检索调用：检索失败 → 命令失败；无快照时 finalize 拒绝
 
-def test_agent_retrieval_failure_no_snapshot(isolated, real_project, monkeypatch):
+def test_agent_retrieval_failure_no_snapshot(isolated, real_project, tmp_path, monkeypatch):
+    # 隔离桥根：避免生产桥目录中遗留的 active 指针触发交互忙碌保护
+    monkeypatch.setattr(bridge, "get_bridge_root", lambda: tmp_path / ".bridge")
+    monkeypatch.setattr(bridge, "focus_qoder_window", lambda: False)
+
     def _boom(query):
         raise RuntimeError("检索崩溃")
 
     monkeypatch.setattr(sp_ops, "_retrieve_package", _boom)
-    sp_ops.prepare_story_plan(project_id=real_project["project_id"], author_question="往前想")
+    prepare_result = sp_ops.prepare_story_plan(project_id=real_project["project_id"], author_question="往前想")
+    request_id = prepare_result["request_id"]
     with pytest.raises(sp_ops.StoryPlanningError) as ei:
-        sp_ops.execute_request_scoped_retrieval("信息层次")
+        sp_ops.execute_request_scoped_retrieval("信息层次", request_id)
     assert "知识检索失败" in str(ei.value)
 
 
@@ -1092,7 +1097,7 @@ def test_agent_task_no_longer_invents_bkp_ids_pre_retrieval(isolated, real_proje
     captured_tasks: list[str] = []
     original_create = bridge.create_request
 
-    def _capture_create(task, kind, meta=None, timeout_seconds=None):
+    def _capture_create(task, kind, meta=None, timeout_seconds=None, **kwargs):
         captured_tasks.append(task)
         return original_create(task, kind, meta=meta, timeout_seconds=timeout_seconds)
 
@@ -1445,7 +1450,12 @@ def test_direct_knowledge_needs_p0_snapshot_workflow(isolated, real_project, fak
     def _agentic_run(request):
         # 模拟直连 Agent：执行内运行 retrieval_snapshot 命令（唯一一次检索）
         # → 从该显示包选择 → 回显 package_ref → 输出 JSON
-        shown = sp_ops.execute_request_scoped_retrieval("信息层次")
+        # request_id 从任务文本中解析（任务模板显式内嵌 --request <id>）
+        import re as _re
+        _m = _re.search(r"--request ([0-9a-f]{32})", request.task)
+        assert _m, "任务文本必须显式绑定 --request"
+        rid = _m.group(1)
+        shown = sp_ops.execute_request_scoped_retrieval("信息层次", rid)
         fingerprint = sp_ops._package_fingerprint(shown)
         output = _agent_json(["信息层次"], ["book_a/K001"], package_ref=fingerprint)
         return AgentResult(status="completed", output=output, agent="fake_direct_agent")

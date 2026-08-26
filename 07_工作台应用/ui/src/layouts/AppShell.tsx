@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { BookOpen, Feather, Folder, Home, Lightbulb, Search, Settings, X } from 'lucide-react'
 import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
+import { TaskStrip } from '../features/tasks/TaskStrip'
 import type { GlobalPage } from '../contracts/ui'
 
 const nav: Array<{ id: GlobalPage; label: string; Icon: typeof Home }> = [
@@ -51,6 +52,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <button className={`settings-link ${active === 'settings' ? 'active' : ''}`} onClick={() => actions.navigate('settings')}><Settings /> <span>设置</span></button>
       </header>
       <main>{children}</main>
+      <TaskStrip />
       {state.toast && <div className="toast" role="status">{state.toast}</div>}
       {state.dialog && <div className="dialog-backdrop" role="presentation" onMouseDown={actions.closeDialog}><section className="dialog panel" role="dialog" aria-modal="true" aria-label={state.dialog.title} onMouseDown={(event) => event.stopPropagation()}><header><h2>{state.dialog.title}</h2><button aria-label="关闭" onClick={actions.closeDialog}><X /></button></header><p style={{ whiteSpace: 'pre-wrap' }}>{state.dialog.content}</p><footer><button className="primary" onClick={actions.closeDialog}>知道了</button></footer></section></div>}
     </div>

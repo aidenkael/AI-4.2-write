@@ -113,11 +113,36 @@ export function WritingPage() {
             <PenLine />
             接下来怎么写
           </button>
-          <button onClick={() => c.setAuthorInput('给我几个接下来可以发展的情节方向')}>
+          <button
+            onClick={() => {
+              // 方案讨论属于规划，不属于正文写作：交给 Development/StoryPlan
+              // 一次性预填（项目绑定、session-only），绝不自动提交，绝不生成正文。
+              if (selected) {
+                actions.setDevelopmentPrefill({
+                  project_id: selected.project_id,
+                  text: '给我几个接下来可以发展的情节方向',
+                })
+                actions.setProjectSection('development')
+              }
+            }}
+          >
             <Bot />
             给我几个方案
           </button>
-          <button onClick={() => actions.setProjectSection('review')}>▣ 检查这段</button>
+          <button
+            onClick={() => {
+              // 章节交接：session-only，Review 消费一次并选中该章节，绝不自动运行
+              if (selected && state.selectedChapterNumber != null) {
+                actions.setReviewChapterHandoff({
+                  project_id: selected.project_id,
+                  chapter_number: state.selectedChapterNumber,
+                })
+              }
+              actions.setProjectSection('review')
+            }}
+          >
+            ▣ 检查这段
+          </button>
         </section>
 
         <section className="panel prose-candidate">

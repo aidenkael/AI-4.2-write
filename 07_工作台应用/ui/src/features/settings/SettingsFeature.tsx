@@ -5,6 +5,7 @@ import { useApp, useIllustration } from '../app/AppStore'
 import { ExecutionAudits } from './components/ExecutionAudits'
 import { ExecutionModules } from './components/ExecutionModules'
 import { VisualSettings } from './components/VisualSettings'
+import { savedExecutionSummary } from './settingsSummary'
 import type { SettingsSection } from './types'
 import { useSettingsController } from './useSettingsController'
 
@@ -14,6 +15,9 @@ const menu = [
   { label: '插图与视觉', Icon: Image }, { label: '高级设置', Icon: SettingsIcon },
   { label: '执行记录', Icon: ScrollText },
 ] as const
+
+// 「重新检测」（环境发现）只出现在环境发现相关的分区；执行记录用「刷新记录」。
+const DISCOVERY_SECTIONS: readonly SettingsSection[] = ['AI 服务 / API', 'Agent', '执行配置']
 
 const authLabels: Record<string, string> = {
   authenticated: '已登录', configured: '已配置', not_authenticated: '未登录',
@@ -37,21 +41,18 @@ export function SettingsFeature() {
   const desk = useIllustration('desk')
 
   const saved = controller.data?.settings
-  const savedAgentName = (id: string | undefined) =>
+  const savedAgentName = (id: string): string =>
     controller.agents.find((a) => a.agent_id === id)?.display_name ?? id
-  const savedModelLabel = saved?.direct_model ?? saved?.direct_custom_model
 
   return <div className="page"><PageHeader title="设置" subtitle="管理应用配置、AI 服务与个性化偏好" art={city}/><div className="settings-layout"><aside className="panel settings-menu">{menu.map(({ label, Icon }) => <button key={label} className={section === label ? 'active' : ''} onClick={() => setSection(label)}><Icon/>{label}</button>)}<div style={{ backgroundImage: `url(${desk})` }}/></aside>
-    <section className="panel settings-content"><div className="section-title"><div><h2>{section}</h2><p>{section === '执行配置' ? '选择真实可用的交互桥或直接执行环境。' : '设置只显示本机实际发现的信息。'}</p></div>{section !== '插图与视觉' ? <button onClick={controller.refresh} disabled={controller.loading}><RefreshCw/>{controller.loading ? '检测中…' : '重新检测'}</button> : null}</div>
+    <section className="panel settings-content"><div className="section-title"><div><h2>{section}</h2><p>{section === '执行配置' ? '选择真实可用的交互桥或直接执行环境。' : '设置只显示本机实际发现的信息。'}</p></div>{DISCOVERY_SECTIONS.includes(section) ? <button onClick={controller.refresh} disabled={controller.loading}><RefreshCw/>{controller.loading ? '检测中…' : '重新检测'}</button> : null}</div>
       {controller.data ? (
         <div className="settings-savedline">
           <span className={`saved-badge ${controller.isSavedConfig ? '' : 'dirty'}`}>
             {controller.isSavedConfig ? '✓ 已保存配置' : '✎ 有未保存更改'}
           </span>
           <span className="saved-config-text">
-            {saved
-              ? `${saved.default_execution_mode === 'direct' ? '直接执行' : '交互桥'} · ${savedAgentName(saved.default_execution_mode === 'direct' ? saved.direct_agent : saved.interactive_agent)}${savedModelLabel ? ` · ${savedModelLabel}` : ''}`
-              : '暂无已保存的执行配置'}
+            {saved ? savedExecutionSummary(saved, savedAgentName) : '暂无已保存的执行配置'}
           </span>
           <span className="muted-note">
             环境检测：{controller.data.discovery?.source === 'fresh' ? '本次会话已检测' : '复用上次检测'}
@@ -74,6 +75,6 @@ export function SettingsFeature() {
         <em>{agent.direct.available ? '可用' : '不可用'}</em></article>)}</div> : null}
       {section === '插图与视觉' ? <VisualSettings/> : null}
       {section === '执行记录' ? <ExecutionAudits/> : null}
-      {(section === '项目与数据' || section === '高级设置') ? <div className="session-config"><SlidersHorizontal size={42}/><h3>{section}</h3><p>这些界面偏好仍保存在当前前端会话，不属于 Agent 执行配置。</p><label><input type="checkbox" checked={state.preferences.autosave} onChange={(event) => actions.setPreference('autosave', event.target.checked)}/> 启用自动保存提示</label><label><input type="checkbox" checked={state.preferences.sound} onChange={(event) => actions.setPreference('sound', event.target.checked)}/> 在执行完成时播放提示音</label><button onClick={() => actions.notify(`${section}界面偏好已更新`)}>保存界面偏好</button></div> : null}
+      {(section === '项目与数据' || section === '高级设置') ? <div className="session-config"><SlidersHorizontal size={42}/><h3>{section}</h3><p>这些界面偏好只保存在当前前端会话，不属于 Agent 执行配置。</p><label><input type="checkbox" checked={state.preferences.sound} onChange={(event) => actions.setPreference('sound', event.target.checked)}/> 在执行完成/失败时播放提示音</label><p className="muted-note">任务完成或失败时显示全局通知；开启提示音后会同时播放一段短提示音（本机音量控制）。</p></div> : null}
     </section></div></div>
 }

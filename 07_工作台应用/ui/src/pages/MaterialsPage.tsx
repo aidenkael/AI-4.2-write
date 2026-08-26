@@ -29,22 +29,19 @@ export function MaterialsPage() {
   const [group, setGroup] = useState<'inbox' | 'all' | 'usable' | 'needs_update'>('inbox')
   const [typeFilter, setTypeFilter] = useState('全部')
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [dragging, setDragging] = useState(false)
 
   const usable = useMemo(() => controller.materials.filter((m) => m.author_group === 'usable'), [controller.materials])
   const needsUpdate = useMemo(
     () => controller.materials.filter((m) => m.author_group === 'needs_update' || m.purification_status === '失败'),
     [controller.materials],
   )
-  const allButUsable = useMemo(
-    () => controller.materials.filter((m) => m.author_group !== 'usable'),
-    [controller.materials],
-  )
+  // 「素材库」= 整个 canonical 素材库（含可用于写作的素材，绝不排除）
+  const all = useMemo(() => controller.materials, [controller.materials])
 
   const shown = useMemo(() => {
-    const base = group === 'usable' ? usable : group === 'needs_update' ? needsUpdate : allButUsable
+    const base = group === 'usable' ? usable : group === 'needs_update' ? needsUpdate : all
     return base.filter((m) => typeFilter === '全部' || (typeLabels[m.type] ?? m.type) === typeFilter)
-  }, [allButUsable, group, needsUpdate, typeFilter, usable])
+  }, [all, group, needsUpdate, typeFilter, usable])
 
   const typeOptions = useMemo(() => {
     const set = new Set(controller.materials.map((m) => typeLabels[m.type] ?? m.type))
@@ -69,7 +66,7 @@ export function MaterialsPage() {
     id === 'inbox' ? controller.inbox.filter((f) => !f.unsupported).length
       : id === 'usable' ? usable.length
         : id === 'needs_update' ? needsUpdate.length
-          : allButUsable.length
+          : all.length
 
   return (
     <div className="page">
@@ -97,20 +94,10 @@ export function MaterialsPage() {
 
       {group === 'inbox' && (
         <section className="panel materials-intake">
-          <div
-            className={`drop-zone ${dragging ? 'dragging' : ''}`}
-            onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={(e) => {
-              e.preventDefault()
-              setDragging(false)
-              // 浏览器拖入不暴露安全本地路径：交给 pywebview 原生文件对话框选择
-              void controller.pickAndImport()
-            }}
-          >
+          <div className="drop-zone">
             <UploadCloud size={34} />
-            <p><strong>拖入 EPUB / PDF / TXT 等素材</strong></p>
-            <p className="muted-note">或点击下方按钮选择本地文件；所有文件先进入待入库（MaterialIntake 收件箱），确认后才会正式入库。</p>
+            <p><strong>选择本地文件（EPUB / PDF / TXT 等）</strong></p>
+            <p className="muted-note">所有文件先进入待入库（MaterialIntake 收件箱），确认后才会正式入库。</p>
             <button className="primary" disabled={controller.importing} onClick={() => void controller.pickAndImport()}>
               {controller.importing ? '导入中…' : '选择文件'}
             </button>

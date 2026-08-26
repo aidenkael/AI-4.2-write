@@ -1010,28 +1010,35 @@ def prepare_story_write(project_id: str, author_input: str) -> dict[str, Any]:
         author_input=author_input, request_id=request_id,
     )
 
-    # 9. 创建桥请求（同一请求生命周期；交互桥带阶段标记与更长超时）
-    bridge.create_request(
-        task=selection_task,
-        kind="story_write_propose",
-        meta={
-            "project_id": project_id,
-            "name": name,
-            "writing_turn_id": writing_turn_id,
-            "author_input": author_input,
-            "intent_rev": intent["intent_rev"],
-            "state_rev": state["state_rev"],
-            "index_fingerprint": index_fingerprint,
-            "execution": {
-                "execution_mode": execution_mode,
-                "agent_id": execution_agent,
-                "model": execution_model,
+    # 9. 创建桥请求（同一请求生命周期；交互桥带阶段标记与更长超时；
+    #    Direct 绝不激活 /gowrite）
+    try:
+        bridge.create_request(
+            task=selection_task,
+            kind="story_write_propose",
+            meta={
+                "project_id": project_id,
+                "name": name,
+                "writing_turn_id": writing_turn_id,
+                "author_input": author_input,
+                "intent_rev": intent["intent_rev"],
+                "state_rev": state["state_rev"],
+                "index_fingerprint": index_fingerprint,
+                "execution": {
+                    "execution_mode": execution_mode,
+                    "agent_id": execution_agent,
+                    "model": execution_model,
+                },
             },
-        },
-        request_id=request_id,
-        phase=PHASE_PENDING_SELECTION if interactive else None,
-        timeout_seconds=_INTERACTIVE_TIMEOUT_SECONDS if interactive else None,
-    )
+            request_id=request_id,
+            phase=PHASE_PENDING_SELECTION if interactive else None,
+            timeout_seconds=_INTERACTIVE_TIMEOUT_SECONDS if interactive else None,
+            activate_for_gowrite=interactive,
+        )
+    except bridge.BridgeBusyError as exc:
+        # 已有等待 /gowrite 的交互任务：绝不清除/覆盖它；回滚本轮临时工作区
+        _cleanup_writing(project_id, writing_turn_id)
+        raise StoryWritingError(str(exc)) from exc
 
     # 10. 验证式审计（operation.started；交互桥只标 waiting，绝不声称 Agent 已启动）
     execution_facts = {
@@ -1195,7 +1202,9 @@ def get_story_write_request(request_id: str) -> dict[str, Any]:
 
     bridge.cleanup_request(request_id)
     _exec_task_manager.remove(request_id)
-    audit.finish_file(request_id, audit.STATUS_COMPLETED)
+    # 候选生成 ≠ 操作完成：记录保持打开（awaiting_confirmation），
+    # 等作者 Confirm（authority.confirmed → completed）或 Discard/Cancel（canceled）。
+    audit.mark_awaiting_confirmation(request_id)
     return {
         "request_id": request_id,
         "status": "completed",
@@ -1377,7 +1386,9 @@ def _get_interactive_story_write_request(
     )
     bridge.cleanup_request(request_id)
     _exec_task_manager.remove(request_id)
-    audit.finish_file(request_id, audit.STATUS_COMPLETED)
+    # 候选生成 ≠ 操作完成：记录保持打开（awaiting_confirmation），
+    # 等作者 Confirm（authority.confirmed → completed）或 Discard/Cancel（canceled）。
+    audit.mark_awaiting_confirmation(request_id)
     return {
         "request_id": request_id,
         "status": "completed",
@@ -1450,6 +1461,8 @@ def cancel_story_write_request(request_id: str) -> dict[str, Any]:
         # 请求文件已不存在（已完成并轮询过 / 已取消过）：按持久化 request_id
         # 清理已完成但未确认的候选工作区（幂等；无匹配时静默）。
         _cleanup_discarded_candidate(request_id)
+        # 审计记录（awaiting_confirmation）收尾为 canceled
+        audit.finish_file(request_id, audit.STATUS_CANCELED)
     _exec_task_manager.remove(request_id)
     return {"request_id": request_id, "status": "canceled"}
 

@@ -147,9 +147,11 @@ def test_interactive_bridge_full_audit_events(isolated, real_project, monkeypatc
     assert "bridge.response_received" in kinds
     assert "skill.started" in kinds and "skill.completed" in kinds
     assert "candidate.created" in kinds
-    assert record["status"] == "completed"
+    # 候选生成 ≠ 操作完成：记录保持打开（awaiting_confirmation，非终态）
+    assert record["status"] == "awaiting_confirmation"
+    assert record["finished_at"] is None
     assert record["execution_mode"] == "interactive_bridge"
-    assert record["duration_ms"] is not None
+    assert record["duration_ms"] is None
     # 无 knowledge_needs → 无任何 retrieval 事件（不伪造）
     assert not any(k.startswith("retrieval.") for k in kinds), "零检索不得伪造 retrieval 事件"
     # 无 secret 字段
@@ -297,7 +299,8 @@ def test_direct_operation_audit_events(isolated, real_project, monkeypatch):
     assert "agent.completed" in kinds
     assert "skill.started" in kinds and "skill.completed" in kinds  # StoryPlan 实际 runtime
     assert "candidate.created" in kinds
-    assert record["status"] == "completed"
+    # 候选生成 ≠ 操作完成：Direct 同样进入 awaiting_confirmation（等作者确认）
+    assert record["status"] == "awaiting_confirmation"
     assert record["execution_mode"] == "direct"
     assert record["agent_id"] == "fake_plan_agent"
     assert record["model"] == "m1"

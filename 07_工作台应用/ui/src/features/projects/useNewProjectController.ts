@@ -1,22 +1,17 @@
 /**
- * 新建作品真实 StoryDesign 消费者控制器。
+ * 新建作品真实 StoryDesign 消费者控制器（App 级协调器消费者）。
+ *
+ * 根不变量：AI 任务属于 Go Write（AuthorTaskCoordinator），不属于页面。
+ * 关闭对话框/离开 Projects 页，任务继续推进、候选保留；返回后自动附着。
  *
  * 关键约束：
- * - 候选是后端返回的单个候选（proposal / work_direction / reader_promise /
- *   hard_constraints / open_space / unknowns），只读，绝不伪造多方向；
+ * - 候选是后端返回的单个候选，只读，绝不伪造多方向；
  * - confirm 只回传 { proposal_token }，不传任何前端构造内容；
- * - 轮询单一循环、无重叠；cancel/discard 走后端生命周期清理，token 失效；
  * - 执行模式由 Settings 决定（Direct 后台执行 / Interactive /gowrite），UI 不分支。
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
-import {
-  cancelNewProjectRequest,
-  confirmNewProject,
-  getNewProjectRequest,
-  prepareNewProject,
-  type ConfirmResult,
-  type StoryCandidate,
-} from '../../bridge/client'
+import { useCallback, useRef, useState } from 'react'
+import { useAuthorTask } from '../tasks/AuthorTaskCoordinator'
+import type { ConfirmResult, StoryCandidate } from '../../bridge/client'
 
 export type NewProjectStatus =
   | 'idle'
@@ -53,187 +48,137 @@ export interface NewProjectController {
   reset(): void
 }
 
-const POLL_INTERVAL_MS = 700
-
 const toMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
+function taskView(
+  task: ReturnType<typeof useAuthorTask>['task'],
+): Pick<NewProjectControllerState, 'requestId' | 'proposalToken' | 'candidate' | 'backendMessage' | 'status' | 'error' | 'execution'> | null {
+  if (!task || task.kind !== 'new_project') return null
+  const base = {
+    requestId: task.requestId || null,
+    proposalToken: null as string | null,
+    candidate: null as StoryCandidate | null,
+    backendMessage: task.message,
+    error: task.error,
+    execution: task.execution
+      ? {
+          execution_mode: task.execution.execution_mode ?? undefined,
+          agent_id: task.execution.agent_id ?? null,
+          model: task.execution.model ?? null,
+        }
+      : null,
+  }
+  switch (task.status) {
+    case 'running':
+    case 'waiting_author':
+      return { ...base, status: 'running' }
+    case 'candidate': {
+      const result = task.result as { proposal_token?: string; candidate?: StoryCandidate; message?: string } | null
+      return {
+        ...base,
+        status: 'waiting_confirmation',
+        proposalToken: result?.proposal_token ?? null,
+        candidate: result?.candidate ?? null,
+        backendMessage: result?.message ?? task.message,
+      }
+    }
+    case 'confirming':
+      return { ...base, status: 'confirming' }
+    case 'failed':
+      return { ...base, status: 'failed' }
+    default:
+      return null
+  }
+}
 
 export function useNewProjectController(options: { notify?: (message: string) => void }): NewProjectController {
   const { notify } = options
-  const [state, setState] = useState<NewProjectControllerState>({
-    name: '',
-    idea: '',
-    requestId: null,
-    proposalToken: null,
-    candidate: null,
-    backendMessage: null,
-    status: 'idle',
-    error: null,
-    confirmed: null,
-    execution: null,
-  })
-  const stateRef = useRef(state)
-  stateRef.current = state
+  const { task, start, cancel: cancelTask, confirm: confirmTask } = useAuthorTask()
+  const [name, setNameState] = useState('')
+  const [idea, setIdeaState] = useState('')
+  const [confirmed, setConfirmed] = useState<ConfirmResult | null>(null)
+  const [localError, setLocalError] = useState<string | null>(null)
 
-  const activeRequestRef = useRef<string | null>(null)
-  const pollSessionRef = useRef(0)
-  const pollTimerRef = useRef<number | null>(null)
+  const nameRef = useRef(name)
+  nameRef.current = name
+  const ideaRef = useRef(idea)
+  ideaRef.current = idea
 
-  const set = useCallback((patch: Partial<NewProjectControllerState>) => {
-    setState((current) => ({ ...current, ...patch }))
+  const view = taskView(task)
+  const candidate = view?.candidate ?? null
+
+  const state: NewProjectControllerState = {
+    name,
+    idea,
+    requestId: view?.requestId ?? null,
+    proposalToken: view?.proposalToken ?? null,
+    candidate,
+    backendMessage: view?.backendMessage ?? null,
+    status: view?.status ?? (confirmed ? 'accepted' : 'idle'),
+    error: view?.error ?? localError,
+    confirmed,
+    execution: view?.execution ?? null,
+  }
+
+  const setName = useCallback((input: string) => {
+    setNameState(input)
+    setLocalError(null)
   }, [])
 
-  const stopPolling = useCallback(() => {
-    pollSessionRef.current += 1
-    if (pollTimerRef.current !== null) {
-      window.clearTimeout(pollTimerRef.current)
-      pollTimerRef.current = null
-    }
+  const setIdea = useCallback((input: string) => {
+    setIdeaState(input)
+    setLocalError(null)
   }, [])
-
-  // 卸载时停止轮询并尽力清理在途请求
-  useEffect(() => {
-    return () => {
-      stopPolling()
-      const rid = activeRequestRef.current
-      if (rid) void cancelNewProjectRequest(rid).catch(() => {})
-    }
-  }, [stopPolling])
-
-  const startPolling = useCallback(
-    (requestId: string) => {
-      stopPolling()
-      const session = pollSessionRef.current + 1
-      pollSessionRef.current = session
-      const tick = async () => {
-        if (pollSessionRef.current !== session) return
-        try {
-          const res = await getNewProjectRequest(requestId)
-          if (pollSessionRef.current !== session) return
-          if (res.status === 'pending') {
-            pollTimerRef.current = window.setTimeout(tick, POLL_INTERVAL_MS)
-            return
-          }
-          stopPolling()
-          if (res.status === 'completed') {
-            if (!res.result) {
-              set({ error: '候选数据无效，请重新生成。', status: 'failed' })
-              return
-            }
-            const exec = res.result.execution
-            set({
-              candidate: res.result.candidate,
-              proposalToken: res.result.proposal_token,
-              backendMessage: res.result.message,
-              status: 'waiting_confirmation',
-              execution: {
-                execution_mode: typeof exec?.execution_mode === 'string' ? exec.execution_mode : undefined,
-                agent_id: typeof exec?.agent_id === 'string' ? exec.agent_id : null,
-                model: typeof exec?.model === 'string' ? exec.model : null,
-              },
-            })
-          } else if (res.status === 'canceled') {
-            activeRequestRef.current = null
-            set({ requestId: null, proposalToken: null, candidate: null, backendMessage: null, status: 'idle', error: null, execution: null })
-          } else {
-            activeRequestRef.current = null
-            set({ error: res.error || '任务失败，请重新发起。', status: 'failed' })
-          }
-        } catch (e) {
-          if (pollSessionRef.current !== session) return
-          stopPolling()
-          activeRequestRef.current = null
-          set({ error: toMessage(e), status: 'failed' })
-        }
-      }
-      pollTimerRef.current = window.setTimeout(tick, 0)
-    },
-    [set, stopPolling],
-  )
-
-  const setName = useCallback((input: string) => set({ name: input, error: null }), [set])
-  const setIdea = useCallback((input: string) => set({ idea: input, error: null }), [set])
 
   const generate = useCallback(async () => {
-    const name = stateRef.current.name.trim()
-    const idea = stateRef.current.idea.trim()
-    if (!name) { set({ error: '请填写作品名。', status: 'failed' }); return }
-    if (!idea) { set({ error: '请写下你的想法。', status: 'failed' }); return }
-    if (activeRequestRef.current) { set({ error: '已有进行中的任务，请先完成或取消。', status: 'failed' }); return }
-    set({ error: null, status: 'running' })
-    try {
-      const prepared = await prepareNewProject({ name, idea })
-      activeRequestRef.current = prepared.request_id
-      set({
-        requestId: prepared.request_id,
-        backendMessage: prepared.message,
-        execution: {
-          execution_mode: prepared.execution_mode,
-          agent_id: prepared.agent_id ?? null,
-          model: prepared.model ?? null,
-        },
-      })
-      startPolling(prepared.request_id)
-    } catch (e) {
-      activeRequestRef.current = null
-      set({ error: toMessage(e), status: 'failed' })
-    }
-  }, [set, startPolling])
+    const n = nameRef.current.trim()
+    const i = ideaRef.current.trim()
+    if (!n) { setLocalError('请填写作品名。'); return }
+    if (!i) { setLocalError('请写下你的想法。'); return }
+    setConfirmed(null)
+    const busy = await start({ kind: 'new_project', name: n, idea: i })
+    if (busy) setLocalError(busy)
+  }, [start])
 
   const cancel = useCallback(async () => {
-    const requestId = activeRequestRef.current
-    stopPolling()
-    activeRequestRef.current = null
-    if (requestId) {
-      try { await cancelNewProjectRequest(requestId) } catch { /* 幂等 */ }
-    }
-    set({ requestId: null, proposalToken: null, candidate: null, backendMessage: null, status: 'idle', error: null, execution: null })
-  }, [set, stopPolling])
+    setLocalError(null)
+    await cancelTask()
+  }, [cancelTask])
 
   const discard = useCallback(async () => {
-    const requestId = activeRequestRef.current
-    stopPolling()
-    activeRequestRef.current = null
-    if (requestId) {
-      try { await cancelNewProjectRequest(requestId) } catch { /* 幂等 */ }
-    }
-    set({ requestId: null, proposalToken: null, candidate: null, backendMessage: null, status: 'idle', error: null, execution: null })
-  }, [set, stopPolling])
+    setLocalError(null)
+    await cancelTask()
+  }, [cancelTask])
 
   const regenerate = useCallback(async () => {
-    const requestId = activeRequestRef.current
-    stopPolling()
-    activeRequestRef.current = null
-    if (requestId) {
-      try { await cancelNewProjectRequest(requestId) } catch { /* 幂等 */ }
-    }
-    set({ requestId: null, proposalToken: null, candidate: null, backendMessage: null, error: null, execution: null })
+    setLocalError(null)
+    await cancelTask()
     await generate()
-  }, [generate, set, stopPolling])
+  }, [cancelTask, generate])
 
   const confirm = useCallback(async (): Promise<ConfirmResult | null> => {
-    const token = stateRef.current.proposalToken
-    if (!token) { set({ error: '缺少确认信息，请重新生成。', status: 'failed' }); return null }
-    set({ status: 'confirming', error: null })
     try {
-      const confirmed = await confirmNewProject({ proposal_token: token })
-      activeRequestRef.current = null
-      set({ requestId: null, proposalToken: null, candidate: null, backendMessage: null, confirmed, status: 'accepted' })
-      notify?.(confirmed.message || '作品已创建')
-      return confirmed
+      const result = await confirmTask('new_project')
+      if (!result) {
+        setLocalError(task?.error ?? '确认失败，请重试。')
+        return null
+      }
+      const confirmedResult = result as ConfirmResult
+      setConfirmed(confirmedResult)
+      notify?.(confirmedResult.message || '作品已创建')
+      return confirmedResult
     } catch (e) {
-      set({ error: toMessage(e), status: 'waiting_confirmation' })
+      setLocalError(toMessage(e))
       return null
     }
-  }, [notify, set])
+  }, [confirmTask, notify, task?.error])
 
   const reset = useCallback(() => {
-    stopPolling()
-    activeRequestRef.current = null
-    set({
-      name: '', idea: '', requestId: null, proposalToken: null, candidate: null,
-      backendMessage: null, status: 'idle', error: null, confirmed: null, execution: null,
-    })
-  }, [set, stopPolling])
+    setNameState('')
+    setIdeaState('')
+    setConfirmed(null)
+    setLocalError(null)
+  }, [])
 
   return { state, setName, setIdea, generate, cancel, discard, regenerate, confirm, reset }
 }

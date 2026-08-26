@@ -75,6 +75,7 @@
 .status-pill.failed{color:#c22;background:#fdecec}
 .status-pill.canceled{color:#8a6d00;background:#fff8e8}
 .status-pill.running{color:#1d4ed8;background:#e8f0ff}
+.status-pill.awaiting_confirmation{color:#7a4d00;background:#fff4e0}
 .audit-detail{display:grid;gap:10px;padding:16px;border:1px solid var(--line);border-radius:12px;background:#fafcff}
 .audit-detail h3{margin:0}
 .retrieval-summary{display:grid;gap:2px;font-size:13px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#fff}
@@ -85,7 +86,18 @@
 .event-kind.verified{color:#1d4ed8}
 .audit-details{font-size:11px;color:var(--muted);word-break:break-all}
 
-/* 素材工作流：导入 / 分类 / 提纯 / 蒸馏 */
+/* ============ 全局运行任务条（App 级协调器 HCI） ============ */
+.task-strip{position:sticky;top:82px;z-index:45;display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 36px;background:linear-gradient(90deg,#eef4ff,#f7fbff);border-bottom:1px solid var(--line);font-size:13px}
+.task-strip-label{display:inline-flex;align-items:center;gap:8px;min-width:0}
+.task-strip-label strong{color:var(--text)}
+.task-strip-label em{font-style:normal;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px}
+.task-strip-state{flex:1;min-width:160px;color:#425170}
+.task-strip-actions{display:inline-flex;gap:8px;align-items:center}
+.task-strip-actions .secondary{border:1px solid var(--line);border-radius:8px;background:#fff;padding:6px 12px;font-size:12px;color:var(--text)}
+.task-strip-actions button{padding:6px 12px;font-size:12px}
+@media(max-width:820px){.task-strip{top:0;padding:8px 12px}.task-strip-state{flex-basis:100%;order:3}}
+
+/* ============ 素材工作流：导入 / 分类 / 提纯 / 蒸馏 ============ */
 .materials-intake{display:grid;gap:14px;margin-top:14px}
 .drop-zone{display:flex;flex-direction:column;align-items:center;gap:8px;padding:34px 18px;border:2px dashed var(--line);border-radius:14px;background:#fafcff;text-align:center}
 .drop-zone.dragging{border-color:var(--blue);background:#eef5ff}

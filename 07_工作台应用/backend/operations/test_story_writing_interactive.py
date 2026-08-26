@@ -423,3 +423,108 @@ def test_confirm_cross_project_rejected(isolated, real_project, fake_bridge, mon
     result = _complete_two_phase(real_project, monkeypatch)
     with pytest.raises(sw_ops.StoryWritingError, match="不属于当前作品"):
         sw_ops.confirm_story_write(project_id=created["project_id"], writing_token=result["writing_token"])
+
+
+# ---------------------------------------------------------------------------
+# K. 两阶段 active 指针保持（/gowrite 激活与请求存储分离后的关键不变量）
+# ---------------------------------------------------------------------------
+
+def test_two_phase_keeps_same_active_request(isolated, real_project, fake_bridge, monkeypatch):
+    """交互桥两阶段：active.json 全程指向同一请求，绝不因阶段切换改变/丢失。"""
+    prepared = _interactive_prepare(real_project, monkeypatch)
+    rid = prepared["request_id"]
+    assert bridge.get_active_request_id() == rid, "prepare 后 active 精确指向该请求"
+
+    _write_qoder_response(rid, _selection_json())
+    got = sw_ops.get_story_write_request(rid)
+    assert got["status"] == "pending" and got["phase"] == "pending_prose"
+    assert bridge.get_active_request_id() == rid, "Stage 1 → Stage 2 必须保持同一 active 请求"
+
+    _write_qoder_response(rid, _prose_output(rid))
+    got = sw_ops.get_story_write_request(rid)
+    assert got["status"] == "completed", got.get("error")
+    # 候选完成 = 请求终态清理：active 指针不再指向已完成任务
+    assert bridge.get_active_request_id() is None
+
+
+def test_second_interactive_write_busy_until_cancel(isolated, real_project, fake_bridge, monkeypatch):
+    """第二个 Interactive StoryWrite 在第一个 pending 时被拒绝（绝不覆盖 active）。"""
+    prepared = _interactive_prepare(real_project, monkeypatch)
+    rid = prepared["request_id"]
+    with pytest.raises(sw_ops.StoryWritingError) as ei:
+        _interactive_prepare(real_project, monkeypatch)
+    assert "Qoder /gowrite" in str(ei.value)
+    assert bridge.get_active_request_id() == rid
+
+    # 取消第一个后，新一轮 Interactive 可以正常开始
+    sw_ops.cancel_story_write_request(rid)
+    assert bridge.get_active_request_id() is None
+    prepared2 = _interactive_prepare(real_project, monkeypatch)
+    assert prepared2["request_id"] != rid
+    assert bridge.get_active_request_id() == prepared2["request_id"]
+
+
+# ---------------------------------------------------------------------------
+# L. 审计生命周期：candidate → awaiting_confirmation → authority.confirmed
+# ---------------------------------------------------------------------------
+
+def _isolated_audit(tmp_path, monkeypatch):
+    from operations import execution_audit as audit
+    monkeypatch.setattr(audit, "get_audit_root", lambda: tmp_path / "audit")
+    return audit
+
+
+def test_audit_awaiting_confirmation_then_authority_confirmed(isolated, real_project, fake_bridge, monkeypatch, tmp_path):
+    """候选生成 → 审计 awaiting_confirmation（非终态）→ Confirm →
+    authority.confirmed 物理存在于最终审计 JSON + completed。"""
+    audit = _isolated_audit(tmp_path, monkeypatch)
+
+    prepared = _interactive_prepare(real_project, monkeypatch)
+    rid = prepared["request_id"]
+    _write_qoder_response(rid, _selection_json())
+    got = sw_ops.get_story_write_request(rid)
+    assert got["status"] == "pending" and got["phase"] == "pending_prose"
+    _write_qoder_response(rid, _prose_output(rid))
+    got = sw_ops.get_story_write_request(rid)
+    assert got["status"] == "completed", got.get("error")
+
+    # 候选生成后：记录保持打开（awaiting_confirmation，非终态）
+    record = audit.get_execution_audit(rid)
+    assert record["status"] == "awaiting_confirmation"
+    assert record["finished_at"] is None
+    kinds = [e["kind"] for e in record["events"]]
+    assert "candidate.created" in kinds
+    assert "authority.confirmed" not in kinds
+
+    # 作者明确确认 → authority.confirmed 物理存在 + completed
+    confirmed = sw_ops.confirm_story_write(
+        project_id=real_project["project_id"], writing_token=got["result"]["writing_token"],
+    )
+    assert confirmed["message"] == "这段已经保留下来了。"
+
+    final = audit.get_execution_audit(rid)
+    assert final["status"] == "completed"
+    assert final["finished_at"] is not None
+    final_kinds = [e["kind"] for e in final["events"]]
+    assert "authority.confirmed" in final_kinds, "authority.confirmed 必须出现在最终审计事件中"
+    raw = json.dumps(final, ensure_ascii=False)
+    assert '"authority.confirmed"' in raw, "authority.confirmed 必须物理存在于最终审计 JSON"
+
+
+def test_audit_discard_after_candidate_cancels(isolated, real_project, fake_bridge, monkeypatch, tmp_path):
+    """候选生成后 Discard/Cancel：审计收尾为 canceled（不再停留在 awaiting）。"""
+    audit = _isolated_audit(tmp_path, monkeypatch)
+
+    prepared = _interactive_prepare(real_project, monkeypatch)
+    rid = prepared["request_id"]
+    _write_qoder_response(rid, _selection_json())
+    sw_ops.get_story_write_request(rid)
+    _write_qoder_response(rid, _prose_output(rid))
+    got = sw_ops.get_story_write_request(rid)
+    assert got["status"] == "completed", got.get("error")
+    assert audit.get_execution_audit(rid)["status"] == "awaiting_confirmation"
+
+    sw_ops.cancel_story_write_request(rid)
+    final = audit.get_execution_audit(rid)
+    assert final["status"] == "canceled"
+    assert final["finished_at"] is not None

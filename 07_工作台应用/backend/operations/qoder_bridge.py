@@ -12,9 +12,16 @@
 / StoryWrite 业务规则（真正的业务要求由 pending task 提供）。
 
 文件布局（全部在 06_工作区/应用开发/.qoder_bridge/，Local Only，可删除）：
-- active.json                    当前活跃请求指针（Qoder 从这里找任务）
+- active.json                    当前活跃 /gowrite 请求指针（Qoder 从这里找任务）
 - requests/<request_id>.json     待执行任务（Go Write 写，Qoder 读）
 - responses/<request_id>.json    执行结果（Qoder 写，Go Write 读）
+
+请求存储与 /gowrite 激活分离：
+- 任何请求（Interactive / Direct）都写入 requests/<request_id>.json；
+- 只有 Interactive 请求通过 ``activate_for_gowrite=True`` 显式激活
+  active.json；Direct 请求绝不进入 active.json；
+- 同一时刻至多一个活跃 /gowrite 请求；第二个 Interactive 请求触发
+  ``BridgeBusyError``，绝不静默覆盖。
 
 安全：
 - request_id 是防串任务的唯一键；response 必须携带相同 request_id。
@@ -95,13 +102,22 @@ def create_request(
     timeout_seconds: Optional[int] = None,
     request_id: Optional[str] = None,
     phase: Optional[str] = None,
+    activate_for_gowrite: bool = False,
 ) -> str:
-    """生成唯一 request_id，保存完整 Agent task，并成为当前活跃请求。
+    """生成唯一 request_id 并保存完整 Agent task。
 
     返回 request_id。request 文件包含 response_path，Qoder 只按此路径写回。
     ``request_id`` 可选：调用方预生成时（如任务文本需要内嵌 request_id）
     可显式传入；缺省自动生成。``phase`` 可选：两阶段交互桥的阶段标记
     （缺省不写入；其它操作不受影响）。
+
+    存储与激活分离（Go Write 生命周期根不变量）：
+    - 创建请求文件 != 把请求暴露给 Qoder /gowrite；
+    - ``activate_for_gowrite=False``（缺省，Direct 一律如此）：只写请求文件，
+      绝不触碰 active.json；
+    - ``activate_for_gowrite=True``（仅 Interactive）：显式把本请求设为
+      /gowrite 活跃任务；若已存在其它活跃 /gowrite 请求则删除刚创建的
+      请求文件并抛 ``BridgeBusyError``（绝不静默覆盖 active.json）。
     """
     request_id = request_id or uuid.uuid4().hex
     timeout = timeout_seconds or DEFAULT_TASK_TIMEOUT_SECONDS
@@ -128,12 +144,44 @@ def create_request(
     (requests_dir / f"{request_id}.json").write_text(
         json.dumps(request, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    # 更新活跃请求指针（Qoder /gowrite 从这里找任务；最新请求优先）
+    if activate_for_gowrite and not activate_request(request_id):
+        # 交互忙碌：绝不静默覆盖 active.json；回滚刚创建的请求文件
+        try:
+            (requests_dir / f"{request_id}.json").unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise BridgeBusyError()
+    return request_id
+
+
+class BridgeBusyError(Exception):
+    """已有活跃的 /gowrite 请求（交互桥忙碌），禁止覆盖。"""
+
+    def __init__(self) -> None:
+        super().__init__("已有等待 Qoder /gowrite 的任务，请先完成或取消。")
+
+
+def activate_request(request_id: str) -> bool:
+    """显式把请求设为 Qoder /gowrite 活跃任务（仅 Interactive 使用）。
+
+    规则：
+    - active.json 已指向同一请求 → 幂等成功（两阶段 StoryWrite 原地更新任务
+      时 active 指针保持不变）；
+    - active.json 已指向其它请求 → 返回 False（第二个 Interactive 请求
+      绝不能覆盖第一个）；
+    - 请求不存在或已终态 → 返回 False。
+    """
+    current = get_active_request_id()
+    if current is not None and current != request_id:
+        return False
+    req = get_request(request_id)
+    if req is None or req.get("state") != "pending":
+        return False
     _active_path().write_text(
         json.dumps({"active_request_id": request_id}, ensure_ascii=False),
         encoding="utf-8",
     )
-    return request_id
+    return True
 
 
 def get_active_request_id() -> Optional[str]:

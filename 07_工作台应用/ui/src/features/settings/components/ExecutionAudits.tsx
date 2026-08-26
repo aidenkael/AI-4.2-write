@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { RefreshCw } from 'lucide-react'
 import {
   clearExecutionAudits,
   getExecutionAudit,
@@ -7,6 +8,7 @@ import {
   type ExecutionAuditRecord,
   type ExecutionAuditSummary,
 } from '../../../bridge/client'
+import { auditEventKey } from '../../tasks/taskModel'
 
 const toMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
@@ -18,7 +20,7 @@ const operationLabels: Record<string, string> = {
 }
 
 const statusLabels: Record<string, string> = {
-  running: '进行中', completed: '已完成', failed: '失败', canceled: '已取消',
+  running: '进行中', awaiting_confirmation: '等待确认', completed: '已完成', failed: '失败', canceled: '已取消',
 }
 
 const eventKindLabels: Record<string, string> = {
@@ -40,6 +42,9 @@ const eventKindLabels: Record<string, string> = {
   'candidate.created': '候选生成',
   'authority.confirmed': '作者确认',
 }
+
+const LIVE_STATUSES = new Set(['running', 'awaiting_confirmation'])
+const AUTO_REFRESH_INTERVAL_MS = 4000
 
 const formatTime = (iso: string | null | undefined) => {
   if (!iso) return ''
@@ -89,6 +94,7 @@ function retrievalRefs(events: ExecutionAuditEvent[], kind: 'retrieval.package_b
 export function ExecutionAudits() {
   const [records, setRecords] = useState<ExecutionAuditSummary[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [operationFilter, setOperationFilter] = useState('全部')
   const [statusFilter, setStatusFilter] = useState('全部')
@@ -96,24 +102,52 @@ export function ExecutionAudits() {
   const [detail, setDetail] = useState<ExecutionAuditRecord | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [clearing, setClearing] = useState(false)
+  const autoTimerRef = useRef<number | null>(null)
 
-  const reload = useCallback(async () => {
-    setLoading(true)
+  const reload = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
+    else setRefreshing(true)
     setError(null)
     try {
-      setRecords(await listExecutionAudits({
+      const next = await listExecutionAudits({
         limit: 50,
         operation: operationFilter === '全部' ? undefined : operationFilter,
         status: statusFilter === '全部' ? undefined : statusFilter,
-      }))
+      })
+      setRecords(next)
+      // 明细若正打开：跟随刷新（不自动关闭）
+      if (openId) {
+        const detailResult = await getExecutionAudit(openId)
+        setDetail(detailResult.record)
+      }
     } catch (e) {
       setError(toMessage(e))
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
-  }, [operationFilter, statusFilter])
+  }, [operationFilter, statusFilter, openId])
 
   useEffect(() => { void reload() }, [reload])
+
+  // 有 running / awaiting_confirmation 记录时适度自动刷新；没有则停止
+  useEffect(() => {
+    const hasLive = records.some((r) => LIVE_STATUSES.has(r.status ?? ''))
+    if (autoTimerRef.current !== null) {
+      window.clearTimeout(autoTimerRef.current)
+      autoTimerRef.current = null
+    }
+    if (!hasLive) return
+    autoTimerRef.current = window.setTimeout(() => {
+      void reload(true)
+    }, AUTO_REFRESH_INTERVAL_MS)
+    return () => {
+      if (autoTimerRef.current !== null) {
+        window.clearTimeout(autoTimerRef.current)
+        autoTimerRef.current = null
+      }
+    }
+  }, [records, reload])
 
   const open = useCallback(async (requestId: string) => {
     setOpenId(requestId)
@@ -128,6 +162,16 @@ export function ExecutionAudits() {
       setDetailLoading(false)
     }
   }, [])
+
+  const toggleRow = useCallback((requestId: string) => {
+    if (openId === requestId) {
+      // 真实收起：关闭明细，绝不重新拉取/打开
+      setOpenId(null)
+      setDetail(null)
+      return
+    }
+    void open(requestId)
+  }, [open, openId])
 
   const clear = useCallback(async () => {
     setClearing(true)
@@ -163,6 +207,9 @@ export function ExecutionAudits() {
             {statuses.map((st) => <option key={st} value={st}>{statusLabels[st] ?? st}</option>)}
           </select>
         </label>
+        <button className="secondary" disabled={refreshing || loading} onClick={() => void reload(true)}>
+          <RefreshCw /> {refreshing ? '刷新中…' : '刷新记录'}
+        </button>
         <button className="secondary" disabled={clearing} onClick={() => void clear()}>
           {clearing ? '清理中…' : '清理记录'}
         </button>
@@ -195,7 +242,7 @@ export function ExecutionAudits() {
                 <td><span className={`status-pill ${record.status ?? ''}`}>{statusLabels[record.status ?? ''] ?? record.status}</span></td>
                 <td>{record.duration_ms != null ? `${(record.duration_ms / 1000).toFixed(1)}s` : '—'}</td>
                 <td>
-                  <button onClick={() => void open(record.request_id ?? '')}>
+                  <button onClick={() => toggleRow(record.request_id ?? '')}>
                     {openId === record.request_id ? '收起' : '展开'}
                   </button>
                 </td>
@@ -242,7 +289,7 @@ export function ExecutionAudits() {
               })()}
               <ol className="audit-timeline">
                 {detail.events.map((event) => (
-                  <li key={event.seq}>
+                  <li key={auditEventKey(event)}>
                     <span className={`event-kind ${event.verified ? 'verified' : ''}`}>
                       {eventKindLabels[event.kind] ?? event.kind}
                     </span>

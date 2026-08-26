@@ -5,12 +5,15 @@ import { defaultIllustrations } from '../../assets/illustrations'
 /**
  * 收缩后的 AppStore：只保留 UI / 会话关注点。
  *
- * - 导航（page / projectSection）
+ * - 导航（page / projectSection；正式项目选择由 FormalProjectShell 持有，
+ *   全局导航绝不清除它）
  * - toast / dialog（临时提示）
  * - 全局搜索（客户端过滤已加载正式实体的输入，见 AppShell）
- * - UI 偏好（会话级，非 Agent 执行配置）
+ * - UI 偏好（会话级，非 Agent 执行配置；sound = 任务完成提示音，真实生效）
  * - 装饰性插图（不含任何假故事事实）
- * - 一次性 Development 预填（"帮我发展"项目内交接：session-only，消费即清，绝不持久化为 Canon，绝不是事件总线）
+ * - 一次性 Development 预填（"帮我发展"项目内交接：session-only，消费即清，
+ *   绝不持久化为 Canon，绝不是事件总线）
+ * - 一次性 Review 章节交接（"检查这段"：session-only，消费即清，绝不自动运行）
  *
  * 明确移除：mock 项目 / 章节 / 素材 / 灵感 / 检查 / 资料数据与对应 service 方法。
  * 正式项目身份一律由 FormalProjectShell（后端 project_id）提供。
@@ -19,6 +22,11 @@ import { defaultIllustrations } from '../../assets/illustrations'
 interface DevelopmentPrefill {
   project_id: string
   text: string
+}
+
+interface ReviewChapterHandoff {
+  project_id: string
+  chapter_number: number
 }
 
 interface AppState {
@@ -30,6 +38,7 @@ interface AppState {
   dialog: { title: string; content: string } | null
   preferences: Record<string, boolean>
   developmentPrefill: DevelopmentPrefill | null
+  reviewChapterHandoff: ReviewChapterHandoff | null
 }
 
 interface Actions {
@@ -44,6 +53,8 @@ interface Actions {
   resetIllustration(key: IllustrationKey): void
   setDevelopmentPrefill(prefill: DevelopmentPrefill): void
   consumeDevelopmentPrefill(): DevelopmentPrefill | null
+  setReviewChapterHandoff(handoff: ReviewChapterHandoff): void
+  consumeReviewChapterHandoff(): ReviewChapterHandoff | null
 }
 
 const initial: AppState = {
@@ -53,8 +64,9 @@ const initial: AppState = {
   search: '',
   toast: null,
   dialog: null,
-  preferences: { autosave: true, sound: false, compactMap: false },
+  preferences: { sound: false },
   developmentPrefill: null,
+  reviewChapterHandoff: null,
 }
 
 const Context = createContext<{ state: AppState; actions: Actions } | null>(null)
@@ -77,7 +89,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (value) setState((current) => ({ ...current, developmentPrefill: null }))
       return value
     },
-  }), [state.developmentPrefill])
+    setReviewChapterHandoff(reviewChapterHandoff) { setState((current) => ({ ...current, reviewChapterHandoff })) },
+    consumeReviewChapterHandoff() {
+      const value = state.reviewChapterHandoff
+      if (value) setState((current) => ({ ...current, reviewChapterHandoff: null }))
+      return value
+    },
+  }), [state.developmentPrefill, state.reviewChapterHandoff])
   return <Context.Provider value={{ state, actions }}>{children}</Context.Provider>
 }
 

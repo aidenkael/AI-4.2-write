@@ -6,7 +6,10 @@
  * - 持有 selectedProjectId（正式 project_id），暴露 { project_id, name }；
  * - 打开项目先经 `openProject({project_id})` 后端校验，成功后才提交选择（失败不改选择）；
  * - 暴露 loading / error / reload；
- * - 返回全局 Projects 时清除选择（绝不替换为 Mock id）。
+ * - 显式 clearSelection() 仅供明确的"关闭/切换项目"动作使用。
+ *
+ * 选择是工作台上下文，不是页面挂载状态：全局导航（Settings / Materials /
+ * Ideas / Home）绝不自动清除正式项目选择；打开另一部正式作品显式替换选择。
  *
  * 明确不引入：通用实体 store / Redux / URL 路由迁移 / 持久化 / 全局工作流引擎。
  * Mock AppStore 身份与本外壳严格分离：本任务内的生产页面（Projects /

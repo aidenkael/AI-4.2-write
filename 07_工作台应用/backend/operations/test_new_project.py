@@ -104,19 +104,25 @@ def test_prepare_does_not_create_project(isolated):
     assert children == [], f"prepare 不应创建作品，实际：{children}"
 
 
-# ---------- 2. 唯一 pending request：完整 task + response_path + active 指针 ----------
+# ---------- 2. 唯一 pending request：完整 task + response_path + 精确激活 ----------
 
 def test_prepare_creates_unique_request(isolated):
     a = np_ops.prepare_new_project(name="请求A", idea="想法A")
-    b = np_ops.prepare_new_project(name="请求B", idea="想法B")
-    assert a["request_id"] != b["request_id"], "每次准备必须是唯一 request_id"
+    assert a["request_id"], "每次准备必须是唯一 request_id"
 
     req_a = bridge.get_request(a["request_id"])
     assert req_a["state"] == "pending"
     assert "想法A" in req_a["task"] and "请求A" in req_a["task"], "完整 Agent task 必须保存在请求中"
     resp_parts = Path(req_a["response_path"]).parts
     assert "responses" in resp_parts and resp_parts[-1] == f"{a['request_id']}.json"
-    assert bridge.get_active_request_id() == b["request_id"], "active 指向最新请求"
+    # Interactive 显式激活：active.json 精确指向该请求
+    assert bridge.get_active_request_id() == a["request_id"], "active 精确指向当前请求"
+
+    # 第二个 Interactive 请求不能覆盖第一个：稳定忙碌错误，绝不静默覆盖
+    with pytest.raises(np_ops.NewProjectError) as ei:
+        np_ops.prepare_new_project(name="请求B", idea="想法B")
+    assert "Qoder /gowrite" in str(ei.value)
+    assert bridge.get_active_request_id() == a["request_id"], "active 仍指向第一个请求"
 
     # response 目录尚无任何文件（pending）
     assert not bridge.response_path(a["request_id"]).exists()
@@ -476,9 +482,12 @@ def test_frozen_skills_untouched(isolated):
 # ---------- 11. 旧 response 不会串到新请求 ----------
 
 def test_old_response_not_leaked_to_new_request(isolated):
-    # 请求 A：写回完成（未消费）；再建请求 B —— B 必须保持 pending，绝不能读到 A 的结果
+    # 请求 A：写回完成（未消费）→ 显式取消清理；再建请求 B —— B 必须保持
+    # pending，绝不能读到 A 的结果（response 按 request_id 隔离；交互忙碌
+    # 保护下 B 只能在新一轮生命周期创建）
     a = np_ops.prepare_new_project(name="旧请求", idea="旧想法")
     bridge.write_response(a["request_id"], result=VALID_AGENT_RESULT)
+    np_ops.cancel_new_project_request(a["request_id"])
 
     b = np_ops.prepare_new_project(name="新请求", idea="新想法")
     status_b = np_ops.get_new_project_request(b["request_id"])

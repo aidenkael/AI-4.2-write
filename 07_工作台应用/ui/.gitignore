@@ -1,0 +1,2 @@
+# UI 本地产物（根 .gitignore 已覆盖 node_modules/ 与 dist/；此处补齐测试编译产物）
+.test-build/

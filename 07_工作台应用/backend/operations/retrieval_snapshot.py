@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """请求级检索快照 CLI：/gowrite 或 Direct 执行内"唯一一次确定性检索调用"的薄入口。
 
-Agent 在执行内运行（按任务 kind 二选一）：
+Agent 在执行内运行（全部任务模板显式内嵌 --request <request_id>）：
 
-    StoryPlan：  python retrieval_snapshot.py "<query>"
-                  → 读取 active.json 的当前请求（StoryPlan 既有契约，不破坏）
+    StoryPlan：  python retrieval_snapshot.py --request <request_id> "<query>"
     StoryWrite： python retrieval_snapshot.py --request <request_id> "<query>"
-                  → 显式绑定 request_id（后台 worker 不依赖可变的 active 指针）
+
+显式绑定 request_id（P0 精确绑定）：Direct 请求绝不进入 active.json，
+检索命令绝不依赖可变的 active 指针（2026-08-27 起 StoryPlan 也改为显式绑定）。
 
 该调用做两件事（同一 invocation）：
 1. 运行现有 KnowledgeRetrieve（确定性、无模型调用、只读），得到精确
@@ -62,11 +63,12 @@ def main() -> int:
     query = args[0].strip()
 
     if request_id is None:
-        request_id = bridge.get_active_request_id()
-        if not request_id:
-            raise story_planning.StoryPlanningError(
-                "当前没有活跃的 Go Write 任务（active.json 缺失或为空），无法生成检索快照。"
-            )
+        # 全部任务模板（StoryPlan/StoryWrite/Review/NewProject）都显式内嵌
+        # --request <request_id>（Direct 请求绝不进入 active.json，检索命令
+        # 绝不依赖可变 active 指针）。
+        raise story_planning.StoryPlanningError(
+            "缺少 --request <request_id>：检索命令必须显式绑定请求 id。"
+        )
 
     request = bridge.get_request(request_id)
     if request is None:
@@ -82,8 +84,8 @@ def main() -> int:
     elif kind == "story_design_propose":
         package = new_project.execute_request_scoped_retrieval(query, request_id)
     else:
-        # StoryPlan 既有契约：active 指针路径（显式 --request 仅用于 StoryWrite/Review/NewProject）
-        package = story_planning.execute_request_scoped_retrieval(query)
+        # StoryPlan：显式 --request 绑定（与其余操作同一 P0 精确绑定）
+        package = story_planning.execute_request_scoped_retrieval(query, request_id)
 
     print(json.dumps(
         {

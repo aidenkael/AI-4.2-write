@@ -1,20 +1,21 @@
 /**
- * 作品检查真实 scoped AI 消费者控制器。
+ * 作品检查真实 scoped AI 消费者控制器（App 级协调器消费者）。
+ *
+ * 根不变量：AI 任务属于 Go Write（AuthorTaskCoordinator），不属于页面。
+ * 离开 Review 页任务继续运行、报告保留；返回后页面显式消费报告。
  *
  * 约束：
  * - 页面加载只读（getReviewSurface），零模型；
- * - 只有作者显式"开始检查"才发起一次 Agent 检查（默认最新已接受章节）；
+ * - 只有作者显式"开始检查"才发起一次 Agent 检查；
  * - 报告非权威、零写回；cancel/late-result 安全；换项目丢弃过期状态。
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  cancelReviewRequest,
-  getReviewRequest,
   getReviewSurface,
-  prepareReview,
   type ReviewReport,
   type ReviewSurface,
 } from '../../bridge/client'
+import { useAuthorTask } from '../tasks/AuthorTaskCoordinator'
 
 export type ReviewStatus =
   | 'loading'
@@ -39,10 +40,10 @@ export interface ReviewController {
   cancel(): Promise<void>
 }
 
-const POLL_INTERVAL_MS = 700
 const toMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 export function useReviewController(projectId: string | null): ReviewController {
+  const { task, start: startTask, cancel: cancelTask, consume } = useAuthorTask()
   const [surface, setSurface] = useState<ReviewSurface | null>(null)
   const [surfaceLoading, setSurfaceLoading] = useState(true)
   const [surfaceError, setSurfaceError] = useState<string | null>(null)
@@ -54,17 +55,6 @@ export function useReviewController(projectId: string | null): ReviewController 
 
   const projectRef = useRef<string | null>(projectId)
   projectRef.current = projectId
-  const activeRequestRef = useRef<string | null>(null)
-  const pollSessionRef = useRef(0)
-  const pollTimerRef = useRef<number | null>(null)
-
-  const stopPolling = useCallback(() => {
-    pollSessionRef.current += 1
-    if (pollTimerRef.current !== null) {
-      window.clearTimeout(pollTimerRef.current)
-      pollTimerRef.current = null
-    }
-  }, [])
 
   const loadSurface = useCallback(async (pid: string) => {
     setSurfaceLoading(true)
@@ -83,9 +73,6 @@ export function useReviewController(projectId: string | null): ReviewController 
   }, [])
 
   useEffect(() => {
-    const oldRequestId = activeRequestRef.current
-    stopPolling()
-    activeRequestRef.current = null
     setReport(null)
     setStatus('idle')
     setError(null)
@@ -96,27 +83,56 @@ export function useReviewController(projectId: string | null): ReviewController 
       setSurfaceLoading(false)
       return
     }
-    void (async () => {
-      if (oldRequestId) {
-        try { await cancelReviewRequest(oldRequestId) } catch { /* 幂等 */ }
-      }
-      await loadSurface(projectId)
-    })()
-    return () => {
-      // 卸载（切页面/全局导航）时除了停止本地轮询，还要取消仍在后台运行的
-      // Direct 检查，避免占用单活跃执行槽、避免报告迟到写回已离开的页面。
-      stopPolling()
-      const pending = activeRequestRef.current
-      if (pending) {
-        activeRequestRef.current = null
-        void cancelReviewRequest(pending).catch(() => {})
-      }
+    void loadSurface(projectId)
+  }, [projectId, loadSurface])
+
+  // 协调器任务 → 本页：运行中直接映射；候选/失败由页面显式消费（adopt + consume）。
+  const taskMatches = task?.kind === 'review' && (!projectId || !task.projectId || task.projectId === projectId)
+
+  useEffect(() => {
+    if (!taskMatches) return
+    if (task.status === 'running' || task.status === 'waiting_author') {
+      setStatus('running')
+      setError(null)
+      setExecution(task.execution
+        ? {
+            execution_mode: task.execution.execution_mode ?? undefined,
+            agent_id: task.execution.agent_id ?? null,
+            model: task.execution.model ?? null,
+          }
+        : null)
+      return
     }
-  }, [projectId, loadSurface, stopPolling])
+    if (task.status === 'candidate' && task.result) {
+      // 显式消费：报告 adopt 到本页展示后，协调器任务清除（不再占全局任务条）
+      const result = task.result as ReviewReport
+      setReport(result)
+      setStatus('completed')
+      setExecution(result.execution
+        ? {
+            execution_mode: typeof result.execution?.execution_mode === 'string' ? result.execution.execution_mode : undefined,
+            agent_id: typeof result.execution?.agent_id === 'string' ? result.execution.agent_id : null,
+            model: typeof result.execution?.model === 'string' ? result.execution.model : null,
+          }
+        : null)
+      setError(null)
+      consume()
+      return
+    }
+    if (task.status === 'failed') {
+      setReport(null)
+      setStatus('failed')
+      setError(task.error ?? '检查失败，请重试。')
+      setExecution(null)
+      consume()
+      return
+    }
+  }, [task, taskMatches, consume])
 
   const selectChapter = useCallback((chapterNumber: number) => {
     setSelectedChapter(chapterNumber)
     setReport(null)
+    setStatus('idle')
   }, [])
 
   const reloadSurface = useCallback(async () => {
@@ -126,88 +142,23 @@ export function useReviewController(projectId: string | null): ReviewController 
   const start = useCallback(async () => {
     const pid = projectRef.current
     if (!pid) { setError('请先选择正式作品。'); setStatus('failed'); return }
-    if (activeRequestRef.current) { setError('已有进行中的检查，请先完成或取消。'); setStatus('failed'); return }
-    setError(null)
+    setReport(null)
     setStatus('running')
-    // 会话令牌：await 期间发生取消/换项目（stopPolling 自增）时，本次发起作废，
-    // 避免"取消后 prepare 才返回"导致检查继续跑并串到新页面/新项目。
-    const startSession = pollSessionRef.current
-    try {
-      const prepared = await prepareReview({ project_id: pid, chapter_number: selectedChapter ?? undefined })
-      if (pollSessionRef.current !== startSession || projectRef.current !== pid) {
-        // 已在等待期间被取消/切换：清理刚创建的请求，绝不启动轮询
-        activeRequestRef.current = null
-        void cancelReviewRequest(prepared.request_id).catch(() => {})
-        return
-      }
-      activeRequestRef.current = prepared.request_id
-      setExecution({
-        execution_mode: prepared.execution_mode,
-        agent_id: prepared.agent_id ?? null,
-        model: prepared.model ?? null,
-      })
-      const session = pollSessionRef.current + 1
-      pollSessionRef.current = session
-      const tick = async () => {
-        if (pollSessionRef.current !== session) return
-        try {
-          const res = await getReviewRequest(prepared.request_id)
-          if (pollSessionRef.current !== session) return
-          if (res.status === 'pending') {
-            pollTimerRef.current = window.setTimeout(tick, POLL_INTERVAL_MS)
-            return
-          }
-          stopPolling()
-          activeRequestRef.current = null
-          if (res.status === 'completed' && res.result) {
-            const exec = res.result.execution
-            setExecution({
-              execution_mode: typeof exec?.execution_mode === 'string' ? exec.execution_mode : undefined,
-              agent_id: typeof exec?.agent_id === 'string' ? exec.agent_id : null,
-              model: typeof exec?.model === 'string' ? exec.model : null,
-            })
-            setReport(res.result)
-            setStatus('completed')
-          } else if (res.status === 'canceled') {
-            setExecution(null)
-            setStatus('idle')
-          } else {
-            setExecution(null)
-            setError(res.error || '检查失败，请重试。')
-            setStatus('failed')
-          }
-        } catch (e) {
-          if (pollSessionRef.current !== session) return
-          stopPolling()
-          activeRequestRef.current = null
-          setExecution(null)
-          setError(toMessage(e))
-          setStatus('failed')
-        }
-      }
-      pollTimerRef.current = window.setTimeout(tick, 0)
-    } catch (e) {
-      if (pollSessionRef.current === startSession) {
-        activeRequestRef.current = null
-        setExecution(null)
-        setError(toMessage(e))
-        setStatus('failed')
-      }
+    setError(null)
+    const busy = await startTask({ kind: 'review', project_id: pid, chapter_number: selectedChapter ?? undefined })
+    if (busy) {
+      setStatus('failed')
+      setError(busy)
     }
-  }, [selectedChapter, stopPolling])
+  }, [selectedChapter, startTask])
 
   const cancel = useCallback(async () => {
-    const requestId = activeRequestRef.current
-    stopPolling()
-    activeRequestRef.current = null
-    if (requestId) {
-      try { await cancelReviewRequest(requestId) } catch { /* 幂等 */ }
-    }
     setReport(null)
     setExecution(null)
     setStatus('idle')
     setError(null)
-  }, [stopPolling])
+    await cancelTask()
+  }, [cancelTask])
 
   return {
     surface, surfaceLoading, surfaceError, report, status, error, selectedChapter, execution,

@@ -311,23 +311,22 @@ def _write_snapshot(
     return path
 
 
-def execute_request_scoped_retrieval(query: str) -> Any:
+def execute_request_scoped_retrieval(query: str, request_id: str) -> Any:
     """Agent 侧（/gowrite 执行内）的"唯一一次确定性检索调用"。
 
-    读取当前活跃请求 → 从 meta 恢复 project/planning turn → 运行现有
-    KnowledgeRetrieve（唯一一次执行）→ 把精确序列化包写入请求级快照 →
-    返回包对象（由 CLI 打印给模型查看）。
+    显式 request_id 绑定（与 StoryWrite/Review/NewProject 同一 P0 精确绑定；
+    绝不依赖可变 active 指针）：从请求 meta 恢复 project/planning turn →
+    运行现有 KnowledgeRetrieve（唯一一次执行）→ 把精确序列化包写入请求级
+    快照 → 返回包对象（由 CLI 打印给模型查看）。
 
     模型看到的候选 == 快照中的包 == finalize 反序列化后 Context 消费的包。
     """
-    request_id = bridge.get_active_request_id()
+    request_id = (request_id or "").strip()
     if not request_id:
-        raise StoryPlanningError(
-            "当前没有活跃的 Go Write 任务（active.json 缺失或为空），无法生成检索快照。"
-        )
+        raise StoryPlanningError("缺少任务标识（request_id），无法生成检索快照。")
     request = bridge.get_request(request_id)
     if request is None:
-        raise StoryPlanningError("活跃任务文件不存在或不可读，无法生成检索快照。")
+        raise StoryPlanningError("任务文件不存在或不可读，无法生成检索快照。")
     meta = request.get("meta") or {}
     project_id = str(meta.get("project_id") or "")
     planning_turn_id = str(meta.get("planning_turn_id") or "")
@@ -610,6 +609,9 @@ def prepare_story_plan(project_id: str, author_question: str) -> dict[str, Any]:
     else:
         current_planning = "（暂无已确定的规划）"
 
+    # 预生成 request_id（检索命令需要内嵌真实 id；Interactive/Direct 共用）
+    request_id = uuid.uuid4().hex
+
     task = _AGENT_TASK_TEMPLATE.format(
         name=name,
         work_direction=work_direction,
@@ -618,7 +620,9 @@ def prepare_story_plan(project_id: str, author_question: str) -> dict[str, Any]:
         open_space=open_space,
         current_planning=current_planning,
         author_question=author_question,
-        retrieval_command=f'"{_RETRIEVAL_SCRIPT}"',
+        # 显式 --request 绑定：Direct 请求绝不进入 active.json，检索命令必须
+        # 按请求 id 定位（与 StoryWrite/Review/NewProject 同一 P0 精确绑定）
+        retrieval_command=f'"{_RETRIEVAL_SCRIPT}" --request {request_id}',
         max_bkp_hits=_MAX_BKP_HITS,
     )
 
@@ -654,25 +658,32 @@ def prepare_story_plan(project_id: str, author_question: str) -> dict[str, Any]:
     write_json(paths["state"], state)
 
     # 8. 创建桥请求（同一请求生命周期：交互由 Qoder /gowrite 写回，
-    #    直连由 Go Write 通过 adapter 执行后写回）
-    request_id = bridge.create_request(
-        task=task,
-        kind="story_plan_propose",
-        meta={
-            "project_id": project_id,
-            "name": name,
-            "planning_turn_id": planning_turn_id,
-            "author_question": author_question,
-            "planning_sources": planning_sources,
-            "intent_rev": intent["intent_rev"],
-            "state_rev": state["state_rev"],
-            "execution": {
-                "execution_mode": execution_mode,
-                "agent_id": execution_agent,
-                "model": execution_model,
+    #    直连由 Go Write 通过 adapter 执行后写回；Direct 绝不激活 /gowrite）
+    try:
+        request_id = bridge.create_request(
+            task=task,
+            kind="story_plan_propose",
+            meta={
+                "project_id": project_id,
+                "name": name,
+                "planning_turn_id": planning_turn_id,
+                "author_question": author_question,
+                "planning_sources": planning_sources,
+                "intent_rev": intent["intent_rev"],
+                "state_rev": state["state_rev"],
+                "execution": {
+                    "execution_mode": execution_mode,
+                    "agent_id": execution_agent,
+                    "model": execution_model,
+                },
             },
-        },
-    )
+            request_id=request_id,
+            activate_for_gowrite=execution_mode != EXECUTION_MODE_DIRECT,
+        )
+    except bridge.BridgeBusyError as exc:
+        # 已有等待 /gowrite 的交互任务：绝不清除/覆盖它；回滚本轮临时工作区
+        _cleanup_planning(project_id, planning_turn_id)
+        raise StoryPlanningError(str(exc)) from exc
 
     # 9. 验证式审计（operation.started；交互桥只标 waiting，绝不声称 Agent 已启动）
     #    必须先于 Direct worker 创建：worker 线程内的 append_event 依赖进程内
@@ -1054,7 +1065,9 @@ def get_story_plan_request(request_id: str) -> dict[str, Any]:
     # 成功：清理桥文件（保留临时 planning 工作区，供确认时使用）
     bridge.cleanup_request(request_id)
     _exec_task_manager.remove(request_id)
-    audit.finish_file(request_id, audit.STATUS_COMPLETED)
+    # 候选生成 ≠ 操作完成：记录保持打开（awaiting_confirmation），
+    # 等作者 Confirm（authority.confirmed → completed）或 Discard/Cancel（canceled）。
+    audit.mark_awaiting_confirmation(request_id)
     return {"request_id": request_id, "status": "completed", "result": result}
 
 
@@ -1122,6 +1135,8 @@ def cancel_story_plan_request(request_id: str) -> dict[str, Any]:
         # 请求文件已不存在（已完成并轮询过 / 已取消过）：按持久化 request_id
         # 清理已完成但未确认的候选工作区（幂等；无匹配时静默）。
         _cleanup_discarded_planning(request_id)
+        # 审计记录（awaiting_confirmation）收尾为 canceled
+        audit.finish_file(request_id, audit.STATUS_CANCELED)
     _exec_task_manager.remove(request_id)
     return {"request_id": request_id, "status": "canceled"}
 

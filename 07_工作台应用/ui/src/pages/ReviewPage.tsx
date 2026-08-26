@@ -1,4 +1,5 @@
 import { CheckCircle2, FolderOpen, Search, ShieldCheck, Sparkles, TriangleAlert, X } from 'lucide-react'
+import { useEffect, useRef } from 'react'
 import { ExecutionSummary } from '../components/ExecutionSummary'
 import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
@@ -14,13 +15,28 @@ const severityMeta = {
  *
  * - 页面加载只读（确定性检查面），零模型；
  * - 只有作者按下"开始检查"才发起一次 Agent 检查（默认最新已接受章节）；
- * - 报告非权威、零写回；不提供"标记已处理"持久化。
+ * - 报告非权威、零写回；不提供"标记已处理"持久化；
+ * - "检查这段"章节交接：消费一次并选中该章节（项目匹配且章节仍有效时），
+ *   绝不自动运行。
  */
 export function ReviewPage() {
   const { actions } = useApp()
   const { selected } = useFormalProjectShell()
   const controller = useReviewController(selected?.project_id ?? null)
   const { surface, surfaceLoading, surfaceError, report, status, error, selectedChapter, execution } = controller
+
+  // 一次性章节交接（"检查这段"）：项目匹配且章节仍有效才选中，消费即清
+  const handoffConsumedRef = useRef(false)
+  useEffect(() => {
+    if (handoffConsumedRef.current) return
+    if (!selected) return
+    const handoff = actions.consumeReviewChapterHandoff()
+    if (handoff && handoff.project_id === selected.project_id) {
+      handoffConsumedRef.current = true
+      const valid = surface?.chapters.some((c) => c.chapter_number === handoff.chapter_number)
+      if (valid) controller.selectChapter(handoff.chapter_number)
+    }
+  }, [selected, surface, actions, controller])
 
   if (!selected) {
     return (

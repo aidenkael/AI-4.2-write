@@ -544,22 +544,28 @@ def prepare_new_project(name: str, idea: str) -> dict[str, Any]:
             _cleanup_proposal(project_id)
             raise NewProjectError(_DIRECT_BUSY_ERROR)
 
-    bridge.create_request(
-        task=task,
-        kind="story_design_propose",
-        meta={
-            "name": name,
-            "idea": idea,
-            "project_id": project_id,
-            "proposal_turn_id": proposal_turn_id,
-            "execution": {
-                "execution_mode": execution_mode,
-                "agent_id": execution_agent,
-                "model": execution_model,
+    try:
+        bridge.create_request(
+            task=task,
+            kind="story_design_propose",
+            meta={
+                "name": name,
+                "idea": idea,
+                "project_id": project_id,
+                "proposal_turn_id": proposal_turn_id,
+                "execution": {
+                    "execution_mode": execution_mode,
+                    "agent_id": execution_agent,
+                    "model": execution_model,
+                },
             },
-        },
-        request_id=request_id,
-    )
+            request_id=request_id,
+            activate_for_gowrite=execution_mode != EXECUTION_MODE_DIRECT,
+        )
+    except bridge.BridgeBusyError as exc:
+        # 已有等待 /gowrite 的交互任务：绝不清除/覆盖它；回滚本轮临时工作区
+        _cleanup_proposal(project_id)
+        raise NewProjectError(str(exc)) from exc
 
     # 把 request_id 持久化到 proposal_meta.json，使"丢弃已完成但未确认候选"
     # 能按 request_id 定位并清理工作区（proposal token 随之失效）。
@@ -866,7 +872,9 @@ def get_new_project_request(request_id: str) -> dict[str, Any]:
 
     bridge.cleanup_request(request_id)
     _exec_task_manager.remove(request_id)
-    audit.finish_file(request_id, audit.STATUS_COMPLETED)
+    # 候选生成 ≠ 操作完成：记录保持打开（awaiting_confirmation），
+    # 等作者 Confirm（authority.confirmed → completed）或 Discard/Cancel（canceled）。
+    audit.mark_awaiting_confirmation(request_id)
     return {"request_id": request_id, "status": "completed", "result": result}
 
 
@@ -911,6 +919,9 @@ def cancel_new_project_request(request_id: str) -> dict[str, Any]:
         audit.finish_file(request_id, audit.STATUS_CANCELED)
     else:
         _cleanup_discarded_proposal(request_id)
+        # 已完成但未确认候选被丢弃：审计记录（awaiting_confirmation）收尾为
+        # canceled（已是 completed 等终态时 finish_file 幂等 no-op）
+        audit.finish_file(request_id, audit.STATUS_CANCELED)
     _exec_task_manager.remove(request_id)
     return {"request_id": request_id, "status": "canceled"}
 

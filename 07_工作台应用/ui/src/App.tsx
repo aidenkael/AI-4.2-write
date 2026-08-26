@@ -1,6 +1,6 @@
-import { useEffect } from 'react'
 import { AppProvider, useApp } from './features/app/AppStore'
-import { FormalProjectShellProvider, useFormalProjectShell } from './features/projects/FormalProjectShell'
+import { FormalProjectShellProvider } from './features/projects/FormalProjectShell'
+import { AuthorTaskCoordinatorProvider } from './features/tasks/AuthorTaskCoordinator'
 import { AppShell } from './layouts/AppShell'
 import { ProjectLayout } from './layouts/ProjectLayout'
 import { HomePage } from './pages/HomePage'
@@ -23,13 +23,6 @@ const CONNECTED_SECTIONS: readonly ProjectSection[] = ['overview', 'development'
 
 function Router() {
   const { state } = useApp()
-  const { clearSelection } = useFormalProjectShell()
-  const global = !state.projectSection
-  // 回到全局页面（首页 / 我的作品等）时清除正式项目选择，绝不沿用旧 project_id
-  useEffect(() => {
-    if (global) clearSelection()
-  }, [global, clearSelection])
-
   const globalPages = { home: <HomePage />, projects: <ProjectsPage />, materials: <MaterialsPage />, ideas: <IdeasPage />, settings: <SettingsFeature /> }
   const projectPages: Record<ProjectSection, JSX.Element> = { overview: <ProjectOverviewPage />, development: <DevelopmentPage />, writing: <WritingPage />, map: <StoryMapPage />, data: <ProjectDataPage />, review: <ReviewPage /> }
   const section = state.projectSection
@@ -42,7 +35,10 @@ export default function App() {
   return (
     <AppProvider>
       <FormalProjectShellProvider>
-        <Router />
+        {/* App 级任务协调器：位于 Router 之上——导航/页面卸载绝不取消或孤立任务 */}
+        <AuthorTaskCoordinatorProvider>
+          <Router />
+        </AuthorTaskCoordinatorProvider>
       </FormalProjectShellProvider>
     </AppProvider>
   )

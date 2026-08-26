@@ -21,7 +21,14 @@
 进程边界说明：retrieval_snapshot.py 是 Agent 在 /gowrite 执行内启动的独立
 子进程；主进程先创建审计文件（operation.started / bridge.waiting），子进程
 通过 append_event()（load→append→save）写入 retrieval 事件，主进程 finalize
-再补 retrieval.selected / context.bound / candidate.created 并 finish()。
+再补 retrieval.selected / context.bound / candidate.created 并进入
+awaiting_confirmation（候选生成 ≠ 操作完成）。作者 Confirm 追加
+authority.confirmed 并 finish(completed)；Discard/Cancel 走 finish(canceled)。
+
+生命周期（NewProject / StoryPlan / StoryWrite）：
+operation.started → … → candidate.created → awaiting_confirmation（非终态，
+记录保持打开）→ 作者确认（authority.confirmed）→ completed；
+作者丢弃/取消 → canceled；失败/超时 → failed。
 
 事件身份模型（跨进程安全）：
 - 每个事件携带全局唯一 ``event_id``（uuid4().hex），主进程 recorder 与跨进程
@@ -63,10 +70,14 @@ EVENT_CANDIDATE_CREATED = "candidate.created"
 EVENT_AUTHORITY_CONFIRMED = "authority.confirmed"
 
 STATUS_RUNNING = "running"
+STATUS_AWAITING_CONFIRMATION = "awaiting_confirmation"
 STATUS_COMPLETED = "completed"
 STATUS_FAILED = "failed"
 STATUS_CANCELED = "canceled"
 
+# 只有这三个才是终态：awaiting_confirmation 是"候选已生成、等待作者确认"的
+# 非终态，后续仍可追加 authority.confirmed 并把状态推进到 completed，
+# 或由 Discard/Cancel 推进到 canceled。
 _TERMINAL_STATUSES = frozenset({STATUS_COMPLETED, STATUS_FAILED, STATUS_CANCELED})
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -201,6 +212,18 @@ class AuditRecorder:
         details: Optional[dict[str, Any]] = None,
     ) -> None:
         self._append_locked(kind, component, verified=verified, details=details)
+
+    def awaiting_confirmation(self) -> None:
+        """候选已生成、等待作者确认：记录保持打开（非终态）。
+
+        之后仍可 append authority.confirmed 等事件，再以 finish() 收尾；
+        绝不在这里关闭记录（authority.confirmed 必须能落到最终审计 JSON）。
+        """
+        with _lock:
+            if self._finished:
+                return
+            self._status = STATUS_AWAITING_CONFIRMATION
+            self._flush_locked()
 
     def finish(self, status: str, error: Optional[str] = None) -> None:
         if status not in _TERMINAL_STATUSES:
@@ -341,6 +364,35 @@ def append_event(
             **({"details": details} if details else {}),
         })
         record["events"] = _normalize_events(events)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(path)
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):  # noqa: BLE001
+        pass
+
+
+def mark_awaiting_confirmation(request_id: str) -> None:
+    """候选已生成 → 把记录置为 awaiting_confirmation（非终态，记录保持打开）。
+
+    与 finish_file 不同：不写 finished_at/duration_ms、不关闭记录，
+    因此后续 confirm 路径仍可 append authority.confirmed 再 finish(completed)，
+    discard/cancel 路径可 finish(canceled)。进程内 recorder 优先；
+    无 recorder 时文件级 load→update→save（best-effort）。
+    """
+    with _lock:
+        recorder = _ACTIVE_RECORDERS.get(request_id)
+    if recorder is not None:
+        recorder.awaiting_confirmation()
+        return
+    path = audit_path(request_id)
+    try:
+        if not path.exists():
+            return
+        record = json.loads(path.read_text(encoding="utf-8"))
+        if record.get("status") in _TERMINAL_STATUSES:
+            return  # 已终态不再回退
+        record["status"] = STATUS_AWAITING_CONFIRMATION
+        record["events"] = _normalize_events(record.get("events") or [])
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(path)

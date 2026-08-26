@@ -851,6 +851,32 @@ export async function cancelReviewRequest(requestId: string): Promise<{ request_
 
 // ---------------- 执行记录（验证式审计；只读，显式清理） ----------------
 
+export interface AuthorOperationFacts {
+  request_id: string
+  /** 归一化操作名：new_project / story_plan / story_write / review / material_classify / book_distill。 */
+  kind: string | null
+  project_id: string | null
+  execution_mode: 'interactive_bridge' | 'direct' | null
+  agent_id: string | null
+  /** 仅机械已知时非空；交互模式未经执行验证时恒为 null（不编造模型身份）。 */
+  model: string | null
+  /** 交互两阶段标记（story_write：pending_selection / pending_prose）。 */
+  phase: string | null
+  /** pending / running / orphaned。orphaned = Direct 请求存在但 worker 已不存在（进程重启）。 */
+  state: string | null
+  message: string | null
+}
+
+/** App 级协调器 remount/reload 后恢复当前待办作者操作；无待办时返回 null。 */
+export async function getActiveAuthorOperation(): Promise<AuthorOperationFacts | null> {
+  return call<AuthorOperationFacts | null>('get_active_author_operation', {})
+}
+
+/** 尽力把 Qoder 桌面端切到前台（全局任务条"前往 Qoder 执行 /gowrite"）。 */
+export async function focusQoder(): Promise<{ focused: boolean }> {
+  return call<{ focused: boolean }>('focus_qoder', {})
+}
+
 export interface ExecutionAuditSummary {
   request_id: string | null
   operation: string | null
@@ -868,6 +894,8 @@ export interface ExecutionAuditSummary {
 
 export interface ExecutionAuditEvent {
   seq: number
+  /** 全局唯一事件身份（跨进程合并 key）；旧版记录可能缺失。 */
+  event_id?: string | null
   at: string
   kind: string
   component: string

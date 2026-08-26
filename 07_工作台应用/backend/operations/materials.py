@@ -570,20 +570,26 @@ def classify_material_inbox() -> dict[str, Any]:
                 ledger_summary=_ledger_summary(ledger or {}),
                 files_summary=_files_summary(ambiguous),
             )
-            bridge.create_request(
-                task=task,
-                kind="material_classify_propose",
-                meta={
-                    "request_id": request_id,
-                    "execution": {
-                        "execution_mode": "interactive_bridge",
-                        "agent_id": settings.interactive_agent,
-                        "model": None,
+            try:
+                bridge.create_request(
+                    task=task,
+                    kind="material_classify_propose",
+                    meta={
+                        "request_id": request_id,
+                        "execution": {
+                            "execution_mode": "interactive_bridge",
+                            "agent_id": settings.interactive_agent,
+                            "model": None,
+                        },
                     },
-                },
-                request_id=request_id,
-                timeout_seconds=_CLASSIFY_TIMEOUT_SECONDS,
-            )
+                    request_id=request_id,
+                    timeout_seconds=_CLASSIFY_TIMEOUT_SECONDS,
+                    activate_for_gowrite=True,  # Interactive：显式激活 /gowrite
+                )
+            except bridge.BridgeBusyError as exc:
+                # 已有等待 /gowrite 的交互任务：绝不清除/覆盖它
+                audit.finish_file(request_id, audit.STATUS_FAILED, error=str(exc))
+                raise MaterialsError(str(exc)) from exc
             audit.append_event(request_id, audit.EVENT_BRIDGE_WAITING, component="material_classify")
             return {
                 "status": "pending",
@@ -964,23 +970,29 @@ def _run_distill_agent_stage(request_id: str, asset_id: str, sp_dir: Path, bd_di
 
     if settings.default_execution_mode != EXECUTION_MODE_DIRECT:
         from operations import qoder_bridge as bridge
-        bridge.create_request(
-            task=task,
-            kind="book_distill_propose",
-            meta={
-                "request_id": request_id,
-                "asset_id": asset_id,
-                "sp_dir": str(sp_dir),
-                "bd_dir": str(bd_dir),
-                "execution": {
-                    "execution_mode": "interactive_bridge",
-                    "agent_id": settings.interactive_agent,
-                    "model": None,
+        try:
+            bridge.create_request(
+                task=task,
+                kind="book_distill_propose",
+                meta={
+                    "request_id": request_id,
+                    "asset_id": asset_id,
+                    "sp_dir": str(sp_dir),
+                    "bd_dir": str(bd_dir),
+                    "execution": {
+                        "execution_mode": "interactive_bridge",
+                        "agent_id": settings.interactive_agent,
+                        "model": None,
+                    },
                 },
-            },
-            request_id=request_id,
-            timeout_seconds=6 * 60 * 60,
-        )
+                request_id=request_id,
+                timeout_seconds=6 * 60 * 60,
+                activate_for_gowrite=True,  # Interactive：显式激活 /gowrite
+            )
+        except bridge.BridgeBusyError as exc:
+            # 已有等待 /gowrite 的交互任务：绝不清除/覆盖它
+            audit.finish_file(request_id, audit.STATUS_FAILED, error=str(exc))
+            raise MaterialsError(str(exc)) from exc
         audit.append_event(request_id, audit.EVENT_BRIDGE_WAITING, component="book_distill")
         raise _PendingDistill(request_id)
     from operations import agent_runner as runner

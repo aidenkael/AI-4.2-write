@@ -635,6 +635,7 @@ def prepare_review(project_id: str, chapter_number: int | None = None) -> dict[s
             },
         },
         request_id=request_id,
+        activate_for_gowrite=False,  # Review 仅 Direct：请求永不进入 Qoder /gowrite
     )
 
     ctx = {
@@ -805,5 +806,8 @@ def cancel_review_request(request_id: str) -> dict[str, Any]:
         audit.finish_file(request_id, audit.STATUS_CANCELED)
     else:
         _cleanup_discarded_review(request_id)
+        # 已完成报告的记录已是 completed 终态：finish_file 幂等 no-op；
+        # awaiting_confirmation 状态（如有）收尾为 canceled
+        audit.finish_file(request_id, audit.STATUS_CANCELED)
     _exec_task_manager.remove(request_id)
     return {"request_id": request_id, "status": "canceled"}
