@@ -54,6 +54,9 @@ __pycache__/
 # SourcePrepare 本地工作区（运行时生成，含原著派生正文；不上传）
 06_工作区/SourcePrepare/
 
+# MethodPrepare 本地工作区（方法素材确定性预处理产物；不上传）
+06_工作区/MethodPrepare/
+
 # 应用开发临时产物（UI、接口、pywebview、Agent 接入等；Local Only）
 06_工作区/应用开发/
 

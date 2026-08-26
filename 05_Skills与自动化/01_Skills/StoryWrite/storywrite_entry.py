@@ -307,7 +307,7 @@ def prepare_context(
     conflicts_or_tensions: list[dict[str, Any]] | None = None,
     retrieval: Any = None,
     selected_knowledge_ids: list[str] | None = None,
-    max_bkp_hits: int = 3,
+    max_knowledge_hits: int = 3,
     allow_simulation_sources: bool = False,
 ) -> dict[str, Any]:
     """Reuse the frozen E3-A Context Compiler; explicit selection only.
@@ -327,7 +327,7 @@ def prepare_context(
         conflicts_or_tensions=conflicts_or_tensions,
         retrieval=retrieval,
         selected_knowledge_ids=selected_knowledge_ids,
-        max_bkp_hits=max_bkp_hits,
+        max_knowledge_hits=max_knowledge_hits,
         allow_simulation_sources=allow_simulation_sources,
     )
 

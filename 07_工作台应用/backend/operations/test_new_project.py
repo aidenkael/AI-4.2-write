@@ -43,7 +43,7 @@ VALID_AGENT_RESULT = {
         "scope": "story_design",
         "objective": "设计一个可推进的故事发动机。",
         "knowledge_needs": [],
-        "selected_bkp_ids": [],
+        "selected_knowledge_refs": [],
         "package_ref": "",
         "assumptions": ["主角与秘密的因果尚未确认"],
     },
@@ -64,7 +64,7 @@ TWO_DOGS_RESULT = {
         "scope": "story_design",
         "objective": "围绕“主角被两条狗咬”设计一个有张力的故事方向。",
         "knowledge_needs": [],
-        "selected_bkp_ids": [],
+        "selected_knowledge_refs": [],
         "package_ref": "",
         "assumptions": ["两条狗的来历与动机是故事核心悬念，作者尚未确认"],
     },
@@ -226,7 +226,7 @@ def test_work_direction_not_string_rejected(isolated):
     bad = {
         "semantic_interpretation": {
             "scope": "story_design", "objective": "目标",
-            "knowledge_needs": [], "selected_bkp_ids": [], "package_ref": "", "assumptions": [],
+            "knowledge_needs": [], "selected_knowledge_refs": [], "package_ref": "", "assumptions": [],
         },
         "model_output": {
             "proposal": "候选方向。", "work_direction": 12345,
@@ -245,7 +245,7 @@ def test_reader_promise_missing_rejected(isolated):
     bad = {
         "semantic_interpretation": {
             "scope": "story_design", "objective": "目标",
-            "knowledge_needs": [], "selected_bkp_ids": [], "package_ref": "", "assumptions": [],
+            "knowledge_needs": [], "selected_knowledge_refs": [], "package_ref": "", "assumptions": [],
         },
         "model_output": {
             "proposal": "候选方向。", "work_direction": "作品方向。",
@@ -263,7 +263,7 @@ def test_hard_constraints_not_list_str_rejected(isolated):
     bad = {
         "semantic_interpretation": {
             "scope": "story_design", "objective": "目标",
-            "knowledge_needs": [], "selected_bkp_ids": [], "package_ref": "", "assumptions": [],
+            "knowledge_needs": [], "selected_knowledge_refs": [], "package_ref": "", "assumptions": [],
         },
         "model_output": {
             "proposal": "候选方向。", "work_direction": "作品方向。",
@@ -281,7 +281,7 @@ def test_open_space_missing_rejected(isolated):
     bad = {
         "semantic_interpretation": {
             "scope": "story_design", "objective": "目标",
-            "knowledge_needs": [], "selected_bkp_ids": [], "package_ref": "", "assumptions": [],
+            "knowledge_needs": [], "selected_knowledge_refs": [], "package_ref": "", "assumptions": [],
         },
         "model_output": {
             "proposal": "候选方向。", "work_direction": "作品方向。",
@@ -299,7 +299,7 @@ def test_knowledge_needs_missing_rejected(isolated):
     bad = {
         "semantic_interpretation": {
             "scope": "story_design", "objective": "目标",
-            "selected_bkp_ids": [], "assumptions": [],
+            "selected_knowledge_refs": [], "assumptions": [],
         },
         "model_output": {
             "proposal": "候选方向。", "work_direction": "作品方向。",
@@ -340,7 +340,7 @@ def test_response_with_unescaped_quotes_rejected(isolated):
         '      "scope": "story_design",\n'
         '      "objective": "为一部以"主角被两条狗咬"为核心事件的故事生成方向",\n'
         '      "knowledge_needs": [],\n'
-        '      "selected_bkp_ids": [],\n'
+        '      "selected_knowledge_refs": [],\n'
         '      "assumptions": [""两条狗"是核心意象，但不确定是字面意义还是隐喻"]\n'
         '    },\n'
         '    "model_output": {\n'

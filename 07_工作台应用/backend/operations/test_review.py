@@ -24,7 +24,7 @@ REVIEW_JSON = json.dumps({
     "semantic_interpretation": {
         "objective": "检查第 1 章连续性。",
         "knowledge_needs": [],
-        "selected_bkp_ids": [],
+        "selected_knowledge_refs": [],
         "package_ref": "",
         "assumptions": [],
     },
@@ -226,9 +226,11 @@ def test_review_interactive_mode_rejected(real_project, fake_bridge, monkeypatch
 
 # ---------- 知识选择绑定（P0） ----------
 
-def _fake_hit(book_id, anchor, statement):
+def _fake_hit(source_id, anchor, statement, source_kind="reference_bkp"):
     return types.SimpleNamespace(
-        rank=1, book_id=book_id, book_title=book_id, source_anchor=anchor,
+        rank=1, source_kind=source_kind, source_id=source_id, source_title=source_id,
+        maturity="source_bound", selection_ref=f"{source_kind}/{source_id}/{anchor}",
+        source_anchor=anchor,
         source="knowledge/cards.md", statement=statement, scope="范围", boundary="边界",
         confidence="中", evidence=["chapters/x.md#L1"], relevance_reason="test",
     )
@@ -252,7 +254,7 @@ def test_review_needs_retrieval_exact_package(real_project, fake_bridge, monkeyp
         out = json.dumps({
             "semantic_interpretation": {
                 "objective": "检查", "knowledge_needs": [query],
-                "selected_bkp_ids": ["book_a/K001"], "package_ref": fp, "assumptions": [],
+                "selected_knowledge_refs": ["reference_bkp/book_a/K001"], "package_ref": fp, "assumptions": [],
             },
             "review": {"summary": "用到了写作知识", "issues": [], "strengths": []},
         }, ensure_ascii=False)

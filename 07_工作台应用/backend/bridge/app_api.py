@@ -533,6 +533,52 @@ class AppApi:
         except Exception as exc:  # noqa: BLE001
             return _err(CODE_BRIDGE_INTERNAL, str(exc))
 
+    def prepare_material(self, payload: dict) -> dict:
+        """作者面通用「提纯」：UI 只传素材 id，后端按类型分派
+        （REFERENCE_WORK/RESEARCH → SourcePrepare；METHOD_SOURCE → MethodPrepare）。"""
+        try:
+            return _ok(materials_ops.prepare_material(
+                asset_id=str(payload.get("asset_id") or ""),
+            ))
+        except MaterialsError as exc:
+            return _err(CODE_MATERIALS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def distill_material(self, payload: dict) -> dict:
+        """作者面通用「蒸馏」：UI 只传素材 id，后端按类型分派
+        （REFERENCE_WORK → BookDistill；METHOD_SOURCE → MethodDistill）。"""
+        try:
+            return _ok(materials_ops.distill_material(
+                asset_id=str(payload.get("asset_id") or ""),
+            ))
+        except MaterialsError as exc:
+            return _err(CODE_MATERIALS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def get_material_distill_request(self, payload: dict) -> dict:
+        """通用蒸馏轮询：按桥请求 kind 分派到 BookDistill / MethodDistill。"""
+        try:
+            return _ok(materials_ops.get_material_distill_request(
+                request_id=str(payload.get("request_id") or ""),
+            ))
+        except MaterialsError as exc:
+            return _err(CODE_MATERIALS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def cancel_material_distill_request(self, payload: dict) -> dict:
+        """通用蒸馏取消：按桥请求 kind 分派。"""
+        try:
+            return _ok(materials_ops.cancel_material_distill_request(
+                request_id=str(payload.get("request_id") or ""),
+            ))
+        except MaterialsError as exc:
+            return _err(CODE_MATERIALS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
     # ---------------- 作品资料 / 故事地图（只读正式 Story State 投影） ----------------
 
     def get_project_data(self, payload: dict) -> dict:

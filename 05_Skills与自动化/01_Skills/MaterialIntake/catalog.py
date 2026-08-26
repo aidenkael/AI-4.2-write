@@ -88,8 +88,9 @@ PURIFICATION_STATUS = ("未处理", "可用", "需复核", "需更新", "失败"
 # 知识状态（含 Phase 2B 预留：失败 / 不适用）
 KNOWLEDGE_STATUS = ("未开始", "可用", "需更新", "失败", "不适用")
 
-# 合法类型（Phase 2B2 起 LOOSE_MATERIAL 由 inbox intake 正式产出）
-VALID_TYPES = ("REFERENCE_WORK", "RESEARCH", "LOOSE_MATERIAL", "NEEDS_REVIEW")
+# 合法类型（Phase 2B2 起 LOOSE_MATERIAL 由 inbox intake 正式产出；
+# METHOD_SOURCE = 方法/技巧类非虚构资料，教写作/编剧/导演/剪辑/叙事等可迁移创作方法）
+VALID_TYPES = ("REFERENCE_WORK", "RESEARCH", "LOOSE_MATERIAL", "METHOD_SOURCE", "NEEDS_REVIEW")
 
 
 def sha256_file(path: Path) -> str:
@@ -154,7 +155,7 @@ def validate_ledger(ledger: dict) -> list[str]:
 
 
 def find_bkp(distill_dir: Path, book_id: str) -> dict | None:
-    """查找 book_id 对应的正式 BKP（identity.json），返回证据摘要或 None。"""
+    """查找 book_id 对应的正式参考作品 BKP（bkp/identity.json），返回证据摘要或 None。"""
     if distill_dir is None or not distill_dir.exists():
         return None
     for d in sorted(distill_dir.iterdir()):
@@ -178,25 +179,59 @@ def find_bkp(distill_dir: Path, book_id: str) -> dict | None:
     return None
 
 
-def find_sp_metadata(sp_dir: Path, book_id: str) -> dict | None:
-    """按 SourcePrepare 正式合同查找 A 级提纯证据。
+def find_method(distill_dir: Path, asset_id: str) -> dict | None:
+    """查找 asset_id 对应的正式方法知识包（method/identity.json），返回证据摘要或 None。
 
-    合同路径：06_工作区/SourcePrepare/<book_id>_<书名>/metadata.json。
+    合同：02_素材知识库/<asset_id>_<名称>/method/identity.json，
+    schema_version = gowrite_method_knowledge/v1；
+    只有 schema_status 以 FINALIZED 开头（FINALIZED_RETRIEVAL_READY）才是可用证据。
+    """
+    if distill_dir is None or not distill_dir.exists():
+        return None
+    for d in sorted(distill_dir.iterdir()):
+        if not d.is_dir() or not d.name.startswith(asset_id + "_"):
+            continue
+        identity = d / "method" / "identity.json"
+        if not identity.exists():
+            return None
+        try:
+            data = json.loads(identity.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if data.get("schema_version") != "gowrite_method_knowledge/v1":
+            return None
+        if str(data.get("source_id") or "") != asset_id:
+            return None
+        schema_status = str(data.get("schema_status", ""))
+        ss = data.get("source_snapshot", {}) or {}
+        return {
+            "finalized": schema_status.startswith("FINALIZED"),
+            "source_sha256": ss.get("source_sha256") or "",
+            "dir_rel": f"{DISTILL_DIR_NAME}/{d.name}",
+            "author": data.get("author") or "",
+        }
+    return None
+
+
+def _find_prep_metadata(prepare_dir: Path, asset_id: str, id_key: str) -> dict | None:
+    """按提纯/预处理正式合同查找 A 级证据（SourcePrepare / MethodPrepare 共用）。
+
+    合同路径：<prepare_dir>/<asset_id>_<名称>/metadata.json。
     规则：
-      - 目录名前缀 <book_id>_ 恰好匹配 1 个 → 读取该目录 metadata.json；
+      - 目录名前缀 <asset_id>_ 恰好匹配 1 个 → 读取该目录 metadata.json；
       - 0 个 → None（无 A 级证据）；
       - >1 个 → RuntimeError（目录歧义，不静默选第一个）；
-      - metadata.book_id 与 book_id 不一致 → RuntimeError（拒绝脏数据）。
+      - metadata[id_key] 与 asset_id 不一致 → RuntimeError（拒绝脏数据）。
     """
-    if sp_dir is None or not sp_dir.exists():
+    if prepare_dir is None or not prepare_dir.exists():
         return None
-    matches = [d for d in sorted(sp_dir.iterdir())
-               if d.is_dir() and d.name.startswith(book_id + "_")]
+    matches = [d for d in sorted(prepare_dir.iterdir())
+               if d.is_dir() and d.name.startswith(asset_id + "_")]
     if not matches:
         return None
     if len(matches) > 1:
         raise RuntimeError(
-            f"SourcePrepare 目录歧义: {book_id} 匹配多个目录 {[d.name for d in matches]}")
+            f"准备目录歧义: {asset_id} 匹配多个目录 {[d.name for d in matches]}")
     m = matches[0] / "metadata.json"
     if not m.exists():
         return None
@@ -204,12 +239,28 @@ def find_sp_metadata(sp_dir: Path, book_id: str) -> dict | None:
         data = json.loads(m.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    meta_book_id = data.get("book_id")
-    if meta_book_id and meta_book_id != book_id:
+    meta_id = data.get(id_key)
+    if meta_id and meta_id != asset_id:
         raise RuntimeError(
-            f"SourcePrepare metadata book_id 不一致: {matches[0].name} 内 "
-            f"book_id={meta_book_id!r} != {book_id!r}")
+            f"准备 metadata {id_key} 不一致: {matches[0].name} 内 "
+            f"{id_key}={meta_id!r} != {asset_id!r}")
     return data
+
+
+def find_sp_metadata(sp_dir: Path, book_id: str) -> dict | None:
+    """按 SourcePrepare 正式合同查找 A 级提纯证据。
+
+    合同路径：06_工作区/SourcePrepare/<book_id>_<书名>/metadata.json。
+    """
+    return _find_prep_metadata(sp_dir, book_id, "book_id")
+
+
+def find_mp_metadata(mp_dir: Path, asset_id: str) -> dict | None:
+    """按 MethodPrepare 正式合同查找 A 级方法提纯证据。
+
+    合同路径：06_工作区/MethodPrepare/<asset_id>_<名称>/metadata.json。
+    """
+    return _find_prep_metadata(mp_dir, asset_id, "asset_id")
 
 
 def content_fingerprint(files: list) -> str:
@@ -235,8 +286,11 @@ def legacy_path_fingerprint(files: list) -> str:
 
 def derive_purification(sp_meta: dict | None, bkp: dict | None, file_shas: set,
                         input_fp: str | None = None, prev: dict | None = None,
-                        legacy_fp: str | None = None) -> dict:
+                        legacy_fp: str | None = None,
+                        evidence_prefix: str = "sourceprepare") -> dict:
     """提纯状态推导（Phase 2B1.1 持久化版；Phase 2B1.2 指纹与路径解耦）。
+    evidence_prefix 区分证据来源（sourceprepare = REFERENCE_WORK/RESEARCH；
+    methodprepare = METHOD_SOURCE），推导规则完全一致。
 
     优先级：
       1. 当前 SourcePrepare metadata（存在时）= 最新处理事实
@@ -257,35 +311,35 @@ def derive_purification(sp_meta: dict | None, bkp: dict | None, file_shas: set,
     不保存时间戳 / SourcePrepare 正文。
 
     evidence 语义：
-      - sourceprepare_metadata / sourceprepare_metadata_*：由当前 SP metadata 直接推导
-      - sourceprepare_record / sourceprepare_record_input_changed：ledger 持久 record 结算/判定
-      - bkp_source_snapshot / bkp_source_sha_mismatch：BKP 历史恢复证据
+      - <prefix>_metadata / <prefix>_metadata_*：由当前准备 metadata 直接推导
+      - <prefix>_record / <prefix>_record_input_changed：ledger 持久 record 结算/判定
+      - bkp_source_snapshot / bkp_source_sha_mismatch：BKP 历史恢复证据（仅参考作品分支）
     """
-    # 1. 当前 SourcePrepare metadata = 最新处理事实
+    # 1. 当前准备 metadata = 最新处理事实（SourcePrepare / MethodPrepare）
     if sp_meta is not None:
         sp_status = sp_meta.get("status")
         sel = sp_meta.get("selected_source")
         sha = sel.get("sha256") if isinstance(sel, dict) else None
         if not sp_status:
-            return {"status": "需复核", "evidence": "sourceprepare_metadata_incomplete"}
+            return {"status": "需复核", "evidence": f"{evidence_prefix}_metadata_incomplete"}
         if sp_status not in ("PASS", "REVIEW", "FAIL"):
-            return {"status": "需复核", "evidence": "sourceprepare_metadata_unknown_status"}
+            return {"status": "需复核", "evidence": f"{evidence_prefix}_metadata_unknown_status"}
         if not sha:
             if sp_status == "FAIL":
-                rec = {"status": "失败", "evidence": "sourceprepare_metadata"}
+                rec = {"status": "失败", "evidence": f"{evidence_prefix}_metadata"}
                 if input_fp is not None:
                     rec["input_fingerprint"] = input_fp
                 return rec
-            return {"status": "需复核", "evidence": "sourceprepare_metadata_incomplete"}
+            return {"status": "需复核", "evidence": f"{evidence_prefix}_metadata_incomplete"}
         if sha not in file_shas:
-            # SP 结果不属于当前素材 → 需更新；保留上次已结算 record（如有）
+            # 准备结果不属于当前素材 → 需更新；保留上次已结算 record（如有）
             if isinstance(prev, dict) and prev.get("input_fingerprint"):
-                return {"status": "需更新", "evidence": "sourceprepare_metadata_sha_mismatch",
+                return {"status": "需更新", "evidence": f"{evidence_prefix}_metadata_sha_mismatch",
                         "source_sha256": prev.get("source_sha256"),
                         "input_fingerprint": prev["input_fingerprint"]}
-            return {"status": "需更新", "evidence": "sourceprepare_metadata_sha_mismatch"}
+            return {"status": "需更新", "evidence": f"{evidence_prefix}_metadata_sha_mismatch"}
         status = {"PASS": "可用", "REVIEW": "需复核", "FAIL": "失败"}[sp_status]
-        rec = {"status": status, "evidence": "sourceprepare_metadata", "source_sha256": sha}
+        rec = {"status": status, "evidence": f"{evidence_prefix}_metadata", "source_sha256": sha}
         if input_fp is not None:
             rec["input_fingerprint"] = input_fp
         return rec
@@ -299,17 +353,17 @@ def derive_purification(sp_meta: dict | None, bkp: dict | None, file_shas: set,
             if legacy_fp is not None and prev_fp == legacy_fp \
                     and prev.get("status") in ("可用", "需复核", "失败"):
                 return {"status": prev["status"],
-                        "evidence": prev.get("evidence") or "sourceprepare_record",
+                        "evidence": prev.get("evidence") or f"{evidence_prefix}_record",
                         "source_sha256": prev.get("source_sha256"),
                         "input_fingerprint": input_fp}
-            rec = {"status": "需更新", "evidence": "sourceprepare_record_input_changed",
+            rec = {"status": "需更新", "evidence": f"{evidence_prefix}_record_input_changed",
                    "input_fingerprint": prev_fp}
             if prev.get("source_sha256"):
                 rec["source_sha256"] = prev["source_sha256"]
             return rec
         if prev.get("status") in ("可用", "需复核", "失败"):
             rec = {"status": prev["status"],
-                   "evidence": prev.get("evidence") or "sourceprepare_record",
+                   "evidence": prev.get("evidence") or f"{evidence_prefix}_record",
                    "input_fingerprint": prev_fp}
             if prev.get("source_sha256"):
                 rec["source_sha256"] = prev["source_sha256"]
@@ -331,8 +385,10 @@ def derive_purification(sp_meta: dict | None, bkp: dict | None, file_shas: set,
     return {"status": "未处理", "evidence": None}
 
 
-def derive_knowledge(bkp: dict | None, file_shas: set) -> dict:
-    """知识状态推导：无 FINALIZED BKP → 未开始；FINALIZED 且 SHA 匹配 → 可用；否则 → 需更新。"""
+def derive_knowledge(package_evidence: dict | None, file_shas: set) -> dict:
+    """知识状态推导（参考作品 BKP / 方法知识包共用）：无 FINALIZED 知识包 → 未开始；
+    FINALIZED 且 SHA 匹配 → 可用；否则 → 需更新。"""
+    bkp = package_evidence
     if bkp is None or not bkp["finalized"]:
         return {"status": "未开始"}
     base = {"status": "可用" if bkp["source_sha256"] in file_shas else "需更新",
@@ -340,7 +396,8 @@ def derive_knowledge(bkp: dict | None, file_shas: set) -> dict:
     return base
 
 
-def refresh_ledger(ledger: dict, mat_dir: Path, distill_dir: Path, sp_dir: Path) -> tuple[dict, dict]:
+def refresh_ledger(ledger: dict, mat_dir: Path, distill_dir: Path, sp_dir: Path,
+                   mp_dir: Path | None = None) -> tuple[dict, dict]:
     """基于磁盘事实与证据刷新 ledger；返回 (new_ledger, report)。
 
     report = {"missing": [...], "unregistered": [...]}
@@ -367,14 +424,24 @@ def refresh_ledger(ledger: dict, mat_dir: Path, distill_dir: Path, sp_dir: Path)
         file_shas = {f["sha256"] for f in new_files}
         input_fp = content_fingerprint(new_files)
         legacy_fp = legacy_path_fingerprint(new_files)
-        bkp = find_bkp(distill_dir, a["id"])
-        sp_meta = find_sp_metadata(sp_dir, a["id"])
-        # LOOSE_MATERIAL：提纯不适用（Phase 2B2 正式类型）。即使无任何证据也不退回未处理。
-        if a["type"] == "LOOSE_MATERIAL":
-            purif = {"status": "不适用", "evidence": None}
+        if a["type"] == "METHOD_SOURCE":
+            # 方法/技巧资料：MethodPrepare 提纯证据 + method/ 知识包证据（与参考作品分支平行）
+            method = find_method(distill_dir, a["id"])
+            mp_meta = find_mp_metadata(mp_dir, a["id"])
+            purif = derive_purification(mp_meta, method, file_shas, input_fp,
+                                        a.get("purification"), legacy_fp,
+                                        evidence_prefix="methodprepare")
+            knowledge = derive_knowledge(method, file_shas)
         else:
-            purif = derive_purification(sp_meta, bkp, file_shas, input_fp,
-                                        a.get("purification"), legacy_fp)
+            bkp = find_bkp(distill_dir, a["id"])
+            sp_meta = find_sp_metadata(sp_dir, a["id"])
+            # LOOSE_MATERIAL：提纯不适用（Phase 2B2 正式类型）。即使无任何证据也不退回未处理。
+            if a["type"] == "LOOSE_MATERIAL":
+                purif = {"status": "不适用", "evidence": None}
+            else:
+                purif = derive_purification(sp_meta, bkp, file_shas, input_fp,
+                                            a.get("purification"), legacy_fp)
+            knowledge = derive_knowledge(bkp, file_shas)
         new_assets.append({
             "id": a["id"],
             "name": a["name"],
@@ -384,7 +451,7 @@ def refresh_ledger(ledger: dict, mat_dir: Path, distill_dir: Path, sp_dir: Path)
             "notes": a.get("notes") or "",
             "files": new_files,
             "purification": purif,
-            "knowledge": derive_knowledge(bkp, file_shas),
+            "knowledge": knowledge,
         })
 
     # containers：结构保留；original.sha256 以磁盘扫描为准重算（机器事实）。
@@ -503,6 +570,7 @@ def render_index_md(ledger: dict) -> str:
 
     sections = [
         ("## 参考作品（REFERENCE_WORK）", by_type.get("REFERENCE_WORK", [])),
+        ("## 方法/技巧资料（METHOD_SOURCE）", by_type.get("METHOD_SOURCE", [])),
         ("## 研究资料（RESEARCH）", by_type.get("RESEARCH", [])),
         ("## 零散素材（LOOSE_MATERIAL）", by_type.get("LOOSE_MATERIAL", [])),
         ("## 待确认（NEEDS_REVIEW）", by_type.get("NEEDS_REVIEW", [])),
@@ -523,6 +591,7 @@ def refresh_and_render(root: Path, check_only: bool = False) -> int:
     mat_dir = root / MATERIAL_DIR_NAME
     distill_dir = root / DISTILL_DIR_NAME
     sp_dir = root / "06_工作区" / "SourcePrepare"
+    mp_dir = root / "06_工作区" / "MethodPrepare"
     ledger_path = mat_dir / LEDGER_FILENAME
 
     if not ledger_path.exists():
@@ -531,7 +600,7 @@ def refresh_and_render(root: Path, check_only: bool = False) -> int:
         return 2
 
     ledger = load_ledger(ledger_path)
-    new_ledger, report = refresh_ledger(ledger, mat_dir, distill_dir, sp_dir)
+    new_ledger, report = refresh_ledger(ledger, mat_dir, distill_dir, sp_dir, mp_dir)
 
     if report["missing"]:
         print(f"[catalog] MISSING_REGISTERED_FILE × {len(report['missing'])}：")

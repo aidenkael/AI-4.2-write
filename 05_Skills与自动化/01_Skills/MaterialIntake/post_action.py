@@ -32,6 +32,7 @@ from pathlib import Path
 RAW_SOURCE_SUFFIXES = (".epub", ".txt", ".pdf", ".mobi", ".azw3", ".zip")
 NEVER_STAGE_MARKERS = (
     "06_工作区/SourcePrepare/",
+    "06_工作区/MethodPrepare/",
     "collection_manifest.json",
 )
 # 01_原始素材 下允许进 Git 的 tracked 元数据（raw 文件由 .gitignore + 第二道过滤双重排除）

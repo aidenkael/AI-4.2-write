@@ -63,7 +63,7 @@ def create_demo(output: Path) -> dict:
         brief_id="plan-brief-001", context_id="plan-context-001", candidate_id="plan-001",
         semantic_interpretation={
             "knowledge_needs": [],
-            "selected_bkp_ids": [],
+            "selected_knowledge_refs": [],
             "deliberate_open_space": ["对抗公开的具体方式", "谁先掌握对方秘密", "关系归宿"],
             "assumptions": ["前半程的具体事件顺序尚未获得作者确认。"],
         },
@@ -87,7 +87,7 @@ def main() -> None:
         raise SystemExit(2)
     print(f"demo created: {args.demo_dir}")
     print(f"retrieval status: {result['context']['retrieval']['status']}")
-    print(f"selected BKP hits: {len(result['context']['selected_bkp_hits'])}")
+    print(f"selected knowledge hits: {len(result['context']['selected_knowledge_hits'])}")
     print(f"plan candidate status: {result['candidate']['status']}")
     print("author decision required before any planning enters approved_plan")
 

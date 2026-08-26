@@ -83,14 +83,22 @@ def score_candidates(query: str, items: list, top_k: int = 15) -> list:
         if dim_match > 0:
             score += 0.3 * dim_match
 
-        # Knowledge level priority:
-        # Pattern > Deep Dive Pattern > Observation > Deep Dive Knowledge > Inference
+        # Knowledge level priority（按知识等级打分；绝不按 source_kind 硬编码赢家，
+        # 参考 BKP / 方法知识 / 已验证知识的相关命中可在同一个包内共存）：
+        # Pattern > Deep Dive Pattern > 已验证知识 > Observation > Deep Dive Knowledge
+        # > 方法原则/程序/检查单 > Inference / 方法诊断·失效模式 > Boundary(负)
         level_bonus = {
             "Work-specific Pattern": 0.2,
             "Deep Dive Pattern": 0.2,
+            "已验证知识": 0.15,
             "Observation": 0.1,
             "Deep Dive Observation": 0.1,
+            "方法原则": 0.1,
+            "方法程序": 0.1,
+            "方法检查单": 0.1,
             "Deep Dive Knowledge": 0.05,
+            "方法诊断": 0.05,
+            "方法失效模式": 0.05,
             "Inference": 0.0,
             "Boundary": -0.1,
         }

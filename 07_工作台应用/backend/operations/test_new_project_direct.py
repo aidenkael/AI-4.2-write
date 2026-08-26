@@ -23,7 +23,7 @@ from config.settings import SettingsStore, AppSettings  # noqa: E402
 VALID_RESULT = {
     "semantic_interpretation": {
         "scope": "story_design", "objective": "设计方向。",
-        "knowledge_needs": [], "selected_bkp_ids": [], "package_ref": "",
+        "knowledge_needs": [], "selected_knowledge_refs": [], "package_ref": "",
         "assumptions": [],
     },
     "model_output": {
@@ -155,7 +155,9 @@ def test_direct_needs_retrieval_exact_package(isolated, monkeypatch):
     package = types.SimpleNamespace(
         status="OK",
         hits=[types.SimpleNamespace(
-            rank=1, book_id="book_a", book_title="book_a", source_anchor="K001",
+            rank=1, source_kind="reference_bkp", source_id="book_a", source_title="book_a",
+            maturity="source_bound", selection_ref="reference_bkp/book_a/K001",
+            source_anchor="K001",
             source="knowledge/cards.md", statement="A 卡", scope="范围", boundary="边界",
             confidence="中", evidence=["chapters/x.md#L1"], relevance_reason="test",
         )],
@@ -171,7 +173,7 @@ def test_direct_needs_retrieval_exact_package(isolated, monkeypatch):
         out = dict(VALID_RESULT)
         out["semantic_interpretation"] = dict(out["semantic_interpretation"])
         out["semantic_interpretation"]["knowledge_needs"] = [query]
-        out["semantic_interpretation"]["selected_bkp_ids"] = ["book_a/K001"]
+        out["semantic_interpretation"]["selected_knowledge_refs"] = ["reference_bkp/book_a/K001"]
         out["semantic_interpretation"]["package_ref"] = fp
         return AgentResult(status="completed", output=json.dumps(out, ensure_ascii=False), agent="fake")
 

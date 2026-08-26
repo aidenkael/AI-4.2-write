@@ -26,8 +26,8 @@ import {
   type ReactNode,
 } from 'react'
 import {
-  cancelBookDistillRequest,
   cancelMaterialClassifyRequest,
+  cancelMaterialDistillRequest,
   cancelNewProjectRequest,
   cancelReviewRequest,
   cancelStoryPlanRequest,
@@ -37,8 +37,8 @@ import {
   confirmStoryPlan,
   confirmStoryWrite,
   getActiveAuthorOperation,
-  getBookDistillRequest,
   getMaterialClassifyRequest,
+  getMaterialDistillRequest,
   getNewProjectRequest,
   getReviewRequest,
   getStoryPlanRequest,
@@ -47,7 +47,7 @@ import {
   prepareReview,
   prepareStoryPlan,
   prepareStoryWrite,
-  runBookDistill,
+  distillMaterial,
   type BookDistillRequestStatus,
   type ClassifyRequestStatus,
   type ConfirmResult,
@@ -85,7 +85,7 @@ export type TaskPayload =
   | { kind: 'story_write'; project_id: string; author_input: string }
   | { kind: 'review'; project_id: string; chapter_number?: number }
   | { kind: 'material_classify' }
-  | { kind: 'book_distill'; asset_id: string }
+  | { kind: 'material_distill'; asset_id: string }
 
 interface AuthorTaskController {
   /** 当前任务（无任务为 null；failed 保留到页面消费或重试）。 */
@@ -114,7 +114,7 @@ const pollers: Record<AuthorTaskKind, (requestId: string) => Promise<PollStatus>
   story_write: async (rid) => (await getStoryWriteRequest(rid)) as StoryWriteRequestStatus,
   review: async (rid) => (await getReviewRequest(rid)) as ReviewRequestStatus,
   material_classify: async (rid) => (await getMaterialClassifyRequest(rid)) as ClassifyRequestStatus,
-  book_distill: async (rid) => (await getBookDistillRequest(rid)) as BookDistillRequestStatus,
+  material_distill: async (rid) => (await getMaterialDistillRequest(rid)) as BookDistillRequestStatus,
 }
 
 const cancellers: Record<AuthorTaskKind, (requestId: string) => Promise<unknown>> = {
@@ -123,7 +123,7 @@ const cancellers: Record<AuthorTaskKind, (requestId: string) => Promise<unknown>
   story_write: cancelStoryWriteRequest,
   review: cancelReviewRequest,
   material_classify: cancelMaterialClassifyRequest,
-  book_distill: cancelBookDistillRequest,
+  material_distill: cancelMaterialDistillRequest,
 }
 
 const confirmers: Partial<Record<AuthorTaskKind, (task: AuthorTask) => Promise<unknown>> | Record<AuthorTaskKind, ((task: AuthorTask) => Promise<unknown>) | null>> = {
@@ -141,7 +141,7 @@ const confirmers: Partial<Record<AuthorTaskKind, (task: AuthorTask) => Promise<u
     }),
   review: null,
   material_classify: null,
-  book_distill: null,
+  material_distill: null,
 }
 
 export function AuthorTaskCoordinatorProvider({ children }: { children: ReactNode }) {
@@ -317,8 +317,8 @@ export function AuthorTaskCoordinatorProvider({ children }: { children: ReactNod
           case 'material_classify':
             prepared = await classifyMaterialInbox()
             break
-          case 'book_distill':
-            prepared = await runBookDistill(payload.asset_id)
+          case 'material_distill':
+            prepared = await distillMaterial(payload.asset_id)
             break
         }
         const interactive = prepared.execution_mode !== 'direct'
@@ -336,10 +336,10 @@ export function AuthorTaskCoordinatorProvider({ children }: { children: ReactNod
           },
           result: null,
           error: null,
-          meta: kind === 'book_distill' ? { asset_id: payload.asset_id } : null,
+          meta: kind === 'material_distill' ? { asset_id: payload.asset_id } : null,
         }
-        // material_classify / book_distill 同步完成（无 request_id）时直接进入候选
-        if (kind === 'material_classify' || kind === 'book_distill') {
+        // material_classify / material_distill 同步完成（无 request_id）时直接进入候选
+        if (kind === 'material_classify' || kind === 'material_distill') {
           const res = prepared as unknown as { status?: string; request_id?: string | null }
           if (res.status === 'ready' || res.status === 'completed') {
             next.status = 'candidate'

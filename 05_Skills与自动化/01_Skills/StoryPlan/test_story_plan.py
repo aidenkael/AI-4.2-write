@@ -353,7 +353,7 @@ class StoryPlanContractTest(unittest.TestCase):
         context = self.context()  # retrieval raises if called
         self.assertEqual(context["status"], "CURRENT")
         self.assertEqual(context["retrieval"]["status"], "SKIPPED_NO_KNOWLEDGE_NEED")
-        self.assertEqual(context["selected_bkp_hits"], [])
+        self.assertEqual(context["selected_knowledge_hits"], [])
         self.assertEqual(context["planning_target"]["target_id"], "target.front-half")
 
     # 11 + 12. 非固定层级 scope 合法；runtime 不要求五层树
@@ -399,7 +399,7 @@ class StoryPlanContractTest(unittest.TestCase):
                 author_planning_question="先规划前半程。",
                 planning_target=TARGET, planning_sources=CONFIRMED_SOURCES,
                 brief_id="pb", context_id="pc", candidate_id="pp",
-                semantic_interpretation={"knowledge_needs": [], "selected_bkp_ids": []},
+                semantic_interpretation={"knowledge_needs": [], "selected_knowledge_refs": []},
                 model_output={"proposal": "候选"},
                 retrieval=fake_retrieve_must_not_be_called,
             )

@@ -12,23 +12,23 @@
   → UI 展示 → 作者明确确认 → approved_plan writeback → 刷新概览
 
 知识选择绑定（Knowledge Selection Binding，当前 P0 真实使用阻塞）：
-- Agent 任务不再要求模型在见到检索结果前编造/选择 BKP id。
-- knowledge_needs = []：不调用 KnowledgeRetrieve，不要求快照，selected BKP
-  为空，规划正常继续，0 张 BKP 是一等合法结果。
+- Agent 任务不再要求模型在见到检索结果前编造/选择知识 ref。
+- knowledge_needs = []：不调用 KnowledgeRetrieve，不要求快照，选择知识为空，
+  规划正常继续，0 条知识是一等合法结果。
 - knowledge_needs 非空：Agent 在本次 /gowrite 执行内运行
   `retrieval_snapshot.py "<query>"` —— 这是整个流程中**唯一一次**确定性
-  KnowledgeRetrieve 执行。该调用同时：
-    a) 把候选（含 book_id/source_anchor/scope/boundary/provenance 与
-       package_fingerprint）返回给模型；
+  KnowledgeRetrieve 执行（统一多源：参考作品 BKP / 方法知识 / 已验证知识混合在同一个包内，模型不选择存储）。该调用同时：
+    a) 把候选（含 selection_ref = source_kind/source_id/source_anchor、
+       scope/boundary/provenance 与 package_fingerprint）返回给模型；
     b) 把精确序列化 RetrievalPackage 写入请求级快照
        （<planning_dir>/retrieval/package.json，非权威、可删除、随临时
        planning 生命周期清理），并绑定 request_id/project_id/
        planning_turn_id/query/指纹。
-  模型只从该显示包中选择 scoped ref（book_id/source_anchor），并在最终
-  JSON 中回显 package_fingerprint。
+  模型只从该显示包中选择 selection_ref，并在最终 JSON 中回显 package_fingerprint。
 - Go Write finalize **绝不再次执行 KnowledgeRetrieve**：只读取已存在的快照，
   校验请求/项目/planning turn/查询/包身份，把反序列化后的包绑定给 Context。
   快照缺失、无法解析、身份或查询不匹配 → 拒绝本次知识选择（整轮 failed）。
+  旧版快照不兼容，fail closed。
 
 约束（遵守现有冻结合同）：
 - 不修改 StoryPlan / StoryDesign / ProjectWorkspace；不创建空壳规划。
@@ -109,12 +109,12 @@ _PLANNING_ROOT = (
 # 它同时把候选返回给模型，并把精确序列化 RetrievalPackage 写入请求级快照。
 _RETRIEVAL_SCRIPT = Path(__file__).resolve().parent / "retrieval_snapshot.py"
 
-# 单次规划允许注入的最大 BKP 数量（与 E1 build_context 默认上限一致）
-_MAX_BKP_HITS = 3
+# 单次规划允许注入的最大知识条数（与 E1 build_context 默认上限一致）
+_MAX_KNOWLEDGE_HITS = 3
 
 # Agent 任务模板：两阶段。第一阶段语义分析；第二阶段（仅 knowledge_needs
-# 非空）运行确定性检索命令查看真实候选，然后从该候选中选择 scoped ref。
-# 模型不得在见到检索结果前编造/选择 BKP id。
+# 非空）运行确定性检索命令查看真实候选，然后从该候选中选择 selection_ref。
+# 模型不得在见到检索结果前编造/选择知识 ref。
 _AGENT_TASK_TEMPLATE = """你是 Go Write 的规划执行器。必须严格按下列顺序执行：先完成语义分析；若 knowledge_needs 非空，必须在生成最终 JSON 之前先用本地命令/工具执行下面给出的检索命令并读取其结果；完成检索与选择后，才输出最终 JSON。本任务不是纯文本生成任务；中间的工具调用属于任务执行过程，不属于最终回复。
 
 流程分两个阶段：
@@ -126,10 +126,10 @@ _AGENT_TASK_TEMPLATE = """你是 Go Write 的规划执行器。必须严格按�
 若 knowledge_needs 非空，在生成最终 JSON 之前，你必须先用可用的本地命令/工具执行以下确定性只读检索命令：
   python {retrieval_command} "<query>"
 其中 <query> 是把你第一阶段列出的全部 knowledge_needs 用中文分号（；）连接成的单个字符串（直接替换命令中的 <query> 占位符）。
-该命令会把本次检索包（RetrievalPackage）写入当前请求的临时快照（不改动任何作品或业务文件），然后向终端输出一个 JSON，其中 package_fingerprint 是本次检索包的身份指纹，package.hits 数组内每个候选项含 book_id、source_anchor、statement、scope、boundary、evidence 等字段；每个候选项的 selection_ref 为 "book_id/source_anchor"（例如 book_a/K001）。
-你必须读取该命令实际输出的 package：只从中选择 0 到 {max_bkp_hits} 个 selection_ref，填入 semantic_interpretation.selected_bkp_ids；并把命令输出的 package_fingerprint 原样填入 semantic_interpretation.package_ref。
-严禁编造命令输出中不存在的 selection_ref 或 package_fingerprint；若没有合适的候选，selected_bkp_ids 保持空列表（0 张 BKP 是合法结果）。
-若 knowledge_needs 为空：不要运行检索命令，selected_bkp_ids 必须为 []，package_ref 必须为空字符串 ""。
+该命令会把本次检索包（RetrievalPackage，混合参考作品知识/方法知识/已验证知识）写入当前请求的临时快照（不改动任何作品或业务文件），然后向终端输出一个 JSON，其中 package_fingerprint 是本次检索包的身份指纹，package.hits 数组内每个候选项含 selection_ref、source_kind、source_id、source_title、statement、scope、boundary、evidence 等字段；selection_ref 形如 "<source_kind>/<source_id>/<source_anchor>"（例如 reference_bkp/book_a/K001、method_source/book_0138/M0003、validated_knowledge/pkg_opening_hook/V0001）。
+你必须读取该命令实际输出的 package：只从中选择 0 到 {max_knowledge_hits} 个 selection_ref，填入 semantic_interpretation.selected_knowledge_refs；并把命令输出的 package_fingerprint 原样填入 semantic_interpretation.package_ref。
+严禁编造命令输出中不存在的 selection_ref 或 package_fingerprint；若没有合适的候选，selected_knowledge_refs 保持空列表（0 条知识是合法结果）。
+若 knowledge_needs 为空：不要运行检索命令，selected_knowledge_refs 必须为 []，package_ref 必须为空字符串 ""。
 
 最终回复
 最终回复必须只有合法 JSON 对象（不要任何额外文字、不要 markdown 代码块标记）。结构必须如下：
@@ -138,7 +138,7 @@ _AGENT_TASK_TEMPLATE = """你是 Go Write 的规划执行器。必须严格按�
   "semantic_interpretation": {{
     "objective": "本次规划的目标（一句话）",
     "knowledge_needs": [],
-    "selected_bkp_ids": [],
+    "selected_knowledge_refs": [],
     "package_ref": "",
     "assumptions": ["AI 解读中的假设，作者尚未确认"],
     "deliberate_open_space": ["作者明确保留自由的部分"]
@@ -219,7 +219,7 @@ def _retrieve_package(query: str) -> Any:
 
 
 def _package_snapshot_dict(package: Any) -> dict[str, Any]:
-    """把 RetrievalPackage 序列化为可比较、可重建的字典（非权威记录）。"""
+    """把 RetrievalPackage 序列化为可比较、可重建的字典（非权威记录；通用身份）。"""
     if hasattr(package, "to_dict"):
         return package.to_dict()
     return {
@@ -227,8 +227,12 @@ def _package_snapshot_dict(package: Any) -> dict[str, Any]:
         "candidate_count": getattr(package, "candidate_count", 0),
         "hits": [
             {
-                "book_id": getattr(hit, "book_id", ""),
-                "book_title": getattr(hit, "book_title", ""),
+                "selection_ref": getattr(hit, "selection_ref", "") or (
+                    f"{getattr(hit, 'source_kind', '')}/{getattr(hit, 'source_id', '')}/"
+                    f"{getattr(hit, 'source_anchor', '')}"),
+                "source_kind": getattr(hit, "source_kind", ""),
+                "source_id": getattr(hit, "source_id", ""),
+                "source_title": getattr(hit, "source_title", ""),
                 "source_anchor": getattr(hit, "source_anchor", ""),
                 "source": getattr(hit, "source", ""),
                 "statement": getattr(hit, "statement", ""),
@@ -294,7 +298,7 @@ def _write_snapshot(
     在模型选择候选之前写入。
     """
     snapshot = {
-        "schema": "gowrite_retrieval_snapshot/v1",
+        "schema": "gowrite_retrieval_snapshot/v2",
         "request_id": request_id,
         "project_id": project_id,
         "planning_turn_id": planning_turn_id,
@@ -357,9 +361,14 @@ def execute_request_scoped_retrieval(query: str, request_id: str) -> Any:
             "query": query[:200],
             "candidate_count": getattr(package, "candidate_count", len(getattr(package, "hits", []))),
             "refs": [
-                f"{getattr(hit, 'book_id', '')}/{getattr(hit, 'source_anchor', '')}"
+                getattr(hit, "selection_ref", "") or (
+                    f"{getattr(hit, 'source_kind', '')}/{getattr(hit, 'source_id', '')}/"
+                    f"{getattr(hit, 'source_anchor', '')}")
                 for hit in getattr(package, "hits", [])
             ],
+            "source_kinds": sorted({
+                getattr(hit, "source_kind", "") for hit in getattr(package, "hits", [])
+            }),
         },
     )
     return package
@@ -376,6 +385,8 @@ def _load_snapshot(planning_dir: Path) -> tuple[dict[str, Any] | None, str | Non
         return None, "检索包快照无法解析（已被篡改或损坏）。"
     if not isinstance(data, dict) or not isinstance(data.get("package"), dict):
         return None, "检索包快照结构无效（缺少 package 对象）。"
+    if data.get("schema") != "gowrite_retrieval_snapshot/v2":
+        return None, "检索包快照为不兼容的旧版格式，已拒绝（请重新发起本轮任务）。"
     return data, None
 
 
@@ -410,12 +421,18 @@ def _validate_snapshot(
 def _package_from_snapshot(snapshot: dict[str, Any]) -> Any:
     """把快照中的序列化包反序列化为 E1 gate 可消费的包对象（不执行任何检索）。"""
     pkg = snapshot["package"]
-    hits = [
-        types.SimpleNamespace(
+    hits = []
+    for h in pkg.get("hits", []):
+        source_kind = h.get("source_kind", "")
+        source_id = h.get("source_id", "")
+        source_anchor = h.get("source_anchor", "")
+        hits.append(types.SimpleNamespace(
             rank=h.get("rank", 0),
-            book_id=h.get("book_id", ""),
-            book_title=h.get("book", h.get("book_title", "")),
-            source_anchor=h.get("source_anchor", ""),
+            selection_ref=h.get("selection_ref") or f"{source_kind}/{source_id}/{source_anchor}",
+            source_kind=source_kind,
+            source_id=source_id,
+            source_title=h.get("source_title", h.get("book", "")),
+            source_anchor=source_anchor,
             source=h.get("source", ""),
             statement=h.get("statement", ""),
             scope=h.get("scope", None),
@@ -423,9 +440,7 @@ def _package_from_snapshot(snapshot: dict[str, Any]) -> Any:
             confidence=h.get("confidence", None),
             evidence=list(h.get("evidence", []) or []),
             relevance_reason=h.get("relevance_reason", ""),
-        )
-        for h in pkg.get("hits", [])
-    ]
+        ))
     return types.SimpleNamespace(
         status=pkg.get("status", "OK"),
         gaps=list(pkg.get("gaps", []) or []),
@@ -480,9 +495,9 @@ def _parse_agent_result(output: str) -> dict[str, Any]:
     if "knowledge_needs" not in si:
         raise StoryPlanningError("Agent 输出缺少 semantic_interpretation.knowledge_needs（应为列表）。")
     _validate_str_list(si["knowledge_needs"], "semantic_interpretation.knowledge_needs")
-    if "selected_bkp_ids" not in si:
-        raise StoryPlanningError("Agent 输出缺少 semantic_interpretation.selected_bkp_ids（应为列表）。")
-    _validate_str_list(si["selected_bkp_ids"], "semantic_interpretation.selected_bkp_ids")
+    if "selected_knowledge_refs" not in si:
+        raise StoryPlanningError("Agent 输出缺少 semantic_interpretation.selected_knowledge_refs（应为列表）。")
+    _validate_str_list(si["selected_knowledge_refs"], "semantic_interpretation.selected_knowledge_refs")
     if "package_ref" not in si or not isinstance(si.get("package_ref"), str):
         raise StoryPlanningError(
             "Agent 输出缺少 semantic_interpretation.package_ref（应为字符串：本次检索包身份指纹）。"
@@ -623,7 +638,7 @@ def prepare_story_plan(project_id: str, author_question: str) -> dict[str, Any]:
         # 显式 --request 绑定：Direct 请求绝不进入 active.json，检索命令必须
         # 按请求 id 定位（与 StoryWrite/Review/NewProject 同一 P0 精确绑定）
         retrieval_command=f'"{_RETRIEVAL_SCRIPT}" --request {request_id}',
-        max_bkp_hits=_MAX_BKP_HITS,
+        max_knowledge_hits=_MAX_KNOWLEDGE_HITS,
     )
 
     # 5. Direct 模式：显式配置校验（无有效配置 → 稳定报错，绝不回退）
@@ -854,7 +869,7 @@ def _finalize_story_plan(
     #      请求级快照 → 校验请求/项目/planning turn/查询/包指纹 →
     #      反序列化该包并绑定给 Context。finalize **绝不再次执行检索**。
     knowledge_needs = list(parsed["semantic_interpretation"].get("knowledge_needs") or [])
-    selected_refs = list(parsed["semantic_interpretation"].get("selected_bkp_ids") or [])
+    selected_refs = list(parsed["semantic_interpretation"].get("selected_knowledge_refs") or [])
     package_ref = str(parsed["semantic_interpretation"].get("package_ref") or "")
     retrieval: Callable[[str], Any] | None = None
     if knowledge_needs:
@@ -883,7 +898,7 @@ def _finalize_story_plan(
         )
     elif selected_refs or package_ref:
         _cleanup_planning(project_id, planning_turn_id)
-        raise StoryPlanningError("没有知识需求却选择了 BKP 卡或检索包身份，已拒绝。")
+        raise StoryPlanningError("没有知识需求却选择了知识卡或检索包身份，已拒绝。")
 
     # 6. 构造 planning_target
     agent_target = parsed["planning_target"]
@@ -966,7 +981,7 @@ def _finalize_story_plan(
 
     # 9. 知识绑定摘要（可证明：retrieved/selected 都来自同一绑定包）
     retrieval_info = (sp_result.get("context") or {}).get("retrieval") or {}
-    selected_hits = (sp_result.get("context") or {}).get("selected_bkp_hits") or []
+    selected_hits = (sp_result.get("context") or {}).get("selected_knowledge_hits") or []
     knowledge_summary = {
         "retrieval_status": retrieval_info.get("status"),
         "retrieved_count": retrieval_info.get("candidate_count", 0),

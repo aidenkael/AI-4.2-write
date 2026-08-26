@@ -26,10 +26,10 @@
 
 | 目录 | 职责 | Authority |
 |---|---|---|
-| 01_原始素材 | 未经 AI 加工的原始来源 + 素材资产.json（canonical ledger） | 原始文件真相 + canonical registry |
-| 02_素材知识库 | 参考作品结构化知识（BKP） | 参考知识 |
+| 01_原始素材 | 未经 AI 加工的原始来源 + 素材资产.json（canonical ledger；含 REFERENCE_WORK / RESEARCH / LOOSE_MATERIAL / METHOD_SOURCE / NEEDS_REVIEW） | 原始文件真相 + canonical registry |
+| 02_素材知识库 | 与来源绑定的外部知识：参考作品 `<asset>/bkp`（BKP）与方法/技巧资料 `<asset>/method`（方法知识包） | 来源绑定参考知识 |
 | 03_作品工程 | 原创小说作品 | **原创最高 authority** |
-| 04_写作知识库 | 经多作品验证的长期写作知识 | 跨作品经验 |
+| 04_写作知识库 | 经多作品验证的长期写作知识；可调用包必须为 FINALIZED_VALIDATED（identity.json + validation.md + knowledge/cards.md） | 跨作品经验 |
 | 05_Skills与自动化 | 工作台可调用能力 | capability |
 | 06_工作区 | 临时运行空间 | derivative/temp |
 | 07_工作台应用 | 正式作者侧桌面应用（UI、接口、Agent 接入、应用层） | 产品/应用层 |
@@ -41,7 +41,7 @@
 3. 当前有效规划（active planning）
 4. 参考知识 BKP / 04 knowledge
 
-**BKP 不得成为原创 Canon。** 未接受文本不得进入 production 正文/State。
+**BKP 不得成为原创 Canon。** 02/04 的外部知识（参考作品 BKP / 方法知识 / 已验证知识）可以影响 proposal/写作/检查，但永远不能写入或覆盖项目 Canon / Story State authority。未接受文本不得进入 production 正文/State。
 Context/Brief/recent prose 是 derivative，不得成为事实 authority。
 
 ## 多作品长期规则
@@ -68,10 +68,12 @@ Context/Brief/recent prose 是 derivative，不得成为事实 authority。
 
 | 子系统 | 状态 |
 |---|---|
-| MaterialIntake | CANONICAL_CATALOG_AVAILABLE + INTAKE_AND_WRITEBACK_AVAILABLE（素材资产.json = 唯一 canonical 真源；CSV/MD derived） |
+| MaterialIntake | CANONICAL_CATALOG_AVAILABLE + INTAKE_AND_WRITEBACK_AVAILABLE（素材资产.json = 唯一 canonical 真源；CSV/MD derived；类型含 METHOD_SOURCE） |
 | SourcePrepare | AVAILABLE（canonical ledger consumer；index_builder 已退役） |
+| MethodPrepare | AVAILABLE（METHOD_SOURCE 确定性预处理；无模型；产物 06_工作区 Local Only） |
 | BookDistill | AVAILABLE / FROZEN |
-| KnowledgeRetrieve | AVAILABLE / FROZEN |
+| MethodDistill | AVAILABLE（方法知识蒸馏 + 确定性定稿；方法取向合同，非 BookDistill 换标签） |
+| KnowledgeRetrieve | AVAILABLE（统一多源：参考 BKP / 方法知识 / 已验证知识一次调用混合检索；不再是旧版 BKP-only 冻结实现） |
 | StoryDesign | CLOSED / FROZEN |
 | StoryPlan | CLOSED / FROZEN |
 | ContextCompiler | CONSUMER_DRIVEN_FREEZE |
@@ -84,11 +86,22 @@ Context/Brief/recent prose 是 derivative，不得成为事实 authority。
 | UI_1_0_BASELINE | APPROVED |
 | WRITER_PLATFORM_REQUIRED | NO |
 
-## 方法链
+## 方法链与知识检索（两条生产分支 + 统一入口）
 
-`SourcePrepare → BookProfile → 多视角 Discovery → 按需 Deep Dive → BookDistill 收敛 → BKP → KnowledgeRetrieve`
+```text
+REFERENCE_WORK → SourcePrepare → BookDistill → 02_素材知识库/<asset>/bkp
+METHOD_SOURCE  → MethodPrepare → MethodDistill → 02_素材知识库/<asset>/method
+```
 
-## BKP 边界
+参考作品链：`SourcePrepare → BookProfile → 多视角 Discovery → 按需 Deep Dive → BookDistill 收敛 → BKP → KnowledgeRetrieve`
+
+方法/技巧资料链：`MethodPrepare（确定性，无模型）→ MethodDistill（语义抽取 + 确定性定稿）→ 方法知识包 → KnowledgeRetrieve`
+
+检索是统一多源入口：一次 `KnowledgeRetrieve.retrieve(query)` 加载并搜索全部已启用来源（`reference_bkp` / `method_source` / `validated_knowledge`），返回单一混合 RetrievalPackage；模型不选择“先查哪个库”，命中统一用 `selection_ref = <source_kind>/<source_id>/<source_anchor>`；生产请求/Context 使用 `selected_knowledge_refs / selected_knowledge_hits`。不建 KnowledgeRouter / 向量库 / embedding / KG / 新模型调用。
+方法卡 `capability_candidate=true` 仅表示潜在可执行的方法知识，绝不自动创建/晋升 05 侧 Skill；方法源绝不自动进入 04；05 Skill 晋升是独立的、证据/测试驱动的人工过程。
+作者面只有一个素材入口：UI 只传素材 id，后端按素材类型分派提纯/蒸馏（按钮只写「提纯 / 蒸馏」）。
+
+## 02/04 边界与单书约束
 
 BKP 长期保存作品身份、作品地图、BookProfile、Observation、Inference、Pattern、Deep Dive 和可追溯 Evidence。
 
@@ -129,8 +142,9 @@ BKP 长期保存作品身份、作品地图、BookProfile、Observation、Infere
 - 未获得作者明确 acceptance / decision 时，不得修改 production 正文或 Story State
 - 作者明确接受正文或作出创作决定后，允许按照现有 authority / writeback 合同更新
 - AI 自己的草稿、推测、candidate、Context、Brief 不得自动升级为 production authority
-- 不批量蒸馏新书
-- 不升级 Retrieval/RAG/KG
+- 不批量蒸馏新书，不批量蒸馏方法书（提纯/蒸馏都是作者显式动作）
+- 不升级 Retrieval/RAG/KG（统一多源检索保持轻量确定性：无向量库/embedding/KG/新模型调用）
+- 不从 MethodDistill 自动创建/晋升任何 05 侧 Skill；方法源不自动进入 04
 - 不建设完整通用 Writer/Reader/Editor/Controller 平台（AI-write 作者侧桌面工作台 1.0 已批准进入实现，属例外）
 - 不为了测试主动制造真实小说；测试可在 tmp 目录创建最小虚构 fixture
 - 不为一次任务新造长期文学 Skill；REAL_PROJECT_WIRING 只允许跨 frozen 能力的最薄机械接线
@@ -154,6 +168,8 @@ BKP 长期保存作品身份、作品地图、BookProfile、Observation、Infere
 | MATERIAL_INTAKE | intake apply 成功（完整事务） | 三份 material state files：`01_原始素材/素材资产.json` + `素材清单.csv` + `素材总索引.md` |
 | SOURCE_PREPARE | formal 结果（PASS/REVIEW/FAIL）且 metadata 完整（refresh 成功）且无 runtime ERROR | 同上（SP 输出在 `06_工作区`，Local Only） |
 | BOOK_DISTILL | BKP FINALIZED + 全部验证通过（settlement，每作品一次） | 当前 book_id 的单一 distillation subtree（`02_素材知识库/<book_id>_<书名>/`）+ 三份 material state files |
+| METHOD_PREPARE | MethodPrepare 完成（确定性，无模型）且目录刷新成功 | 仅三份 material state files（产物在 `06_工作区/MethodPrepare/`，Local Only） |
+| METHOD_DISTILL | 方法包定稿 `FINALIZED_RETRIEVAL_READY` + 全部定稿校验通过 + 目录刷新成功 | 当前 asset 的单一方法子树（`02_素材知识库/<asset_id>_<名称>/method/`）+ 三份 material state files |
 
 规则：
 

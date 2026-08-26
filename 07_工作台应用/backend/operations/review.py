@@ -39,7 +39,7 @@ from operations.agent_runner import AgentRunError
 from config.settings import EXECUTION_MODE_DIRECT, SettingsStore
 from operations.story_planning import (  # noqa: E402  复用同一 P0 检索包机制
     _DIRECT_BUSY_ERROR,
-    _MAX_BKP_HITS,
+    _MAX_KNOWLEDGE_HITS,
     _bound_package,
     _package_fingerprint,
     _package_from_snapshot,
@@ -82,10 +82,10 @@ _AGENT_TASK_TEMPLATE = """你是 Go Write 的作品检查执行器。必须严�
 若 knowledge_needs 非空，在生成最终 JSON 之前，你必须先用可用的本地命令/工具执行以下确定性只读检索命令：
   python {retrieval_command} --request {request_id} "<query>"
 其中 <query> 是把你第一阶段列出的全部 knowledge_needs 用中文分号（；）连接成的单个字符串。
-该命令会把本次检索包写入当前请求的临时快照，然后输出 JSON；每个候选项的 selection_ref 为 "book_id/source_anchor"。
-你必须读取该命令实际输出的 package：只从中选择 0 到 {max_bkp_hits} 个 selection_ref 填入 semantic_interpretation.selected_bkp_ids；并把命令输出的 package_fingerprint 原样填入 semantic_interpretation.package_ref。
-严禁编造命令输出中不存在的 selection_ref 或 package_fingerprint；没有合适候选时 selected_bkp_ids 保持空列表。
-若 knowledge_needs 为空：不要运行检索命令，selected_bkp_ids 必须为 []，package_ref 必须为空字符串 ""。
+该命令会把本次检索包（混合参考作品知识/方法知识/已验证知识）写入当前请求的临时快照，然后输出 JSON；每个候选项的 selection_ref 形如 "<source_kind>/<source_id>/<source_anchor>"。
+你必须读取该命令实际输出的 package：只从中选择 0 到 {max_knowledge_hits} 个 selection_ref 填入 semantic_interpretation.selected_knowledge_refs；并把命令输出的 package_fingerprint 原样填入 semantic_interpretation.package_ref。
+严禁编造命令输出中不存在的 selection_ref 或 package_fingerprint；没有合适候选时 selected_knowledge_refs 保持空列表。
+若 knowledge_needs 为空：不要运行检索命令，selected_knowledge_refs 必须为 []，package_ref 必须为空字符串 ""。
 
 最终回复
 最终回复必须只有合法 JSON 对象（不要任何额外文字、不要 markdown 代码块标记）。结构必须如下：
@@ -94,7 +94,7 @@ _AGENT_TASK_TEMPLATE = """你是 Go Write 的作品检查执行器。必须严�
   "semantic_interpretation": {{
     "objective": "本次检查的目标（一句话）",
     "knowledge_needs": [],
-    "selected_bkp_ids": [],
+    "selected_knowledge_refs": [],
     "package_ref": "",
     "assumptions": ["AI 解读中的假设"]
   }},
@@ -172,7 +172,7 @@ def _write_snapshot(
     review_dir: Path,
 ) -> Path:
     snapshot = {
-        "schema": "gowrite_retrieval_snapshot/v1",
+        "schema": "gowrite_retrieval_snapshot/v2",
         "request_id": request_id,
         "project_id": project_id,
         "review_turn_id": review_turn_id,
@@ -197,6 +197,8 @@ def _load_snapshot(review_dir: Path) -> tuple[dict[str, Any] | None, str | None]
         return None, "检索包快照无法解析（已被篡改或损坏）。"
     if not isinstance(data, dict) or not isinstance(data.get("package"), dict):
         return None, "检索包快照结构无效（缺少 package 对象）。"
+    if data.get("schema") != "gowrite_retrieval_snapshot/v2":
+        return None, "检索包快照为不兼容的旧版格式，已拒绝（请重新发起本轮任务）。"
     return data, None
 
 
@@ -258,9 +260,14 @@ def execute_request_scoped_retrieval(query: str, request_id: str) -> Any:
             "query": query[:200],
             "candidate_count": getattr(package, "candidate_count", len(getattr(package, "hits", []))),
             "refs": [
-                f"{getattr(hit, 'book_id', '')}/{getattr(hit, 'source_anchor', '')}"
+                getattr(hit, "selection_ref", "") or (
+                    f"{getattr(hit, 'source_kind', '')}/{getattr(hit, 'source_id', '')}/"
+                    f"{getattr(hit, 'source_anchor', '')}")
                 for hit in getattr(package, "hits", [])
             ],
+            "source_kinds": sorted({
+                getattr(hit, "source_kind", "") for hit in getattr(package, "hits", [])
+            }),
         },
     )
     return package
@@ -394,9 +401,9 @@ def _parse_review_result(output: str) -> dict[str, Any]:
     if "knowledge_needs" not in si:
         raise ReviewError("Agent 输出缺少 semantic_interpretation.knowledge_needs。")
     _validate_str_list(si["knowledge_needs"], "semantic_interpretation.knowledge_needs")
-    if "selected_bkp_ids" not in si:
-        raise ReviewError("Agent 输出缺少 semantic_interpretation.selected_bkp_ids。")
-    _validate_str_list(si["selected_bkp_ids"], "semantic_interpretation.selected_bkp_ids")
+    if "selected_knowledge_refs" not in si:
+        raise ReviewError("Agent 输出缺少 semantic_interpretation.selected_knowledge_refs。")
+    _validate_str_list(si["selected_knowledge_refs"], "semantic_interpretation.selected_knowledge_refs")
     if "package_ref" not in si or not isinstance(si.get("package_ref"), str):
         raise ReviewError("Agent 输出缺少 semantic_interpretation.package_ref。")
     if "assumptions" in si:
@@ -480,7 +487,7 @@ def _dispatch_review_worker(adapter: Any, agent_request: Any, ctx: dict[str, Any
 
     # 知识选择绑定（P0：只从精确捕获包选择，绝不再次检索）
     knowledge_needs = list(parsed["semantic_interpretation"].get("knowledge_needs") or [])
-    selected_refs = list(parsed["semantic_interpretation"].get("selected_bkp_ids") or [])
+    selected_refs = list(parsed["semantic_interpretation"].get("selected_knowledge_refs") or [])
     package_ref = str(parsed["semantic_interpretation"].get("package_ref") or "")
     if knowledge_needs:
         query = "；".join(knowledge_needs)
@@ -505,7 +512,7 @@ def _dispatch_review_worker(adapter: Any, agent_request: Any, ctx: dict[str, Any
             details={"query": query, "refs": selected_refs, "package_ref": package_ref},
         )
     elif selected_refs or package_ref:
-        _finish_direct(request_id, status="failed", error="没有知识需求却选择了 BKP 卡或检索包身份，已拒绝。")
+        _finish_direct(request_id, status="failed", error="没有知识需求却选择了知识卡或检索包身份，已拒绝。")
         return
 
     review = parsed["review"]
@@ -615,7 +622,7 @@ def prepare_review(project_id: str, chapter_number: int | None = None) -> dict[s
         chapter_text=chapter_text,
         retrieval_command=f'"{_RETRIEVAL_SCRIPT}"',
         request_id=request_id,
-        max_bkp_hits=_MAX_BKP_HITS,
+        max_knowledge_hits=_MAX_KNOWLEDGE_HITS,
     )
 
     bridge.create_request(

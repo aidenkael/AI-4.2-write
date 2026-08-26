@@ -35,7 +35,9 @@ _KIND_TO_OPERATION: dict[str, str] = {
     "story_write_propose": "story_write",
     "review_propose": "review",
     "material_classify_propose": "material_classify",
-    "book_distill_propose": "book_distill",
+    # 蒸馏归一化为同一个作者面操作（后端已按素材类型分派 BookDistill / MethodDistill）
+    "book_distill_propose": "material_distill",
+    "method_distill_propose": "material_distill",
 }
 
 # 交互等待时的作者可读消息（阶段相关）

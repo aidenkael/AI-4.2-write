@@ -201,10 +201,14 @@ def build_context(
     intent: dict[str, Any],
     state: dict[str, Any],
     retrieval: Callable[[str], Any] | None = None,
-    max_bkp_hits: int = 3,
+    max_knowledge_hits: int = 3,
     selected_knowledge_ids: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Build a small, reconstructible Context Package from a retrieval call."""
+    """Build a small, reconstructible Context Package from a retrieval call.
+
+    知识选择是通用的：选择身份是 canonical selection_ref
+    "<source_kind>/<source_id>/<source_anchor>"，runtime 不关心知识来自哪个存储。
+    """
     validate_author_intent(intent)
     validate_story_state(state)
     _require_same_project(brief, intent, state)
@@ -213,40 +217,57 @@ def build_context(
     knowledge_needs = list(brief.get("knowledge_needs") or [])
     selected_knowledge_ids = list(selected_knowledge_ids or [])
     if selected_knowledge_ids and not knowledge_needs:
-        raise ContractError("选择 BKP 必须先有明确 knowledge_needs；不允许无知识需求直接选卡")
+        raise ContractError("选择知识必须先有明确 knowledge_needs；不允许无知识需求直接选卡")
     selected: list[dict[str, Any]] = []
     gaps: list[str] = []
     if not knowledge_needs:
         # Frozen E1 policy: without an explicit knowledge need there is no
-        # retrieval call at all.  0 BKP is a normal path; never fall back to
-        # objective-based auto retrieval.
+        # retrieval call at all.  0 knowledge is a normal path; never fall back
+        # to objective-based auto retrieval.
         retrieval_info = {"query": None, "status": "SKIPPED_NO_KNOWLEDGE_NEED", "gaps": gaps, "candidate_count": 0}
         selection_reason = ("Brief 没有明确 knowledge_needs；按冻结策略跳过 KnowledgeRetrieve，"
-                            "0 张 BKP 是正常路径。")
+                            "0 条知识是正常路径。")
     else:
         retrieval = retrieval or _default_retrieve
         query = "；".join(knowledge_needs)
         package = retrieval(query)
         selected_id_set = set(selected_knowledge_ids)
-        ambiguous_ids: set[str] = set()
+        gaps = list(getattr(package, "gaps", []))
         if getattr(package, "status", "INSUFFICIENT_BKP") == "OK":
             # Retrieval only recalls candidates.  A model/Skill must explicitly
-            # select ids after considering scope and boundary; rank is not a
+            # select refs after considering scope and boundary; rank is not a
             # substitute for literary/semantic judgment.
             hits = list(getattr(package, "hits", []))
-            # A bare source_anchor can collide across books.  If one selected
-            # id recalls more than one candidate the reference is ambiguous:
-            # inject none of the colliding hits and record a stable gap.
-            for anchor in selected_id_set:
-                if sum(1 for hit in hits if hit.source_anchor == anchor) > 1:
-                    ambiguous_ids.add(anchor)
+            # Generic selection identity (Knowledge Selection Binding): a
+            # selected ref is the canonical selection_ref
+            # "<source_kind>/<source_id>/<source_anchor>".  A ref is usable
+            # only when it resolves to EXACTLY ONE candidate inside this exact
+            # package; unknown refs, ambiguous refs and over-limit selections
+            # never inject anything and never substitute another candidate.
+            def _hit_ref(hit: Any) -> str:
+                ref_attr = getattr(hit, "selection_ref", None)
+                if isinstance(ref_attr, str) and ref_attr:
+                    return ref_attr
+                return f"{getattr(hit, 'source_kind', '')}/{getattr(hit, 'source_id', '')}/{getattr(hit, 'source_anchor', '')}"
+
+            resolved: dict[str, list[Any]] = {
+                ref: [h for h in hits if _hit_ref(h) == ref] for ref in selected_id_set
+            }
+            ambiguous_ids = {ref for ref, matches in resolved.items() if len(matches) > 1}
+            unknown_ids = {ref for ref, matches in resolved.items() if not matches}
+            used_refs: set[str] = set()
             for hit in hits:
-                if hit.source_anchor not in selected_id_set or hit.source_anchor in ambiguous_ids or len(selected) >= max_bkp_hits:
+                if len(selected) >= max_knowledge_hits:
+                    break
+                ref = _hit_ref(hit)
+                if ref not in selected_id_set or ref in ambiguous_ids or ref in used_refs:
                     continue
                 selected.append({
-                    "book_id": hit.book_id,
-                    "book_title": hit.book_title,
-                    "knowledge_id": hit.source_anchor,
+                    "selection_ref": ref,
+                    "source_kind": getattr(hit, "source_kind", ""),
+                    "source_id": getattr(hit, "source_id", ""),
+                    "source_title": getattr(hit, "source_title", ""),
+                    "source_anchor": hit.source_anchor,
                     "source": hit.source,
                     "statement": hit.statement,
                     "scope": hit.scope,
@@ -254,22 +275,24 @@ def build_context(
                     "confidence": hit.confidence,
                     "provenance": {"evidence": hit.evidence, "rank": hit.rank, "relevance_reason": hit.relevance_reason},
                 })
-        gaps = list(getattr(package, "gaps", []))
+                used_refs.add(ref)
+            for ref in sorted(ambiguous_ids):
+                gaps.append(f"AMBIGUOUS_KNOWLEDGE_REF: 选择 ref {ref} 在本次召回中命中多条知识，未注入任何碰撞候选。")
+            if unknown_ids:
+                gaps.append("部分模型/Skill 选择的知识 ref 不在本次有效召回中。")
+            for ref in sorted(selected_id_set - unknown_ids - ambiguous_ids - used_refs):
+                gaps.append(f"KNOWLEDGE_LIMIT: 选择 ref {ref} 超过上限 {max_knowledge_hits} 条，未注入。")
         if getattr(package, "status", "INSUFFICIENT_BKP") == "OK" and not selected:
-            gaps.append("模型/Skill 未选择可用 BKP；Context 不注入未审查候选。")
-        elif selected_id_set - ambiguous_ids - {hit["knowledge_id"] for hit in selected}:
-            gaps.append("部分模型/Skill 选择的 BKP id 不在本次有效召回中。")
-        for anchor in sorted(ambiguous_ids):
-            gaps.append(f"AMBIGUOUS_BKP_REF: 选择 id {anchor} 在本次召回中命中多张 BKP 卡，未注入任何碰撞候选。")
+            gaps.append("模型/Skill 未选择可用知识；Context 不注入未审查候选。")
         retrieval_info = {
             "query": query,
             "status": getattr(package, "status", "INSUFFICIENT_BKP"),
             "gaps": gaps,
             "candidate_count": getattr(package, "candidate_count", 0),
         }
-        selection_reason = ("模型/Skill 明示选择的少量 BKP；runtime 只校验 provenance 和数量上限。"
+        selection_reason = ("模型/Skill 明示选择的少量知识；runtime 只校验 provenance 和数量上限。"
                              if selected else "没有可注入的模型/Skill 选择；保留检索 gap 而非按排名硬凑。")
-    status = "CURRENT" if selected or not knowledge_needs else "CURRENT_WITH_BKP_GAP"
+    status = "CURRENT" if selected or not knowledge_needs else "CURRENT_WITH_KNOWLEDGE_GAP"
     return {
         "artifact_type": "context_package",
         "context_id": context_id,
@@ -282,10 +305,10 @@ def build_context(
             "open_threads": state.get("open_threads", []),
             "approved_plan": state.get("approved_plan", []),
         },
-        "selected_bkp_hits": selected,
+        "selected_knowledge_hits": selected,
         "selection_reason": selection_reason,
         "retrieval": retrieval_info,
-        "size_summary": {"selected_bkp_hits": len(selected), "catalog_not_injected": True},
+        "size_summary": {"selected_knowledge_hits": len(selected), "catalog_not_injected": True},
         "created_at": utc_now(),
     }
 
@@ -449,6 +472,15 @@ def trace_record(*, trace_id: str, brief: dict[str, Any], context: dict[str, Any
         "candidate_ref": candidate["candidate_id"],
         "source_versions": brief["source_versions"],
         "retrieval": context["retrieval"],
-        "bkp_provenance": [hit["provenance"] | {"book_id": hit["book_id"], "knowledge_id": hit["knowledge_id"]} for hit in context["selected_bkp_hits"]],
+        "knowledge_provenance": [
+            hit["provenance"]
+            | {
+                "selection_ref": hit["selection_ref"],
+                "source_kind": hit["source_kind"],
+                "source_id": hit["source_id"],
+                "source_anchor": hit["source_anchor"],
+            }
+            for hit in context["selected_knowledge_hits"]
+        ],
         "created_at": utc_now(),
     }

@@ -448,7 +448,7 @@ def run_story_plan(
     )
     context = build_plan_context(
         context_id=context_id, brief=brief, intent=intent, state=state,
-        retrieval=retrieval, selected_knowledge_ids=semantic_interpretation.get("selected_bkp_ids", []),
+        retrieval=retrieval, selected_knowledge_ids=semantic_interpretation.get("selected_knowledge_refs", []),
     )
     candidate = create_plan_candidate(candidate_id=candidate_id, brief=brief, context=context, model_output=model_output)
     trace = story_plan_trace(trace_id=f"trace-{candidate_id}", brief=brief, context=context, candidate=candidate)

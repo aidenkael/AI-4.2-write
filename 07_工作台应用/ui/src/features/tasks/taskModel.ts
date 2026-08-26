@@ -12,7 +12,7 @@ export type AuthorTaskKind =
   | 'story_write'
   | 'review'
   | 'material_classify'
-  | 'book_distill'
+  | 'material_distill'
 
 /** 协调器任务状态（与后端轮询状态解耦的 App 级投影）。 */
 export type AuthorTaskStatus =
@@ -44,7 +44,7 @@ export interface AuthorTask {
   /** 每类操作的候选/报告/计划载荷（消费前保留在协调器）。 */
   result: unknown | null
   error: string | null
-  /** 非机密补充元数据（如 book_distill 的 asset_id；仅页面展示用）。 */
+  /** 非机密补充元数据（如 material_distill 的 asset_id；仅页面展示用）。 */
   meta?: Record<string, unknown> | null
 }
 
@@ -59,7 +59,7 @@ export const TASK_LABELS: Record<AuthorTaskKind, string> = {
   story_write: '正文写作',
   review: '作品检查',
   material_classify: '素材分类',
-  book_distill: '素材蒸馏',
+  material_distill: '素材蒸馏',
 }
 
 export function taskLabel(kind: AuthorTaskKind): string {
@@ -77,7 +77,7 @@ export function taskTarget(kind: AuthorTaskKind): TaskTarget {
     case 'review':
       return { section: 'review' }
     case 'material_classify':
-    case 'book_distill':
+    case 'material_distill':
       return { page: 'materials' }
   }
 }
@@ -108,7 +108,7 @@ export function waitingAuthorMessage(kind: AuthorTaskKind, phase: string | null)
     return '等待 Qoder /gowrite：正在选择本次写作上下文'
   }
   if (kind === 'material_classify') return '等待 Qoder /gowrite：正在分类待入库素材'
-  if (kind === 'book_distill') return '等待 Qoder /gowrite：正在蒸馏（Base Scan + 收敛）'
+  if (kind === 'material_distill') return '等待 Qoder /gowrite：正在蒸馏知识'
   return '等待 Qoder /gowrite 执行任务'
 }
 
@@ -125,7 +125,7 @@ export function candidateReadyMessage(kind: AuthorTaskKind): string {
       return '检查报告已生成 · 返回查看'
     case 'material_classify':
       return '入库建议已生成 · 返回查看'
-    case 'book_distill':
+    case 'material_distill':
       return '蒸馏完成 · 返回查看'
   }
 }

@@ -49,7 +49,7 @@ def run_story_design(
     )
     context = build_context(
         context_id=context_id, brief=brief, intent=intent, state=state, retrieval=retrieval,
-        selected_knowledge_ids=semantic_interpretation.get("selected_bkp_ids", []),
+        selected_knowledge_ids=semantic_interpretation.get("selected_knowledge_refs", []),
     )
     candidate = create_design_candidate(candidate_id=candidate_id, brief=brief, context=context, model_output=model_output)
     trace = trace_record(trace_id=f"trace-{candidate_id}", brief=brief, context=context, candidate=candidate)

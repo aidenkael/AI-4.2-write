@@ -58,13 +58,13 @@ from config.settings import SettingsStore, AppSettings  # noqa: E402
 
 
 # 合法 Agent 选择阶段输出（无知识需求：package_ref 空串）
-def _selection_json(knowledge_needs=None, selected_bkp_ids=None, package_ref="",
+def _selection_json(knowledge_needs=None, selected_knowledge_refs=None, package_ref="",
                     state_selections=None, assumptions=None, objective="写开场。"):
     return json.dumps({
         "semantic_interpretation": {
             "objective": objective,
             "knowledge_needs": knowledge_needs or [],
-            "selected_bkp_ids": selected_bkp_ids or [],
+            "selected_knowledge_refs": selected_knowledge_refs or [],
             "package_ref": package_ref,
             "assumptions": assumptions if assumptions is not None else ["主角首次进入花园"],
         },
@@ -87,12 +87,15 @@ def _ready_event() -> threading.Event:
     return e
 
 
-def _fake_hit(book_id, source_anchor, statement, rank=1):
+def _fake_hit(source_id, source_anchor, statement, rank=1, source_kind="reference_bkp"):
     return {
-        "book_id": book_id,
+        "selection_ref": f"{source_kind}/{source_id}/{source_anchor}",
+        "source_kind": source_kind,
+        "source_id": source_id,
+        "source_title": f"{source_id} 书",
+        "maturity": "source_bound",
         "source_anchor": source_anchor,
-        "book_title": f"{book_id} 书",
-        "source": f"{book_id}/source",
+        "source": f"{source_id}/source",
         "statement": statement,
         "scope": "scope",
         "boundary": "boundary",
@@ -433,7 +436,7 @@ def test_stage1_no_knowledge_zero_retrieval(isolated, real_project, fake_bridge,
     assert result["result"]["draft_text"]
     meta = _writing_meta(real_project, isolated)
     assert meta["context_fingerprint"]
-    assert meta["context"]["selected_bkp_hits"] == []
+    assert meta["context"]["selected_knowledge_hits"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -456,7 +459,7 @@ def test_stage1_knowledge_exact_package_binding(isolated, real_project, fake_bri
         shown = sw_ops.execute_request_scoped_retrieval("信息层次", rid)  # 唯一一次检索
         fp = sw_ops._package_fingerprint(shown)
         return AgentResult(status="completed", output=_selection_json(
-            knowledge_needs=["信息层次"], selected_bkp_ids=["book_a/K001"], package_ref=fp,
+            knowledge_needs=["信息层次"], selected_knowledge_refs=["reference_bkp/book_a/K001"], package_ref=fp,
         ), agent="fake_storywrite_agent")
 
     adapter = _TwoStageAdapter(on_stage1=_stage1)
@@ -468,12 +471,12 @@ def test_stage1_knowledge_exact_package_binding(isolated, real_project, fake_bri
 
     meta = _writing_meta(real_project, isolated)
     context = meta["context"]
-    assert [h["statement"] for h in context["selected_bkp_hits"]] == ["A 卡"], \
+    assert [h["statement"] for h in context["selected_knowledge_hits"]] == ["A 卡"], \
         "Context 必须消费模型从该包中选择的同一批卡"
 
     turn_dir = list((isolated.parent / ".writing" / real_project["project_id"]).iterdir())[0]
     snapshot = json.loads((turn_dir / "retrieval" / "package.json").read_text(encoding="utf-8"))
-    assert snapshot["schema"] == "gowrite_retrieval_snapshot/v1"
+    assert snapshot["schema"] == "gowrite_retrieval_snapshot/v2"
     assert snapshot["request_id"] == prepare_result["request_id"]
     assert snapshot["project_id"] == real_project["project_id"]
     assert snapshot["writing_turn_id"] == turn_dir.name
@@ -488,7 +491,7 @@ def test_stage1_knowledge_exact_package_binding(isolated, real_project, fake_bri
 def test_missing_snapshot_fails_closed_no_stage2(isolated, real_project, fake_bridge, monkeypatch):
     monkeypatch.setattr(sw_ops, "_retrieve_package", lambda q: _fake_package([]))
     adapter = _TwoStageAdapter(selection_json=_selection_json(
-        knowledge_needs=["信息层次"], selected_bkp_ids=["book_a/K001"], package_ref="x",
+        knowledge_needs=["信息层次"], selected_knowledge_refs=["reference_bkp/book_a/K001"], package_ref="x",
     ))
     prepare_result = _sw_prepare(real_project, adapter, monkeypatch)
     assert _wait_worker(prepare_result["request_id"])
@@ -506,7 +509,7 @@ def test_tampered_package_ref_fails_closed_no_stage2(isolated, real_project, fak
         rid = re.search(r"--request ([0-9a-f]{32})", request.task).group(1)
         sw_ops.execute_request_scoped_retrieval("信息层次", rid)  # 写快照
         return AgentResult(status="completed", output=_selection_json(
-            knowledge_needs=["信息层次"], selected_bkp_ids=["book_a/K001"],
+            knowledge_needs=["信息层次"], selected_knowledge_refs=["reference_bkp/book_a/K001"],
             package_ref="deadbeef" * 8,  # 伪造指纹
         ), agent="fake_storywrite_agent")
 

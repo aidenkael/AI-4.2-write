@@ -18,7 +18,7 @@
 
 - Context Package 是可重建派生工件（`artifact_type = context_package`），永不写回 Canon / Story State；整体也不得成为任何 authority。
 - `selected_story_state` 只复制 semantic selection 明确点名的权威条目（deepcopy 原始内容），不整包注入，也不用模型摘要替代原文；空 selection 合法，绝不 fallback 到全 State。
-- `selected_bkp_hits` 与 `selected_story_state` 结构隔离；BKP 不能获得 Canon authority、不能覆盖 Story State、不能伪装为原创事实。State 与 BKP 的张力只进入 `conflicts_or_tensions`（`analysis_noncanonical`）。
+- `selected_knowledge_hits`（外部知识：参考作品 BKP / 方法知识 / 已验证知识，统一 `selection_ref` 身份）与 `selected_story_state` 结构隔离；外部知识不能获得 Canon authority、不能覆盖 Story State、不能伪装为原创事实。State 与外部知识的张力只进入 `conflicts_or_tensions`（`analysis_noncanonical`）。
 - 允许的 selection area：`canon_facts / character_state / relationship_state / occurred_events / open_threads / approved_plan`。不支持任意 dict 路径。
 - `approved_plan` 只能选当前 active planning（复用 `resolve_plan_activity`）；已 superseded 的历史 planning 保留在 append-only history 中，但不进入当前 Context。approved_plan 必须确定性可寻址：缺 id 或同 id 重复 → ContractError（不静默取第一个/最后一个/dedupe）。
 - `approved_plan` 的 production authority 必须是可信未来规划来源：`author_decision:` / `manual_import:`（直接复用 StoryPlan 冻结常量 `TRUSTED_PLANNING_SOURCE_AUTHORITIES`，不另建白名单）；`simulation_author_decision:` 仅显式 `allow_simulation_sources=True` 的 sandbox/test 可用；`accepted_text:` 是合法 Canon authority 但不是合法 planning authority，选入 approved_plan 必须拒绝。

@@ -53,9 +53,12 @@ ROLE_DIR = {
     "REFERENCE_WORK": "01_参考作品",
     "RESEARCH": "02_研究资料",
     "LOOSE_MATERIAL": "03_零散素材",
+    # METHOD_SOURCE 物理落入现有 02_研究资料 区；语义类型 authority 始终是素材资产.json，
+    # 物理目录名不是类型真相；不新增/重编根目录，不迁移已有素材。
+    "METHOD_SOURCE": "02_研究资料",
 }
 VALID_ACTIONS = ("NEW_ASSET", "ATTACH_EXISTING", "REVIEW")
-VALID_TYPES = ("REFERENCE_WORK", "RESEARCH", "LOOSE_MATERIAL")
+VALID_TYPES = ("REFERENCE_WORK", "RESEARCH", "LOOSE_MATERIAL", "METHOD_SOURCE")
 UNSUPPORTED_SUFFIXES = (".doc", ".docx")
 ID_RE = re.compile(r"^book_(\d{4})$")
 

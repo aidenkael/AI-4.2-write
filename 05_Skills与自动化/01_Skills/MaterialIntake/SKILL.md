@@ -60,6 +60,12 @@ MI 负责「资产登记与状态推导」+「新素材入库（inbox intake）�
 - `REFERENCE_WORK`（参考作品，当前 130）/ `RESEARCH`（研究资料，当前 5）/ `NEEDS_REVIEW`（待确认，当前 6）。
 - `LOOSE_MATERIAL`（零散素材）Phase 2B2 起为正式枚举，路由到 `03_零散素材/`，
   提纯状态恒为「不适用」（refresh 强制，不退回「未处理」）。
+- `METHOD_SOURCE`（方法/技巧资料，2026-08-27 起）：主要目的是教授/解释写作、编剧、
+  导演、剪辑、戏剧、表演、叙事技巧、读者体验等可迁移创作方法的非虚构资料；
+  物理路由进现有 `02_研究资料/` 区（不新增/重编根目录、不迁移已有素材）；
+  语义类型 authority 始终是 `素材资产.json`，物理目录名不是类型真相；
+  提纯/知识证据分别由 `06_工作区/MethodPrepare/` 与 `02_素材知识库/<asset>_<名称>/method/` 推导
+  （evidence 前缀 `methodprepare_*`；方法包需 `FINALIZED_RETRIEVAL_READY` 才计可用）。
 
 ### 提纯状态推导（Phase 2B1.1 持久化版：SP 证据 + ledger 持久 record）
 
@@ -126,12 +132,13 @@ containers 按 id 排序；不含时间戳等 volatile 字段。**同一输入�
   UNEXPECTED_DIFF / push race 停止 → 本地 durable action 已完成，保留现场人工处理 Git。
 - **稳定 ID**：`book_XXXX` max+1（不补 gap、不复用删除 ID）；批量 NEW_ASSET 按 deterministic inbox path 排序分配；
 - **NEW_ASSET 路由**：REFERENCE_WORK → `01_参考作品/`、RESEARCH → `02_研究资料/`、
-  LOOSE_MATERIAL → `03_零散素材/`（safe_name，不建二级 taxonomy）；
+  LOOSE_MATERIAL → `03_零散素材/`、METHOD_SOURCE → `02_研究资料/`（复用现有区，不新增根目录；
+  safe_name，不建二级 taxonomy）；
 - **ATTACH_EXISTING** 移到 primary source 所在目录、`primary=false` 默认；同一 asset 新版本 →
   purification 需更新、knowledge 保持可用（fingerprint 机制自动处理）；
 - **REVIEW** 留 inbox 不分 ID；
 - **collision**：同名不同 SHA → `<stem>__<sha前8位><suffix>`（绝不覆盖）；
-- 初始状态：REFERENCE_WORK/RESEARCH = 未处理/未开始；LOOSE_MATERIAL = 不适用/未开始
+- 初始状态：REFERENCE_WORK/RESEARCH/METHOD_SOURCE = 未处理/未开始；LOOSE_MATERIAL = 不适用/未开始
   （refresh 强制尊重不适用，不退回未处理）。
 
 ## Post-Action Writeback（Phase 2B2.1 已实施）

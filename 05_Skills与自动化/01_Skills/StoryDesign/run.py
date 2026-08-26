@@ -49,7 +49,7 @@ def create_demo(output: Path) -> dict:
             "scope": "story_design",
             "objective": "探索能让主角主动进入花园秘密的故事发动机。",
             "knowledge_needs": [],
-            "selected_bkp_ids": [],
+            "selected_knowledge_refs": [],
             "assumptions": ["失联朋友与花园秘密的具体因果尚未获得作者确认。"],
         },
         model_output={
@@ -72,7 +72,7 @@ def main() -> None:
         raise SystemExit(2)
     print(f"demo created: {args.demo_dir}")
     print(f"retrieval status: {result['context']['retrieval']['status']}")
-    print(f"selected BKP hits: {len(result['context']['selected_bkp_hits'])}")
+    print(f"selected knowledge hits: {len(result['context']['selected_knowledge_hits'])}")
     print("candidate status: proposal_noncanonical")
 
 

@@ -740,6 +740,26 @@ export async function cancelBookDistillRequest(requestId: string): Promise<{ req
   return call<{ request_id: string; status: string }>('cancel_book_distill_request', { request_id: requestId })
 }
 
+/** 作者面通用「提纯」：UI 只传素材 id，后端按类型分派到 SourcePrepare / MethodPrepare。 */
+export async function prepareMaterial(assetId: string): Promise<SourcePrepareResult> {
+  return call<SourcePrepareResult>('prepare_material', { asset_id: assetId })
+}
+
+/** 作者面通用「蒸馏」：UI 只传素材 id，后端按类型分派到 BookDistill / MethodDistill。 */
+export async function distillMaterial(assetId: string): Promise<BookDistillResult> {
+  return call<BookDistillResult>('distill_material', { asset_id: assetId })
+}
+
+/** 通用蒸馏轮询（后端按桥请求 kind 分派 BookDistill / MethodDistill）。 */
+export async function getMaterialDistillRequest(requestId: string): Promise<BookDistillRequestStatus> {
+  return call<BookDistillRequestStatus>('get_material_distill_request', { request_id: requestId })
+}
+
+/** 通用蒸馏取消。 */
+export async function cancelMaterialDistillRequest(requestId: string): Promise<{ request_id: string; status: string }> {
+  return call<{ request_id: string; status: string }>('cancel_material_distill_request', { request_id: requestId })
+}
+
 /** 单素材作者面详情（写作时能否调用 / 阶段 / 下一步；零模型）。 */
 export async function getMaterialDetail(assetId: string): Promise<MaterialDetail> {
   return call<MaterialDetail>('get_material_detail', { asset_id: assetId })
@@ -853,7 +873,7 @@ export async function cancelReviewRequest(requestId: string): Promise<{ request_
 
 export interface AuthorOperationFacts {
   request_id: string
-  /** 归一化操作名：new_project / story_plan / story_write / review / material_classify / book_distill。 */
+  /** 归一化操作名：new_project / story_plan / story_write / review / material_classify / material_distill。 */
   kind: string | null
   project_id: string | null
   execution_mode: 'interactive_bridge' | 'direct' | null

@@ -111,9 +111,11 @@ def fake_retrieve_must_not_be_called(query):
 
 
 class _FakeHit:
-    def __init__(self, source_anchor, statement="示例 BKP 观察"):
-        self.book_id = "book_0035"
-        self.book_title = "长安十二时辰"
+    def __init__(self, source_anchor, statement="示例知识观察"):
+        self.source_kind = "reference_bkp"
+        self.source_id = "book_0035"
+        self.source_title = "长安十二时辰"
+        self.maturity = "source_bound"
         self.source_anchor = source_anchor
         self.source = "knowledge/cards.md#x"
         self.statement = statement
@@ -135,6 +137,9 @@ class _FakePackage:
 
 def fake_retrieve_ok(query):
     return _FakePackage([_FakeHit("bkp.negotiation.1"), _FakeHit("bkp.negotiation.2")])
+
+
+NEG_REF = "reference_bkp/book_0035/bkp.negotiation.1"
 
 
 class ContextCompilerSandboxTest(unittest.TestCase):
@@ -159,7 +164,7 @@ class ContextCompilerSandboxTest(unittest.TestCase):
         self.assertLess(ss["selected_state_items"], ss["total_state_items"])
         self.assertEqual(ss["total_active_plans"], 3)
         self.assertEqual(ss["selected_active_plans"], 1)
-        self.assertEqual(ss["selected_bkp_hits"], 0)
+        self.assertEqual(ss["selected_knowledge_hits"], 0)
 
     def test_only_selected_items_copied(self):
         ctx = self.context()
@@ -293,28 +298,32 @@ class ContextCompilerNegativeTest(unittest.TestCase):
         )
         self.assertEqual([p["id"] for p in ctx["selected_story_state"]["approved_plan"]], ["plan.sim"])
 
-    # 8. BKP without knowledge_need -> reject
+    # 8. 知识选择 without knowledge_need -> reject
     def test_bkp_without_knowledge_need_rejected(self):
         brief = make_brief(knowledge_needs=[])
         with self.assertRaises(ContractError):
-            self.compile([], brief=brief, selected_knowledge_ids=["bkp.negotiation.1"],
+            self.compile([], brief=brief, selected_knowledge_ids=[NEG_REF],
                          retrieval=fake_retrieve_ok)
 
-    # 9. selected BKP not in retrieval -> gap / not injected
+    # 9. selected knowledge not in retrieval -> gap / not injected
     def test_selected_bkp_not_in_retrieval_not_injected(self):
         brief = make_brief(knowledge_needs=["姐妹公开谈判如何处理利益冲突"])
-        ctx = self.compile([], brief=brief, selected_knowledge_ids=["bkp.not-in-recall"],
+        ctx = self.compile([], brief=brief, selected_knowledge_ids=["reference_bkp/book_0035/bkp.not-in-recall"],
                            retrieval=fake_retrieve_ok)
-        self.assertEqual(ctx["selected_bkp_hits"], [])
-        self.assertEqual(ctx["status"], "CURRENT_WITH_BKP_GAP")
+        self.assertEqual(ctx["selected_knowledge_hits"], [])
+        self.assertEqual(ctx["status"], "CURRENT_WITH_KNOWLEDGE_GAP")
         self.assertTrue(ctx["retrieval"]["gaps"])
 
     def test_selected_bkp_in_retrieval_injected(self):
         brief = make_brief(knowledge_needs=["姐妹公开谈判如何处理利益冲突"])
-        ctx = self.compile([], brief=brief, selected_knowledge_ids=["bkp.negotiation.1"],
+        ctx = self.compile([], brief=brief, selected_knowledge_ids=[NEG_REF],
                            retrieval=fake_retrieve_ok)
-        self.assertEqual(len(ctx["selected_bkp_hits"]), 1)
-        self.assertEqual(ctx["selected_bkp_hits"][0]["knowledge_id"], "bkp.negotiation.1")
+        self.assertEqual(len(ctx["selected_knowledge_hits"]), 1)
+        hit = ctx["selected_knowledge_hits"][0]
+        self.assertEqual(hit["selection_ref"], NEG_REF)
+        self.assertEqual(hit["source_kind"], "reference_bkp")
+        self.assertEqual(hit["source_id"], "book_0035")
+        self.assertEqual(hit["source_anchor"], "bkp.negotiation.1")
         self.assertEqual(ctx["status"], "CURRENT")
 
 
@@ -336,17 +345,17 @@ class ContextCompilerIsolationTest(unittest.TestCase):
         ctx = compile_context(
             context_id="ctx-iso", brief=brief, intent=INTENT, state=STATE,
             state_selections=[{"area": "relationship_state", "id": "rel.sisters", "reason": "谈判核心"}],
-            selected_knowledge_ids=["bkp.negotiation.1"], retrieval=fake_retrieve_ok,
+            selected_knowledge_ids=[NEG_REF], retrieval=fake_retrieve_ok,
         )
-        self.assertEqual(len(ctx["selected_bkp_hits"]), 1)
+        self.assertEqual(len(ctx["selected_knowledge_hits"]), 1)
         for area in ctx["selected_story_state"]:
             self.assertIn(area, SELECTABLE_AREAS)
         state_item_keys = set()
         for items in ctx["selected_story_state"].values():
             for item in items:
                 state_item_keys.update(item.keys())
-        self.assertNotIn("knowledge_id", state_item_keys)
-        self.assertNotIn("book_id", state_item_keys)
+        self.assertNotIn("selection_ref", state_item_keys)
+        self.assertNotIn("source_kind", state_item_keys)
 
     def test_empty_selection_does_not_fallback_to_full_state(self):  # 15
         ctx = compile_context(

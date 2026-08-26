@@ -32,7 +32,7 @@ from config.settings import SettingsStore, AppSettings  # noqa: E402
 def _selection_json():
     return json.dumps({
         "semantic_interpretation": {
-            "objective": "写开场。", "knowledge_needs": [], "selected_bkp_ids": [],
+            "objective": "写开场。", "knowledge_needs": [], "selected_knowledge_refs": [],
             "package_ref": "", "assumptions": ["主角首次进入花园"],
         },
         "state_selections": [], "conflicts_or_tensions": [],
@@ -168,10 +168,13 @@ def test_retrieval_refs_consistent(isolated, real_project, monkeypatch):
     package = type("RetrievalPackage", (), {
         "status": "OK", "gaps": [], "candidate_count": 1,
         "hits": [type("Hit", (), {
-            "book_id": "book_a", "source_anchor": "K001", "statement": "A 卡", "rank": 1,
+            "selection_ref": "reference_bkp/book_a/K001",
+            "source_kind": "reference_bkp", "source_id": "book_a", "source_title": "book_a",
+            "maturity": "source_bound", "source_anchor": "K001",
+            "statement": "A 卡", "rank": 1,
             "scope": "s", "boundary": "b", "confidence": 0.9, "evidence": [], "relevance_reason": "r",
         })()],
-        "to_dict": lambda self: {"status": "OK", "candidate_count": 1, "hits": [{"book_id": "book_a", "source_anchor": "K001", "statement": "A 卡"}], "gaps": []},
+        "to_dict": lambda self: {"status": "OK", "candidate_count": 1, "hits": [{"selection_ref": "reference_bkp/book_a/K001", "source_kind": "reference_bkp", "source_id": "book_a", "source_anchor": "K001", "statement": "A 卡"}], "gaps": []},
     })()
     monkeypatch.setattr(sw_ops, "_retrieve_package", lambda q: package)
 
@@ -182,7 +185,7 @@ def test_retrieval_refs_consistent(isolated, real_project, monkeypatch):
         return json.dumps({
             "semantic_interpretation": {
                 "objective": "写开场。", "knowledge_needs": ["信息层次"],
-                "selected_bkp_ids": ["book_a/K001"], "package_ref": fp, "assumptions": [],
+                "selected_knowledge_refs": ["reference_bkp/book_a/K001"], "package_ref": fp, "assumptions": [],
             },
             "state_selections": [], "conflicts_or_tensions": [],
         }, ensure_ascii=False)
@@ -201,9 +204,11 @@ def test_retrieval_refs_consistent(isolated, real_project, monkeypatch):
     selected = [e for e in record["events"] if e["kind"] == "retrieval.selected"]
     bound = [e for e in record["events"] if e["kind"] == "context.bound"]
     assert len(built) == 1 and len(selected) == 1 and len(bound) == 1
-    assert "book_a/K001" in built[0]["details"]["refs"]
-    assert selected[0]["details"]["refs"] == ["book_a/K001"]
-    assert bound[0]["details"]["refs"] == ["book_a/K001"]
+    # 审计证明：混合多源检索事件同时记录 selection_ref 与 source_kind（不记录知识正文）
+    assert "reference_bkp/book_a/K001" in built[0]["details"]["refs"]
+    assert built[0]["details"]["source_kinds"] == ["reference_bkp"]
+    assert selected[0]["details"]["refs"] == ["reference_bkp/book_a/K001"]
+    assert bound[0]["details"]["refs"] == ["reference_bkp/book_a/K001"]
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +275,7 @@ def test_direct_operation_audit_events(isolated, real_project, monkeypatch):
         def run(self, request):
             return AgentResult(status="completed", output=json.dumps({
                 "semantic_interpretation": {
-                    "objective": "规划", "knowledge_needs": [], "selected_bkp_ids": [],
+                    "objective": "规划", "knowledge_needs": [], "selected_knowledge_refs": [],
                     "package_ref": "", "assumptions": [], "deliberate_open_space": [],
                 },
                 "planning_target": {"description": "继续发展", "scope_kind": "free"},
@@ -319,7 +324,7 @@ def test_audit_no_secret_fields_direct(isolated, real_project, monkeypatch):
     class _FakeAdapter:
         name = "fake_agent"
         def run(self, request):
-            return AgentResult(status="completed", output='{"semantic_interpretation":{"objective":"x","knowledge_needs":[],"selected_bkp_ids":[],"package_ref":"","assumptions":[]},"planning_target":{"description":"d","scope_kind":"free"},"model_output":{"proposal":"p","planning_items":[{"description":"i"}]}}', agent=self.name)
+            return AgentResult(status="completed", output='{"semantic_interpretation":{"objective":"x","knowledge_needs":[],"selected_knowledge_refs":[],"package_ref":"","assumptions":[]},"planning_target":{"description":"d","scope_kind":"free"},"model_output":{"proposal":"p","planning_items":[{"description":"i"}]}}', agent=self.name)
         def cancel(self):
             return True
 
@@ -435,8 +440,8 @@ def test_retrieval_child_events_not_lost_after_main_events(isolated):
     _simulate_child_append(rid, audit.EVENT_RETRIEVAL_PACKAGE_BUILT, "knowledge_retrieve", details={"candidate_count": 2})
 
     # 主进程 finalize 追写（多次 flush 后仍须保留子进程事件）
-    recorder.event(audit.EVENT_RETRIEVAL_SELECTED, "knowledge_retrieve", details={"refs": ["book_a/K001"]})
-    recorder.event(audit.EVENT_CONTEXT_BOUND, "context_compiler", details={"refs": ["book_a/K001"]})
+    recorder.event(audit.EVENT_RETRIEVAL_SELECTED, "knowledge_retrieve", details={"refs": ["reference_bkp/book_a/K001"]})
+    recorder.event(audit.EVENT_CONTEXT_BOUND, "context_compiler", details={"refs": ["reference_bkp/book_a/K001"]})
     recorder.event(audit.EVENT_CANDIDATE_CREATED, "story_write")
     recorder.finish(audit.STATUS_COMPLETED)
 

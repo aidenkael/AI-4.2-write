@@ -213,15 +213,16 @@ def compile_context(
     conflicts_or_tensions: list[dict[str, Any]] | None = None,
     retrieval: Callable[[str], Any] | None = None,
     selected_knowledge_ids: list[str] | None = None,
-    max_bkp_hits: int = 3,
+    max_knowledge_hits: int = 3,
     allow_simulation_sources: bool = False,
 ) -> dict[str, Any]:
     """Compile a task-relevant Context Package.
 
     The model/Skill supplies ``state_selections`` (semantic brain); this runtime
     proves each selection is real, active, fresh and safely copyable, then copies
-    ONLY those authoritative entries into ``selected_story_state``.  BKP handling
-    is delegated to the frozen E1 gate and kept in a structurally separate area.
+    ONLY those authoritative entries into ``selected_story_state``.  外部知识
+    （参考作品 BKP / 方法知识 / 已验证知识）处理委托给冻结的 E1 门，并保持
+    在结构上独立的 selected_knowledge_hits 区域（与自身 Story State 分离）。
     Nothing here writes Canon / Story State: the package is a rebuildable,
     non-authoritative derived artifact.
     """
@@ -240,17 +241,17 @@ def compile_context(
         state, state_selections, allow_simulation_sources=allow_simulation_sources,
     )
 
-    # Reuse the frozen E1 BKP gate read-only: only take its selected hits,
-    # retrieval info and BKP selection reason.  E3-A never re-implements
+    # Reuse the frozen E1 knowledge gate read-only: only take its selected hits,
+    # retrieval_info and knowledge selection reason.  E3-A never re-implements
     # KnowledgeRetrieve and never modifies build_context.
     e1_context = build_context(
         context_id=context_id, brief=brief, intent=intent, state=state,
-        retrieval=retrieval, max_bkp_hits=max_bkp_hits,
+        retrieval=retrieval, max_knowledge_hits=max_knowledge_hits,
         selected_knowledge_ids=selected_knowledge_ids,
     )
-    selected_bkp_hits = e1_context["selected_bkp_hits"]
+    selected_knowledge_hits = e1_context["selected_knowledge_hits"]
     retrieval_info = e1_context["retrieval"]
-    status = "CURRENT_WITH_BKP_GAP" if e1_context["status"] == "CURRENT_WITH_BKP_GAP" else "CURRENT"
+    status = "CURRENT_WITH_KNOWLEDGE_GAP" if e1_context["status"] == "CURRENT_WITH_KNOWLEDGE_GAP" else "CURRENT"
 
     activity = resolve_plan_activity(state)
     total_state_items = sum(len(state.get(area, [])) for area in SELECTABLE_AREAS)
@@ -276,7 +277,7 @@ def compile_context(
         },
         "selected_intent": _select_intent(intent),
         "selected_story_state": selected_story_state,
-        "selected_bkp_hits": selected_bkp_hits,
+        "selected_knowledge_hits": selected_knowledge_hits,
         "selection_reason": selection_reasons,
         "conflicts_or_tensions": conflicts,
         "size_summary": {
@@ -284,7 +285,7 @@ def compile_context(
             "selected_state_items": selected_state_items,
             "total_active_plans": len(activity["active"]),
             "selected_active_plans": selected_plan_count,
-            "selected_bkp_hits": len(selected_bkp_hits),
+            "selected_knowledge_hits": len(selected_knowledge_hits),
             "by_area": {area: len(items) for area, items in selected_story_state.items()},
         },
         "retrieval": retrieval_info,

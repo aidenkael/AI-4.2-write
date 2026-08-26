@@ -6,7 +6,7 @@ import { PageHeader } from '../components/PageHeader'
 import { defaultIllustrations } from '../assets/illustrations'
 
 const typeLabels: Record<string, string> = {
-  REFERENCE_WORK: '参考作品', RESEARCH: '研究资料',
+  REFERENCE_WORK: '参考作品', METHOD_SOURCE: '方法/技巧资料', RESEARCH: '研究资料',
   LOOSE_MATERIAL: '零散素材', NEEDS_REVIEW: '待确认',
 }
 
@@ -14,14 +14,14 @@ const typeLabels: Record<string, string> = {
  * 素材与学习：真实素材管理/加工工作流。
  *
  * 作者流程：本地导入 → 待入库 → 分类（确定性优先；无法定论时才一次 Agent）
- * → 确认入库（MaterialIntake 事务）→ 显式提纯（SourcePrepare）→ 显式蒸馏
- * （BookDistill）→ FINALIZED BKP → 可用于写作。
+ * → 确认入库（MaterialIntake 事务）→ 显式提纯 → 显式蒸馏 → 定稿知识包
+ * → 可用于写作。UI 只传素材 id，后端按素材类型自动分派：
+ * 参考作品 → SourcePrepare/BookDistill；方法/技巧资料 → MethodPrepare/MethodDistill。
  *
  * - 页面加载只读（listMaterials）；绝不隐式调用模型 / 提纯 / 蒸馏；
  * - 主导航是工作流阶段（待处理 / 素材库 / 可用于写作 / 需更新·异常），
  *   源类型与状态是次级筛选/详情；
- * - 素材页负责管理和加工；真正写作时由 Go Write 按当前问题自动检索已经蒸馏
- *   完成的知识。
+ * - 素材页负责管理和加工；真正写作时由 Go Write 按当前问题自动检索已定稿的知识。
  */
 export function MaterialsPage() {
   const { actions } = useApp()
@@ -198,7 +198,7 @@ export function MaterialsPage() {
                   className={selectedId === m.id ? 'active' : ''}
                   onClick={() => { setSelectedId(m.id); void controller.selectDetail(m.id) }}
                 >
-                  <span className="material-thumb">{m.type === 'REFERENCE_WORK' ? '书' : '研'}</span>
+                  <span className="material-thumb">{m.type === 'REFERENCE_WORK' ? '书' : m.type === 'METHOD_SOURCE' ? '方' : '研'}</span>
                   <span>
                     <strong>{m.name}</strong>
                     <small>{typeLabels[m.type] ?? m.type}{m.author ? `　·　${m.author}` : ''}</small>
@@ -228,13 +228,13 @@ export function MaterialsPage() {
                     {selected.notes ? ` · 备注：${selected.notes}` : ''}
                   </p>
                   <div className="material-actions">
-                    {selected.purification_status !== '可用' && selected.type !== 'LOOSE_MATERIAL' && (
+                    {selected.purification_status !== '可用' && selected.type !== 'LOOSE_MATERIAL' && selected.type !== 'NEEDS_REVIEW' && (
                       <button
                         className="secondary"
                         disabled={controller.busyAssetId !== null}
                         onClick={() => void controller.runPrepare(selected.id)}
                       >
-                        {controller.busyAssetId === selected.id && controller.busyKind === 'source_prepare' ? '提纯中…' : '提纯（SourcePrepare）'}
+                        {controller.busyAssetId === selected.id && controller.busyKind === 'prepare' ? '提纯中…' : '提纯'}
                       </button>
                     )}
                     {selected.purification_status === '可用' && selected.knowledge_status !== '可用' && (
@@ -243,14 +243,14 @@ export function MaterialsPage() {
                         disabled={controller.busyAssetId !== null}
                         onClick={() => void controller.runDistill(selected.id)}
                       >
-                        {controller.busyAssetId === selected.id && controller.busyKind === 'book_distill' ? '蒸馏中…' : '蒸馏（BookDistill）'}
+                        {controller.busyAssetId === selected.id && controller.busyKind === 'distill' ? '蒸馏中…' : '蒸馏'}
                       </button>
                     )}
-                    {controller.busyAssetId === selected.id && controller.busyKind === 'book_distill' && (
-                      <span className="muted-note">显式离线处理，可能耗时较长；完成后自动封装 BKP。</span>
+                    {controller.busyAssetId === selected.id && controller.busyKind === 'distill' && (
+                      <span className="muted-note">显式离线处理，可能耗时较长；完成后自动生成可检索的知识包。</span>
                     )}
                   </div>
-                  <p className="muted-note">提示：素材页负责管理和加工；真正写作时由 Go Write 按当前问题自动检索已经蒸馏完成的知识。不会因为打开本页而运行任何 AI 或提纯/蒸馏。</p>
+                  <p className="muted-note">提示：素材页负责管理和加工；真正写作时由 Go Write 按当前问题自动检索已经定稿的知识。不会因为打开本页而运行任何 AI 或提纯/蒸馏。</p>
                 </div>
               )}
               {!selected && (
@@ -258,9 +258,9 @@ export function MaterialsPage() {
                   <p>素材目录来自正式素材资产台账（MaterialIntake）。打开本页不会运行任何 AI 或提纯/蒸馏过程。</p>
                   <p>选择一个素材查看：它写作时能否被调用、当前阶段、下一步该做什么。</p>
                   <ul>
-                    <li>「可用于写作」= 已蒸馏出可用知识包（FINALIZED BKP），写作/规划/检查时按需检索。</li>
-                    <li>「提纯」把原著标准化为纯净 Markdown（SourcePrepare，确定性、无模型）。</li>
-                    <li>「蒸馏」把提纯 PASS 素材蒸馏为知识包（BookDistill，显式离线处理，完成后才标注可用）。</li>
+                    <li>「可用于写作」= 已蒸馏出定稿知识包，写作/规划/检查时按需检索。</li>
+                    <li>「提纯」把素材标准化为纯净 Markdown（确定性、无模型；后端按类型自动选择处理方式）。</li>
+                    <li>「蒸馏」把提纯完成的素材蒸馏为知识包（显式离线处理，完成后才标注可用）。</li>
                   </ul>
                 </div>
               )}

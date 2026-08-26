@@ -1,64 +1,101 @@
-"""KnowledgeRetrieve — minimal cross-book retrieval prototype (G3-C).
+"""KnowledgeRetrieve — 统一多源知识检索（单一入口，不按知识库路由）。
+
+一次 `retrieve(query)` 调用加载并搜索全部已启用来源（参考作品 BKP /
+方法知识包 / 已验证知识包），返回一个混合多源 RetrievalPackage；每个命中
+保留来源身份（source_kind / source_id / source_title / selection_ref）。
+模型不需要、也不允许选择"先查哪个库"：相关命中在同一包内共存。
 
 Usage:
     python run.py "创作问题"
-    python run.py --list-books
+    python run.py --list-sources
     python run.py --stats
 
-No external dependencies. No vector DB. No embedding. No KG.
+No external dependencies. No vector DB. No embedding. No KG. No model call.
 """
 
 import json
-import os
 import sys
+from collections import Counter
 from pathlib import Path
 
 # Add current dir to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from models import KnowledgeItem, KnowledgeHit, RetrievalPackage
-from registry import discover_bkps
-from adapter import load_bkp
-from retrieve import score_candidates
+from models import KnowledgeHit, RetrievalPackage  # noqa: E402
+from registry import discover_sources  # noqa: E402
+from adapter import load_bkp  # noqa: E402
+from method_provider import (  # noqa: E402,F401  （MethodDistill 复用 parse_cards_generic）
+    load_method_package,
+    load_validated_package,
+    parse_cards_generic,
+)
+from retrieve import score_candidates  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
 # Globals
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- #
 
 BASE_DIR = str(Path(__file__).parent.parent.parent.parent)  # e:\AI-Write
 CATALOG = None  # Lazy-loaded
 
 
+def reset_catalog() -> None:
+    """丢弃缓存目录（测试/来源变化后重建）。"""
+    global CATALOG
+    CATALOG = None
+
+
+def _load_source(source: dict) -> list:
+    kind = source["source_kind"]
+    if kind == "reference_bkp":
+        return load_bkp(source)
+    if kind == "method_source":
+        try:
+            return load_method_package(source["package_dir"])
+        except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
+            print(f"[WARN] 方法知识包不可加载（跳过）：{source['package_dir']}：{exc}")
+            return []
+    if kind == "validated_knowledge":
+        try:
+            return load_validated_package(source["package_dir"])
+        except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
+            print(f"[WARN] 已验证知识包不可加载（跳过）：{source['package_dir']}：{exc}")
+            return []
+    print(f"[WARN] 未知 source_kind（跳过）：{kind}")
+    return []
+
+
 def _load_catalog():
-    """Load all BKPs into a unified in-memory catalog."""
+    """Load all searchable knowledge sources into a unified in-memory catalog."""
     global CATALOG
     if CATALOG is not None:
         return CATALOG
 
-    bkps = discover_bkps(BASE_DIR)
-    if not bkps:
-        print("[ERROR] No BKPs found under 02_素材知识库/*/bkp/")
-        sys.exit(1)
-
+    sources = discover_sources(BASE_DIR)
     all_items = []
-    book_registry = {}
-    for bkp in bkps:
-        items = load_bkp(bkp)
+    source_registry = {}
+    for source in sources:
+        items = _load_source(source)
         all_items.extend(items)
-        book_registry[bkp["book_id"]] = {
-            "title": bkp["title"],
-            "author": bkp["author"],
+        key = f"{source['source_kind']}/{source['source_id']}"
+        source_registry[key] = {
+            "source_kind": source["source_kind"],
+            "source_id": source["source_id"],
+            "title": source["title"],
+            "author": source.get("author", ""),
             "item_count": len(items),
         }
-        print(f"[INFO] Loaded {bkp['title']} ({bkp['book_id']}): {len(items)} items")
+        if items:
+            print(f"[INFO] Loaded {source['title'] or source['source_id']} "
+                  f"({key}): {len(items)} items")
 
     CATALOG = {
         "items": all_items,
-        "books": book_registry,
+        "sources": source_registry,
         "total": len(all_items),
     }
-    print(f"[INFO] Total catalog: {CATALOG['total']} items from {len(book_registry)} books")
+    print(f"[INFO] Total catalog: {CATALOG['total']} items from {len(source_registry)} sources")
     return CATALOG
 
 
@@ -114,32 +151,38 @@ def understand_query(query: str) -> str:
 # ---------------------------------------------------------------------------
 
 def retrieve(query: str, top_k: int = 15) -> RetrievalPackage:
-    """Full retrieval pipeline: candidate recall → structured output.
+    """Full retrieval pipeline: 全源候选召回 → 归一化混合包。
 
+    一次调用搜索全部已启用来源；不路由到单一存储，不让模型选库。
     Note: Semantic selection (Agent 语义判断) is done externally
     by the calling agent, not by this script.
     """
     catalog = _load_catalog()
     understanding = understand_query(query)
 
-    # Step 1: Candidate recall
+    # Step 1: Candidate recall（全源混合召回）
     candidates = score_candidates(query, catalog["items"], top_k=top_k)
 
     if not candidates:
+        gaps = ["关键词召回为零：当前可检索知识资产中没有匹配的知识条目"]
+        if not catalog["sources"]:
+            gaps.append("当前没有任何已定稿的可检索知识包")
         return RetrievalPackage(
             query=query,
             query_understanding=understanding,
             status="INSUFFICIENT_BKP",
-            gaps=["关键词召回为零：当前两个 BKP（一九八四、三体）中没有匹配的知识条目"],
+            gaps=gaps,
         )
 
-    # Step 2: Build hits
+    # Step 2: Build hits（通用身份；保留来源与 selection_ref）
     hits = []
     for rank, (item, score, matched_kw) in enumerate(candidates, 1):
         hit = KnowledgeHit(
             rank=rank,
-            book_id=item.book_id,
-            book_title=item.book_title,
+            source_kind=item.source_kind,
+            source_id=item.source_id,
+            source_title=item.source_title,
+            maturity=item.maturity,
             knowledge_level=item.knowledge_level,
             statement=item.text,
             relevance_reason=f"关键词匹配 {len(matched_kw)} 个，原始得分 {score:.3f}",
@@ -158,6 +201,11 @@ def retrieve(query: str, top_k: int = 15) -> RetrievalPackage:
             conditions=item.conditions,
             mechanism=item.mechanism,
             effect=item.effect,
+            method_kind=item.method_kind,
+            steps=item.steps,
+            checks=item.checks,
+            failure_modes=item.failure_modes,
+            capability_candidate=item.capability_candidate,
             raw_score=score,
         )
         hits.append(hit)
@@ -171,8 +219,8 @@ def retrieve(query: str, top_k: int = 15) -> RetrievalPackage:
             hits=hits,
             status="INSUFFICIENT_BKP",
             gaps=[
-                "候选召回得分极低，当前两个 BKP 中可能没有真正相关的知识",
-                "建议：检查 BKP 是否覆盖该创作维度，或补充新的参考作品",
+                "候选召回得分极低，当前知识资产中可能没有真正相关的知识",
+                "建议：检查知识资产是否覆盖该创作维度，或补充新的来源素材",
             ],
             candidate_count=len(candidates),
         )
@@ -192,18 +240,22 @@ def retrieve(query: str, top_k: int = 15) -> RetrievalPackage:
 # CLI
 # ---------------------------------------------------------------------------
 
-def cmd_list_books():
+def cmd_list_sources():
     catalog = _load_catalog()
-    for bid, info in catalog["books"].items():
-        print(f"  {bid}: {info['title']} ({info['author']}) — {info['item_count']} items")
+    for key, info in catalog["sources"].items():
+        print(f"  [{info['source_kind']}] {info['source_id']}: "
+              f"{info['title']}（{info['author'] or '—'}）— {info['item_count']} items")
 
 
 def cmd_stats():
     catalog = _load_catalog()
-    from collections import Counter
     levels = Counter(item.knowledge_level for item in catalog["items"])
     dims = Counter(item.dimension for item in catalog["items"])
+    kinds = Counter(item.source_kind for item in catalog["items"])
     print(f"\nTotal items: {catalog['total']}")
+    print(f"\nBy source kind:")
+    for sk, cnt in kinds.most_common():
+        print(f"  {sk}: {cnt}")
     print(f"\nBy knowledge level:")
     for kl, cnt in levels.most_common():
         print(f"  {kl}: {cnt}")
@@ -224,8 +276,8 @@ def main():
 
     arg = sys.argv[1]
 
-    if arg == "--list-books":
-        cmd_list_books()
+    if arg in ("--list-sources", "--list-books"):
+        cmd_list_sources()
     elif arg == "--stats":
         cmd_stats()
     else:

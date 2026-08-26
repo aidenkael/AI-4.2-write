@@ -6,7 +6,7 @@
  * → 显式蒸馏（BookDistill）→ FINALIZED BKP → 可用于写作。
  *
  * 生命周期归属（根不变量）：
- * - material_classify / book_distill 的异步状态属于 App 级协调器；
+ * - material_classify / material_distill 的异步状态属于 App 级协调器；
  *   离开素材页任务继续、结果保留，返回后页面显式消费；
  * - MaterialIntake apply 与 SourcePrepare 是确定性机械操作，留在本控制器；
  * - 页面加载只读（listMaterials）+ 一次确定性收件箱扫描（零模型）；
@@ -19,8 +19,8 @@ import {
   importMaterialFiles,
   listMaterials,
   pickMaterialFiles,
+  prepareMaterial,
   refreshMaterials,
-  runSourcePrepare,
   scanMaterialInbox,
   type ClassifyMaterialResult,
   type ImportMaterialResult,
@@ -45,7 +45,7 @@ export interface MaterialsController {
   importResult: ImportMaterialResult | null
   importing: boolean
   busyAssetId: string | null
-  busyKind: 'source_prepare' | 'book_distill' | null
+  busyKind: 'prepare' | 'distill' | null
   detail: MaterialDetail | null
   detailLoading: boolean
   reload(): Promise<void>
@@ -134,7 +134,7 @@ export function useMaterialsController(options?: { notify?: (message: string) =>
   // ---------------- 协调器任务 → 本页投影（classify / distill） ----------------
 
   const classifyTask = task?.kind === 'material_classify' ? task : null
-  const distillTask = task?.kind === 'book_distill' ? task : null
+  const distillTask = task?.kind === 'material_distill' ? task : null
 
   // classify：运行中/等待 → 状态映射；候选/失败 → 显式消费
   useEffect(() => {
@@ -168,7 +168,7 @@ export function useMaterialsController(options?: { notify?: (message: string) =>
     const assetId = typeof distillTask.meta?.asset_id === 'string' ? distillTask.meta.asset_id : null
     if (distillTask.status === 'running' || distillTask.status === 'pending' || distillTask.status === 'waiting_author') {
       setBusyAssetId(assetId)
-      setBusyKind('book_distill')
+      setBusyKind('distill')
       return
     }
     if (distillTask.status === 'candidate' && distillTask.result) {
@@ -280,10 +280,10 @@ export function useMaterialsController(options?: { notify?: (message: string) =>
   const runPrepare = useCallback(async (assetId: string) => {
     sourcePrepareAssetRef.current = assetId
     setBusyAssetId(assetId)
-    setBusyKind('source_prepare')
+    setBusyKind('prepare')
     setError(null)
     try {
-      const result = await runSourcePrepare(assetId)
+      const result = await prepareMaterial(assetId)
       notify?.(result.message)
       await reload()
       if (detail?.id === assetId) await selectDetail(assetId)
@@ -301,8 +301,8 @@ export function useMaterialsController(options?: { notify?: (message: string) =>
   const runDistill = useCallback(async (assetId: string) => {
     setError(null)
     setBusyAssetId(assetId)
-    setBusyKind('book_distill')
-    const busy = await start({ kind: 'book_distill', asset_id: assetId })
+    setBusyKind('distill')
+    const busy = await start({ kind: 'material_distill', asset_id: assetId })
     if (busy) {
       setBusyAssetId(null)
       setBusyKind(null)

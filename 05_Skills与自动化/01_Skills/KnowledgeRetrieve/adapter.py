@@ -1,4 +1,8 @@
-"""BKP Adapter: parse Markdown knowledge files into structured KnowledgeItems.
+"""BKP Adapter：参考作品 BKP 的 Markdown 知识解析（legacy/reference 适配器）。
+
+本适配器内部仍理解 legacy book 身份（book_id/book_title 对参考作品确实来源特定），
+但产出的 KnowledgeItem 一律使用通用身份：source_kind=reference_bkp /
+source_id=book_id / source_title=book_title / maturity=source_bound。
 
 Handles two observed formats:
 - 一九八四: `text（chapters/NNNN.md#LNN，conf）[scope: ...][boundary: ...]`
@@ -121,8 +125,10 @@ def parse_cards(bkp_dir: str, book_id: str, book_title: str) -> list:
         cards.append(current)
 
     return [KnowledgeItem(
-        book_id=book_id,
-        book_title=book_title,
+        source_kind="reference_bkp",
+        source_id=book_id,
+        source_title=book_title,
+        maturity="source_bound",
         knowledge_level=c.get("knowledge_level", ""),
         dimension=c.get("dimension", ""),
         text=c.get("statement", ""),
@@ -193,8 +199,10 @@ def parse_observations(bkp_dir: str, book_id: str, book_title: str) -> list:
             evidence, confidence, scope, boundary, clean_text = _extract_refs_paren(bullet)
 
         items.append(KnowledgeItem(
-            book_id=book_id,
-            book_title=book_title,
+            source_kind="reference_bkp",
+            source_id=book_id,
+            source_title=book_title,
+            maturity="source_bound",
             knowledge_level="Observation",
             dimension=current_dim,
             text=clean_text if clean_text else bullet,
@@ -249,8 +257,10 @@ def parse_inferences(bkp_dir: str, book_id: str, book_title: str) -> list:
             evidence, confidence, scope, boundary, clean_text = _extract_refs_paren(bullet)
 
         items.append(KnowledgeItem(
-            book_id=book_id,
-            book_title=book_title,
+            source_kind="reference_bkp",
+            source_id=book_id,
+            source_title=book_title,
+            maturity="source_bound",
             knowledge_level="Inference",
             dimension=current_section,
             text=clean_text if clean_text else bullet,
@@ -306,8 +316,10 @@ def parse_patterns(bkp_dir: str, book_id: str, book_title: str) -> list:
             pat_desc = m_pattern.group(3).strip()
             # Check if description spans multiple lines
             items.append(KnowledgeItem(
-                book_id=book_id,
-                book_title=book_title,
+                source_kind="reference_bkp",
+                source_id=book_id,
+                source_title=book_title,
+                maturity="source_bound",
                 knowledge_level="Work-specific Pattern",
                 dimension=current_section,
                 text=f"[{pat_id} {pat_name}] {pat_desc}",
@@ -326,8 +338,10 @@ def parse_patterns(bkp_dir: str, book_id: str, book_title: str) -> list:
             mech_desc = m_mech.group(4).strip()
             evidence = [mech_ref] if mech_ref else []
             items.append(KnowledgeItem(
-                book_id=book_id,
-                book_title=book_title,
+                source_kind="reference_bkp",
+                source_id=book_id,
+                source_title=book_title,
+                maturity="source_bound",
                 knowledge_level="Work-specific Pattern",
                 dimension=current_section,
                 text=f"[{mech_name}] {mech_desc}",
@@ -381,8 +395,10 @@ def parse_boundaries(bkp_dir: str, book_id: str, book_title: str) -> list:
             evidence, confidence, _, _, clean_text = _extract_refs_paren(bullet)
 
         items.append(KnowledgeItem(
-            book_id=book_id,
-            book_title=book_title,
+            source_kind="reference_bkp",
+            source_id=book_id,
+            source_title=book_title,
+            maturity="source_bound",
             knowledge_level="Boundary",
             dimension=current_section,
             text=clean_text if clean_text else bullet,
@@ -461,8 +477,10 @@ def parse_deep_dives(bkp_dir: str, book_id: str, book_title: str,
                 evidence, confidence, _, _, text_clean = _extract_refs_paren(clean)
 
             items.append(KnowledgeItem(
-                book_id=book_id,
-                book_title=book_title,
+                source_kind="reference_bkp",
+                source_id=book_id,
+                source_title=book_title,
+                maturity="source_bound",
                 knowledge_level=kl,
                 dimension=dimension,
                 text=text_clean if text_clean else clean,
@@ -480,12 +498,12 @@ def parse_deep_dives(bkp_dir: str, book_id: str, book_title: str,
 # Main loader
 # ---------------------------------------------------------------------------
 
-def load_bkp(bkp_info: dict) -> list:
-    """Load all knowledge items from a single BKP."""
-    bkp_dir = bkp_info["bkp_dir"]
-    book_id = bkp_info["book_id"]
-    book_title = bkp_info["title"]
-    identity = bkp_info["identity"]
+def load_bkp(source_info: dict) -> list:
+    """Load all knowledge items from a single reference BKP（通用来源描述入参）。"""
+    bkp_dir = source_info["package_dir"]
+    book_id = source_info["source_id"]
+    book_title = source_info["title"]
+    identity = source_info["identity"]
 
     cards = parse_cards(bkp_dir, book_id, book_title)
     if cards:

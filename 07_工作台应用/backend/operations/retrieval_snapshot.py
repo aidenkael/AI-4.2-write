@@ -17,7 +17,8 @@ Agent 在执行内运行（全部任务模板显式内嵌 --request <request_id>
    dir；StoryWrite → writing dir；非权威、可删除、随临时生命周期清理）。
 
 随后向 stdout 打印 `{package_fingerprint, package}` JSON：模型只从该显示包中
-选择 scoped ref（book_id/source_anchor）并原样回显 package_fingerprint。
+选择 selection_ref（source_kind/source_id/source_anchor；统一多源混合包）并原样回显
+package_fingerprint。
 
 Go Write finalize **绝不再次执行 KnowledgeRetrieve**：只读取该快照、校验身份、
 反序列化并把同一包绑定给 Context。快照缺失/身份或查询不匹配 → 整轮 failed。

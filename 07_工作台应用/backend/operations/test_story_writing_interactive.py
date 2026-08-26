@@ -33,12 +33,12 @@ from operations import story_writing as sw_ops  # noqa: E402
 from config.settings import SettingsStore, AppSettings  # noqa: E402
 
 
-def _selection_json(knowledge_needs=None, selected_bkp_ids=None, package_ref="", state_selections=None):
+def _selection_json(knowledge_needs=None, selected_knowledge_refs=None, package_ref="", state_selections=None):
     return json.dumps({
         "semantic_interpretation": {
             "objective": "写开场。",
             "knowledge_needs": knowledge_needs or [],
-            "selected_bkp_ids": selected_bkp_ids or [],
+            "selected_knowledge_refs": selected_knowledge_refs or [],
             "package_ref": package_ref,
             "assumptions": ["主角首次进入花园"],
         },
@@ -47,10 +47,13 @@ def _selection_json(knowledge_needs=None, selected_bkp_ids=None, package_ref="",
     }, ensure_ascii=False)
 
 
-def _fake_hit(book_id, source_anchor, statement, rank=1):
+def _fake_hit(source_id, source_anchor, statement, rank=1, source_kind="reference_bkp"):
     return {
-        "book_id": book_id, "source_anchor": source_anchor, "book_title": f"{book_id} 书",
-        "source": f"{book_id}/source", "statement": statement, "scope": "scope",
+        "selection_ref": f"{source_kind}/{source_id}/{source_anchor}",
+        "source_kind": source_kind, "source_id": source_id, "source_title": f"{source_id} 书",
+        "maturity": "source_bound",
+        "source_anchor": source_anchor,
+        "source": f"{source_id}/source", "statement": statement, "scope": "scope",
         "boundary": "boundary", "confidence": 0.9, "evidence": ["证据"], "rank": rank,
         "relevance_reason": "相关",
     }
@@ -261,7 +264,7 @@ def test_stage1_knowledge_exact_package_single_retrieval(isolated, real_project,
         shown = sw_ops.execute_request_scoped_retrieval("信息层次", rid)
         fp = sw_ops._package_fingerprint(shown)
         return _selection_json(
-            knowledge_needs=["信息层次"], selected_bkp_ids=["book_a/K001"], package_ref=fp,
+            knowledge_needs=["信息层次"], selected_knowledge_refs=["reference_bkp/book_a/K001"], package_ref=fp,
         )
 
     prepared = _interactive_prepare(real_project, monkeypatch)
@@ -276,7 +279,7 @@ def test_stage1_knowledge_exact_package_single_retrieval(isolated, real_project,
     assert got["status"] == "completed", got.get("error")
     assert retrieval_calls == ["信息层次"], "Stage 2 / finalize 绝不再次检索"
     meta = _writing_meta(real_project, isolated)
-    assert [h["statement"] for h in meta["context"]["selected_bkp_hits"]] == ["A 卡"]
+    assert [h["statement"] for h in meta["context"]["selected_knowledge_hits"]] == ["A 卡"]
 
 
 def test_stage1_no_knowledge_zero_retrieval(isolated, real_project, fake_bridge, monkeypatch):
@@ -292,7 +295,7 @@ def test_stage1_no_knowledge_zero_retrieval(isolated, real_project, fake_bridge,
     assert got["status"] == "completed", got.get("error")
     assert retrieval_calls == [], "knowledge_needs=[] 时检索次数必须为 0"
     meta = _writing_meta(real_project, isolated)
-    assert meta["context"]["selected_bkp_hits"] == []
+    assert meta["context"]["selected_knowledge_hits"] == []
 
 
 # ---------------------------------------------------------------------------

@@ -17,13 +17,14 @@ import {
 
 test('taskLabel covers all kinds', () => {
   assert.equal(taskLabel('story_write'), '正文写作')
-  assert.equal(taskLabel('book_distill'), '素材蒸馏')
+  assert.equal(taskLabel('material_distill'), '素材蒸馏')
 })
 
 test('taskTarget maps to owning page/section', () => {
   assert.deepEqual(taskTarget('story_write'), { section: 'writing' })
   assert.deepEqual(taskTarget('new_project'), { page: 'projects' })
   assert.deepEqual(taskTarget('material_classify'), { page: 'materials' })
+  assert.deepEqual(taskTarget('material_distill'), { page: 'materials' })
   assert.deepEqual(taskTarget('review'), { section: 'review' })
 })
 
