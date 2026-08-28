@@ -6,6 +6,8 @@
 
 **CURRENT_PHASE = REAL_WRITING_USAGE**
 
+**PRODUCT_BASELINE = GO_WRITE_2_0_APPROVED**
+
 工作台已从开发验证期进入真实使用期。主目标是辅助作者进行长篇小说创作。
 
 ## 核心目标
@@ -20,7 +22,10 @@
 - 日常创作界面中，作者操作作品和创作任务，不需要每次选择 Agent、模型或 Skill；「设置」页面允许作者真实配置 AI 服务/API、模型、Agent 与任务执行配置。Agent 是 AI-write 执行 Skills 和复用知识库的重要执行层。
 - 高频明确操作可以按钮化；模糊和创造性需求保留自然语言。
 - candidate / draft / proposal 默认不是 authority，作者明确采用后才能正式写入。
-- UI 1.0 产品基线已确认（`UI_1_0_BASELINE = APPROVED`）：页面职责、主要导航、核心交互与视觉方向已定；具体像素/间距/局部组件实现时可小范围调整，不因此推翻 UI 1.0。
+- **Go Write 2.0 是正式产品基线。**它面向中文长篇小说作者；固定作品管理框架，具体工作内容结构随作品与任务动态生长。稳定的作品一级页面为「作品概览 / 作品地基 / 故事规划 / 正在写 / 故事地图 / 作品检查」。
+- UI 1.0 保留为已验证的技术纵切/实现参考基线；其与 Go Write 2.0 冲突的产品假设已被 supersede，但历史记录不得删除。
+- 字数规划是 Go Write 2.0 的一等能力：总目标 → 卷/阶段预算 → 章节范围 → 实际字数。它是已批准的产品方向，不因本条规则自动宣称已经实现。
+- AI candidate / draft / proposal 仍非 authority；未来规划不等于 Canon；作者编辑须先进行影响分析并走安全的 authority/writeback 合同，不得直接、无保护地改写 Canon。
 
 ## 目录 authority
 
@@ -83,7 +88,8 @@ Context/Brief/recent prose 是 derivative，不得成为事实 authority。
 | REAL_PROJECT_WIRING_IMPLEMENTATION | READY_FOR_REAL_VERTICAL_SLICE |
 | AUTHOR_FACING_ONE_SENTENCE_ENTRY | NOT_YET_PROVEN |
 | AUTHOR_FACING_WORKBENCH_DESIGN | ACTIVE |
-| UI_1_0_BASELINE | APPROVED |
+| PRODUCT_BASELINE | GO_WRITE_2_0_APPROVED（产品基线已批准；未实现能力不得标记 DONE） |
+| UI_1_0_BASELINE | TECHNICAL_VERTICAL_SLICE_REFERENCE（历史技术/实现参考；非正式产品基线） |
 | WRITER_PLATFORM_REQUIRED | NO |
 
 ## 方法链与知识检索（两条生产分支 + 统一入口）
@@ -148,9 +154,9 @@ BKP 长期保存作品身份、作品地图、BookProfile、Observation、Infere
 - 不建设完整通用 Writer/Reader/Editor/Controller 平台（AI-write 作者侧桌面工作台 1.0 已批准进入实现，属例外）
 - 不为了测试主动制造真实小说；测试可在 tmp 目录创建最小虚构 fixture
 - 不为一次任务新造长期文学 Skill；REAL_PROJECT_WIRING 只允许跨 frozen 能力的最薄机械接线
-- 除已批准的 07_工作台应用 UI 1.0 外，不因 UI 讨论开发其他完整平台
+- 除已批准的 Go Write 2.0 作者侧工作台方向外，不因 UI 讨论开发其他完整平台
 
-当前阶段允许的是：按 UI 1.0 基准实现 07_工作台应用，以及由真实 UI 使用证明必要的最小底层补强。
+当前阶段允许的是：按 Go Write 2.0 正式产品基线、并参考 UI 1.0 技术纵切实现 07_工作台应用，以及由真实 UI 使用证明必要的最小底层补强。
 
 ## Git 安全
 
@@ -191,12 +197,12 @@ BKP 长期保存作品身份、作品地图、BookProfile、Observation、Infere
 
 ## NEXT
 
-**AUTHOR_FACING_WORKBENCH_IMPLEMENTATION（UI_1_0_BASELINE = APPROVED）**：
+**AUTHOR_FACING_WORKBENCH_IMPLEMENTATION（PRODUCT_BASELINE = GO_WRITE_2_0_APPROVED）**：
 
 1. 建立 `07_工作台应用` 工程骨架（desktop / ui / backend，仅目录结构，下一阶段）；
-2. 按 UI 1.0 基准实现顶部导航与作品内导航对应页面；
+2. 按 Go Write 2.0 产品基线实现作者页面；UI 1.0 仅作为已有技术纵切参考；
 3. 打通 UI → Bridge → Author Operations → Agent Adapter / Task Manager → 现有 Skills → 正式项目/知识数据；
-4. 实现中落实三个最小基座：candidate / accepted / authority 统一决策、proposal → confirm/writeback、next-best-action；
+4. 实现中落实三个最小基座：candidate / accepted / authority 统一决策、proposal → confirm/writeback、next-best-action；字数规划按已批准链路逐步验证；
 5. 只有真实 UI 使用证明底层缺能力时才补底层。
 
 真实作者纵切尚未完成，因此 `AUTHOR_FACING_ONE_SENTENCE_ENTRY` 不得标记 proven。
