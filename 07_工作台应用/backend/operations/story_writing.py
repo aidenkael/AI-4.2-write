@@ -1283,9 +1283,21 @@ def _get_interactive_story_write_request(
         request_id, audit.EVENT_BRIDGE_RESPONSE_RECEIVED, "story_write",
         details={"phase": phase},
     )
-    output = response.get("output") or (
-        json.dumps(response.get("result"), ensure_ascii=False) if isinstance(response.get("result"), dict) else ""
-    )
+    # 结构化 result 优先；纯文本 output 兜底（形状歧义由桥集中消除：
+    # output 为对象等畸形信封已被 read_response 转为失败信封）
+    try:
+        output = bridge.response_result_text(response)
+    except bridge.BridgeProtocolError as exc:
+        error = f"执行结果状态异常：{exc}"
+        audit.append_event(
+            request_id, audit.EVENT_AGENT_FAILED, "story_write",
+            details={"error": error[:200]},
+        )
+        if project_id and writing_turn_id:
+            _cleanup_writing(project_id, writing_turn_id)
+        bridge.cleanup_request(request_id)
+        audit.finish_file(request_id, audit.STATUS_FAILED, error=error)
+        return {"request_id": request_id, "status": "failed", "error": error}
 
     # 读取 prepare 时刻的 ctx 快照（缺失 → 整轮失效）
     ctx_path = writing_dir / "ctx.json"

@@ -828,14 +828,11 @@ def _finish_direct(
 
 
 def _response_output_text(response: dict[str, Any]) -> str:
-    """从 response 提取模型最终结果文本（result 优先，output 兜底）。"""
-    result = response.get("result")
-    if isinstance(result, dict) and result:
-        return json.dumps(result, ensure_ascii=False)
-    output = response.get("output")
-    if isinstance(output, str) and output.strip():
-        return output
-    raise StoryPlanningError("执行结果缺少模型输出。")
+    """从 response 提取模型最终结果文本（result 优先，output 兜底；共享桥 helper）。"""
+    try:
+        return bridge.response_result_text(response)
+    except bridge.BridgeProtocolError as exc:
+        raise StoryPlanningError(str(exc)) from exc
 
 
 def _finalize_story_plan(

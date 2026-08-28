@@ -210,6 +210,41 @@ def test_classify_agent_cannot_reference_unscanned_file(isolated, monkeypatch):
         materials.classify_material_inbox()
 
 
+def test_classify_interactive_accepts_structured_result(isolated, monkeypatch):
+    """交互分类：结构化 result（NEW_ASSET + METHOD_SOURCE）经桥消费与文本 output 等效。"""
+    from operations import qoder_bridge as bridge
+    monkeypatch.setattr(bridge, "get_bridge_root", lambda: isolated.parent / ".bridge")
+    SettingsStore().save(AppSettings(
+        default_execution_mode="interactive_bridge",
+        interactive_agent="qoder",
+        direct_agent="fake_classify_agent",
+        direct_model="native-1",
+        direct_custom_model=None,
+    ))
+    _write_ledger(isolated, _fake_asset_ledger())
+    (isolated / "01_原始素材" / "00_待入库" / "方法书.epub").write_bytes(b"method-book")
+
+    pending = materials.classify_material_inbox()
+    assert pending["status"] == "pending"
+    assert pending["agent_required"] is True
+    rid = pending["request_id"]
+
+    # canonical 信封：结构化 result 直接放对象（新 /gowrite 契约）
+    bridge.write_response(rid, result={
+        "items": [{
+            "filename": "方法书.epub", "action": "NEW_ASSET",
+            "name": "人物弧光方法书", "type": "METHOD_SOURCE",
+            "reason": "写作方法教程",
+        }],
+    })
+    status = materials.get_material_classify_request(rid)
+    assert status["status"] == "completed", status.get("error")
+    item = status["plan"]["items"][0]
+    assert item["action"] == "NEW_ASSET"
+    assert item["name"] == "人物弧光方法书"
+    assert item["type"] == "METHOD_SOURCE"
+
+
 # ---------------------------------------------------------------------------
 # E. 分类后仍走 MaterialIntake 事务入库
 # ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@ import sys
 import threading
 import time
 
+from agents import qoder
 from agents.base import AgentRequest
 from agents.qoder import QoderAdapter, _default_cli, _parse_models
 
@@ -86,3 +87,48 @@ def test_cancel(tmp_path):
     assert adapter.cancel() is True
     thread.join(10)
     assert holder["result"].status == "cancelled"
+
+
+def test_command_ready_requires_every_managed_location(monkeypatch, tmp_path):
+    """就绪 = 每个受支持命令位置都与当前定义精确一致（任一 stale/缺失 → 不就绪）。"""
+    a = tmp_path / "a" / "commands" / "gowrite.md"
+    b = tmp_path / "b" / "commands" / "gowrite.md"
+    monkeypatch.setattr(qoder, "_command_paths", lambda: [a, b])
+    assert qoder.command_ready() is False  # 两个位置都缺失
+    a.parent.mkdir(parents=True)
+    a.write_text(qoder.command_definition(), encoding="utf-8")
+    assert qoder.command_ready() is False  # 一个正确 + 一个缺失
+    b.parent.mkdir(parents=True)
+    b.write_text("stale command", encoding="utf-8")
+    assert qoder.command_ready() is False  # 一个正确 + 一个 stale
+    b.write_text(qoder.command_definition(), encoding="utf-8")
+    assert qoder.command_ready() is True  # 两个都精确一致
+
+
+def test_install_command_writes_exact_definition_to_all_locations(monkeypatch, tmp_path):
+    """install_command 必须把同一份当前定义写入全部位置并逐位置校验。"""
+    a = tmp_path / "a" / "commands" / "gowrite.md"
+    b = tmp_path / "b" / "commands" / "gowrite.md"
+    monkeypatch.setattr(qoder, "_command_paths", lambda: [a, b])
+    result = qoder.install_command()
+    assert result["status"] == "installed"
+    assert result["command_ready"] is True
+    assert sorted(result["installed_paths"]) == sorted([str(a), str(b)])
+    assert a.read_text(encoding="utf-8") == qoder.command_definition()
+    assert b.read_text(encoding="utf-8") == qoder.command_definition()
+    assert all(loc["ready"] for loc in result["locations"])
+    assert len(result["locations"]) == 2
+
+
+def test_command_locations_reports_stale_content(monkeypatch, tmp_path):
+    a = tmp_path / "a" / "commands" / "gowrite.md"
+    b = tmp_path / "b" / "commands" / "gowrite.md"
+    monkeypatch.setattr(qoder, "_command_paths", lambda: [a, b])
+    a.parent.mkdir(parents=True)
+    a.write_text(qoder.command_definition(), encoding="utf-8")
+    b.parent.mkdir(parents=True)
+    b.write_text("stale", encoding="utf-8")
+    facts = {loc["path"]: loc for loc in qoder.command_locations()}
+    assert facts[str(a)]["ready"] is True
+    assert facts[str(b)]["ready"] is False
+    assert facts[str(b)]["matches"] is False

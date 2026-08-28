@@ -5,6 +5,7 @@
 严格 JSON 验收（未转义引号拒绝；中文引号 / 正确转义引号接受）。
 不涉及任何模型调用；业务链测试见 test_new_project.py。
 """
+import json
 from pathlib import Path
 
 import pytest
@@ -163,6 +164,145 @@ def test_read_response_accepts_escaped_english_quotes(isolated):
     resp = bridge.read_response(rid)
     assert resp["status"] == "completed"
     assert resp["result"]["objective"] == "主角说\"你好\"，然后离开。"
+
+
+def test_read_response_rejects_dict_output_with_failed_envelope(isolated):
+    """output 中放对象（旧 /gowrite 畸形契约）→ 稳定失败信封，绝不产生 Python 类型异常。"""
+    rid = bridge.create_request(task="T", kind="k")
+    path = bridge.response_path(rid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "schema": "gowrite_response/v1", "request_id": rid,
+        "status": "completed", "result": None,
+        "output": {"items": [{"action": "NEW_ASSET", "type": "METHOD_SOURCE"}]},
+        "error": None,
+    }, ensure_ascii=False), encoding="utf-8")
+    resp = bridge.read_response(rid)
+    assert resp["request_id"] == rid
+    assert resp["status"] == "failed"
+    assert resp["result"] is None and resp["output"] is None
+    assert "output" in resp["error"]
+    assert isinstance(resp["error"], str) and resp["error"].strip()
+
+
+def test_read_response_rejects_array_output(isolated):
+    """output 中放数组同样无效（对象/数组必须放 result）。"""
+    rid = bridge.create_request(task="T", kind="k")
+    path = bridge.response_path(rid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "schema": "gowrite_response/v1", "request_id": rid,
+        "status": "completed", "result": None,
+        "output": [1, 2], "error": None,
+    }, ensure_ascii=False), encoding="utf-8")
+    resp = bridge.read_response(rid)
+    assert resp["status"] == "failed"
+    assert "output" in resp["error"]
+
+
+def test_read_response_survives_structured_result(isolated):
+    """规范化信封：结构化 result 对象原样通过桥。"""
+    rid = bridge.create_request(task="T", kind="k")
+    payload = {"items": [{"action": "NEW_ASSET", "name": "方法书", "type": "METHOD_SOURCE"}]}
+    bridge.write_response(rid, result=payload)
+    resp = bridge.read_response(rid)
+    assert resp["status"] == "completed"
+    assert resp["result"] == payload
+    assert resp["output"] is None
+
+
+def test_read_response_survives_textual_output(isolated):
+    """规范化信封：纯文本 output 原样通过桥。"""
+    rid = bridge.create_request(task="T", kind="k")
+    bridge.write_response(rid, output="普通文本结果")
+    resp = bridge.read_response(rid)
+    assert resp["status"] == "completed"
+    assert resp["output"] == "普通文本结果"
+    assert resp["result"] is None
+
+
+def test_read_response_rejects_invalid_field_types(isolated):
+    """result/output/error/status 类型非法或被拒绝的状态 → 稳定失败信封。"""
+    cases = [
+        {"status": "completed", "result": []},       # result 是数组
+        {"status": "completed", "result": "text"},   # result 是字符串
+        {"status": "completed", "output": 123},       # output 是数字
+        {"status": "completed", "error": 123},        # error 是数字
+        {"status": "maybe"},                          # 生产流程未使用的状态
+    ]
+    for extra in cases:
+        rid = bridge.create_request(task="T", kind="k")
+        path = bridge.response_path(rid)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "schema": "gowrite_response/v1", "request_id": rid,
+            "status": "completed", "result": None, "output": None, "error": None,
+            **extra,
+        }
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        resp = bridge.read_response(rid)
+        assert resp["status"] == "failed", extra
+        assert isinstance(resp["error"], str) and resp["error"]
+
+
+def test_read_response_wrong_schema_or_request_id_rejected(isolated):
+    rid = bridge.create_request(task="T", kind="k")
+    path = bridge.response_path(rid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "schema": "other/v1", "request_id": rid, "status": "completed", "result": {"a": 1},
+    }, ensure_ascii=False), encoding="utf-8")
+    assert bridge.read_response(rid)["status"] == "failed"
+    path.write_text(json.dumps({
+        "schema": "gowrite_response/v1", "request_id": "other-id", "status": "completed", "result": {"a": 1},
+    }, ensure_ascii=False), encoding="utf-8")
+    resp = bridge.read_response(rid)
+    assert resp["status"] == "failed"
+    assert resp["request_id"] == rid
+
+
+def test_read_response_completed_without_payload_rejected(isolated):
+    """completed 必须携带有效载荷（result 对象或非空 output 文本）。"""
+    rid = bridge.create_request(task="T", kind="k")
+    path = bridge.response_path(rid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "schema": "gowrite_response/v1", "request_id": rid,
+        "status": "completed", "result": None, "output": "", "error": None,
+    }, ensure_ascii=False), encoding="utf-8")
+    resp = bridge.read_response(rid)
+    assert resp["status"] == "failed"
+    assert "有效载荷" in resp["error"]
+
+
+def test_read_response_failed_without_error_rejected(isolated):
+    """failed 必须携带可用的 error。"""
+    rid = bridge.create_request(task="T", kind="k")
+    path = bridge.response_path(rid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "schema": "gowrite_response/v1", "request_id": rid,
+        "status": "failed", "result": None, "output": None, "error": None,
+    }, ensure_ascii=False), encoding="utf-8")
+    resp = bridge.read_response(rid)
+    assert resp["status"] == "failed"
+    assert "error" in resp["error"]
+
+
+def test_response_result_text_shared_helper(isolated):
+    """共享 helper：result 对象 → JSON 文本；output 纯文本 → 原样；两者皆无 → BridgeProtocolError。"""
+    rid = bridge.create_request(task="T", kind="k")
+    payload = {"items": [{"action": "NEW_ASSET"}]}
+    bridge.write_response(rid, result=payload)
+    text = bridge.response_result_text(bridge.read_response(rid))
+    assert json.loads(text) == payload
+
+    bridge.write_response(rid, output="  纯文本  ")
+    assert bridge.response_result_text(bridge.read_response(rid)) == "  纯文本  "
+
+    bridge.write_response(rid, result={})
+    with pytest.raises(bridge.BridgeProtocolError):
+        bridge.response_result_text(bridge.read_response(rid))
 
 
 def test_mark_canceled_deletes_response(isolated):

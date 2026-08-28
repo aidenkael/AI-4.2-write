@@ -164,7 +164,33 @@ def _command_paths() -> list[Path]:
 
 
 def command_definition() -> str:
-    return "---\ndescription: Execute the active Go Write request and write its response\n---\nRead `06_工作区/应用开发/.qoder_bridge/active.json`, then read the referenced request. Execute only its `task`. Write one UTF-8 JSON response to the request's `response_path` with schema `gowrite_response/v1`, the same `request_id`, status `completed` or `failed`, and either `output` or `error`. Do not invent or alter Go Write business rules; the request task is authoritative.\n"
+    """当前 /gowrite 命令定义（Go Write 安装到所有受支持 Qoder 位置的确切文本）。
+
+    响应信封契约（gowrite_response/v1）：``result`` 只放结构化 JSON 对象，
+    ``output`` 只放纯文本字符串，``error`` 放失败原因；无关字段置 null。
+    不包含任何 Go Write 业务规则 —— 业务规则全部由请求文件的 ``task`` 提供。
+    """
+    return (
+        "---\n"
+        "description: Execute the active Go Write request and write its response\n"
+        "---\n"
+        "Read `06_工作区/应用开发/.qoder_bridge/active.json`, then read the referenced request. "
+        "Execute only its `task`. Write one UTF-8 JSON response file to the request's `response_path` "
+        "with schema `gowrite_response/v1`, using a real JSON serializer (never hand-concatenate JSON). "
+        "The response must be a JSON object with the exact same `request_id` as the request file, and "
+        "one of these shapes:\n"
+        "- structured result: {\"schema\": \"gowrite_response/v1\", \"request_id\": \"<exact request id>\", "
+        "\"status\": \"completed\", \"result\": {<parsed JSON object>}, \"output\": null, \"error\": null}\n"
+        "- plain text result: {\"schema\": \"gowrite_response/v1\", \"request_id\": \"<exact request id>\", "
+        "\"status\": \"completed\", \"result\": null, \"output\": \"<plain text>\", \"error\": null}\n"
+        "- failure: {\"schema\": \"gowrite_response/v1\", \"request_id\": \"<exact request id>\", "
+        "\"status\": \"failed\", \"result\": null, \"output\": null, \"error\": \"<error message>\"}\n"
+        "Rules: if the task's final answer is a JSON object, parse it and write it under `result` as an "
+        "object; never place an object or array under `output` (`output` is raw plain text only); "
+        "preserve the exact request_id; set unused fields to null; before finishing, parse the written "
+        "response back and verify it is valid JSON. Do not invent or alter Go Write business rules; "
+        "the request task is authoritative.\n"
+    )
 
 
 def command_locations() -> list[dict[str, Any]]:
@@ -189,11 +215,20 @@ def command_locations() -> list[dict[str, Any]]:
 
 
 def command_ready() -> bool:
-    """Ready when the exact definition exists at any supported location."""
-    return any(location["ready"] for location in command_locations())
+    """Ready only when every Go Write-managed command location holds the exact current definition.
+
+    任一受支持位置缺失或内容过期都视为未就绪（否则一个陈旧位置的旧契约
+    可能被某个 Qoder 实例当作活跃命令使用）。
+    """
+    return all(location["ready"] for location in command_locations())
 
 
 def install_command() -> dict[str, Any]:
+    """把当前命令定义写入全部受支持位置，并逐位置校验。
+
+    只写 Go Write 自己管理的两个命令位置；绝不改动 Qoder 的 settings / models /
+    auth 等其它配置。全部位置与当前定义精确一致才算 installed。
+    """
     paths = _command_paths()
     errors: list[str] = []
     installed_paths: list[str] = []
@@ -205,11 +240,13 @@ def install_command() -> dict[str, Any]:
         except (OSError, UnicodeError) as exc:
             errors.append(f"{path}: 写入 Qoder Desktop 命令失败：{exc}")
 
-    ready = command_ready()
+    locations = command_locations()
+    ready = all(location["ready"] for location in locations)
     if not ready and not errors:
-        errors.append("命令已写入，但任何受支持的 Qoder 命令位置都不符合 /gowrite 命令格式")
+        errors.append("命令已写入，但并非每个受支持的 Qoder 命令位置都符合 /gowrite 命令格式")
     return {
         "installed_paths": installed_paths,
+        "locations": locations,
         "command_ready": ready,
         "status": "installed" if ready else "error",
         "restart_required": False,

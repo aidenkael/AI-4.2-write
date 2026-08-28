@@ -685,13 +685,19 @@ def get_material_classify_request(request_id: str) -> dict[str, Any]:
         bridge.cleanup_request(request_id)
         return {"request_id": request_id, "status": "failed", "error": "返回结果与任务不匹配，已丢弃。"}
     audit.append_event(request_id, audit.EVENT_BRIDGE_RESPONSE_RECEIVED, "material_classify")
-    output = response.get("output") or ""
-    if response.get("status") != "completed" or not output:
+    if response.get("status") != "completed":
         error = response.get("error") or "分类结果无效"
         bridge.cleanup_request(request_id)
         audit.finish_file(request_id, audit.STATUS_FAILED, error=error)
         return {"request_id": request_id, "status": "failed", "error": error}
-    from operations import qoder_bridge as _b
+    # 结构化 result 优先；纯文本 output 兜底（output 为对象等畸形信封已被桥拒绝）
+    try:
+        output = bridge.response_result_text(response)
+    except bridge.BridgeProtocolError as exc:
+        error = f"分类结果无效：{exc}"
+        bridge.cleanup_request(request_id)
+        audit.finish_file(request_id, audit.STATUS_FAILED, error=error)
+        return {"request_id": request_id, "status": "failed", "error": error}
     catalog, intake, _ = _load_materialintake()
     mat_dir = get_repo_root() / "01_原始素材"
     ledger_path = mat_dir / "素材资产.json"

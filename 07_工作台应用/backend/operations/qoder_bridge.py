@@ -51,6 +51,9 @@ _BRIDGE_ROOT = _REPO_ROOT / "06_工作区" / "应用开发" / ".qoder_bridge"
 REQUEST_SCHEMA = "gowrite_request/v1"
 RESPONSE_SCHEMA = "gowrite_response/v1"
 
+# 当前生产流程允许的响应状态（其余状态一律按坏信封拒绝）
+_ALLOWED_RESPONSE_STATUSES = frozenset({"completed", "failed"})
+
 # 默认任务超时：作者可能 Alt+Tab 后稍晚才执行 /gowrite，给 30 分钟
 DEFAULT_TASK_TIMEOUT_SECONDS = 30 * 60
 
@@ -224,13 +227,37 @@ def is_expired(request: dict[str, Any]) -> bool:
 # 结果读取（Go Write 侧）
 # ---------------------------------------------------------------------------
 
+class BridgeProtocolError(Exception):
+    """桥协议错误：响应信封缺少有效载荷或字段类型非法（普通可读错误）。"""
+
+
+def _failed_response(request_id: str, error: str) -> dict[str, Any]:
+    """稳定失败信封（与畸形 JSON 的失败信封同构，request_id 保持原值）。"""
+    return {
+        "schema": RESPONSE_SCHEMA,
+        "request_id": request_id,
+        "status": "failed",
+        "result": None,
+        "output": None,
+        "error": error,
+    }
+
+
 def read_response(request_id: str) -> Optional[dict[str, Any]]:
     """读取 response 文件；不存在返回 None。
 
-    严格验收：文件必须是合法 JSON，否则直接返回携带相同 request_id 的失败
-    信封（由调用方转成普通可读错误；request_id 仍是原值，便于防串校验）。
-    Go Write 绝不根据字符位置猜测或修改 Qoder 写回的原始 JSON —— 产生合法
-    JSON 是 Qoder 的职责（/gowrite 必须用标准 JSON parser 自验证）。
+    信封边界集中校验（consumer 永远只看到合法信封）：
+    - schema 必须恰为 gowrite_response/v1；
+    - request_id 必须与请求一致；
+    - status 必须是当前生产流程使用的状态（completed / failed）；
+    - result 必须是 dict 或 null；output / error 必须是 str 或 null；
+    - completed 必须携带有效载荷（result 对象或非空 output 文本）；
+      failed 必须携带可用的 error；
+    - output 中出现对象/数组（应放 result）→ 直接拒绝，绝不静默接受。
+
+    任一条件不满足 → 返回携带相同 request_id 的稳定失败信封（含桥协议错误），
+    绝不把 AttributeError/TypeError 传给业务层，也绝不猜测修复畸形 JSON。
+    产生合法 JSON 是 Qoder 的职责（/gowrite 必须用标准 JSON parser 自验证）。
     """
     path = response_path(request_id)
     if not path.exists():
@@ -238,15 +265,48 @@ def read_response(request_id: str) -> Optional[dict[str, Any]]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {
-            "schema": RESPONSE_SCHEMA,
-            "request_id": request_id,
-            "status": "failed",
-            "result": None,
-            "output": None,
-            "error": "结果文件不是合法 JSON，Go Write 已丢弃。",
-        }
+        return _failed_response(request_id, "结果文件不是合法 JSON，Go Write 已丢弃。")
+    if not isinstance(data, dict):
+        return _failed_response(request_id, "结果信封不是 JSON 对象，已拒绝。")
+    if data.get("schema") != RESPONSE_SCHEMA:
+        return _failed_response(request_id, f"结果信封 schema 不是 {RESPONSE_SCHEMA}，已拒绝。")
+    if data.get("request_id") != request_id:
+        return _failed_response(request_id, "结果 request_id 与当前任务不一致，已拒绝。")
+    status = data.get("status")
+    if status not in _ALLOWED_RESPONSE_STATUSES:
+        return _failed_response(request_id, f"结果信封 status 非法（{status!r}），已拒绝。")
+    result = data.get("result")
+    output = data.get("output")
+    error = data.get("error")
+    if result is not None and not isinstance(result, dict):
+        return _failed_response(request_id, "结果信封 result 类型错误（应为 JSON 对象或 null），已拒绝。")
+    if output is not None and not isinstance(output, str):
+        return _failed_response(request_id, "结果信封 output 类型错误（应为字符串或 null），已拒绝；对象/数组必须放在 result。")
+    if error is not None and not isinstance(error, str):
+        return _failed_response(request_id, "结果信封 error 类型错误（应为字符串或 null），已拒绝。")
+    if status == "completed":
+        if result is None and not (isinstance(output, str) and output.strip()):
+            return _failed_response(request_id, "completed 结果缺少有效载荷（result 对象或非空 output 文本）。")
+    elif status == "failed":
+        if not (isinstance(error, str) and error.strip()):
+            return _failed_response(request_id, "failed 结果缺少可用的 error。")
     return data
+
+
+def response_result_text(response: dict[str, Any]) -> str:
+    """把已校验信封中的模型结果提取为 JSON 文本（result 对象优先，output 纯文本兜底）。
+
+    read_response 已保证 result 为 dict/null、output 为 str/null；本函数绝不对
+    未知类型调用字符串方法。result 为对象 → json.dumps(ensure_ascii=False)；
+    否则取非空 output 文本；均无 → 抛 BridgeProtocolError。
+    """
+    result = response.get("result")
+    if isinstance(result, dict) and result:
+        return json.dumps(result, ensure_ascii=False)
+    output = response.get("output")
+    if isinstance(output, str) and output.strip():
+        return output
+    raise BridgeProtocolError("执行结果缺少模型输出。")
 
 
 def write_response(

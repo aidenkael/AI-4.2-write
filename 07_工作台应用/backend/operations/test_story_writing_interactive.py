@@ -143,6 +143,26 @@ def _write_qoder_response(request_id, output):
     }, ensure_ascii=False), encoding="utf-8")
 
 
+def _write_qoder_structured_response(request_id, result):
+    """模拟 Qoder /gowrite 写回：输出 = 结构化 result 对象（新契约）。"""
+    resp = bridge.response_path(request_id)
+    resp.parent.mkdir(parents=True, exist_ok=True)
+    resp.write_text(json.dumps({
+        "schema": "gowrite_response/v1", "request_id": request_id,
+        "status": "completed", "result": result, "output": None, "error": None,
+    }, ensure_ascii=False), encoding="utf-8")
+
+
+def _write_qoder_dict_output_response(request_id, output_dict):
+    """写入旧畸形契约：output 里放对象（必须被桥拒绝，不得出现 dict.strip 异常）。"""
+    resp = bridge.response_path(request_id)
+    resp.parent.mkdir(parents=True, exist_ok=True)
+    resp.write_text(json.dumps({
+        "schema": "gowrite_response/v1", "request_id": request_id,
+        "status": "completed", "result": None, "output": output_dict, "error": None,
+    }, ensure_ascii=False), encoding="utf-8")
+
+
 def _stage2_fingerprint(request_id) -> str:
     """从请求文件（已换成 Stage 2 任务）提取 Context 指纹。"""
     request = bridge.get_request(request_id)
@@ -202,6 +222,41 @@ def _complete_two_phase(real_project, monkeypatch, selection=None):
 # ---------------------------------------------------------------------------
 # A. prepare 两阶段请求生命周期
 # ---------------------------------------------------------------------------
+
+def test_stage1_accepts_structured_result(isolated, real_project, fake_bridge, monkeypatch):
+    """Stage 1 验收：结构化 result 对象（新契约）与文本 output 等效。"""
+    prepared = _interactive_prepare(real_project, monkeypatch)
+    rid = prepared["request_id"]
+    _write_qoder_structured_response(rid, json.loads(_selection_json()))
+    got = sw_ops.get_story_write_request(rid)
+    assert got["status"] == "pending" and got["phase"] == "pending_prose", got.get("error")
+    # 请求文件已换成 Stage 2 任务
+    request = bridge.get_request(rid)
+    assert "Context Package" in request["task"]
+
+
+def test_stage2_accepts_structured_result(isolated, real_project, fake_bridge, monkeypatch):
+    """Stage 2 验收：正文生成结果以结构化 result 对象返回。"""
+    prepared = _interactive_prepare(real_project, monkeypatch)
+    rid = prepared["request_id"]
+    _write_qoder_response(rid, _selection_json())
+    got = sw_ops.get_story_write_request(rid)
+    assert got["status"] == "pending" and got["phase"] == "pending_prose", got.get("error")
+    _write_qoder_structured_response(rid, json.loads(_prose_output(rid)))
+    got = sw_ops.get_story_write_request(rid)
+    assert got["status"] == "completed", got.get("error")
+    assert got["result"]["draft_text"]
+
+
+def test_stage1_dict_output_rejected_as_bridge_protocol_error(isolated, real_project, fake_bridge, monkeypatch):
+    """旧畸形契约（output 为对象）→ 桥失败信封 → 稳定 failed，绝不出现 dict.strip 异常。"""
+    prepared = _interactive_prepare(real_project, monkeypatch)
+    rid = prepared["request_id"]
+    _write_qoder_dict_output_response(rid, {"semantic_interpretation": {"objective": "x"}})
+    got = sw_ops.get_story_write_request(rid)
+    assert got["status"] == "failed"
+    assert isinstance(got["error"], str) and "output" in got["error"]
+
 
 def test_interactive_prepare_creates_two_phase_request(isolated, real_project, fake_bridge, monkeypatch):
     prepared = _interactive_prepare(real_project, monkeypatch)
@@ -367,8 +422,11 @@ def test_request_id_mismatch_response_discarded(isolated, real_project, fake_bri
         "status": "completed", "result": None, "output": _selection_json(), "error": None,
     }, ensure_ascii=False), encoding="utf-8")
     got = sw_ops.get_story_write_request(rid)
-    # 不匹配响应被丢弃：仍处于 pending_selection，不推进不失败
-    assert got["status"] == "pending" and got["phase"] == "pending_selection"
+    # 请求 id 不匹配响应由桥边界直接转成稳定失败信封（request_id 恢复为请求 id），
+    # 绝不把其它请求内容当作本任务的有效载荷解析。
+    assert got["status"] == "failed"
+    assert "request_id" in got.get("error", "")
+    assert bridge.get_request(rid) is None  # 终态清理
 
 
 # ---------------------------------------------------------------------------

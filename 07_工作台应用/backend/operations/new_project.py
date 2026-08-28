@@ -686,13 +686,11 @@ def _finish_direct(request_id: str, *, status: str, output: str = "", error: str
 # ---------------------------------------------------------------------------
 
 def _response_output_text(response: dict[str, Any]) -> str:
-    result = response.get("result")
-    if isinstance(result, dict) and result:
-        return json.dumps(result, ensure_ascii=False)
-    output = response.get("output")
-    if isinstance(output, str) and output.strip():
-        return output
-    raise NewProjectError("Qoder 返回结果缺少模型输出。")
+    """从 response 提取模型最终结果文本（result 优先，output 兜底；共享桥 helper）。"""
+    try:
+        return bridge.response_result_text(response)
+    except bridge.BridgeProtocolError as exc:
+        raise NewProjectError(str(exc)) from exc
 
 
 def _finalize_request(request: dict[str, Any], response: dict[str, Any]) -> dict[str, Any]:
