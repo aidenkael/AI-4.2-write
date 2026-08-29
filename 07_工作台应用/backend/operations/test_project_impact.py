@@ -40,6 +40,29 @@ def _ref(model):
     return model["change_history"][-1]["detail"]["ref"]
 
 
+def _project_file_bytes(project):
+    root = Path(project["project_dir"])
+    return {path.relative_to(root): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+
+
+def test_missing_project_model_is_a_read_only_failure(project):
+    artifact = Path(project["project_dir"]) / "_工作台状态" / model_ops.ARTIFACT_NAME
+    assert not artifact.exists()
+    with pytest.raises(impact_ops.ProjectImpactError, match="尚未建立"):
+        impact_ops.build_direct_impact_report(project["project_id"], 1)
+    assert not artifact.exists()
+
+
+def test_malformed_project_model_is_not_rewritten(project):
+    model_ops.load_project_model(project["project_id"])
+    artifact = Path(project["project_dir"]) / "_工作台状态" / model_ops.ARTIFACT_NAME
+    artifact.write_text("{not-json", encoding="utf-8")
+    before = artifact.read_bytes()
+    with pytest.raises(impact_ops.ProjectImpactError, match="读取或校验"):
+        impact_ops.build_direct_impact_report(project["project_id"], 1)
+    assert artifact.read_bytes() == before
+
+
 def test_latest_object_edit_keeps_concrete_raw_change_and_snapshot(project):
     created = _create(project, "旧名")
     ref = _ref(created)
@@ -47,7 +70,9 @@ def test_latest_object_edit_keeps_concrete_raw_change_and_snapshot(project):
         project["project_id"], base_model_rev=created["model_rev"], ref=ref,
         title="新名", data={"note": "明确修改"},
     )
+    before = _project_file_bytes(project)
     report = impact_ops.build_direct_impact_report(project["project_id"], updated["model_rev"])
+    assert _project_file_bytes(project) == before
     assert report["changed_object_refs"] == [ref]
     assert report["change"]["detail"]["changes"]["title"] == {"before": "旧名", "after": "新名"}
     assert report["object_snapshots"][ref]["title"] == "新名"
@@ -62,6 +87,12 @@ def test_outgoing_and_incoming_candidates_are_deterministic(project):
         project["project_id"], base_model_rev=second["model_rev"], source_ref=first_ref,
         target_ref=second_ref, relation_kind="supports",
     )
+    created_report = impact_ops.build_direct_impact_report(project["project_id"], edge["model_rev"])
+    assert created_report["changed_object_refs"] == []
+    assert created_report["changed_dependency_refs"] == [_ref(edge)]
+    assert created_report["object_snapshots"] == {
+        first_ref: edge["objects"][first_ref], second_ref: edge["objects"][second_ref],
+    }
     outgoing = model_ops.update_object(
         project["project_id"], base_model_rev=edge["model_rev"], ref=first_ref, title="甲改名",
     )
@@ -148,6 +179,6 @@ def test_stale_and_missing_revision_rejected_and_report_is_read_only(project, mo
 
     missing = dict(model_ops.load_project_model(project["project_id"]))
     missing["change_history"] = []
-    monkeypatch.setattr(impact_ops, "load_project_model", lambda _project_id: missing)
+    monkeypatch.setattr(impact_ops, "_load_read_only_project_model", lambda _project_id: missing)
     with pytest.raises(impact_ops.ProjectImpactError, match="恰好"):
         impact_ops.build_direct_impact_report(project["project_id"], current["model_rev"])

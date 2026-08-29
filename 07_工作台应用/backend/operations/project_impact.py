@@ -8,9 +8,21 @@ call, and no writeback to Story State, Canon, planning, or the model artifact.
 from __future__ import annotations
 
 import copy
+import json
+from pathlib import Path
 from typing import Any
 
-from operations.project_model import load_project_model
+from operations.project_model import (  # existing v1 artifact contract; no writes
+    ARTIFACT_NAME,
+    ProjectModelError,
+    _validate_model,
+)
+from project_workspace import (  # formal-project resolution/loading only
+    ContractError as PWContractError,
+    WorkspaceError as PWWorkspaceError,
+    load_project,
+    resolve_project,
+)
 
 
 SCHEMA_VERSION = "gowrite_direct_impact/v1"
@@ -18,6 +30,32 @@ SCHEMA_VERSION = "gowrite_direct_impact/v1"
 
 class ProjectImpactError(Exception):
     """A revision-bound direct-impact report cannot be built safely."""
+
+
+def _load_read_only_project_model(project_id: str) -> dict[str, Any]:
+    """Resolve a formal project and validate an existing model without writes."""
+    if not isinstance(project_id, str) or not project_id.strip():
+        raise ProjectImpactError("缺少 project_id。")
+    project_id = project_id.strip()
+    try:
+        project = resolve_project(project_id)
+        loaded = load_project(project["project_dir"])
+    except (PWContractError, PWWorkspaceError) as exc:
+        raise ProjectImpactError(str(exc)) from exc
+    if loaded.get("project_id") != project_id:
+        raise ProjectImpactError("项目解析后的 project_id 不一致，已拒绝。")
+    project_dir = Path(loaded["project_dir"]).resolve()
+    state_dir = (project_dir / "_工作台状态").resolve()
+    artifact = (state_dir / ARTIFACT_NAME).resolve()
+    if artifact.parent != state_dir or state_dir.parent != project_dir:
+        raise ProjectImpactError("项目模型路径 containment 校验失败。")
+    if not artifact.is_file():
+        raise ProjectImpactError("项目尚未建立 Go Write project-model 工件。")
+    try:
+        model = json.loads(artifact.read_text(encoding="utf-8"))
+        return _validate_model(model, project_id)
+    except (OSError, json.JSONDecodeError, ProjectModelError) as exc:
+        raise ProjectImpactError(f"项目模型读取或校验失败：{exc}") from exc
 
 
 def _add_ref(refs: set[str], value: Any) -> None:
@@ -115,13 +153,13 @@ def _dependency_candidates(
 def build_direct_impact_report(project_id: str, source_model_rev: int) -> dict[str, Any]:
     """Build a report bound to the latest committed project-model revision.
 
-    ``load_project_model`` is the sole model access point.  This operation
-    makes no writes itself and rejects any historical/stale revision until a
-    future explicit historical-model contract exists.
+    It resolves formal projects and reads an existing, validated artifact only.
+    This operation makes no writes and rejects any historical/stale revision
+    until a future explicit historical-model contract exists.
     """
     if not isinstance(source_model_rev, int) or isinstance(source_model_rev, bool) or source_model_rev <= 0:
         raise ProjectImpactError("source_model_rev 必须是正整数。")
-    model = load_project_model(project_id)
+    model = _load_read_only_project_model(project_id)
     if model.get("model_rev") != source_model_rev:
         raise ProjectImpactError("source_model_rev 必须等于当前 model_rev；历史 revision 暂不支持。")
     matches = [
@@ -135,6 +173,16 @@ def build_direct_impact_report(project_id: str, source_model_rev: int) -> dict[s
     candidates = _dependency_candidates(model, changed_object_refs, source_model_rev)
     snapshot_refs = set(changed_object_refs)
     snapshot_refs.update(candidate["other_ref"] for candidate in candidates if isinstance(candidate.get("other_ref"), str))
+    if change.get("kind") == "dependency.created":
+        if len(changed_dependency_refs) != 1:
+            raise ProjectImpactError("dependency.created 必须解析到一条现存依赖边。")
+        edge = model.get("dependencies", {}).get(changed_dependency_refs[0])
+        if not isinstance(edge, dict):
+            raise ProjectImpactError("dependency.created 对应依赖边不存在。")
+        for endpoint in (edge.get("source_ref"), edge.get("target_ref")):
+            if not isinstance(endpoint, str) or endpoint not in model.get("objects", {}):
+                raise ProjectImpactError("dependency.created 对应端点对象不存在。")
+            snapshot_refs.add(endpoint)
     snapshots = {
         ref: copy.deepcopy(model["objects"][ref])
         for ref in sorted(snapshot_refs)
