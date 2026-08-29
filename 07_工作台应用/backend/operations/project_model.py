@@ -145,16 +145,29 @@ def _validate_model(model: Any, project_id: str) -> dict[str, Any]:
             raise ProjectModelError("项目模型依赖结构非法。")
         if edge.get("source_ref") not in model["objects"] or edge.get("target_ref") not in model["objects"]:
             raise ProjectModelError("项目模型依赖指向未知或跨项目 ref。")
+        if not edge.get("tombstoned") and (
+            model["objects"][edge["source_ref"]].get("tombstoned")
+            or model["objects"][edge["target_ref"]].get("tombstoned")
+        ):
+            raise ProjectModelError("活动依赖不能指向 tombstoned 对象。")
     plan = model["length_plan"]
     if not isinstance(plan.get("stage_refs"), list) or not isinstance(plan.get("chapter_target_refs"), list):
         raise ProjectModelError("项目模型长度规划 ref 列表非法。")
     if not isinstance(plan.get("actual_word_counts"), dict):
         raise ProjectModelError("项目模型 actual_word_counts 非法。")
     for ref in plan["stage_refs"]:
-        if ref not in model["objects"] or model["objects"][ref].get("kind") != "length_stage":
+        if (
+            ref not in model["objects"]
+            or model["objects"][ref].get("kind") != "length_stage"
+            or model["objects"][ref].get("tombstoned")
+        ):
             raise ProjectModelError("项目模型阶段 ref 非法。")
     for ref in plan["chapter_target_refs"]:
-        if ref not in model["objects"] or model["objects"][ref].get("kind") != "chapter_target":
+        if (
+            ref not in model["objects"]
+            or model["objects"][ref].get("kind") != "chapter_target"
+            or model["objects"][ref].get("tombstoned")
+        ):
             raise ProjectModelError("项目模型章节目标 ref 非法。")
     for ref, count in plan["actual_word_counts"].items():
         if ref not in plan["chapter_target_refs"] or not isinstance(count, int) or count < 0:
@@ -213,6 +226,7 @@ def _commit(
     detail = mutate(model, next_rev)
     model["model_rev"] = next_rev
     model["change_history"].append({"model_rev": next_rev, "kind": change_kind, "detail": detail})
+    _validate_model(model, project_id)
     _atomic_write_json(artifact, model)
     return copy.deepcopy(model)
 
@@ -240,6 +254,20 @@ def _active_object(model: dict[str, Any], ref: str, *, expected_kind: str | None
     if expected_kind and item.get("kind") != expected_kind:
         raise ProjectModelError("ref 类型不符合当前操作。")
     return item
+
+
+def _tombstone_object_with_incident_edges(model: dict[str, Any], ref: str, next_rev: int) -> list[str]:
+    """Retire one object and every active explicit edge incident to it."""
+    item = _active_object(model, ref)
+    item["tombstoned"] = True
+    item["tombstoned_at_rev"] = next_rev
+    retired_edges: list[str] = []
+    for edge_ref, edge in model["dependencies"].items():
+        if not edge.get("tombstoned") and (edge["source_ref"] == ref or edge["target_ref"] == ref):
+            edge["tombstoned"] = True
+            edge["tombstoned_at_rev"] = next_rev
+            retired_edges.append(edge_ref)
+    return retired_edges
 
 
 def create_foundation_record(
@@ -298,17 +326,22 @@ def update_object(
 
     def mutate(model: dict[str, Any], _next_rev: int) -> dict[str, Any]:
         item = _active_object(model, ref)
-        changed: list[str] = []
-        if title is not None:
+        changes: dict[str, dict[str, Any]] = {}
+        if title is not None and item.get("title") != title.strip():
+            before = item.get("title")
             item["title"] = title.strip()
-            changed.append("title")
-        if material_state is not None:
+            changes["title"] = {"before": before, "after": item["title"]}
+        if material_state is not None and item.get("material_state") != material_state:
+            before = item.get("material_state")
             item["material_state"] = material_state
-            changed.append("material_state")
-        if data is not None:
+            changes["material_state"] = {"before": before, "after": material_state}
+        if data is not None and item.get("data") != data:
+            before = copy.deepcopy(item.get("data"))
             item["data"] = data
-            changed.append("data")
-        return {"ref": ref, "action": "updated", "fields": changed}
+            changes["data"] = {"before": before, "after": copy.deepcopy(data)}
+        if not changes:
+            raise ProjectModelError("编辑未产生任何实际变化。")
+        return {"ref": ref, "action": "updated", "changes": changes}
 
     return _commit(project_id, base_model_rev, "object.updated", mutate)
 
@@ -316,10 +349,8 @@ def update_object(
 def tombstone_object(project_id: str, *, base_model_rev: int, ref: str) -> dict[str, Any]:
     """Retire an identity without removing it or permitting reuse."""
     def mutate(model: dict[str, Any], next_rev: int) -> dict[str, Any]:
-        item = _active_object(model, ref)
-        item["tombstoned"] = True
-        item["tombstoned_at_rev"] = next_rev
-        return {"ref": ref, "action": "tombstoned"}
+        retired_edges = _tombstone_object_with_incident_edges(model, ref, next_rev)
+        return {"ref": ref, "action": "tombstoned", "retired_dependency_refs": retired_edges}
 
     return _commit(project_id, base_model_rev, "object.tombstoned", mutate)
 
@@ -375,51 +406,114 @@ def set_length_plan(
         ):
             raise ProjectModelError("actual_word_counts 必须是 ref 到非负整数的映射。")
 
-    def replace_items(model: dict[str, Any], plan: dict[str, Any], key: str, kind: str, entries: list[dict[str, Any]]) -> list[str]:
+    def normalize_entry(kind: str, entry: dict[str, Any], current: dict[str, Any] | None) -> tuple[str, dict[str, Any]]:
+        if not isinstance(entry, dict):
+            raise ProjectModelError("长度规划条目必须是对象。")
+        supplied_title = entry.get("title") or entry.get("name") or entry.get("label")
+        title = supplied_title if supplied_title is not None else (current or {}).get("title")
+        if not isinstance(title, str) or not title.strip():
+            raise ProjectModelError("长度规划条目必须有 title/name/label。")
+        data = copy.deepcopy((current or {}).get("data") or {})
+        if "data" in entry:
+            data = _validate_data(entry["data"])
+        for field, value in entry.items():
+            if field not in {"ref", "title", "name", "label", "data"}:
+                data[field] = copy.deepcopy(value)
+        if kind == "length_stage":
+            target = data.get("target_words")
+            if target is not None and (not isinstance(target, int) or target < 0):
+                raise ProjectModelError("阶段 target_words 必须是非负整数。")
+        else:
+            minimum, maximum = data.get("min_words"), data.get("max_words")
+            if not isinstance(minimum, int) or not isinstance(maximum, int) or minimum < 0 or maximum < minimum:
+                raise ProjectModelError("章节目标必须提供合法 min_words/max_words。")
+        return title.strip(), data
+
+    def reconcile_items(
+        model: dict[str, Any], plan: dict[str, Any], key: str, kind: str,
+        entries: list[dict[str, Any]], next_rev: int,
+    ) -> tuple[list[str], list[dict[str, Any]]]:
         old_refs = list(plan[key])
-        for old_ref in old_refs:
-            old = _active_object(model, old_ref, expected_kind=kind)
-            old["tombstoned"] = True
+        submitted_refs: set[str] = set()
         new_refs: list[str] = []
+        object_changes: list[dict[str, Any]] = []
         for entry in entries:
             if not isinstance(entry, dict):
                 raise ProjectModelError("长度规划条目必须是对象。")
-            title = entry.get("title") or entry.get("name") or entry.get("label")
-            if not isinstance(title, str) or not title.strip():
-                raise ProjectModelError("长度规划条目必须有 title/name/label。")
-            data = {k: copy.deepcopy(v) for k, v in entry.items() if k not in {"title", "name", "label"}}
-            if kind == "length_stage":
-                target = data.get("target_words")
-                if target is not None and (not isinstance(target, int) or target < 0):
-                    raise ProjectModelError("阶段 target_words 必须是非负整数。")
+            ref = entry.get("ref")
+            if ref is None:
+                title, data = normalize_entry(kind, entry, None)
+                ref = _next_ref(model, "obj")
+                model["objects"][ref] = {
+                    "ref": ref, "kind": kind, "title": title, "material_state": "future",
+                    "data": data, "tombstoned": False,
+                }
+                object_changes.append({"ref": ref, "action": "created"})
             else:
-                minimum, maximum = data.get("min_words"), data.get("max_words")
-                if not isinstance(minimum, int) or not isinstance(maximum, int) or minimum < 0 or maximum < minimum:
-                    raise ProjectModelError("章节目标必须提供合法 min_words/max_words。")
-            ref = _next_ref(model, "obj")
-            model["objects"][ref] = {
-                "ref": ref, "kind": kind, "title": title.strip(), "material_state": "future",
-                "data": data, "tombstoned": False,
-            }
+                if not isinstance(ref, str) or ref in submitted_refs:
+                    raise ProjectModelError("长度规划 ref 必须唯一且为字符串。")
+                item = _active_object(model, ref, expected_kind=kind)
+                if ref not in old_refs:
+                    raise ProjectModelError("长度规划 ref 不属于当前项目的活动规划集合。")
+                title, data = normalize_entry(kind, entry, item)
+                changes: dict[str, dict[str, Any]] = {}
+                if item.get("title") != title:
+                    changes["title"] = {"before": item.get("title"), "after": title}
+                    item["title"] = title
+                if item.get("data") != data:
+                    changes["data"] = {"before": copy.deepcopy(item.get("data")), "after": copy.deepcopy(data)}
+                    item["data"] = data
+                if changes:
+                    object_changes.append({"ref": ref, "action": "updated", "changes": changes})
+            submitted_refs.add(ref)
             new_refs.append(ref)
+        for ref in old_refs:
+            if ref not in submitted_refs:
+                _active_object(model, ref, expected_kind=kind)
+                retired_edges = _tombstone_object_with_incident_edges(model, ref, next_rev)
+                object_changes.append({
+                    "ref": ref, "action": "tombstoned", "retired_dependency_refs": retired_edges,
+                })
         plan[key] = new_refs
-        return new_refs
+        return new_refs, object_changes
 
-    def mutate(model: dict[str, Any], _next_rev: int) -> dict[str, Any]:
+    def mutate(model: dict[str, Any], next_rev: int) -> dict[str, Any]:
         plan = model["length_plan"]
         changed: dict[str, Any] = {}
-        if total_target_words is not None:
+        if total_target_words is not None and plan.get("total_target_words") != total_target_words:
+            changed["total_target_words"] = {
+                "before": plan.get("total_target_words"), "after": total_target_words,
+            }
             plan["total_target_words"] = total_target_words
-            changed["total_target_words"] = total_target_words
         if stages is not None:
-            changed["stage_refs"] = replace_items(model, plan, "stage_refs", "length_stage", stages)
+            before = list(plan["stage_refs"])
+            refs, object_changes = reconcile_items(model, plan, "stage_refs", "length_stage", stages, next_rev)
+            if before != refs or object_changes:
+                changed["stages"] = {"before_refs": before, "after_refs": refs, "objects": object_changes}
         if chapter_targets is not None:
-            changed["chapter_target_refs"] = replace_items(model, plan, "chapter_target_refs", "chapter_target", chapter_targets)
+            before = list(plan["chapter_target_refs"])
+            refs, object_changes = reconcile_items(model, plan, "chapter_target_refs", "chapter_target", chapter_targets, next_rev)
+            if before != refs or object_changes:
+                changed["chapter_targets"] = {"before_refs": before, "after_refs": refs, "objects": object_changes}
+        active_chapter_refs = set(plan["chapter_target_refs"])
+        retained_actuals = {
+            ref: count for ref, count in plan["actual_word_counts"].items() if ref in active_chapter_refs
+        }
         if actual_word_counts is not None:
             for ref in actual_word_counts:
+                if ref not in active_chapter_refs:
+                    raise ProjectModelError("actual_word_counts 只能引用最终活动章节目标。")
                 _active_object(model, ref, expected_kind="chapter_target")
-            plan["actual_word_counts"] = copy.deepcopy(actual_word_counts)
-            changed["actual_word_counts"] = sorted(actual_word_counts)
+            final_actuals = copy.deepcopy(actual_word_counts)
+        else:
+            final_actuals = retained_actuals
+        if plan["actual_word_counts"] != final_actuals:
+            changed["actual_word_counts"] = {
+                "before": copy.deepcopy(plan["actual_word_counts"]), "after": copy.deepcopy(final_actuals),
+            }
+            plan["actual_word_counts"] = final_actuals
+        if not changed:
+            raise ProjectModelError("长度规划编辑未产生任何实际变化。")
         return {"action": "length_plan.set", "changed": changed}
 
     return _commit(project_id, base_model_rev, "length_plan.set", mutate)

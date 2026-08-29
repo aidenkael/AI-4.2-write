@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "05_Skills与自动化" / "01_Skills" / "ProjectWorkspace"))
 
 import project_workspace  # noqa: E402
@@ -174,3 +175,110 @@ def test_malformed_or_cross_project_artifact_is_rejected(project, isolated):
     artifact.write_text(json.dumps(model, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(model_ops.ProjectModelError, match="跨项目"):
         model_ops.load_project_model(project["project_id"])
+
+
+def _two_stage_two_chapter_plan(project):
+    return model_ops.set_length_plan(
+        project["project_id"], base_model_rev=model_ops.load_project_model(project["project_id"])["model_rev"],
+        stages=[
+            {"name": "第一幕", "target_words": 50000},
+            {"name": "第二幕", "target_words": 60000},
+        ],
+        chapter_targets=[
+            {"label": "第001章", "min_words": 2500, "max_words": 3500},
+            {"label": "第002章", "min_words": 2800, "max_words": 3800},
+        ],
+    )
+
+
+def test_length_plan_edits_and_reordering_preserve_existing_refs(project):
+    planned = _two_stage_two_chapter_plan(project)
+    stages = planned["length_plan"]["stage_refs"]
+    chapters = planned["length_plan"]["chapter_target_refs"]
+    edited = model_ops.set_length_plan(
+        project["project_id"], base_model_rev=planned["model_rev"],
+        stages=[{"ref": stages[1]}, {"ref": stages[0], "title": "开篇", "target_words": 52000}],
+        chapter_targets=[
+            {"ref": chapters[1]},
+            {"ref": chapters[0], "min_words": 2600, "max_words": 3600},
+        ],
+    )
+    assert edited["length_plan"]["stage_refs"] == [stages[1], stages[0]]
+    assert edited["length_plan"]["chapter_target_refs"] == [chapters[1], chapters[0]]
+    assert edited["objects"][stages[0]]["title"] == "开篇"
+    assert edited["objects"][stages[0]]["data"]["target_words"] == 52000
+    assert edited["objects"][chapters[0]]["data"] == {"min_words": 2600, "max_words": 3600}
+    history = edited["change_history"][-1]["detail"]["changed"]
+    stage_update = next(item for item in history["stages"]["objects"] if item["ref"] == stages[0])
+    assert stage_update["changes"]["title"] == {"before": "第一幕", "after": "开篇"}
+    assert stage_update["changes"]["data"]["before"]["target_words"] == 50000
+    assert stage_update["changes"]["data"]["after"]["target_words"] == 52000
+
+
+def test_length_plan_add_and_remove_tombstones_without_ref_reuse(project):
+    planned = _two_stage_two_chapter_plan(project)
+    old_stages = planned["length_plan"]["stage_refs"]
+    updated = model_ops.set_length_plan(
+        project["project_id"], base_model_rev=planned["model_rev"],
+        stages=[{"ref": old_stages[0]}, {"name": "新增幕", "target_words": 30000}],
+    )
+    new_stages = updated["length_plan"]["stage_refs"]
+    assert new_stages[0] == old_stages[0]
+    assert new_stages[1] not in old_stages
+    assert updated["objects"][old_stages[1]]["tombstoned"] is True
+    later = model_ops.set_length_plan(
+        project["project_id"], base_model_rev=updated["model_rev"],
+        stages=[{"ref": new_stages[0]}, {"ref": new_stages[1]}, {"name": "再新增", "target_words": 20000}],
+    )
+    assert later["length_plan"]["stage_refs"][-1] not in {*old_stages, *new_stages}
+
+
+def test_chapter_actual_counts_follow_active_chapter_refs(project):
+    planned = _two_stage_two_chapter_plan(project)
+    chapters = planned["length_plan"]["chapter_target_refs"]
+    counted = model_ops.set_length_plan(
+        project["project_id"], base_model_rev=planned["model_rev"],
+        actual_word_counts={chapters[0]: 3000, chapters[1]: 3200},
+    )
+    removed = model_ops.set_length_plan(
+        project["project_id"], base_model_rev=counted["model_rev"], chapter_targets=[{"ref": chapters[1]}],
+    )
+    assert removed["objects"][chapters[0]]["tombstoned"] is True
+    assert removed["length_plan"]["actual_word_counts"] == {chapters[1]: 3200}
+    assert model_ops.load_project_model(project["project_id"])["length_plan"]["actual_word_counts"] == {chapters[1]: 3200}
+    with pytest.raises(model_ops.ProjectModelError, match="最终活动"):
+        model_ops.set_length_plan(
+            project["project_id"], base_model_rev=removed["model_rev"], actual_word_counts={chapters[0]: 3000},
+        )
+
+
+def test_failed_final_validation_preserves_artifact_bytes(project):
+    planned = _two_stage_two_chapter_plan(project)
+    stage_ref = planned["length_plan"]["stage_refs"][0]
+    artifact = Path(project["project_dir"]) / "_工作台状态" / model_ops.ARTIFACT_NAME
+    before = artifact.read_bytes()
+    with pytest.raises(model_ops.ProjectModelError, match="阶段 ref"):
+        model_ops.tombstone_object(project["project_id"], base_model_rev=planned["model_rev"], ref=stage_ref)
+    assert artifact.read_bytes() == before
+    assert model_ops.load_project_model(project["project_id"])["objects"][stage_ref]["tombstoned"] is False
+
+
+def test_object_tombstone_retires_incident_dependency_edges(project):
+    source = _add_character(project, title="人物")
+    source_ref = source["change_history"][-1]["detail"]["ref"]
+    target = model_ops.create_foundation_record(
+        project["project_id"], base_model_rev=source["model_rev"], category="story_line", title="主线",
+    )
+    target_ref = target["change_history"][-1]["detail"]["ref"]
+    edged = model_ops.add_dependency(
+        project["project_id"], base_model_rev=target["model_rev"], source_ref=source_ref,
+        target_ref=target_ref, relation_kind="motivates",
+    )
+    edge_ref = edged["change_history"][-1]["detail"]["ref"]
+    retired = model_ops.tombstone_object(
+        project["project_id"], base_model_rev=edged["model_rev"], ref=source_ref,
+    )
+    assert retired["dependencies"][edge_ref]["tombstoned"] is True
+    assert retired["dependencies"][edge_ref]["tombstoned_at_rev"] == retired["model_rev"]
+    assert retired["change_history"][-1]["detail"]["retired_dependency_refs"] == [edge_ref]
+    assert model_ops.list_direct_dependencies(project["project_id"], target_ref) == []
