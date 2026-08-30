@@ -146,6 +146,19 @@ def get_project_data(project_id: str) -> dict[str, Any]:
             *[project(item, "future") for item in snapshot["future"].get(section, [])],
         ]
 
+    def retired_entry(item: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": item.get("id") or item.get("ref"),
+            "label": item.get("title") or "",
+            "record": copy.deepcopy(item.get("record")),
+            "source_ref": item.get("ref"),
+            "source_kind": item.get("source_kind"),
+            "category": item.get("category"),
+            "editable": True,
+        }
+
+    retired_source = snapshot.get("retired") if isinstance(snapshot.get("retired"), dict) else {}
+
     intent = snapshot["author_intent"]
     return {
         "project_id": snapshot["project_id"],
@@ -166,6 +179,10 @@ def get_project_data(project_id: str) -> dict[str, Any]:
             "actual_result": copy.deepcopy(item.get("actual_result")),
         } for item in snapshot["chapters"]],
         "planning_impact_candidates": snapshot.get("planning_impact_candidates", []),
+        "retired": {
+            "foundation": [retired_entry(item) for item in retired_source.get("foundation", [])],
+            "relationships": [retired_entry(item) for item in retired_source.get("relationships", [])],
+        },
         "sections": {
             "characters": combined("characters"),
             "relationships": combined("relationships"),

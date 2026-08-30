@@ -38,9 +38,10 @@ Deterministic code      Direct AI / Agent+Skills
 - `project_snapshot.py`
 - `project_data.py`
 - `project_impact.py`
-- `author_edit.py`
-- `change_settlement.py` 中**写回/authority/patch 应用**部分
+- `author_edit.py`（含按项目可重入写锁 `project_write_lock`：账本/模型所有写入的串行化点）
+- `change_settlement.py` 中**写回/authority/patch 应用**部分；该文件保持在 `operations/change_settlement.py`（move-on-touch，未搬家）：其 **Direct AI 结算编排（提示组装/请求生命周期/账本状态机）同样归属本模块**，消费 `ai/` 薄通道；绝不回退 `agent/`
 - 章节正式保存与 accepted index 的确定性部分
+- `restore_object` / `restore_dependency`（退役记录同一 ref 原位恢复；确定性、零 AI）
 
 长期 API 只围绕：
 - load current project snapshot
@@ -48,26 +49,25 @@ Deterministic code      Direct AI / Agent+Skills
 - validate/apply semantic patch
 - accept/cancel candidate
 - retire/restore domain object
-- current/future/actual result projection
+- current/future/retired 分区投影与 actual result projection（退役记录经 `retired.foundation[] / retired.relationships[]` 暴露，不混入 current/future）
 
 规则：这是唯一可写原创权威的模块；AI、Agent、UI 不直接碰底层文件。
 
 ### B. `ai/` —— Direct AI 薄通道
 
-当前尚未正式实现；以后只在接独立 AI API 时建立。
-
-最小文件建议：
+已实现（2026-08-31，M2）：
 
 ```text
 backend/ai/
-├─ runner.py        # run_structured
-├─ contracts.py     # request/result/schema 最小合同
-└─ providers/       # 仅真实需要的 provider adapter
+├─ __init__.py
+└─ runner.py        # run_text(prompt) -> str；一次 OpenAI 兼容 chat/completions
 ```
 
-禁止在这里建立：memory、workflow、agent graph、知识库、项目状态。
+- 配置：非机密 `semantic_ai_base_url` / `semantic_ai_model` 存 `~/.ai-write/semantic_ai_settings.json`；API Key 只进 OS keyring（`config/secrets.SecretStore`）。与 `config/settings.py` 的 Agent 执行设置完全分离。
+- 语义合同校验**不在本模块**：输出只是文本，既有 `change_settlement` 解析器/authority 门继续承担。
+- 第一个消费者：`change_settlement` 高频语义结算。后续消费者（章节实际摘要、人物/关系/世界状态增量提取）按真实需要接入，不为它们预建结构。
 
-第一批消费者候选：高频语义 settlement、章节实际摘要、人物/关系/世界状态增量提取。
+禁止在这里建立：memory、workflow、agent graph、知识库、项目状态、provider registry、session/prompt registry。
 
 ### C. `agent/` —— Agent 与工具执行
 

@@ -1658,16 +1658,17 @@ def confirm_story_write(project_id: str, writing_token: str) -> dict[str, Any]:
             item for item in accepted_snapshot["chapters"]
             if item["chapter_number"] == chapter_number
         )
-        change = author_edit_ops.record_accepted_ai_prose(
-            project_id, chapter_number=chapter_number, scene_ref=scene_ref, settlement=settlement,
-            content_sha256=accepted_chapter["content_sha256"],
-            semantic_result=meta.get("semantic_result"),
-        )
-        if meta.get("semantic_result") is not None:
-            from operations import change_settlement as settlement_ops
-            settlement_ops.apply_semantic_result(
-                project_id, change["change_id"], meta["semantic_result"],
+        with author_edit_ops.project_write_lock(project_id):
+            change = author_edit_ops.record_accepted_ai_prose(
+                project_id, chapter_number=chapter_number, scene_ref=scene_ref, settlement=settlement,
+                content_sha256=accepted_chapter["content_sha256"],
+                semantic_result=meta.get("semantic_result"),
             )
+            if meta.get("semantic_result") is not None:
+                from operations import change_settlement as settlement_ops
+                settlement_ops.apply_semantic_result(
+                    project_id, change["change_id"], meta["semantic_result"],
+                )
     except Exception as exc:  # noqa: BLE001 - accepted prose must stay durable across settlement failures
         ledger_warning = f"正文已保留，但章节结果/统一语义记录失败：{exc}"
     else:

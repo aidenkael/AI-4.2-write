@@ -24,7 +24,7 @@ export const minimalProjectData: ProjectData = {
   work_direction: '', reader_promise: '', settlement,
   story_bible_profile: { genre_tags: [], narrative_mode: null, active_modules: ['core', 'characters', 'relationships', 'world', 'locations', 'organizations', 'storylines', 'foreshadowing', 'events', 'time'], field_config: {} },
   length_plan: { total_target_words: null, actual_total_words: 0, stages: [], chapters: [] },
-  chapters: [], planning_impact_candidates: [], sections,
+  chapters: [], planning_impact_candidates: [], retired: { foundation: [], relationships: [] }, sections,
 }
 
 const actions: Actions = {
@@ -54,7 +54,7 @@ function installBridge() {
   const previous = target.window
   target.IS_REACT_ACT_ENVIRONMENT = true
   target.window = {
-    pywebview: { api: new Proxy({}, { get: (_target, method) => async () => ({ ok: true, data: bridgeData(String(method)), error: null }) }) },
+    pywebview: { api: new Proxy({}, { get: (_target, method) => (method === 'then' ? undefined : async () => ({ ok: true, data: bridgeData(String(method)), error: null })) }) },
     setTimeout, clearTimeout, setInterval, clearInterval, addEventListener: () => {}, removeEventListener: () => {},
   }
   return () => { target.window = previous }
@@ -101,5 +101,63 @@ export function invalidProjectDataIsRejected(): boolean {
     return false
   } catch (error) {
     return error instanceof BridgeError && error.code === 'PROJECT_DATA_INVALID'
+  }
+}
+
+export function minimalProjectDataPassesContract(): boolean {
+  return validateProjectData(minimalProjectData).project_id === minimalProjectData.project_id
+}
+
+export function missingRetiredSurfaceIsRejected(): boolean {
+  const invalid = { ...minimalProjectData, retired: undefined }
+  try {
+    validateProjectData(invalid)
+    return false
+  } catch (error) {
+    return error instanceof BridgeError && error.code === 'PROJECT_DATA_INVALID'
+  }
+}
+
+/** Retired records render in a compact 已退役 area with a 恢复 action (Foundation page). */
+export async function retiredRecordsRenderWithRestoreAction(): Promise<boolean> {
+  const retiredEntry = {
+    id: 'gw_retired_1', label: '退役人物', record: { name: '退役人物' },
+    source_ref: 'gw_retired_1', source_kind: 'author_workspace', category: 'character', editable: true,
+  }
+  const dataWithRetired: ProjectData = {
+    ...minimalProjectData,
+    retired: { foundation: [retiredEntry], relationships: [] },
+  }
+  const target = globalThis as unknown as { window?: unknown; IS_REACT_ACT_ENVIRONMENT?: boolean }
+  const previous = target.window
+  target.IS_REACT_ACT_ENVIRONMENT = true
+  target.window = {
+    pywebview: {
+      api: new Proxy({}, {
+        get: (_t, method) => (method === 'then' ? undefined : async () => ({
+          ok: true,
+          data: method === 'get_project_data' ? dataWithRetired : bridgeData(String(method)),
+          error: null,
+        })),
+      }),
+    },
+    setTimeout, clearTimeout, setInterval, clearInterval, addEventListener: () => {}, removeEventListener: () => {},
+  }
+  try {
+    const holder: { renderer: ReturnType<typeof create> | null } = { renderer: null }
+    let output = ''
+    await act(async () => {
+      holder.renderer = create(wrap(<FoundationPage />))
+      await Promise.resolve(); await Promise.resolve()
+    })
+    // Bridge 加载是异步的：多拍几次微任务，等待 setData 触发重渲染。
+    for (let i = 0; i < 8; i += 1) {
+      await act(async () => { await Promise.resolve() })
+    }
+    output = JSON.stringify(holder.renderer?.toJSON())
+    holder.renderer?.unmount()
+    return output.includes('已退役') && output.includes('恢复') && output.includes('退役人物')
+  } finally {
+    target.window = previous
   }
 }

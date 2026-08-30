@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { PageHeader } from '../../components/PageHeader'
 import { useApp, useIllustration } from '../app/AppStore'
 import { ExecutionAudits } from './components/ExecutionAudits'
+import { SemanticAiSettingsSection } from './components/SemanticAiSettings'
 import { ExecutionModules } from './components/ExecutionModules'
 import { VisualSettings } from './components/VisualSettings'
 import { savedExecutionSummary } from './settingsSummary'
@@ -10,7 +11,7 @@ import type { SettingsSection } from './types'
 import { useSettingsController } from './useSettingsController'
 
 const menu = [
-  { label: 'AI 服务 / API', Icon: Cloud }, { label: 'Agent', Icon: Bot },
+  { label: 'AI 服务 / API', Icon: Cloud }, { label: '日常 AI', Icon: Cloud }, { label: 'Agent', Icon: Bot },
   { label: '执行配置', Icon: SlidersHorizontal }, { label: '项目与数据', Icon: Folder },
   { label: '插图与视觉', Icon: Image }, { label: '高级设置', Icon: SettingsIcon },
   { label: '执行记录', Icon: ScrollText },
@@ -73,6 +74,7 @@ export function SettingsFeature() {
                 : `${agent.direct.models.length}（受管默认）+ ${agent.direct.custom_models.length}（自定义）`)}</span>
             : <span>无可执行模型</span>}
         <em>{agent.direct.available ? '可用' : '不可用'}</em></article>)}</div> : null}
+      {section === '日常 AI' ? <SemanticAiSettingsSection/> : null}
       {section === '插图与视觉' ? <VisualSettings/> : null}
       {section === '执行记录' ? <ExecutionAudits/> : null}
       {(section === '项目与数据' || section === '高级设置') ? <div className="session-config"><SlidersHorizontal size={42}/><h3>{section}</h3><p>这些界面偏好只保存在当前前端会话，不属于 Agent 执行配置。</p><label><input type="checkbox" checked={state.preferences.sound} onChange={(event) => actions.setPreference('sound', event.target.checked)}/> 在执行完成/失败时播放提示音</label><p className="muted-note">任务完成或失败时显示全局通知；开启提示音后会同时播放一段短提示音（本机音量控制）。</p></div> : null}

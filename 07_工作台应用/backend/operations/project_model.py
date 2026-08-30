@@ -689,6 +689,48 @@ def tombstone_object(project_id: str, *, base_model_rev: int, ref: str) -> dict[
     return _commit(project_id, base_model_rev, "object.tombstoned", mutate)
 
 
+def restore_object(project_id: str, *, base_model_rev: int, ref: str) -> dict[str, Any]:
+    """Restore the SAME tombstoned identity; never create a replacement.
+
+    Deterministic: no AI/Agent involved.  Incident explicit edges retired by the
+    same tombstone revision are restored together when both endpoints are active
+    again, so relationships remain bound to the same stable refs.
+    """
+    def mutate(model: dict[str, Any], next_rev: int) -> dict[str, Any]:
+        item = model["objects"].get(ref)
+        if not isinstance(item, dict):
+            raise ProjectModelError("未知或跨项目 ref，已拒绝。")
+        if not item.get("tombstoned"):
+            raise ProjectModelError("该记录处于活动状态，无需恢复。")
+        item["tombstoned"] = False
+        item.pop("tombstoned_at_rev", None)
+        item["restored_at_rev"] = next_rev
+        restored_edges: list[str] = []
+        for entry in reversed(model["change_history"]):
+            if entry.get("kind") != "object.tombstoned":
+                continue
+            detail = entry.get("detail") if isinstance(entry.get("detail"), dict) else {}
+            if detail.get("ref") != ref:
+                continue
+            for edge_ref in detail.get("retired_dependency_refs") or []:
+                edge = model["dependencies"].get(edge_ref)
+                if (
+                    isinstance(edge, dict)
+                    and edge.get("tombstoned")
+                    and edge.get("tombstoned_at_rev") == entry.get("model_rev")
+                    and not model["objects"][edge["source_ref"]].get("tombstoned")
+                    and not model["objects"][edge["target_ref"]].get("tombstoned")
+                ):
+                    edge["tombstoned"] = False
+                    edge.pop("tombstoned_at_rev", None)
+                    edge["restored_at_rev"] = next_rev
+                    restored_edges.append(edge_ref)
+            break
+        return {"ref": ref, "action": "restored", "restored_dependency_refs": restored_edges}
+
+    return _commit(project_id, base_model_rev, "object.restored", mutate)
+
+
 def create_system(
     project_id: str,
     *,
@@ -1189,6 +1231,26 @@ def tombstone_dependency(project_id: str, *, base_model_rev: int, ref: str) -> d
         return {"ref": ref, "action": "tombstoned"}
 
     return _commit(project_id, base_model_rev, "dependency.tombstoned", mutate)
+
+
+def restore_dependency(project_id: str, *, base_model_rev: int, ref: str) -> dict[str, Any]:
+    """Restore the SAME tombstoned dependency; endpoints must be active."""
+    def mutate(model: dict[str, Any], next_rev: int) -> dict[str, Any]:
+        edge = model["dependencies"].get(ref)
+        if not isinstance(edge, dict):
+            raise ProjectModelError("未知或跨项目依赖 ref，已拒绝。")
+        if not edge.get("tombstoned"):
+            raise ProjectModelError("该关系处于活动状态，无需恢复。")
+        for endpoint in (edge["source_ref"], edge["target_ref"]):
+            item = model["objects"].get(endpoint)
+            if not isinstance(item, dict) or item.get("tombstoned"):
+                raise ProjectModelError("关系两端人物仍处于退役状态，请先恢复人物。")
+        edge["tombstoned"] = False
+        edge.pop("tombstoned_at_rev", None)
+        edge["restored_at_rev"] = next_rev
+        return {"ref": ref, "action": "restored"}
+
+    return _commit(project_id, base_model_rev, "dependency.restored", mutate)
 
 
 def create_relationship(

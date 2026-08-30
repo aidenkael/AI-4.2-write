@@ -283,6 +283,29 @@ export async function testAgentConnection(payload: {
   return call<ConnectionTestResult>('test_agent_connection', payload)
 }
 
+// ---------------- 日常 AI（Direct AI 语义结算；独立于 Agent 执行设置） ----------------
+
+export interface SemanticAiSettings {
+  semantic_ai_base_url: string
+  semantic_ai_model: string
+  /** API Key 只存在于系统凭据存储；前端永远只能看到是否已配置。 */
+  has_api_key: boolean
+  configured: boolean
+}
+
+export async function getSemanticAiSettings(): Promise<SemanticAiSettings> {
+  return call<SemanticAiSettings>('get_semantic_ai_settings')
+}
+
+/** 保存日常 AI 设置；提供 api_key 时只写入 OS keyring，绝不回传明文。 */
+export async function saveSemanticAiSettings(payload: {
+  semantic_ai_base_url: string
+  semantic_ai_model: string
+  api_key?: string
+}): Promise<{ settings: SemanticAiSettings }> {
+  return call<{ settings: SemanticAiSettings }>('save_semantic_ai_settings', payload)
+}
+
 // ---------------- 新建作品（"我有个想法"纵切） ----------------
 // Go Write 只准备任务（pending request）；模型执行由作者在 Qoder 桌面端
 // 输入 /gowrite 完成；前端轮询写回结果，出现候选后由作者确认。
@@ -855,6 +878,8 @@ export interface SettlementSummary {
   status: 'synchronized' | 'pending' | 'failed'
   pending_count: number
   failed_count: number
+  /** 存在“需要配置日常 AI”的可恢复失败；配置后可重试，不是故事数据错误。 */
+  needs_semantic_ai_config?: boolean
   changes: SettlementChange[]
 }
 
@@ -884,6 +909,8 @@ export interface ProjectData {
     actual_result: Record<string, unknown> | null
   }>
   planning_impact_candidates: Array<Record<string, unknown>>
+  /** 已退役源记录：可见可恢复，但绝不混入 current/future，也不进入故事地图活动视图。 */
+  retired: { foundation: ProjectDataEntry[]; relationships: ProjectDataEntry[] }
   sections: ProjectDataSections
 }
 
@@ -965,6 +992,9 @@ export function validateProjectData(value: unknown): ProjectData {
   requireArray(data.planning_impact_candidates, 'planning_impact_candidates')
   const sections = requireRecord(data.sections, 'sections')
   for (const key of PROJECT_DATA_SECTION_KEYS) requireProjectEntries(sections[key], `sections.${key}`)
+  const retired = requireRecord(data.retired, 'retired')
+  requireProjectEntries(retired.foundation, 'retired.foundation')
+  requireProjectEntries(retired.relationships, 'retired.relationships')
   return data as unknown as ProjectData
 }
 
@@ -1052,6 +1082,22 @@ export async function retireRelationship(payload: {
   ref: string
 }): Promise<AuthorEditResult> {
   return call<AuthorEditResult>('retire_relationship', payload)
+}
+
+export async function restoreFoundationRecord(payload: {
+  project_id: string
+  base_model_rev: number
+  ref: string
+}): Promise<AuthorEditResult> {
+  return call<AuthorEditResult>('restore_foundation_record', payload)
+}
+
+export async function restoreRelationship(payload: {
+  project_id: string
+  base_model_rev: number
+  ref: string
+}): Promise<AuthorEditResult> {
+  return call<AuthorEditResult>('restore_relationship', payload)
 }
 
 export async function setLengthPlan(payload: {

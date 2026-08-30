@@ -18,6 +18,7 @@ from typing import Any, Optional
 from agents.qoder import install_command as install_qoder_command
 from agents.registry import discover_all as registry_discover_all
 from config.settings import EXECUTION_MODE_DIRECT, VALID_AGENTS, VALID_EXECUTION_MODES, AppSettings, SettingsStore
+from ai import runner as semantic_ai
 
 
 class SettingsOpError(Exception): pass
@@ -168,6 +169,37 @@ def install_or_repair_interactive_command(payload: dict) -> dict:
 
 def _str_or_none(value: Any) -> Optional[str]:
     return str(value).strip() or None if value is not None else None
+
+
+# ---------------------------------------------------------------------------
+# 日常 AI（Direct AI 语义结算）独立设置：与 Agent 执行设置完全分离。
+# 只持久化非机密配置（API 地址 / 模型）；API Key 只进 OS keyring。
+# ---------------------------------------------------------------------------
+
+
+def get_semantic_ai_settings() -> dict:
+    config = semantic_ai.load_semantic_ai_config()
+    return {
+        "semantic_ai_base_url": config.base_url,
+        "semantic_ai_model": config.model,
+        "has_api_key": semantic_ai.has_semantic_api_key(),
+        "configured": config.complete and semantic_ai.has_semantic_api_key(),
+    }
+
+
+def save_semantic_ai_settings(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        raise SettingsOpError("设置格式错误")
+    base_url = str(payload.get("semantic_ai_base_url") or "").strip()
+    model = str(payload.get("semantic_ai_model") or "").strip()
+    api_key = payload.get("api_key")
+    try:
+        config = semantic_ai.save_semantic_ai_config(base_url, model)
+        if isinstance(api_key, str) and api_key.strip():
+            semantic_ai.save_semantic_api_key(api_key.strip())
+    except semantic_ai.SemanticAiConfigError as exc:
+        raise SettingsOpError(str(exc)) from exc
+    return get_semantic_ai_settings()
 
 
 def test_agent_connection(payload: dict) -> dict:

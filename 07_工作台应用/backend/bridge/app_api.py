@@ -199,6 +199,25 @@ class AppApi:
         except Exception as exc:  # noqa: BLE001
             return _err(CODE_BRIDGE_INTERNAL, str(exc))
 
+    # ---------------- 日常 AI（Direct AI 语义结算）独立设置 ----------------
+    # 与 Agent 执行设置完全分离；API Key 只进 OS keyring，绝不明文返回。
+
+    def get_semantic_ai_settings(self) -> dict:
+        """日常 AI 设置（API 地址 / 模型 / 是否已配置 Key；无明文）。"""
+        try:
+            return _ok(settings_ops.get_semantic_ai_settings())
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def save_semantic_ai_settings(self, payload: dict) -> dict:
+        """保存日常 AI 设置；API Key 只写 keyring，不回传明文。"""
+        try:
+            return _ok({"settings": settings_ops.save_semantic_ai_settings(payload)})
+        except SettingsOpError as exc:
+            return _err(CODE_SETTINGS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
     # ---------------- 新建作品（"我有个想法"纵切） ----------------
     # 确认前只写临时 pre-project 工作区 + 桥文件（06_工作区/应用开发/.qoder_bridge）；
     # 模型执行由作者在 Qoder 桌面端输入 /gowrite 完成（Go Write 不直接调模型）。
@@ -747,6 +766,30 @@ class AppApi:
     def retire_relationship(self, payload: dict) -> dict:
         try:
             return _ok(_start_required_settlement(author_edit_ops.retire_relationship(
+                str(payload.get("project_id") or ""),
+                base_model_rev=int(payload.get("base_model_rev")), ref=str(payload.get("ref") or ""),
+            )))
+        except (AuthorEditError, TypeError, ValueError) as exc:
+            return _err(CODE_AUTHOR_EDIT_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def restore_foundation_record(self, payload: dict) -> dict:
+        """确定性恢复同一退役记录（同一 ref；零 AI/Agent）。"""
+        try:
+            return _ok(_start_required_settlement(author_edit_ops.restore_foundation_record(
+                str(payload.get("project_id") or ""),
+                base_model_rev=int(payload.get("base_model_rev")), ref=str(payload.get("ref") or ""),
+            )))
+        except (AuthorEditError, TypeError, ValueError) as exc:
+            return _err(CODE_AUTHOR_EDIT_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def restore_relationship(self, payload: dict) -> dict:
+        """确定性恢复同一退役关系（同一 ref；零 AI/Agent）。"""
+        try:
+            return _ok(_start_required_settlement(author_edit_ops.restore_relationship(
                 str(payload.get("project_id") or ""),
                 base_model_rev=int(payload.get("base_model_rev")), ref=str(payload.get("ref") or ""),
             )))

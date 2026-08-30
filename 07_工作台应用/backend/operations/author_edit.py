@@ -14,6 +14,7 @@ import os
 import re
 import sys
 import tempfile
+import threading
 import uuid
 from pathlib import Path
 from typing import Any, Callable
@@ -46,6 +47,22 @@ class AuthorEditError(Exception):
 
 def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+
+
+# Per-project serializer for every author_changes.json / project-model mutation.
+# Rapid author edits and background Direct AI settlement must never overwrite
+# each other's ledger writes (no queue service; one reentrant lock per project).
+_PROJECT_WRITE_LOCKS_GUARD = threading.Lock()
+_PROJECT_WRITE_LOCKS: dict[str, threading.RLock] = {}
+
+
+def project_write_lock(project_id: str) -> threading.RLock:
+    with _PROJECT_WRITE_LOCKS_GUARD:
+        lock = _PROJECT_WRITE_LOCKS.get(project_id)
+        if lock is None:
+            lock = threading.RLock()
+            _PROJECT_WRITE_LOCKS[project_id] = lock
+        return lock
 
 
 def _atomic_write(path: Path, payload: bytes) -> None:
@@ -104,6 +121,41 @@ def _read_changes(artifact: Path, project_id: str) -> dict[str, Any]:
 
 
 def _append_change(
+    artifact: Path,
+    project_id: str,
+    *,
+    source_kind: str,
+    status: str,
+    delta: dict[str, Any],
+    requires_semantic: bool,
+    source_model_rev: int | None = None,
+) -> dict[str, Any]:
+    return _append_change_locked(
+        artifact, project_id, source_kind=source_kind, status=status,
+        delta=delta, requires_semantic=requires_semantic,
+        source_model_rev=source_model_rev,
+    )
+
+
+def _append_change_locked(
+    artifact: Path,
+    project_id: str,
+    *,
+    source_kind: str,
+    status: str,
+    delta: dict[str, Any],
+    requires_semantic: bool,
+    source_model_rev: int | None = None,
+) -> dict[str, Any]:
+    with project_write_lock(project_id):
+        return _append_change_inner(
+            artifact, project_id, source_kind=source_kind, status=status,
+            delta=delta, requires_semantic=requires_semantic,
+            source_model_rev=source_model_rev,
+        )
+
+
+def _append_change_inner(
     artifact: Path,
     project_id: str,
     *,
@@ -241,6 +293,15 @@ def _perform_model_change(
     source_kind: str,
     action: Callable[[], dict[str, Any]],
 ) -> dict[str, Any]:
+    with project_write_lock(project_id):
+        return _perform_model_change_locked(project_id, source_kind, action)
+
+
+def _perform_model_change_locked(
+    project_id: str,
+    source_kind: str,
+    action: Callable[[], dict[str, Any]],
+) -> dict[str, Any]:
     _loaded, project_dir, changes_path = _load(project_id)
     model_path = _model_artifact(project_dir)
     model_before = model_path.read_bytes() if model_path.exists() else None
@@ -296,7 +357,7 @@ def _model_change_requires_semantic(
     detail: dict[str, Any],
 ) -> bool:
     """Conservative boundary: only proven display/mechanical edits skip AI."""
-    if source_kind == "profile_edit":
+    if source_kind in {"profile_edit", "foundation_restore", "relationship_restore"}:
         return False
     history_detail = detail.get("detail") if isinstance(detail.get("detail"), dict) else {}
     if source_kind in {"relationship_edit", "system_edit"}:
@@ -591,6 +652,44 @@ def retire_relationship(project_id: str, *, base_model_rev: int, ref: str) -> di
     )
 
 
+def restore_foundation_record(project_id: str, *, base_model_rev: int, ref: str) -> dict[str, Any]:
+    """Deterministically restore the same retired foundation/system ref."""
+    def action() -> dict[str, Any]:
+        model = project_model.load_project_model(project_id)
+        if model["model_rev"] != base_model_rev:
+            raise AuthorEditError("模型版本已变化，已拒绝 stale 写入。")
+        item = model.get("objects", {}).get(ref)
+        if not isinstance(item, dict):
+            raise AuthorEditError("未知或跨项目记录 ref，已拒绝。")
+        if item.get("kind") not in {"foundation", "system"}:
+            raise AuthorEditError("该 ref 不是可恢复的地基记录。")
+        if not item.get("tombstoned"):
+            raise AuthorEditError("该记录已处于活动状态，无需恢复。")
+        return project_model.restore_object(
+            project_id, base_model_rev=model["model_rev"], ref=ref,
+        )
+
+    return _perform_model_change(project_id, "foundation_restore", action)
+
+
+def restore_relationship(project_id: str, *, base_model_rev: int, ref: str) -> dict[str, Any]:
+    """Deterministically restore the same retired relationship ref."""
+    def action() -> dict[str, Any]:
+        model = project_model.load_project_model(project_id)
+        if model["model_rev"] != base_model_rev:
+            raise AuthorEditError("模型版本已变化，已拒绝 stale 写入。")
+        edge = model.get("dependencies", {}).get(ref)
+        if not isinstance(edge, dict):
+            raise AuthorEditError("未知或跨项目关系 ref，已拒绝。")
+        if not edge.get("tombstoned"):
+            raise AuthorEditError("该关系已处于活动状态，无需恢复。")
+        return project_model.restore_dependency(
+            project_id, base_model_rev=model["model_rev"], ref=ref,
+        )
+
+    return _perform_model_change(project_id, "relationship_restore", action)
+
+
 def set_length_plan(
     project_id: str,
     *,
@@ -620,6 +719,11 @@ def _chapter_path(project_dir: Path, chapter_number: int) -> Path:
 
 
 def create_chapter(project_id: str, *, chapter_number: int) -> dict[str, Any]:
+    with project_write_lock(project_id):
+        return _create_chapter_locked(project_id, chapter_number=chapter_number)
+
+
+def _create_chapter_locked(project_id: str, *, chapter_number: int) -> dict[str, Any]:
     _loaded, project_dir, changes_path = _load(project_id)
     chapter = _chapter_path(project_dir, chapter_number)
     if chapter.exists():
@@ -650,6 +754,20 @@ def save_formal_prose(
     content: str,
 ) -> dict[str, Any]:
     """Explicit save with stale guard, atomic chapter/index/change ledger update."""
+    with project_write_lock(project_id):
+        return _save_formal_prose_locked(
+            project_id, chapter_number=chapter_number,
+            base_content_sha256=base_content_sha256, content=content,
+        )
+
+
+def _save_formal_prose_locked(
+    project_id: str,
+    *,
+    chapter_number: int,
+    base_content_sha256: str,
+    content: str,
+) -> dict[str, Any]:
     if not isinstance(content, str):
         raise AuthorEditError("正文 content 必须是字符串。")
     if not isinstance(base_content_sha256, str) or len(base_content_sha256) != 64:
@@ -757,19 +875,20 @@ def record_accepted_ai_prose(
     semantic_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Record an already-durable StoryWrite acceptance in the unified ledger."""
-    _loaded, _project_dir, changes_path = _load(project_id)
-    requires_semantic = semantic_result is not None
-    return _append_change(
-        changes_path, project_id, source_kind="accepted_ai_prose",
-        status="pending" if requires_semantic else "synchronized",
-        delta={
-            "chapter_number": chapter_number, "scene_ref": scene_ref,
-            "settlement_candidates": copy.deepcopy(settlement.get("candidates") or []),
-            "after_sha256": content_sha256,
-            "precomputed_semantic": copy.deepcopy(semantic_result),
-        },
-        requires_semantic=requires_semantic,
-    )
+    with project_write_lock(project_id):
+        _loaded, _project_dir, changes_path = _load(project_id)
+        requires_semantic = semantic_result is not None
+        return _append_change(
+            changes_path, project_id, source_kind="accepted_ai_prose",
+            status="pending" if requires_semantic else "synchronized",
+            delta={
+                "chapter_number": chapter_number, "scene_ref": scene_ref,
+                "settlement_candidates": copy.deepcopy(settlement.get("candidates") or []),
+                "after_sha256": content_sha256,
+                "precomputed_semantic": copy.deepcopy(semantic_result),
+            },
+            requires_semantic=requires_semantic,
+        )
 
 
 def get_change(project_id: str, change_id: str) -> dict[str, Any]:
@@ -793,6 +912,23 @@ def update_change(
 ) -> dict[str, Any]:
     if status not in {"pending", "failed", "awaiting_author", "synchronized"}:
         raise AuthorEditError("作者变更状态非法。")
+    with project_write_lock(project_id):
+        return _update_change_locked(
+            project_id, change_id, status=status, semantic=semantic, error=error,
+            settlement_request_id=settlement_request_id, settlement_started=settlement_started,
+        )
+
+
+def _update_change_locked(
+    project_id: str,
+    change_id: str,
+    *,
+    status: str,
+    semantic: dict[str, Any] | None = None,
+    error: str | None = None,
+    settlement_request_id: str | None = None,
+    settlement_started: bool | None = None,
+) -> dict[str, Any]:
     _loaded, _project_dir, artifact = _load(project_id)
     ledger = _read_changes(artifact, project_id)
     matched = None

@@ -319,11 +319,56 @@ export function FoundationPage() {
         </header>
 
         {controller.data?.settlement.status !== 'synchronized' && (
-          <div className="sync-warning">有 {controller.data?.settlement.pending_count ?? 0} 项变更等待同步；显式编辑已保存，派生状态可能暂未完整刷新。</div>
+          controller.data?.settlement.needs_semantic_ai_config
+            ? (
+              <div className="sync-warning sync-warning-action">
+                <span>需要在“设置”中配置日常 AI 后才能同步语义状态。已保存的编辑不会丢失。</span>
+                <button disabled={controller.saving} onClick={() => void controller.retrySettlement()}>重试同步</button>
+              </div>
+            )
+            : (
+              <div className="sync-warning sync-warning-action">
+                <span>有 {controller.data?.settlement.pending_count ?? 0} 项变更等待同步；显式编辑已保存，派生状态可能暂未完整刷新。</span>
+                {(controller.data?.settlement.failed_count ?? 0) > 0 && (
+                  <button disabled={controller.saving} onClick={() => void controller.retrySettlement()}>重试同步</button>
+                )}
+              </div>
+            )
         )}
         {controller.loading && <div className="empty-state">正在加载作品地基…</div>}
         {controller.error && <p className="error-text">{controller.error}</p>}
         {!controller.loading && entries.length === 0 && <div className="empty-state">当前尚未记录{tabMeta.label}，可以直接新增。</div>}
+
+        {(() => {
+          const retiredFoundation = controller.data?.retired.foundation ?? []
+          const retiredRelationships = controller.data?.retired.relationships ?? []
+          if (retiredFoundation.length === 0 && retiredRelationships.length === 0) return null
+          return (
+            <details className="foundation-retired">
+              <summary>已退役（{retiredFoundation.length + retiredRelationships.length}）</summary>
+              <ul>
+                {retiredFoundation.map((entry) => (
+                  <li key={`retired-f-${entry.source_ref ?? entry.label}`}>
+                    <span className="foundation-retired-name">{entry.label || '（未命名记录）'}</span>
+                    <span className="muted-note">{entry.category === 'character' ? '人物' : '地基记录'}</span>
+                    {entry.source_ref && (
+                      <button disabled={controller.saving} onClick={() => void controller.restoreFoundation(entry.source_ref as string)}>恢复</button>
+                    )}
+                  </li>
+                ))}
+                {retiredRelationships.map((entry) => (
+                  <li key={`retired-r-${entry.source_ref ?? entry.label}`}>
+                    <span className="foundation-retired-name">{entry.label || '（未命名关系）'}</span>
+                    <span className="muted-note">关系</span>
+                    {entry.source_ref && (
+                      <button disabled={controller.saving} onClick={() => void controller.restoreRelationship(entry.source_ref as string)}>恢复</button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )
+        })()}
 
         <div className="foundation-cards">
           {entries.map((entry) => {
@@ -359,6 +404,7 @@ export function FoundationPage() {
       {recordForm && (
         <aside className="record-drawer panel" aria-label={`${recordForm.mode === 'create' ? '新增' : '编辑'}${tabMeta.label}`}>
           <header><h2>{recordForm.mode === 'create' ? '新增' : '编辑'}{tabMeta.label}</h2><button onClick={() => setRecordForm(null)}><X /></button></header>
+          <div className="record-drawer-body">
           <label>名称<input value={recordForm.title} onChange={(event) => setRecordForm({ ...recordForm, title: event.target.value })} /></label>
           <label>状态<select value={recordForm.material_state} onChange={(event) => setRecordForm({ ...recordForm, material_state: event.target.value as MaterialState })}><option value="current">当前</option><option value="future">规划中</option></select></label>
           <div className="record-fields">
@@ -374,6 +420,7 @@ export function FoundationPage() {
             ))}
             <button onClick={() => setRecordForm({ ...recordForm, extraFields: [...recordForm.extraFields, { key: '', value: '', isList: false }] })}><Plus /> 添加自定义字段</button>
           </div>
+          </div>
           <footer>
             {recordForm.mode === 'edit' && <button className="danger" onClick={() => void retire({ source_ref: recordForm.ref, editable: true } as ProjectDataEntry)}><Trash2 /> 退役</button>}
             <button className="primary" disabled={controller.saving || !recordForm.title.trim()} onClick={() => void saveRecord()}><Save /> {controller.saving ? '保存中…' : '保存'}</button>
@@ -386,11 +433,13 @@ export function FoundationPage() {
       {detailEntry && (
         <aside className="record-drawer panel" aria-label={`${detailEntry.label}详情`}>
           <header><h2>{detailEntry.label || '未命名记录'}</h2><button onClick={() => setDetailEntry(null)}><X /></button></header>
+          <div className="record-drawer-body">
           <p><span className={`material-state ${detailEntry.status === 'future' ? 'future' : 'current'}`}>{authorStatusLabel(detailEntry.status)}</span></p>
           <p className="muted-note">{authorSourceLabel(detailEntry.source_kind)}</p>
           <div className="record-fields">
             {readonlyDetailFields.length === 0 && <p className="muted-note">暂无更多已记录信息。</p>}
             {readonlyDetailFields.map((field) => <p key={field.key}><b>{field.label}：</b>{field.value}</p>)}
+          </div>
           </div>
         </aside>
       )}

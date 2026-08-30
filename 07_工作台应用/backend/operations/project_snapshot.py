@@ -32,7 +32,7 @@ from project_workspace import (  # noqa: E402
 from story_plan import resolve_plan_activity  # noqa: E402
 
 
-SCHEMA_VERSION = "gowrite_project_snapshot/v2"
+SCHEMA_VERSION = "gowrite_project_snapshot/v3"
 _CHAPTER_RE = re.compile(r"^第(\d+)章\.md$")
 _STATE_SECTIONS = (
     "canon_facts", "character_state", "relationship_state", "occurred_events", "open_threads",
@@ -344,9 +344,17 @@ def _settlement_summary(project_dir: Path) -> dict[str, Any]:
         if isinstance(item, dict) and item.get("status") in {"pending", "awaiting_author"}
     )
     failed = sum(1 for item in changes if isinstance(item, dict) and item.get("status") == "failed")
+    needs_semantic_ai_config = any(
+        isinstance(item, dict)
+        and item.get("status") in {"pending", "failed"}
+        and isinstance(item.get("error"), str)
+        and item["error"].startswith("NEEDS_SEMANTIC_AI_CONFIG")
+        for item in changes
+    )
     return {
         "status": "pending" if pending else ("failed" if failed else "synchronized"),
         "pending_count": pending, "failed_count": failed,
+        "needs_semantic_ai_config": needs_semantic_ai_config,
         "changes": copy.deepcopy(changes[-20:]),
     }
 
@@ -410,6 +418,30 @@ def get_project_snapshot(project_id: str) -> dict[str, Any]:
         bucket = current if edge.get("material_state", "current") == "current" else future
         bucket["relationships"].append(_relationship_record(edge, model["objects"]))
 
+    # Soft-retired records stay stored and retrievable, but never mix into
+    # current/future projections (Story Map must not render them as active).
+    retired: dict[str, list[dict[str, Any]]] = {"foundation": [], "relationships": []}
+    for item in model.get("objects", {}).values():
+        if (
+            not isinstance(item, dict)
+            or not item.get("tombstoned")
+            or item.get("kind") not in {"foundation", "system"}
+        ):
+            continue
+        record = _model_record(item)
+        record["retired_at_rev"] = item.get("tombstoned_at_rev")
+        retired["foundation"].append(record)
+    for edge in model.get("dependencies", {}).values():
+        if (
+            not isinstance(edge, dict)
+            or not edge.get("tombstoned")
+            or edge.get("relation_kind") != "character_relationship"
+        ):
+            continue
+        record = _relationship_record(edge, model["objects"])
+        record["retired_at_rev"] = edge.get("tombstoned_at_rev")
+        retired["relationships"].append(record)
+
     # An explicit author-workspace overlay can supersede a raw Story State
     # projection without deleting the historical production entry.
     superseded_state_refs = {
@@ -457,6 +489,7 @@ def get_project_snapshot(project_id: str) -> dict[str, Any]:
         "story_bible_profile": copy.deepcopy(model["story_bible_profile"]),
         "current": current,
         "future": future,
+        "retired": retired,
         "length_plan": length_plan,
         "chapters": chapters,
         "planning_impact_candidates": copy.deepcopy(model.get("planning_impact_candidates", [])),

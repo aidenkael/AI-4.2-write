@@ -4,22 +4,24 @@ from __future__ import annotations
 
 import copy
 import json
+import threading
 import uuid
 from pathlib import Path
 from typing import Any
 
-from config.settings import EXECUTION_MODE_DIRECT, SettingsStore
-from operations import agent_runner
+from ai import runner as semantic_ai
 from operations import author_edit
-from operations import execution_tasks
 from operations import project_model
 from operations import qoder_bridge as bridge
-from operations.project_snapshot import focused_task_context, get_project_snapshot
-from operations.agent_runner import AgentRunError
+from operations.project_snapshot import (
+    ProjectSnapshotError,
+    focused_task_context,
+    get_project_snapshot,
+)
 
 
-_exec_task_manager = execution_tasks.manager
-_DIRECT_BUSY_ERROR = "已有直连任务正在执行，请先等待其完成或取消，再同步本次修改。"
+NEEDS_CONFIG_PREFIX = "NEEDS_SEMANTIC_AI_CONFIG"
+NEEDS_CONFIG_MESSAGE = '需要在“设置”中配置日常 AI 后才能同步语义状态。'
 _ALLOWED_KINDS = {
     "character", "relationship", "event", "time", "foreshadowing",
     "setting", "location", "organization", "system", "storyline", "planning",
@@ -445,24 +447,156 @@ def apply_semantic_result(
     }
 
 
-def _worker(adapter: Any, request: Any, request_id: str) -> None:
+_SETTLEMENT_WORKERS_GUARD = threading.Lock()
+_SETTLEMENT_WORKERS: dict[str, threading.Thread] = {}
+_PROJECT_SETTLEMENT_LOCKS: dict[str, threading.Lock] = {}
+
+
+def _project_lock(project_id: str) -> threading.Lock:
+    """One in-process settlement serializer per project (no queue service)."""
+    with _SETTLEMENT_WORKERS_GUARD:
+        lock = _PROJECT_SETTLEMENT_LOCKS.get(project_id)
+        if lock is None:
+            lock = threading.Lock()
+            _PROJECT_SETTLEMENT_LOCKS[project_id] = lock
+        return lock
+
+
+def _active_worker(project_id: str) -> threading.Thread | None:
+    with _SETTLEMENT_WORKERS_GUARD:
+        worker = _SETTLEMENT_WORKERS.get(project_id)
+        if worker is not None and worker.is_alive():
+            return worker
+        return None
+
+
+def _register_worker(project_id: str, worker: threading.Thread) -> None:
+    with _SETTLEMENT_WORKERS_GUARD:
+        _SETTLEMENT_WORKERS[project_id] = worker
+
+
+def _mark_failed(project_id: str, change_id: str, error: str) -> None:
     try:
-        result = adapter.run(request)
-    except Exception as exc:  # noqa: BLE001
-        if not _exec_task_manager.is_canceled(request_id):
-            bridge.write_response(request_id, status="failed", error=f"语义同步执行失败：{exc}")
-            _exec_task_manager.finish(request_id, execution_tasks.TASK_FAILED)
+        author_edit.update_change(project_id, change_id, status="failed", error=error)
+    except (author_edit.AuthorEditError, OSError):
+        pass
+
+
+def _build_prompt(project_id: str, change: dict[str, Any]) -> str:
+    delta = copy.deepcopy(change.get("delta") or {})
+    chapter_number = delta.get("chapter_number") if isinstance(delta.get("chapter_number"), int) else None
+    task_context = focused_task_context(project_id, chapter_number=chapter_number)
+    return _TASK_TEMPLATE.format(
+        change=json.dumps(delta, ensure_ascii=False, indent=2),
+        snapshot=json.dumps(task_context, ensure_ascii=False, indent=2),
+    )
+
+
+def _settle_one_change(project_id: str, change_id: str) -> None:
+    """Settle one ledger change via Direct AI through the existing gates."""
+    try:
+        change = author_edit.get_change(project_id, change_id)
+    except author_edit.AuthorEditError:
         return
-    if _exec_task_manager.is_canceled(request_id):
+    if not change.get("requires_semantic") or change.get("status") not in {"pending", "failed"}:
         return
-    if result.status != "completed":
-        bridge.write_response(
-            request_id, status="failed", error=result.error or f"语义同步未完成（{result.status}）。",
+    try:
+        config, _api_key = semantic_ai.require_semantic_ai()
+    except semantic_ai.SemanticAiConfigError as exc:
+        _mark_failed(project_id, change_id, f"{NEEDS_CONFIG_PREFIX}: {exc}")
+        return
+    request_id = uuid.uuid4().hex
+    execution = {"execution_mode": "direct_ai", "agent_id": None, "model": config.model}
+    try:
+        task = _build_prompt(project_id, change)
+        bridge.create_request(
+            task=task, kind="change_settlement", request_id=request_id,
+            meta={"project_id": project_id, "change_id": change_id, "execution": execution},
+            activate_for_gowrite=False,
         )
-        _exec_task_manager.finish(request_id, execution_tasks.TASK_FAILED)
+    except Exception as exc:  # noqa: BLE001 - durable edit must remain retryable
+        _mark_failed(project_id, change_id, f"语义同步准备失败：{exc}")
         return
-    bridge.write_response(request_id, status="completed", output=result.output)
-    _exec_task_manager.finish(request_id, execution_tasks.TASK_COMPLETED)
+    try:
+        author_edit.update_change(
+            project_id, change_id, status="pending", error=None,
+            settlement_request_id=request_id, settlement_started=True,
+        )
+    except (author_edit.AuthorEditError, OSError):
+        bridge.cleanup_request(request_id)
+        return
+    try:
+        output = semantic_ai.run_text(task)
+    except (semantic_ai.SemanticAiConfigError, semantic_ai.SemanticAiRunError) as exc:
+        _mark_failed(project_id, change_id, str(exc))
+        bridge.write_response(request_id, status="failed", error=str(exc))
+        return
+    request = bridge.get_request(request_id)
+    if not isinstance(request, dict) or request.get("state") == "canceled":
+        bridge.cleanup_request(request_id)
+        return
+    try:
+        parsed = _parse_output(output)
+    except ChangeSettlementError as exc:
+        _mark_failed(project_id, change_id, str(exc))
+        bridge.write_response(request_id, status="failed", error=str(exc))
+        return
+    # Model + ledger mutations happen under the same per-project write lock as
+    # durable author edits, so rapid edits and settlement never overwrite
+    # each other.
+    with author_edit.project_write_lock(project_id):
+        try:
+            apply_semantic_result(project_id, change_id, parsed)
+        except (ChangeSettlementError, author_edit.AuthorEditError, OSError) as exc:
+            bridge.write_response(request_id, status="failed", error=str(exc))
+            return
+    bridge.write_response(request_id, status="completed", output=output)
+
+
+def _next_pending_change(project_id: str) -> str | None:
+    try:
+        _loaded, _project_dir, artifact = author_edit._load(project_id)
+        ledger = author_edit._read_changes(artifact, project_id)
+    except (author_edit.AuthorEditError, OSError):
+        return None
+    for item in ledger["changes"]:
+        if (
+            isinstance(item, dict)
+            and item.get("requires_semantic")
+            and item.get("status") == "pending"
+            and item.get("change_id")
+        ):
+            return str(item["change_id"])
+    return None
+
+
+def _project_settlement_worker(
+    project_id: str,
+    lock: threading.Lock,
+    explicit_change_id: str | None,
+) -> None:
+    """Drain the durable ledger in order; rapid edits never collide."""
+    handled_explicit = explicit_change_id is None
+    with lock:
+        while True:
+            target: str | None = None
+            if not handled_explicit:
+                handled_explicit = True
+                try:
+                    explicit = author_edit.get_change(project_id, explicit_change_id)
+                except author_edit.AuthorEditError:
+                    explicit = None
+                if (
+                    explicit
+                    and explicit.get("requires_semantic")
+                    and explicit.get("status") in {"pending", "failed"}
+                ):
+                    target = str(explicit_change_id)
+            if target is None:
+                target = _next_pending_change(project_id)
+            if not target:
+                return
+            _settle_one_change(project_id, target)
 
 
 def prepare_change_settlement(project_id: str, change_id: str) -> dict[str, Any]:
@@ -471,78 +605,36 @@ def prepare_change_settlement(project_id: str, change_id: str) -> dict[str, Any]
         raise ChangeSettlementError("这条变更只需要确定性处理，已经同步完成。")
     if change.get("status") not in {"pending", "failed"}:
         raise ChangeSettlementError("这条变更当前不需要重新执行语义同步。")
-    existing_request_id = change.get("settlement_request_id")
-    if isinstance(existing_request_id, str) and existing_request_id:
-        existing = bridge.get_request(existing_request_id)
-        if existing and existing.get("kind") == "change_settlement" and bridge.read_response(existing_request_id) is None:
-            execution = (existing.get("meta") or {}).get("execution") or {}
-            interactive = execution.get("execution_mode") != EXECUTION_MODE_DIRECT
-            return {
-                "request_id": existing_request_id, "project_id": project_id,
-                "change_id": change_id, "status": "pending", "execution": execution,
-                "request_started": True,
-                "message": "等待 /gowrite 完成语义同步。" if interactive else "正在后台同步本次修改。",
-            }
-    delta = copy.deepcopy(change.get("delta") or {})
-    chapter_number = delta.get("chapter_number") if isinstance(delta.get("chapter_number"), int) else None
-    task_context = focused_task_context(project_id, chapter_number=chapter_number)
-    task = _TASK_TEMPLATE.format(
-        change=json.dumps(delta, ensure_ascii=False, indent=2),
-        snapshot=json.dumps(task_context, ensure_ascii=False, indent=2),
-    )
-    settings = SettingsStore().load()
-    interactive = settings.default_execution_mode != EXECUTION_MODE_DIRECT
-    request_id = uuid.uuid4().hex
-    adapter = None
-    agent_request = None
-    execution = {
-        "execution_mode": settings.default_execution_mode,
-        "agent_id": settings.interactive_agent if interactive else settings.direct_agent,
-        "model": None,
-    }
-    if not interactive:
-        try:
-            adapter, agent_request = agent_runner._build_adapter()
-        except AgentRunError as exc:
-            raise ChangeSettlementError(f"直连执行配置不可用：{exc}") from exc
-        except Exception as exc:  # noqa: BLE001
-            raise ChangeSettlementError(f"直连执行配置不可用：{exc}") from exc
-        if _exec_task_manager.is_busy():
-            raise ChangeSettlementError(_DIRECT_BUSY_ERROR)
-        agent_request.task = task
-        agent_request.cwd = str(Path(get_project_snapshot(project_id)["identity"]["project_dir"]))
-        execution = {
-            "execution_mode": "direct", "agent_id": adapter.name,
-            "model": agent_request.custom_model or agent_request.model,
+    if _active_worker(project_id) is not None:
+        # Rapid edits: the durable change stays in the author ledger and the
+        # running per-project worker drains pending changes in ledger order.
+        # No second request, no duplicate failure cards, no Agent slot.
+        return {
+            "request_id": None, "project_id": project_id, "change_id": change_id,
+            "status": "pending", "execution": {"execution_mode": "direct_ai"},
+            "request_started": False, "queued": True,
+            "message": "已排队：前序变更同步完成后自动继续。",
         }
+    # Fail fast on missing configuration before any orchestration.  The durable
+    # edit remains visible/retryable; this is configuration state, not story
+    # data, and there is no silent Agent fallback.
     try:
-        bridge.create_request(
-            task=task, kind="change_settlement", request_id=request_id,
-            meta={"project_id": project_id, "change_id": change_id, "execution": execution},
-            activate_for_gowrite=interactive,
-        )
-    except bridge.BridgeBusyError as exc:
-        raise ChangeSettlementError(str(exc)) from exc
-    if not interactive:
-        worker = lambda: _worker(adapter, agent_request, request_id)  # noqa: E731
-        if not _exec_task_manager.start(
-            request_id=request_id, worker=worker, adapter=adapter, execution=execution,
-        ):
-            bridge.cleanup_request(request_id)
-            raise ChangeSettlementError(_DIRECT_BUSY_ERROR)
-    try:
-        author_edit.update_change(
-            project_id, change_id, status="pending", error=None,
-            settlement_request_id=request_id, settlement_started=True,
-        )
-    except (author_edit.AuthorEditError, OSError) as exc:
-        _exec_task_manager.cancel(request_id)
-        bridge.cleanup_request(request_id)
-        raise ChangeSettlementError(f"语义同步请求记账失败：{exc}") from exc
+        semantic_ai.require_semantic_ai()
+    except semantic_ai.SemanticAiConfigError as exc:
+        _mark_failed(project_id, change_id, f"{NEEDS_CONFIG_PREFIX}: {exc}")
+        raise ChangeSettlementError(NEEDS_CONFIG_MESSAGE) from exc
+    lock = _project_lock(project_id)
+    worker = threading.Thread(
+        target=_project_settlement_worker, args=(project_id, lock, change_id),
+        name=f"gowrite-semantic-settlement-{project_id}", daemon=True,
+    )
+    _register_worker(project_id, worker)
+    worker.start()
     return {
-        "request_id": request_id, "project_id": project_id, "change_id": change_id,
-        "status": "pending", "execution": execution, "request_started": True,
-        "message": "等待 /gowrite 完成语义同步。" if interactive else "正在后台同步本次修改。",
+        "request_id": None, "project_id": project_id, "change_id": change_id,
+        "status": "pending", "execution": {"execution_mode": "direct_ai"},
+        "request_started": True, "queued": False,
+        "message": "正在后台同步本次修改。",
     }
 
 
@@ -553,6 +645,12 @@ def get_change_settlement_request(request_id: str) -> dict[str, Any]:
     meta = request.get("meta") or {}
     project_id = str(meta.get("project_id") or "")
     change_id = str(meta.get("change_id") or "")
+    if request.get("state") == "canceled":
+        bridge.cleanup_request(request_id)
+        return {
+            "request_id": request_id, "project_id": project_id, "change_id": change_id,
+            "status": "canceled",
+        }
     response = bridge.read_response(request_id)
     if response is None:
         return {
@@ -561,29 +659,41 @@ def get_change_settlement_request(request_id: str) -> dict[str, Any]:
         }
     if response.get("status") != "completed":
         error = response.get("error") or "语义同步失败。"
-        author_edit.update_change(project_id, change_id, status="failed", error=error)
+        try:
+            change = author_edit.get_change(project_id, change_id)
+            if change.get("status") == "pending":
+                author_edit.update_change(project_id, change_id, status="failed", error=error)
+        except (author_edit.AuthorEditError, OSError):
+            pass
         bridge.cleanup_request(request_id)
-        _exec_task_manager.remove(request_id)
         return {
             "request_id": request_id, "project_id": project_id, "change_id": change_id,
             "status": "failed", "error": error,
         }
+    # Completed responses are written only after the Direct AI worker applied
+    # the result through the existing strict parser and authority gates.
     try:
-        parsed = _parse_output(response.get("output") or "")
-        settled = apply_semantic_result(project_id, change_id, parsed)
-    except (ChangeSettlementError, author_edit.AuthorEditError) as exc:
-        author_edit.update_change(project_id, change_id, status="failed", error=str(exc))
+        change = author_edit.get_change(project_id, change_id)
+    except author_edit.AuthorEditError as exc:
         bridge.cleanup_request(request_id)
-        _exec_task_manager.remove(request_id)
         return {
             "request_id": request_id, "project_id": project_id, "change_id": change_id,
             "status": "failed", "error": str(exc),
         }
     bridge.cleanup_request(request_id)
-    _exec_task_manager.remove(request_id)
+    status = change.get("status")
+    if status in {"synchronized", "awaiting_author"}:
+        return {
+            "request_id": request_id, "project_id": project_id, "change_id": change_id,
+            "status": "completed",
+            "result": {
+                "project_id": project_id, "change_id": change_id,
+                "status": status, "change": change,
+            },
+        }
     return {
         "request_id": request_id, "project_id": project_id, "change_id": change_id,
-        "status": "completed", "result": settled,
+        "status": "failed", "error": change.get("error") or "语义同步失败。",
     }
 
 
@@ -594,10 +704,12 @@ def cancel_change_settlement_request(request_id: str) -> dict[str, Any]:
     meta = request.get("meta") or {}
     project_id = str(meta.get("project_id") or "")
     change_id = str(meta.get("change_id") or "")
-    _exec_task_manager.cancel(request_id)
     bridge.mark_canceled(request_id)
     if project_id and change_id:
-        author_edit.update_change(project_id, change_id, status="pending", error=None)
+        try:
+            author_edit.update_change(project_id, change_id, status="pending", error=None)
+        except (author_edit.AuthorEditError, OSError):
+            pass
     return {"request_id": request_id, "status": "canceled"}
 
 
@@ -616,6 +728,18 @@ def confirm_ambiguous_consequences(
         for index in accepted_indexes
     ):
         raise ChangeSettlementError("待确认后果索引非法。")
+    with author_edit.project_write_lock(project_id):
+        return _confirm_ambiguous_locked(project_id, change_id, accepted_indexes, change, semantic)
+
+
+def _confirm_ambiguous_locked(
+    project_id: str,
+    change_id: str,
+    accepted_indexes: list[int],
+    change: dict[str, Any],
+    semantic: dict[str, Any],
+) -> dict[str, Any]:
+    consequences = semantic.get("consequences") or []
     snapshot = get_project_snapshot(project_id)
     model = project_model.load_project_model(project_id)
     model_path = _model_artifact(project_id)
