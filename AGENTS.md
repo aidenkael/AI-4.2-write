@@ -131,6 +131,14 @@ BKP 长期保存作品身份、作品地图、BookProfile、Observation、Infere
 
 窄口径：`THIN_ORCHESTRATION_BUILD_ALLOWED`——只允许复用现有合同的薄操作层；不代表完整通用 Writer platform 获批（AI-write 作者侧桌面工作台 1.0 已批准进入实现）。
 
+执行边界（详见 `00_项目控制/长期开发手册.md` §15）：
+
+- 确定性工作一律 Code first；
+- 一次模型调用即可完成的单轮语义工作 Direct AI first；
+- 只有需要模型引导的工具/Skill/多步骤执行才使用 Agent；
+- Author / Code / Direct AI / Agent 全部消费同一项目 authority 与派生快照，不建第二份状态；
+- 没有真实使用证明的 consumer blocker，不新增大型 AI 编排框架。
+
 ## Borrow-first
 
 `真实问题 → 查成熟上游 → 能借就借 → 最小适配 → 真实运行`
@@ -201,12 +209,11 @@ BKP 长期保存作品身份、作品地图、BookProfile、Observation、Infere
 
 ## NEXT
 
-**AUTHOR_FACING_WORKBENCH_IMPLEMENTATION（PRODUCT_BASELINE = GO_WRITE_2_0_APPROVED）**：
+里程碑以 `00_项目控制/长期开发手册.md` §16 为唯一定义：
 
-1. 建立 `07_工作台应用` 工程骨架（desktop / ui / backend，仅目录结构，下一阶段）；
-2. 按 Go Write 2.0 产品基线实现作者页面；UI 1.0 仅作为已有技术纵切参考；
-3. 打通 UI → Bridge → Author Operations → Agent Adapter / Task Manager → 现有 Skills → 正式项目/知识数据；
-4. 实现中落实三个最小基座：candidate / accepted / authority 统一决策、proposal → confirm/writeback、next-best-action；字数规划按已批准链路逐步验证；
-5. 只有真实 UI 使用证明底层缺能力时才补底层。
+- **M1 AUTHOR_UX_BLOCKERS**：编辑器底部动作永远可达；退役记录可见可恢复（同一 ref）；六个作品页面保持 runtime-safe。
+- **M2 DIRECT_AI_SEMANTIC_V1**：最小独立模型 API 路径；只迁移 change_settlement 高频语义；日常语义维护不再经过 Agent /gowrite。
+- **M3 KNOWLEDGE_GROUNDED_FOUNDATION_DESIGN**：未来任务；重大新书/基座设计保持 Agent 主导（分解基座问题、多轮 KnowledgeRetrieve、综合提案、作者确认后写回）。
+- **M4 FULL_AUTHOR_LOOP_ACCEPTANCE**：idea → foundation → planning → outline → prose → acceptance → 自动语义维护 → map/state 刷新 → 作者编辑 → 重新结算 → 下一次写作使用最新状态。
 
-真实作者纵切尚未完成，因此 `AUTHOR_FACING_ONE_SENTENCE_ENTRY` 不得标记 proven。
+除非新架构/产品模块阻塞 M1-M4 之一，否则不批准。真实作者完整纵切尚未完成，因此 `AUTHOR_FACING_ONE_SENTENCE_ENTRY` 不得标记 proven。
