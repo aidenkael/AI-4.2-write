@@ -17,55 +17,19 @@
  * 只作用于权威 Story State，经安全合同写回后由本层重新投影。
  */
 import type { ProjectData, ProjectDataEntry } from '../../bridge/client'
+import {
+  compactCharacter,
+  describeAuthorRecord,
+  type AuthorField,
+} from '../presentation/authorPresentation.js'
 
 // ---------------- 通用记录描述（Foundation / StoryMap 共用） ----------------
 
-export interface RecordField {
-  key: string
-  label: string
-  value: string
-}
-
-// 常见正式字段的作者面标签；未收录的键按原样低调展示（真实数据，不翻译也不隐藏）。
-const FIELD_LABELS: Record<string, string> = {
-  name: '名称', label: '名称', description: '描述', summary: '概述',
-  role: '角色定位', identity: '身份', goal: '目标', motivation: '动机',
-  personality: '性格', background: '背景', appearance: '外貌', ability: '能力',
-  arc: '人物弧光', status: '当前状态', relation: '关系', relationship: '关系',
-  between: '双方', parties: '双方', targets: '双方', characters: '双方',
-  fact: '事实', content: '内容', note: '备注', event: '事件', text: '内容',
-  time: '时间', time_anchor: '时间锚点', story_time: '故事时间', when: '时间',
-  date: '日期', temporal_anchor: '时间锚点',
-  aliases: '别名', one_line_intro: '一句话介绍', role_identity: '角色 / 身份',
-  position_title: '职位', faction_org: '阵营 / 组织', visible_traits: '可见特征',
-  persona_core: '人设核心', goal_desire: '目标 / 渴望', fear_weakness: '恐惧 / 弱点',
-  inner_conflict: '内在冲突', values_beliefs: '价值 / 信念', background_summary: '背景摘要',
-  speech_style: '说话特点', behavior_anchors: '行为特点', secrets: '秘密',
-  current_state: '当前状态', current_objective: '当前目标', arc_stage: '人物弧阶段',
-  relationship_phase: '关系阶段', key_history: '关键经历', current_tension: '当前张力',
-  hidden_information: '隐瞒的信息', trust: '信任', closeness: '亲近',
-  power_rank: '武力 / 等级', profession_rank: '职业 / 职级', current_location: '当前位置',
-}
-const INTERNAL_FIELDS = new Set([
-  'id', 'authority', 'label', 'name', 'source_ref', 'source_kind', 'material_state',
-  'planning_source_ref', 'source_state_ref', 'supersedes_state_ref', 'settlement_provenance',
-])
+export type RecordField = AuthorField
 
 /** 把一条正式记录投影为作者可读字段列表；跳过 id/authority/label 等机械键。 */
 export function describeRecord(entry: ProjectDataEntry): RecordField[] {
-  const record = entry.record
-  if (!record || typeof record !== 'object' || Array.isArray(record)) return []
-  const out: RecordField[] = []
-  for (const [k, v] of Object.entries(record as Record<string, unknown>)) {
-    if (INTERNAL_FIELDS.has(k)) continue
-    if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
-      out.push({ key: k, label: FIELD_LABELS[k] ?? k, value: String(v) })
-    } else if (Array.isArray(v)) {
-      const text = v.filter((x) => typeof x === 'string').join('、')
-      if (text) out.push({ key: k, label: FIELD_LABELS[k] ?? k, value: text })
-    }
-  }
-  return out
+  return describeAuthorRecord(entry)
 }
 
 // ---------------- 人物关系图 ----------------
@@ -75,6 +39,11 @@ export interface GraphNode {
   label: string
   /** 图内短标签：name 优先，否则 label 截断（完整文本在详情面板查看，不臆造） */
   short: string
+  avatarText: string
+  avatarHue: number
+  intro: string
+  role: string
+  hoverFields: RecordField[]
   fields: RecordField[]
   status: 'current' | 'future'
   sourceRef: string | null
@@ -87,6 +56,8 @@ export interface GraphEdge {
   label: string
   source: string
   target: string
+  sourceLabel: string
+  targetLabel: string
   fields: RecordField[]
   status: 'current' | 'future'
   sourceRef: string | null
@@ -174,12 +145,20 @@ export function projectRelationshipGraph(data: ProjectData | null): Relationship
       if (isNonEmptyString(n)) name = n.trim()
     }
     const displayName = name ?? (label.length > 12 ? `${label.slice(0, 12)}…` : label)
-    const short = `${displayName.slice(0, 1).toUpperCase()}  ${displayName}`
+    const compact = compactCharacter(entry)
+    const short = compact.role
+      ? `${compact.avatar.text}  ${displayName}\n${compact.role.slice(0, 10)}`
+      : `${compact.avatar.text}  ${displayName}`
     nodes.push({
       id: nodeId,
       label,
       short,
-      fields: describeRecord(entry),
+      avatarText: compact.avatar.text,
+      avatarHue: compact.avatar.hue,
+      intro: compact.intro,
+      role: compact.role,
+      hoverFields: compact.hoverFields,
+      fields: compact.details,
       status: entryStatus(entry),
       sourceRef: entry.source_ref ?? null,
       sourceKind: entry.source_kind ?? null,
@@ -191,6 +170,7 @@ export function projectRelationshipGraph(data: ProjectData | null): Relationship
   })
 
   const edges: GraphEdge[] = []
+  const nodeLabelById = new Map(nodes.map((node) => [node.id, node.label]))
   const unresolved: UnresolvedRelation[] = []
   const edgeIdentity = new Set<string>()
   const unresolvedIdentity = new Set<string>()
@@ -209,26 +189,26 @@ export function projectRelationshipGraph(data: ProjectData | null): Relationship
   for (const entry of data.sections.relationships) {
     const raw = extractRawEndpoints(entry.record)
     if (!raw) {
-      addUnresolved(entry, '没有显式两端字段（targets/characters/between/source+target 等）')
+      addUnresolved(entry, '这条关系缺少明确的双方人物，请编辑后再生成连线。')
       continue
     }
     const texts = raw.map(rawEndpointText)
     if (texts.some((t) => t === null)) {
-      addUnresolved(entry, '端点不是可解析的 id/名称')
+      addUnresolved(entry, '这条关系中的人物目前无法唯一对应，请确认双方人物。')
       continue
     }
     if (texts.length !== 2) {
-      addUnresolved(entry, `显式端点数量为 ${texts.length}，无法形成单条连线`)
+      addUnresolved(entry, '这条关系缺少明确的双方人物，请编辑后再生成连线。')
       continue
     }
     const source = idIndex.get(texts[0] as string) ?? null
     const target = idIndex.get(texts[1] as string) ?? null
     if (!source || !target) {
-      addUnresolved(entry, '端点无法对应到已记录人物')
+      addUnresolved(entry, '这条关系中的人物目前无法唯一对应，请确认双方人物。')
       continue
     }
     if (source === target) {
-      addUnresolved(entry, '两端指向同一人物')
+      addUnresolved(entry, '关系双方不能是同一人物，请重新选择。')
       continue
     }
     const label = entryLabel(entry)
@@ -240,7 +220,17 @@ export function projectRelationshipGraph(data: ProjectData | null): Relationship
       label,
       source,
       target,
-      fields: describeRecord(entry),
+      sourceLabel: nodeLabelById.get(source) ?? texts[0] as string,
+      targetLabel: nodeLabelById.get(target) ?? texts[1] as string,
+      fields: [
+        { key: 'source_character', label: '人物 A', value: nodeLabelById.get(source) ?? texts[0] as string },
+        { key: 'target_character', label: '人物 B', value: nodeLabelById.get(target) ?? texts[1] as string },
+        ...describeRecord(entry).map((field) => (
+          field.key === 'current_state' || field.key === 'state'
+            ? { ...field, label: '当前关系状态' }
+            : field
+        )),
+      ],
       status: entryStatus(entry),
       sourceRef: entry.source_ref ?? null,
       sourceKind: entry.source_kind ?? null,

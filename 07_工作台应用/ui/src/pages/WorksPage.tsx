@@ -1,6 +1,5 @@
 import { Check, FolderOpen, Lightbulb, PenLine, Plus, RefreshCw, Sparkles, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { ExecutionSummary } from '../components/ExecutionSummary'
 import { PageHeader } from '../components/PageHeader'
 import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
@@ -147,8 +146,7 @@ export function WorksPage() {
 
                 {np.state.status === 'running' && (
                   <>
-                    <div className="running"><span /> {np.state.execution?.execution_mode === 'direct' ? '后台 AI 正在执行（直接模式）…' : '等待交互桥 /gowrite…'}</div>
-                    {np.state.backendMessage && <p className="muted-note">{np.state.backendMessage}</p>}
+                    <div className="running"><span /> {np.state.execution?.execution_mode === 'interactive_bridge' ? '请到 Qoder 执行 /gowrite' : 'AI 正在整理作品方向'}</div>
                   </>
                 )}
                 {np.state.status === 'running' && (
@@ -165,7 +163,6 @@ export function WorksPage() {
 
                 {np.state.status === 'waiting_confirmation' && np.state.candidate && (
                   <>
-                    <ExecutionSummary execution={np.state.execution} />
                     <div className="candidate-view">
                       <strong>方向候选（待确认）</strong>
                       <p><b>作品方向：</b>{np.state.candidate.work_direction}</p>

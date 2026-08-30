@@ -128,6 +128,8 @@ def _append_change(
         "delta": copy.deepcopy(delta),
         "semantic": None,
         "error": None,
+        "settlement_request_id": None,
+        "settlement_started": False,
     }
     ledger["changes"].append(entry)
     _atomic_write(artifact, _json_bytes(ledger))
@@ -294,11 +296,14 @@ def _model_change_requires_semantic(
     detail: dict[str, Any],
 ) -> bool:
     """Conservative boundary: only proven display/mechanical edits skip AI."""
-    if source_kind in {"relationship_edit", "system_edit"}:
-        return True
     if source_kind == "profile_edit":
         return False
     history_detail = detail.get("detail") if isinstance(detail.get("detail"), dict) else {}
+    if source_kind in {"relationship_edit", "system_edit"}:
+        changes = history_detail.get("changes") if isinstance(history_detail.get("changes"), dict) else {}
+        if changes and set(changes) == {"data"} and _changed_data_keys(history_detail) <= _DISPLAY_ONLY_DATA_FIELDS:
+            return False
+        return True
     if source_kind == "foundation_edit":
         ref = history_detail.get("ref")
         item = model.get("objects", {}).get(ref) if isinstance(ref, str) else None
@@ -314,14 +319,18 @@ def _model_change_requires_semantic(
         return True
     if source_kind == "planning_edit":
         changed = history_detail.get("changed") if isinstance(history_detail.get("changed"), dict) else {}
-        chapter_changes = (changed.get("chapter_targets") or {}).get("objects", [])
-        for item in chapter_changes if isinstance(chapter_changes, list) else []:
-            if item.get("action") in {"created", "tombstoned"}:
-                return True
-            if "title" in (item.get("changes") or {}):
-                return True
-            if _changed_data_keys(item) - _MECHANICAL_OUTLINE_FIELDS:
-                return True
+        for group, mechanical_fields in (
+            ("stages", {"target_words", "display_order"}),
+            ("chapter_targets", _MECHANICAL_OUTLINE_FIELDS),
+        ):
+            object_changes = (changed.get(group) or {}).get("objects", [])
+            for item in object_changes if isinstance(object_changes, list) else []:
+                if item.get("action") in {"created", "tombstoned"}:
+                    return True
+                if "title" in (item.get("changes") or {}):
+                    return True
+                if _changed_data_keys(item) - mechanical_fields:
+                    return True
         return False
     return False
 
@@ -384,6 +393,13 @@ def update_foundation_record(
     material_state: str | None = None,
     data: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    try:
+        initial = project_model.load_project_model(project_id)
+    except project_model.ProjectModelError as exc:
+        raise AuthorEditError(str(exc)) from exc
+    initial_item = initial.get("objects", {}).get(ref)
+    source_kind = "system_edit" if isinstance(initial_item, dict) and initial_item.get("kind") == "system" else "foundation_edit"
+
     def action() -> dict[str, Any]:
         model = project_model.load_project_model(project_id)
         if model["model_rev"] != base_model_rev:
@@ -410,12 +426,19 @@ def update_foundation_record(
 
     return _perform_model_change(
         project_id,
-        "foundation_edit",
+        source_kind,
         action,
     )
 
 
 def retire_foundation_record(project_id: str, *, base_model_rev: int, ref: str) -> dict[str, Any]:
+    try:
+        initial = project_model.load_project_model(project_id)
+    except project_model.ProjectModelError as exc:
+        raise AuthorEditError(str(exc)) from exc
+    initial_item = initial.get("objects", {}).get(ref)
+    source_kind = "system_edit" if isinstance(initial_item, dict) and initial_item.get("kind") == "system" else "foundation_edit"
+
     def action() -> dict[str, Any]:
         model = project_model.load_project_model(project_id)
         if model["model_rev"] != base_model_rev:
@@ -445,7 +468,7 @@ def retire_foundation_record(project_id: str, *, base_model_rev: int, ref: str) 
 
     return _perform_model_change(
         project_id,
-        "foundation_edit",
+        source_kind,
         action,
     )
 
@@ -765,6 +788,8 @@ def update_change(
     status: str,
     semantic: dict[str, Any] | None = None,
     error: str | None = None,
+    settlement_request_id: str | None = None,
+    settlement_started: bool | None = None,
 ) -> dict[str, Any]:
     if status not in {"pending", "failed", "awaiting_author", "synchronized"}:
         raise AuthorEditError("作者变更状态非法。")
@@ -780,6 +805,10 @@ def update_change(
     matched["status"] = status
     matched["semantic"] = copy.deepcopy(semantic)
     matched["error"] = error
+    if settlement_request_id is not None:
+        matched["settlement_request_id"] = settlement_request_id
+    if settlement_started is not None:
+        matched["settlement_started"] = bool(settlement_started)
     matched["updated_at"] = _now()
     _atomic_write(artifact, _json_bytes(ledger))
     return copy.deepcopy(matched)

@@ -143,6 +143,7 @@ p{line-height:1.65}
 .foundation-card h3{margin:0 0 8px;font-size:16px}
 .foundation-card p{margin:6px 0;font-size:14px;line-height:1.6}
 .foundation-card b{color:var(--muted);font-weight:600}
+.character-avatar{display:inline-grid;place-items:center;flex:none;width:34px;height:34px;border-radius:50%;background:hsl(var(--avatar-hue,215) 72% 92%);color:hsl(var(--avatar-hue,215) 52% 34%);font-weight:800;border:1px solid hsl(var(--avatar-hue,215) 48% 78%)}
 .foundation-note{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:0 22px}
 .foundation-note p{margin:0}
 .material-state{display:inline-flex;align-items:center;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700;white-space:nowrap;background:#e9f8f2;color:#13815f}
@@ -232,11 +233,18 @@ p{line-height:1.65}
 .map-graph-wrap{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:0;min-height:560px}
 .map-graph-main{padding:18px 22px;min-width:0}
 .map-graph{height:480px;border:1px solid var(--line);border-radius:10px;background:linear-gradient(135deg,#f7fbff,#fff)}
+.map-graph-stage{position:relative}
+.map-tooltip{position:absolute;z-index:12;pointer-events:none;width:min(260px,70vw);display:grid;grid-template-columns:auto 1fr;gap:4px 10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.97);box-shadow:0 12px 30px rgba(33,59,102,.16);font-size:12px}
+.map-tooltip .character-avatar{grid-row:1/5;width:30px;height:30px}
+.map-tooltip p,.map-tooltip small{grid-column:2;margin:0;line-height:1.45}
+.map-tooltip small{display:block;color:var(--muted)}
 .map-graph-tools{display:flex;align-items:center;gap:14px;margin-top:10px}
 .map-detail{border-left:1px solid var(--line);padding:18px 20px}
 .map-detail h3{margin:0 0 10px;font-size:15px}
 .map-detail p{margin:6px 0;font-size:13px;line-height:1.6}
 .map-detail b{color:var(--muted);font-weight:600}
+.map-character-identity{display:flex;align-items:flex-start;gap:10px;margin:8px 0 12px}
+.map-character-identity p{margin:0 0 3px}.map-character-identity small{color:var(--muted)}
 .map-unresolved{margin-top:16px;border:1px dashed var(--line);border-radius:10px;padding:12px 16px;background:#fafcff}
 .map-unresolved h3{margin:0 0 8px;font-size:14px;color:var(--muted)}
 .map-unresolved ul{margin:0;padding-left:18px;display:grid;gap:6px}

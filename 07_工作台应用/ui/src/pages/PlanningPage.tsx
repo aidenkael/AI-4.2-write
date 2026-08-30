@@ -1,6 +1,5 @@
 import { Check, Clock3, FolderOpen, RefreshCw, Send, Sparkles, WandSparkles, X } from 'lucide-react'
 import { useEffect, useRef } from 'react'
-import { ExecutionSummary } from '../components/ExecutionSummary'
 import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { useDevelopmentController } from '../features/development/useDevelopmentController'
@@ -105,15 +104,14 @@ export function PlanningPage() {
           <>
             <div className="running">
               <span />
-              <strong>{state.execution?.execution_mode === 'direct' ? '后台 AI 正在执行（直接模式）…' : '等待交互桥 /gowrite…'}</strong>
+              <strong>{state.execution?.execution_mode === 'interactive_bridge' ? '请到 Qoder 执行 /gowrite' : 'AI 正在规划'}</strong>
             </div>
-            {state.backendMessage && <p className="muted-note">{state.backendMessage}</p>}
           </>
         )}
 
         {state.status === 'confirming' && state.candidate && (
           <div className="candidate-view">
-            <strong>建议方向（待确认）</strong>
+            <strong>规划候选 · 等待你确认</strong>
             <p>{state.candidate.proposal}</p>
             <ul>
               {state.candidate.planning_items.map((item, i) => (
@@ -126,8 +124,7 @@ export function PlanningPage() {
 
         {state.status === 'waiting_confirmation' && state.candidate && (
           <div className="candidate-view">
-            <strong>建议方向（待确认）</strong>
-            <ExecutionSummary execution={state.execution} />
+            <strong>规划候选 · 等待你确认</strong>
             <p>{state.candidate.proposal}</p>
             <ul>
               {state.candidate.planning_items.map((item, i) => (

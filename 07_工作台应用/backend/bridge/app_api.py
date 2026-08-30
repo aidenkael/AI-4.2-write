@@ -64,6 +64,52 @@ def _err(code: str, message: str) -> dict:
     return {"ok": False, "data": None, "error": {"code": code, "message": message}}
 
 
+def _start_required_settlement(result: dict, *, enabled: bool = True) -> dict:
+    """Start the one existing settlement path after a durable semantic mutation.
+
+    Failure here never rolls back or disguises the durable edit.  The returned
+    change remains retryable and normal author UI can show the synchronization
+    state without exposing runtime routing metadata.
+    """
+    change = result.get("change") if isinstance(result, dict) else None
+    if not isinstance(change, dict):
+        return result
+    requires_semantic = bool(change.get("requires_semantic"))
+    if not enabled or not requires_semantic or change.get("status") == "synchronized":
+        result["settlement_request"] = {
+            "change_id": change.get("change_id"),
+            "requires_semantic": requires_semantic,
+            "status": change.get("status"),
+            "complete": change.get("status") == "synchronized",
+            "request_started": False,
+            "request_id": change.get("settlement_request_id"),
+        }
+        return result
+    project_id = str(result.get("model", {}).get("project_id") or result.get("project_id") or "")
+    change_id = str(change.get("change_id") or "")
+    try:
+        prepared = change_settlement_ops.prepare_change_settlement(project_id, change_id)
+    except Exception as exc:  # durable edit must remain visible/retryable even if orchestration fails
+        updated = author_edit_ops.update_change(
+            project_id, change_id, status="failed", error=str(exc), settlement_started=False,
+        )
+        result["change"] = updated
+        result["settlement_request"] = {
+            "change_id": change_id, "requires_semantic": True, "status": "failed",
+            "complete": False, "request_started": False, "request_id": None,
+            "error": str(exc),
+        }
+        return result
+    result["change"] = author_edit_ops.get_change(project_id, change_id)
+    result["settlement_request"] = {
+        **prepared,
+        "requires_semantic": True,
+        "complete": False,
+        "request_started": True,
+    }
+    return result
+
+
 class AppApi:
     """暴露给 React（window.pywebview.api）的桥接 API。"""
 
@@ -611,7 +657,7 @@ class AppApi:
 
     def create_foundation_record(self, payload: dict) -> dict:
         try:
-            return _ok(author_edit_ops.create_foundation_record(
+            return _ok(_start_required_settlement(author_edit_ops.create_foundation_record(
                 str(payload.get("project_id") or ""),
                 base_model_rev=int(payload.get("base_model_rev")),
                 category=str(payload.get("category") or ""),
@@ -619,7 +665,7 @@ class AppApi:
                 material_state=str(payload.get("material_state") or "current"),
                 data=payload.get("data") if isinstance(payload.get("data"), dict) else {},
                 category_name=(str(payload.get("category_name")) if payload.get("category_name") is not None else None),
-            ))
+            )))
         except (AuthorEditError, TypeError, ValueError) as exc:
             return _err(CODE_AUTHOR_EDIT_ERROR, str(exc))
         except Exception as exc:  # noqa: BLE001
@@ -642,14 +688,14 @@ class AppApi:
 
     def update_foundation_record(self, payload: dict) -> dict:
         try:
-            return _ok(author_edit_ops.update_foundation_record(
+            return _ok(_start_required_settlement(author_edit_ops.update_foundation_record(
                 str(payload.get("project_id") or ""),
                 base_model_rev=int(payload.get("base_model_rev")),
                 ref=str(payload.get("ref") or ""),
                 title=(str(payload.get("title")) if payload.get("title") is not None else None),
                 material_state=(str(payload.get("material_state")) if payload.get("material_state") is not None else None),
                 data=payload.get("data") if isinstance(payload.get("data"), dict) else None,
-            ))
+            )))
         except (AuthorEditError, TypeError, ValueError) as exc:
             return _err(CODE_AUTHOR_EDIT_ERROR, str(exc))
         except Exception as exc:  # noqa: BLE001
@@ -657,10 +703,10 @@ class AppApi:
 
     def retire_foundation_record(self, payload: dict) -> dict:
         try:
-            return _ok(author_edit_ops.retire_foundation_record(
+            return _ok(_start_required_settlement(author_edit_ops.retire_foundation_record(
                 str(payload.get("project_id") or ""),
                 base_model_rev=int(payload.get("base_model_rev")), ref=str(payload.get("ref") or ""),
-            ))
+            )))
         except (AuthorEditError, TypeError, ValueError) as exc:
             return _err(CODE_AUTHOR_EDIT_ERROR, str(exc))
         except Exception as exc:  # noqa: BLE001
@@ -668,7 +714,7 @@ class AppApi:
 
     def create_relationship(self, payload: dict) -> dict:
         try:
-            return _ok(author_edit_ops.create_relationship(
+            return _ok(_start_required_settlement(author_edit_ops.create_relationship(
                 str(payload.get("project_id") or ""),
                 base_model_rev=int(payload.get("base_model_rev")),
                 source_ref=str(payload.get("source_ref") or ""),
@@ -676,7 +722,7 @@ class AppApi:
                 label=str(payload.get("label") or ""),
                 material_state=str(payload.get("material_state") or "current"),
                 data=payload.get("data") if isinstance(payload.get("data"), dict) else {},
-            ))
+            )))
         except (AuthorEditError, TypeError, ValueError) as exc:
             return _err(CODE_AUTHOR_EDIT_ERROR, str(exc))
         except Exception as exc:  # noqa: BLE001
@@ -684,7 +730,7 @@ class AppApi:
 
     def update_relationship(self, payload: dict) -> dict:
         try:
-            return _ok(author_edit_ops.update_relationship(
+            return _ok(_start_required_settlement(author_edit_ops.update_relationship(
                 str(payload.get("project_id") or ""),
                 base_model_rev=int(payload.get("base_model_rev")), ref=str(payload.get("ref") or ""),
                 source_ref=(str(payload.get("source_ref")) if payload.get("source_ref") is not None else None),
@@ -692,7 +738,7 @@ class AppApi:
                 label=(str(payload.get("label")) if payload.get("label") is not None else None),
                 material_state=(str(payload.get("material_state")) if payload.get("material_state") is not None else None),
                 data=payload.get("data") if isinstance(payload.get("data"), dict) else None,
-            ))
+            )))
         except (AuthorEditError, TypeError, ValueError) as exc:
             return _err(CODE_AUTHOR_EDIT_ERROR, str(exc))
         except Exception as exc:  # noqa: BLE001
@@ -700,10 +746,10 @@ class AppApi:
 
     def retire_relationship(self, payload: dict) -> dict:
         try:
-            return _ok(author_edit_ops.retire_relationship(
+            return _ok(_start_required_settlement(author_edit_ops.retire_relationship(
                 str(payload.get("project_id") or ""),
                 base_model_rev=int(payload.get("base_model_rev")), ref=str(payload.get("ref") or ""),
-            ))
+            )))
         except (AuthorEditError, TypeError, ValueError) as exc:
             return _err(CODE_AUTHOR_EDIT_ERROR, str(exc))
         except Exception as exc:  # noqa: BLE001
@@ -712,13 +758,13 @@ class AppApi:
     def set_length_plan(self, payload: dict) -> dict:
         try:
             total = payload.get("total_target_words")
-            return _ok(author_edit_ops.set_length_plan(
+            return _ok(_start_required_settlement(author_edit_ops.set_length_plan(
                 str(payload.get("project_id") or ""),
                 base_model_rev=int(payload.get("base_model_rev")),
                 total_target_words=(int(total) if total is not None else None),
                 stages=payload.get("stages") if isinstance(payload.get("stages"), list) else None,
                 chapter_targets=(payload.get("chapter_targets") if isinstance(payload.get("chapter_targets"), list) else None),
-            ))
+            )))
         except (AuthorEditError, TypeError, ValueError) as exc:
             return _err(CODE_AUTHOR_EDIT_ERROR, str(exc))
         except Exception as exc:  # noqa: BLE001
@@ -736,11 +782,11 @@ class AppApi:
 
     def save_formal_prose(self, payload: dict) -> dict:
         try:
-            return _ok(author_edit_ops.save_formal_prose(
+            return _ok(_start_required_settlement(author_edit_ops.save_formal_prose(
                 str(payload.get("project_id") or ""), chapter_number=int(payload.get("chapter_number")),
                 base_content_sha256=str(payload.get("base_content_sha256") or ""),
                 content=str(payload.get("content") or ""),
-            ))
+            ), enabled=bool(payload.get("sync"))))
         except (AuthorEditError, TypeError, ValueError) as exc:
             return _err(CODE_AUTHOR_EDIT_ERROR, str(exc))
         except Exception as exc:  # noqa: BLE001

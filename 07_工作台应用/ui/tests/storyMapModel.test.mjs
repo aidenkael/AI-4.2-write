@@ -54,6 +54,11 @@ test('显式人物 + 显式有效关系 => 节点 + 边', () => {
   assert.equal(graph.nodes.length, 2)
   assert.equal(graph.edges.length, 1)
   assert.deepEqual([graph.edges[0].source, graph.edges[0].target], ['c1', 'c2'])
+  assert.deepEqual(
+    graph.edges[0].fields.slice(0, 2).map((field) => [field.label, field.value]),
+    [['人物 A', '林砚'], ['人物 B', '苏晚晴']],
+  )
+  assert.ok(!graph.edges[0].fields.some((field) => field.key === 'targets'))
   assert.equal(graph.unresolved.length, 0)
 })
 
@@ -71,8 +76,8 @@ test('关系端点无法解析 => 不臆造边 + unresolved 条目', () => {
   const graph = projectRelationshipGraph(data)
   assert.equal(graph.edges.length, 0, '不得臆造边')
   assert.equal(graph.unresolved.length, 2)
-  assert.ok(graph.unresolved[0].reason.includes('端点无法对应'))
-  assert.ok(graph.unresolved[1].reason.includes('没有显式两端字段'))
+  assert.ok(graph.unresolved[0].reason.includes('无法唯一对应'))
+  assert.ok(graph.unresolved[1].reason.includes('缺少明确的双方人物'))
 })
 
 test('重复关系记录只呈现一次渲染身份', () => {

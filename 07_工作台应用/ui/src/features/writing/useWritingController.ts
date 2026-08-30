@@ -140,6 +140,7 @@ export function useWritingController(options: {
   const [settlementStatus, setSettlementStatus] = useState<'idle' | 'syncing' | 'failed'>('idle')
 
   const projectRef = useRef<string | null>(projectId)
+  const followedSettlementRequestsRef = useRef(new Set<string>())
   projectRef.current = projectId
 
   const loadSurface = useCallback(async (pid: string) => {
@@ -148,6 +149,7 @@ export function useWritingController(options: {
     try {
       const surface = await getStoryWriteSurface(pid)
       if (projectRef.current !== pid) return // 加载期间已切换项目 → 丢弃过期结果
+      if (surface.project_id !== pid) throw new Error('返回的写作数据与当前作品不一致，已拒绝。')
       setWritingSurface(surface)
       setSelectedChapterNumber((current) => {
         const next = current != null && surface.chapters.some((chapter) => chapter.chapter_number === current)
@@ -170,9 +172,11 @@ export function useWritingController(options: {
   useEffect(() => {
     setAcceptedNote(false)
     setLocalError(null)
+    setSettlementStatus('idle')
+    followedSettlementRequestsRef.current.clear()
+    setWritingSurface(null)
+    setSelectedChapterNumber(null)
     if (!projectId) {
-      setWritingSurface(null)
-      setSelectedChapterNumber(null)
       setSurfaceLoading(false)
       return
     }
@@ -226,10 +230,20 @@ export function useWritingController(options: {
     setLocalError(null)
   }, [])
 
-  const syncChange = useCallback(async (pid: string, changeId: string) => {
+  const syncChange = useCallback(async (pid: string, changeId: string, startedRequestId?: string | null) => {
+    let trackedRequestId = startedRequestId ?? null
+    if (startedRequestId && followedSettlementRequestsRef.current.has(startedRequestId)) return
+    if (startedRequestId) followedSettlementRequestsRef.current.add(startedRequestId)
     setSettlementStatus('syncing')
     try {
-      const prepared = await prepareChangeSettlement({ project_id: pid, change_id: changeId })
+      const prepared = startedRequestId
+        ? { request_id: startedRequestId, status: 'pending' as const }
+        : await prepareChangeSettlement({ project_id: pid, change_id: changeId })
+      if (!trackedRequestId) {
+        trackedRequestId = prepared.request_id
+        if (followedSettlementRequestsRef.current.has(trackedRequestId)) return
+        followedSettlementRequestsRef.current.add(trackedRequestId)
+      }
       let status = prepared
       while (projectRef.current === pid && status.status === 'pending') {
         await new Promise((resolve) => window.setTimeout(resolve, 1000))
@@ -245,12 +259,26 @@ export function useWritingController(options: {
         setLocalError(toMessage(e))
         await loadSurface(pid)
       }
+    } finally {
+      if (trackedRequestId) followedSettlementRequestsRef.current.delete(trackedRequestId)
     }
   }, [loadSurface])
 
+  useEffect(() => {
+    const pid = projectRef.current
+    const pending = writingSurface?.settlement?.changes.find((change) => (
+      change.status === 'pending'
+      && change.requires_semantic
+      && change.settlement_started
+      && change.settlement_request_id
+    ))
+    if (!pid || writingSurface?.project_id !== pid || !pending?.settlement_request_id) return
+    void syncChange(pid, pending.change_id, pending.settlement_request_id)
+  }, [syncChange, writingSurface?.settlement?.changes])
+
   const createChapter = useCallback(async () => {
     const pid = projectRef.current
-    if (!pid || !writingSurface) return
+    if (!pid || !writingSurface || writingSurface.project_id !== pid) return
     const onlyVirtualFirst = writingSurface.chapters.length === 1
       && writingSurface.chapters[0].chapter_number === 1
       && !writingSurface.chapters[0].content_sha256
@@ -274,7 +302,9 @@ export function useWritingController(options: {
 
   const save = useCallback(async (sync: boolean) => {
     const pid = projectRef.current
-    const chapter = writingSurface?.chapters.find((item) => item.chapter_number === selectedChapterNumber)
+    const chapter = writingSurface?.project_id === pid
+      ? writingSurface.chapters.find((item) => item.chapter_number === selectedChapterNumber)
+      : undefined
     if (!pid || !chapter) return
     if (!chapter.content_sha256) {
       setLocalError('请先新建正式章节，再保存正文。')
@@ -286,14 +316,18 @@ export function useWritingController(options: {
     try {
       const result = await saveFormalProse({
         project_id: pid, chapter_number: chapter.chapter_number,
-        base_content_sha256: chapter.content_sha256, content: editorContent,
+        base_content_sha256: chapter.content_sha256, content: editorContent, sync,
       })
       await loadSurface(pid)
       setSelectedChapterNumber(chapter.chapter_number)
       setEditorContentState(editorContent)
       setEditorDirty(false)
       notify?.(sync ? '正文已保存，正在同步作品状态。' : result.message)
-      if (sync) void syncChange(pid, result.change.change_id)
+      if (sync) void syncChange(
+        pid,
+        result.change.change_id,
+        result.settlement_request?.request_started ? result.settlement_request.request_id : null,
+      )
     } catch (e) {
       setLocalError(toMessage(e))
     } finally {

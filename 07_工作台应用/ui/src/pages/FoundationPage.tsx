@@ -1,10 +1,12 @@
 import { Check, FileCheck2, GitBranch, MapPin, Pencil, Plus, Save, Trash2, UserRound, X } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { ProjectDataEntry } from '../bridge/client'
 import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { useProjectDataController } from '../features/projectData/useProjectDataController'
 import { describeRecord } from '../features/storyMap/storyMapModel'
+import { authorSourceLabel, authorStatusLabel, compactCharacter } from '../features/presentation/authorPresentation'
+import { CharacterEditor, RelationshipEditor, splitEditorData } from '../features/foundation/recordEditors'
 
 type FoundationTab =
   | 'characters' | 'relationships' | 'canon_facts' | 'locations' | 'organizations'
@@ -89,61 +91,7 @@ interface RecordForm {
   data: Record<string, string>
   extraFields: Array<{ key: string; value: string; isList: boolean }>
   preservedData: Record<string, unknown>
-}
-
-interface RelationshipForm {
-  mode: 'create' | 'edit'
-  ref: string | null
-  label: string
-  source_ref: string
-  target_ref: string
-  material_state: MaterialState
-  description: string
-  state: string
-  notes: string
-  relationship_phase: string
-  key_history: string
-  current_tension: string
-  hidden_information: string
-  trust: string
-  closeness: string
-  preservedData: Record<string, unknown>
-}
-
-function recordObject(entry: ProjectDataEntry): Record<string, unknown> {
-  return entry.record && typeof entry.record === 'object' && !Array.isArray(entry.record)
-    ? entry.record as Record<string, unknown>
-    : {}
-}
-
-function stringData(entry: ProjectDataEntry, fields: readonly (readonly [string, string])[]) {
-  const record = recordObject(entry)
-  return Object.fromEntries(fields.map(([key]) => [key, typeof record[key] === 'string' ? record[key] as string : '']))
-}
-
-const injectedKeys = new Set([
-  'id', 'name', 'authority', 'source', 'target', 'source_name', 'target_name', 'relationship',
-  'source_ref', 'source_kind', 'material_state',
-])
-
-function flexibleData(entry: ProjectDataEntry, fields: readonly (readonly [string, string])[]) {
-  const record = recordObject(entry)
-  const known = new Set(fields.map(([key]) => key))
-  const extraFields: Array<{ key: string; value: string; isList: boolean }> = []
-  const preservedData: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(record)) {
-    if (known.has(key) || injectedKeys.has(key)) continue
-    if (['planning_source_ref', 'source_state_ref', 'supersedes_state_ref', 'settlement_provenance'].includes(key)) {
-      preservedData[key] = value
-    } else if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-      extraFields.push({ key, value: String(value), isList: false })
-    } else if (Array.isArray(value) && value.every((item) => typeof item === 'string')) {
-      extraFields.push({ key, value: value.join('、'), isList: true })
-    } else {
-      preservedData[key] = value
-    }
-  }
-  return { extraFields, preservedData }
+  knownListFields: string[]
 }
 
 const sectionForCategory = (category: string | null | undefined): FoundationTab => {
@@ -165,40 +113,14 @@ const optionalModules = [
   ['romance_social', '情感 / 社交'], ['mystery_information', '悬疑信息'], ['custom', '自定义'],
 ] as const
 
-const characterInitial = (entry: ProjectDataEntry) => {
-  const label = entry.label.trim()
-  return label ? label.slice(0, 1).toUpperCase() : '？'
-}
-
-function relationshipEndpointRefs(record: Record<string, unknown>, characters: ProjectDataEntry[]): [string, string] {
-  const raw = Array.isArray(record.targets) ? record.targets
-    : Array.isArray(record.characters) ? record.characters
-      : Array.isArray(record.between) ? record.between
-        : Array.isArray(record.participants) ? record.participants
-          : [record.source ?? record.from, record.target ?? record.to]
-  const resolve = (value: unknown) => {
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      const item = value as Record<string, unknown>
-      value = item.id ?? item.name ?? item.label
-    }
-    if (typeof value !== 'string' || !value.trim()) return ''
-    const needle = value.trim()
-    const matches = characters.filter((character) => {
-      const data = recordObject(character)
-      return [character.id, character.source_ref, character.label, data.id, data.name, data.label].some((candidate) => candidate === needle)
-    })
-    return matches.length === 1 ? matches[0].source_ref ?? '' : ''
-  }
-  return [resolve(raw[0]), resolve(raw[1])]
-}
-
 export function FoundationPage() {
   const { actions } = useApp()
   const { selected } = useFormalProjectShell()
   const controller = useProjectDataController(selected?.project_id ?? null)
   const [tab, setTab] = useState<FoundationTab>('characters')
   const [recordForm, setRecordForm] = useState<RecordForm | null>(null)
-  const [relationshipForm, setRelationshipForm] = useState<RelationshipForm | null>(null)
+  const [sharedEditor, setSharedEditor] = useState<{ kind: 'character' | 'relationship'; entry: ProjectDataEntry | null } | null>(null)
+  const [detailEntry, setDetailEntry] = useState<ProjectDataEntry | null>(null)
   const [genreTags, setGenreTags] = useState('')
   const [narrativeMode, setNarrativeMode] = useState('')
   const [activeModules, setActiveModules] = useState<string[]>([])
@@ -209,6 +131,14 @@ export function FoundationPage() {
   const entries = useMemo(() => controller.data?.sections[tab] ?? [], [controller.data, tab])
   const fields = fieldsForTab(tab)
   const characters = controller.data?.sections.characters ?? []
+  const readonlyDetailFields = useMemo(() => detailEntry ? describeRecord(detailEntry) : [], [detailEntry])
+
+  useEffect(() => {
+    setRecordForm(null)
+    setSharedEditor(null)
+    setDetailEntry(null)
+    handoffRef.current = null
+  }, [selected?.project_id])
 
   useEffect(() => {
     const profile = controller.data?.story_bible_profile
@@ -226,50 +156,30 @@ export function FoundationPage() {
   }, [controller.data?.story_bible_profile])
 
   const beginCreate = () => {
-    if (tab === 'relationships') {
-      setRelationshipForm({
-        mode: 'create', ref: null, label: '', source_ref: '', target_ref: '',
-        material_state: 'current', description: '', state: '', notes: '',
-        relationship_phase: '', key_history: '', current_tension: '', hidden_information: '',
-        trust: '', closeness: '', preservedData: {},
-      })
+    if (tab === 'characters' || tab === 'relationships') {
+      setSharedEditor({ kind: tab === 'characters' ? 'character' : 'relationship', entry: null })
       return
     }
     setRecordForm({
       mode: 'create', ref: null, title: '', material_state: tab === 'storylines' ? 'future' : 'current',
       category: tabMeta.category,
-      data: Object.fromEntries(fields.map(([key]) => [key, ''])), extraFields: [], preservedData: {},
+      data: Object.fromEntries(fields.map(([key]) => [key, ''])), extraFields: [], preservedData: {}, knownListFields: [],
     })
   }
 
   const beginEdit = (entry: ProjectDataEntry) => {
     if (!entry.editable || !entry.source_ref) return
-    if (tab === 'relationships') {
-      const record = recordObject(entry)
-      const [sourceRef, targetRef] = relationshipEndpointRefs(record, characters)
-      setRelationshipForm({
-        mode: 'edit', ref: entry.source_ref, label: entry.label,
-        source_ref: sourceRef, target_ref: targetRef,
-        material_state: entry.status === 'future' ? 'future' : 'current',
-        description: String(record.description ?? ''), state: String(record.current_state ?? record.state ?? record.status ?? ''),
-        notes: String(record.notes ?? ''),
-        relationship_phase: String(record.relationship_phase ?? ''),
-        key_history: String(record.key_history ?? ''), current_tension: String(record.current_tension ?? ''),
-        hidden_information: String(record.hidden_information ?? ''),
-        trust: String(record.trust ?? ''), closeness: String(record.closeness ?? ''),
-        preservedData: Object.fromEntries(
-          Object.entries(record).filter(([key]) => ['planning_source_ref', 'source_state_ref', 'supersedes_state_ref', 'settlement_provenance'].includes(key)),
-        ),
-      })
+    if (tab === 'characters' || tab === 'relationships') {
+      setSharedEditor({ kind: tab === 'characters' ? 'character' : 'relationship', entry })
       return
     }
-    const flexible = flexibleData(entry, fields)
+    const flexible = splitEditorData(entry, fields)
     setRecordForm({
       mode: 'edit', ref: entry.source_ref, title: entry.label,
       material_state: entry.status === 'future' ? 'future' : 'current',
       category: entry.category || tabMeta.category,
-      data: stringData(entry, fields),
-      ...flexible,
+      data: flexible.values, extraFields: flexible.custom,
+      preservedData: flexible.preserved, knownListFields: [...flexible.knownListFields],
     })
   }
 
@@ -286,26 +196,19 @@ export function FoundationPage() {
       if (entry) {
         handoffRef.current = handoff.source_ref
         setTab(sectionForCategory(entry.category))
-        const record = recordObject(entry)
         if (entry.category === 'relationship' || section === 'relationships') {
-          const [sourceRef, targetRef] = relationshipEndpointRefs(record, characters)
-          setRelationshipForm({
-            mode: 'edit', ref: entry.source_ref ?? null, label: entry.label,
-            source_ref: sourceRef, target_ref: targetRef,
-            material_state: entry.status === 'future' ? 'future' : 'current',
-            description: String(record.description ?? ''), state: String(record.current_state ?? record.state ?? record.status ?? ''),
-            notes: String(record.notes ?? ''), relationship_phase: String(record.relationship_phase ?? ''),
-            key_history: String(record.key_history ?? ''), current_tension: String(record.current_tension ?? ''),
-            hidden_information: String(record.hidden_information ?? ''), trust: String(record.trust ?? ''),
-            closeness: String(record.closeness ?? ''), preservedData: {},
-          })
+          setSharedEditor({ kind: 'relationship', entry })
+        } else if (section === 'characters') {
+          setSharedEditor({ kind: 'character', entry })
         } else {
           const entryFields = fieldsForTab(section)
+          const flexible = splitEditorData(entry, entryFields)
           setRecordForm({
             mode: 'edit', ref: entry.source_ref ?? null, title: entry.label,
             material_state: entry.status === 'future' ? 'future' : 'current',
-            category: entry.category || 'world_setting', data: stringData(entry, entryFields),
-            ...flexibleData(entry, entryFields),
+            category: entry.category || 'world_setting', data: flexible.values,
+            extraFields: flexible.custom, preservedData: flexible.preserved,
+            knownListFields: [...flexible.knownListFields],
           })
         }
         return
@@ -319,8 +222,13 @@ export function FoundationPage() {
     if (!recordForm || !recordForm.title.trim()) return
     const data: Record<string, unknown> = {
       ...recordForm.preservedData,
-      ...Object.fromEntries(Object.entries(recordForm.data).filter(([, value]) => value.trim())),
     }
+    Object.entries(recordForm.data).forEach(([key, value]) => {
+      if (!value.trim()) return
+      data[key] = recordForm.knownListFields.includes(key)
+        ? value.split(/[、,，\n]/).map((item) => item.trim()).filter(Boolean)
+        : value.trim()
+    })
     for (const field of recordForm.extraFields) {
       const key = field.key.trim()
       if (!key || !field.value.trim()) continue
@@ -338,38 +246,12 @@ export function FoundationPage() {
     if (ok) setRecordForm(null)
   }
 
-  const saveRelationship = async () => {
-    if (!relationshipForm || !relationshipForm.label.trim() || !relationshipForm.source_ref || !relationshipForm.target_ref) return
-    const data = {
-      ...relationshipForm.preservedData,
-      ...(relationshipForm.description.trim() ? { description: relationshipForm.description.trim() } : {}),
-      ...(relationshipForm.state.trim() ? { current_state: relationshipForm.state.trim() } : {}),
-      ...(relationshipForm.relationship_phase.trim() ? { relationship_phase: relationshipForm.relationship_phase.trim() } : {}),
-      ...(relationshipForm.key_history.trim() ? { key_history: relationshipForm.key_history.trim() } : {}),
-      ...(relationshipForm.current_tension.trim() ? { current_tension: relationshipForm.current_tension.trim() } : {}),
-      ...(relationshipForm.hidden_information.trim() ? { hidden_information: relationshipForm.hidden_information.trim() } : {}),
-      ...(relationshipForm.trust.trim() ? { trust: relationshipForm.trust.trim() } : {}),
-      ...(relationshipForm.closeness.trim() ? { closeness: relationshipForm.closeness.trim() } : {}),
-      ...(relationshipForm.notes.trim() ? { notes: relationshipForm.notes.trim() } : {}),
-    }
-    const payload = {
-      source_ref: relationshipForm.source_ref, target_ref: relationshipForm.target_ref,
-      label: relationshipForm.label.trim(), material_state: relationshipForm.material_state, data,
-    }
-    const ok = relationshipForm.mode === 'create'
-      ? await controller.createRelationship(payload)
-      : await controller.updateRelationship({ ref: relationshipForm.ref as string, ...payload })
-    if (ok) setRelationshipForm(null)
-  }
-
   const retire = async (entry: ProjectDataEntry) => {
     if (!entry.editable || !entry.source_ref) return
-    const ok = tab === 'relationships'
-      ? await controller.retireRelationship(entry.source_ref)
-      : await controller.retireFoundation(entry.source_ref)
+    if (!window.confirm(`确认退役“${entry.label || '这条记录'}”？记录会保留历史，不会直接删除。`)) return
+    const ok = await controller.retireFoundation(entry.source_ref)
     if (ok) {
       setRecordForm(null)
-      setRelationshipForm(null)
     }
   }
 
@@ -428,7 +310,7 @@ export function FoundationPage() {
         <header className="foundation-toolbar">
           <div className="foundation-tabs">
             {tabs.map(({ key, label, Icon }) => (
-              <button key={key} className={tab === key ? 'active' : ''} onClick={() => { setTab(key); setRecordForm(null); setRelationshipForm(null) }}>
+              <button key={key} className={tab === key ? 'active' : ''} onClick={() => { setTab(key); setRecordForm(null); setSharedEditor(null); setDetailEntry(null) }}>
                 <Icon /> {label}
               </button>
             ))}
@@ -445,11 +327,17 @@ export function FoundationPage() {
 
         <div className="foundation-cards">
           {entries.map((entry) => {
-            const details = describeRecord(entry)
+            const character = tab === 'characters' ? compactCharacter(entry) : null
+            const details = character
+              ? [
+                  ...(character.intro ? [{ key: 'one_line_intro', label: '一句话介绍', value: character.intro }] : []),
+                  ...(character.role ? [{ key: 'role_identity', label: '身份 / 职位', value: character.role }] : []),
+                ]
+              : describeRecord(entry).slice(0, 2)
             return (
               <article className="foundation-card" key={`${tab}-${entry.id ?? entry.label}`}>
                 <div className="foundation-card-head">
-                  {tab === 'characters' && <span className="character-avatar" aria-hidden="true">{characterInitial(entry)}</span>}
+                  {character && <span className="character-avatar" style={{ '--avatar-hue': character.avatar.hue } as CSSProperties} aria-hidden="true">{character.avatar.text}</span>}
                   <h3>{entry.label || '（未命名条目）'}</h3>
                   <span className={`material-state ${entry.status === 'future' ? 'future' : 'current'}`}>
                     {entry.status === 'future' ? '规划中' : '当前'}
@@ -458,8 +346,9 @@ export function FoundationPage() {
                 {details.length === 0 && <p className="muted-note">暂无更多已记录信息。</p>}
                 {details.map((detail) => <p key={detail.key}><b>{detail.label}：</b>{detail.value}</p>)}
                 <footer>
-                  {entry.editable && <button onClick={() => beginEdit(entry)}><Pencil /> 编辑</button>}
-                  {!entry.editable && <span className="muted-note">来自已采用正文与作品状态</span>}
+                  {entry.editable
+                    ? <button onClick={() => beginEdit(entry)}><Pencil /> 查看 / 编辑</button>
+                    : <button onClick={() => setDetailEntry(entry)}>查看详情</button>}
                 </footer>
               </article>
             )
@@ -471,7 +360,7 @@ export function FoundationPage() {
         <aside className="record-drawer panel" aria-label={`${recordForm.mode === 'create' ? '新增' : '编辑'}${tabMeta.label}`}>
           <header><h2>{recordForm.mode === 'create' ? '新增' : '编辑'}{tabMeta.label}</h2><button onClick={() => setRecordForm(null)}><X /></button></header>
           <label>名称<input value={recordForm.title} onChange={(event) => setRecordForm({ ...recordForm, title: event.target.value })} /></label>
-          <label>状态<select value={recordForm.material_state} onChange={(event) => setRecordForm({ ...recordForm, material_state: event.target.value as MaterialState })}><option value="current">当前有效</option><option value="future">未来规划</option></select></label>
+          <label>状态<select value={recordForm.material_state} onChange={(event) => setRecordForm({ ...recordForm, material_state: event.target.value as MaterialState })}><option value="current">当前</option><option value="future">规划中</option></select></label>
           <div className="record-fields">
             {fields.map(([key, label]) => (
               <label key={key}>{label}<textarea rows={key === 'background_summary' || key === 'notes' ? 3 : 2} value={recordForm.data[key] ?? ''} onChange={(event) => setRecordForm({ ...recordForm, data: { ...recordForm.data, [key]: event.target.value } })} /></label>
@@ -492,28 +381,17 @@ export function FoundationPage() {
         </aside>
       )}
 
-      {relationshipForm && (
-        <aside className="record-drawer panel" aria-label={`${relationshipForm.mode === 'create' ? '新增' : '编辑'}关系`}>
-          <header><h2>{relationshipForm.mode === 'create' ? '新增' : '编辑'}关系</h2><button onClick={() => setRelationshipForm(null)}><X /></button></header>
-          <label>关系名称<input value={relationshipForm.label} onChange={(event) => setRelationshipForm({ ...relationshipForm, label: event.target.value })} /></label>
-          <div className="relationship-endpoints">
-            <label>人物 A<select value={relationshipForm.source_ref} onChange={(event) => setRelationshipForm({ ...relationshipForm, source_ref: event.target.value })}><option value="">请选择</option>{characters.map((entry) => <option key={entry.source_ref ?? entry.id ?? entry.label} value={entry.source_ref ?? ''}>{entry.label} · {entry.status === 'future' ? '规划中' : '当前'}</option>)}</select></label>
-            <label>人物 B<select value={relationshipForm.target_ref} onChange={(event) => setRelationshipForm({ ...relationshipForm, target_ref: event.target.value })}><option value="">请选择</option>{characters.map((entry) => <option key={entry.source_ref ?? entry.id ?? entry.label} value={entry.source_ref ?? ''}>{entry.label} · {entry.status === 'future' ? '规划中' : '当前'}</option>)}</select></label>
+      {sharedEditor?.kind === 'character' && <CharacterEditor key={sharedEditor.entry?.source_ref ?? 'new-character'} entry={sharedEditor.entry} controller={controller} onClose={() => setSharedEditor(null)} />}
+      {sharedEditor?.kind === 'relationship' && <RelationshipEditor key={sharedEditor.entry?.source_ref ?? 'new-relationship'} entry={sharedEditor.entry} characters={characters} controller={controller} onClose={() => setSharedEditor(null)} />}
+      {detailEntry && (
+        <aside className="record-drawer panel" aria-label={`${detailEntry.label}详情`}>
+          <header><h2>{detailEntry.label || '未命名记录'}</h2><button onClick={() => setDetailEntry(null)}><X /></button></header>
+          <p><span className={`material-state ${detailEntry.status === 'future' ? 'future' : 'current'}`}>{authorStatusLabel(detailEntry.status)}</span></p>
+          <p className="muted-note">{authorSourceLabel(detailEntry.source_kind)}</p>
+          <div className="record-fields">
+            {readonlyDetailFields.length === 0 && <p className="muted-note">暂无更多已记录信息。</p>}
+            {readonlyDetailFields.map((field) => <p key={field.key}><b>{field.label}：</b>{field.value}</p>)}
           </div>
-          <label>状态<select value={relationshipForm.material_state} onChange={(event) => setRelationshipForm({ ...relationshipForm, material_state: event.target.value as MaterialState })}><option value="current">当前有效</option><option value="future">未来规划</option></select></label>
-          <label>描述<textarea rows={3} value={relationshipForm.description} onChange={(event) => setRelationshipForm({ ...relationshipForm, description: event.target.value })} /></label>
-          <label>关系状态<input value={relationshipForm.state} onChange={(event) => setRelationshipForm({ ...relationshipForm, state: event.target.value })} placeholder="例如：紧张、合作、疏远" /></label>
-          <label>关系阶段<input value={relationshipForm.relationship_phase} onChange={(event) => setRelationshipForm({ ...relationshipForm, relationship_phase: event.target.value })} /></label>
-          <label>关键经历<textarea rows={3} value={relationshipForm.key_history} onChange={(event) => setRelationshipForm({ ...relationshipForm, key_history: event.target.value })} /></label>
-          <label>当前张力<textarea rows={2} value={relationshipForm.current_tension} onChange={(event) => setRelationshipForm({ ...relationshipForm, current_tension: event.target.value })} /></label>
-          <label>隐瞒的信息<textarea rows={2} value={relationshipForm.hidden_information} onChange={(event) => setRelationshipForm({ ...relationshipForm, hidden_information: event.target.value })} /></label>
-          <label>信任（可选）<input value={relationshipForm.trust} onChange={(event) => setRelationshipForm({ ...relationshipForm, trust: event.target.value })} /></label>
-          <label>亲近（可选）<input value={relationshipForm.closeness} onChange={(event) => setRelationshipForm({ ...relationshipForm, closeness: event.target.value })} /></label>
-          <label>备注<textarea rows={3} value={relationshipForm.notes} onChange={(event) => setRelationshipForm({ ...relationshipForm, notes: event.target.value })} /></label>
-          <footer>
-            {relationshipForm.mode === 'edit' && <button className="danger" onClick={() => void retire({ source_ref: relationshipForm.ref, editable: true } as ProjectDataEntry)}><Trash2 /> 退役</button>}
-            <button className="primary" disabled={controller.saving || !relationshipForm.label.trim() || !relationshipForm.source_ref || !relationshipForm.target_ref || relationshipForm.source_ref === relationshipForm.target_ref} onClick={() => void saveRelationship()}><Save /> {controller.saving ? '保存中…' : '保存'}</button>
-          </footer>
         </aside>
       )}
     </div>

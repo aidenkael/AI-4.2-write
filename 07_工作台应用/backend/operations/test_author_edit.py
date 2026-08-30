@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "05_Skills与自动
 
 import project_workspace  # noqa: E402
 from operations import author_edit, change_settlement, project_snapshot  # noqa: E402
+from bridge import app_api  # noqa: E402
 
 
 @pytest.fixture()
@@ -182,3 +183,58 @@ def test_failed_semantic_writeback_keeps_edit_and_can_retry(project):
     })
     assert retried["status"] == "synchronized"
     assert project_snapshot.get_project_snapshot(project["project_id"])["settlement"]["status"] == "synchronized"
+
+
+def test_application_boundary_auto_starts_required_settlement(project, monkeypatch):
+    created = author_edit.create_foundation_record(
+        project["project_id"], base_model_rev=0, category="character", title="林澈",
+        material_state="current", data={"one_line_intro": "调查者"},
+    )
+    called = []
+    monkeypatch.setattr(
+        app_api.change_settlement_ops,
+        "prepare_change_settlement",
+        lambda project_id, change_id: called.append((project_id, change_id)) or {
+            "request_id": "req-1", "change_id": change_id, "project_id": project_id,
+            "status": "pending", "request_started": True,
+        },
+    )
+    result = app_api._start_required_settlement(created)
+    assert called == [(project["project_id"], created["change"]["change_id"])]
+    assert result["settlement_request"]["request_started"] is True
+    assert result["settlement_request"]["request_id"] == "req-1"
+
+
+def test_application_boundary_skips_deterministic_change(project, monkeypatch):
+    author_edit.create_chapter(project["project_id"], chapter_number=1)
+    change = author_edit.get_author_edit_surface(project["project_id"])["settlement"]["changes"][-1]
+    called = []
+    monkeypatch.setattr(
+        app_api.change_settlement_ops,
+        "prepare_change_settlement",
+        lambda *_args: called.append(True),
+    )
+    result = app_api._start_required_settlement({
+        "project_id": project["project_id"], "change": change,
+    })
+    assert called == []
+    assert result["settlement_request"]["request_started"] is False
+    assert result["settlement_request"]["complete"] is True
+
+
+def test_application_boundary_keeps_durable_edit_when_settlement_start_fails(project, monkeypatch):
+    created = author_edit.create_foundation_record(
+        project["project_id"], base_model_rev=0, category="character", title="林澈",
+        material_state="current", data={"one_line_intro": "调查者"},
+    )
+    monkeypatch.setattr(
+        app_api.change_settlement_ops,
+        "prepare_change_settlement",
+        lambda *_args: (_ for _ in ()).throw(change_settlement.ChangeSettlementError("配置不可用")),
+    )
+    result = app_api._start_required_settlement(created)
+    assert result["change"]["status"] == "failed"
+    assert result["settlement_request"]["request_started"] is False
+    assert result["settlement_request"]["error"] == "配置不可用"
+    snapshot = project_snapshot.get_project_snapshot(project["project_id"])
+    assert [item["title"] for item in snapshot["current"]["characters"]] == ["林澈"]

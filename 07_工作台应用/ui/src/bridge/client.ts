@@ -835,6 +835,20 @@ export interface SettlementChange {
   delta: Record<string, unknown>
   semantic?: { summary?: string; consequences?: Array<Record<string, unknown>> } | null
   error?: string | null
+  requires_semantic?: boolean
+  settlement_request_id?: string | null
+  settlement_started?: boolean
+}
+
+export interface SettlementStart {
+  change_id: string
+  requires_semantic: boolean
+  status: string
+  complete: boolean
+  request_started: boolean
+  request_id?: string | null
+  message?: string
+  error?: string | null
 }
 
 export interface SettlementSummary {
@@ -881,6 +895,7 @@ export async function getProjectData(projectId: string): Promise<ProjectData> {
 export interface AuthorEditResult {
   model?: { model_rev: number }
   change: SettlementChange
+  settlement_request?: SettlementStart
 }
 
 export async function createFoundationRecord(payload: {
@@ -980,12 +995,14 @@ export async function saveFormalProse(payload: {
   chapter_number: number
   base_content_sha256: string
   content: string
+  sync?: boolean
 }): Promise<{
   project_id: string
   chapter_number: number
   content_sha256: string
   actual_words: number
   change: SettlementChange
+  settlement_request?: SettlementStart
   message: string
 }> {
   return call('save_formal_prose', payload)
@@ -993,6 +1010,8 @@ export async function saveFormalProse(payload: {
 
 export interface ChangeSettlementRequest {
   request_id: string
+  project_id?: string
+  change_id?: string
   status: 'pending' | 'completed' | 'failed' | 'canceled'
   message?: string
   error?: string | null

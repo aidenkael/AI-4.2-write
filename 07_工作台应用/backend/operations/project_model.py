@@ -30,8 +30,8 @@ from project_workspace import (  # noqa: E402 - frozen project resolution only
 )
 
 
-SCHEMA_VERSION = "gowrite_project_model/v2"
-_LEGACY_SCHEMA_VERSION = "gowrite_project_model/v1"
+SCHEMA_VERSION = "gowrite_project_model/v3"
+_LEGACY_SCHEMA_VERSIONS = {"gowrite_project_model/v1", "gowrite_project_model/v2"}
 ARTIFACT_NAME = "go_write_project_model.json"
 _FOUNDATION_CATEGORIES = {
     "character",
@@ -60,6 +60,18 @@ _CHAPTER_RESULT_FIELDS = {
     "relationship_changes", "time_movement", "location_state_changes", "information_revealed",
     "foreshadowing_planted_paid_off", "unresolved_threads", "final_chapter_state",
     "outline_divergence",
+}
+_DYNAMIC_SEMANTIC_FIELDS = {
+    "one_line_intro", "visible_traits", "background_summary", "position_title",
+    "power_rank", "profession_rank", "current_location", "current_state",
+    "current_objective", "arc_stage", "relationship_state", "relationship_phase",
+    "current_tension", "state", "stage_progress", "reveal_status", "actual_payoff",
+}
+_INTERNAL_DATA_FIELDS = {
+    "source_ref", "source_kind", "material_state", "model_rev", "state_rev",
+    "schema_version", "project_id", "request_id", "planning_token", "writing_token",
+    "scene_ref", "authority", "provenance", "planning_source_ref", "source_state_ref",
+    "supersedes_state_ref", "settlement_provenance", "content_sha256",
 }
 _UNSET = object()
 
@@ -117,11 +129,39 @@ def _initial_model(project_id: str) -> dict[str, Any]:
     }
 
 
+def _is_internal_data_field(field: str) -> bool:
+    lowered = field.lower()
+    return (
+        field in _INTERNAL_DATA_FIELDS
+        or lowered.endswith(("_rev", "_hash", "_token"))
+        or (lowered.endswith("_ref") and field not in {"system_ref"})
+    )
+
+
+def _field_scope(field: str) -> str:
+    return "dynamic" if field in _DYNAMIC_SEMANTIC_FIELDS else "stable"
+
+
+def _authority_entry(source: str, field: str, model_rev: int) -> dict[str, Any]:
+    return {"source": source, "scope": _field_scope(field), "updated_model_rev": model_rev}
+
+
+def _initial_field_authority(
+    data: dict[str, Any], field_authority: str, model_rev: int,
+) -> dict[str, dict[str, Any]]:
+    return {
+        field: _authority_entry(field_authority, field, model_rev)
+        for field in data
+        if not _is_internal_data_field(field)
+    }
+
+
 def _migrate_model(model: Any) -> tuple[Any, bool]:
-    """Additive v1 migration; read-only consumers may use it in memory."""
-    if not isinstance(model, dict) or model.get("schema_version") != _LEGACY_SCHEMA_VERSION:
+    """Additively migrate v1/v2 authority into the field-level v3 contract."""
+    if not isinstance(model, dict) or model.get("schema_version") not in _LEGACY_SCHEMA_VERSIONS:
         return model, False
     migrated = copy.deepcopy(model)
+    from_v1 = migrated.get("schema_version") == "gowrite_project_model/v1"
     migrated["schema_version"] = SCHEMA_VERSION
     migrated.setdefault("story_bible_profile", {
         "genre_tags": [], "narrative_mode": None,
@@ -129,10 +169,26 @@ def _migrate_model(model: Any) -> tuple[Any, bool]:
     })
     migrated.setdefault("chapter_actual_results", {})
     migrated.setdefault("planning_impact_candidates", [])
-    for item in migrated.get("objects", {}).values():
+    for item in [
+        *migrated.get("objects", {}).values(),
+        *migrated.get("dependencies", {}).values(),
+    ]:
         if isinstance(item, dict):
             data = item.get("data") if isinstance(item.get("data"), dict) else {}
-            item.setdefault("author_fields", sorted(data))
+            if from_v1:
+                item.setdefault("author_fields", sorted(
+                    field for field in data if not _is_internal_data_field(field)
+                ))
+            author_fields = set(item.get("author_fields") or [])
+            rev = int(migrated.get("model_rev") or 0)
+            item["field_authority"] = {
+                field: _authority_entry("author" if field in author_fields else "semantic", field, rev)
+                for field in data
+                if not _is_internal_data_field(field)
+            }
+            item["author_fields"] = sorted(
+                field for field in author_fields if not _is_internal_data_field(field)
+            )
     return migrated, True
 
 
@@ -206,6 +262,16 @@ def _validate_model(model: Any, project_id: str) -> dict[str, Any]:
             not isinstance(field, str) for field in item.get("author_fields", [])
         ):
             raise ProjectModelError("项目模型对象 author_fields 非法。")
+        authority = item.get("field_authority", {})
+        if not isinstance(authority, dict) or any(
+            not isinstance(field, str)
+            or not isinstance(meta, dict)
+            or meta.get("source") not in {"author", "semantic", "confirmed_plan"}
+            or meta.get("scope") not in {"stable", "dynamic"}
+            or not isinstance(meta.get("updated_model_rev"), int)
+            for field, meta in authority.items()
+        ):
+            raise ProjectModelError("项目模型对象 field_authority 非法。")
     for ref, edge in model["dependencies"].items():
         if not isinstance(ref, str) or not ref.startswith(f"gw2_edge_{scope}_"):
             raise ProjectModelError("项目模型包含未知或跨项目依赖 ref。")
@@ -219,6 +285,16 @@ def _validate_model(model: Any, project_id: str) -> dict[str, Any]:
             not isinstance(field, str) for field in edge.get("author_fields", [])
         ):
             raise ProjectModelError("项目模型依赖 author_fields 非法。")
+        authority = edge.get("field_authority", {})
+        if not isinstance(authority, dict) or any(
+            not isinstance(field, str)
+            or not isinstance(meta, dict)
+            or meta.get("source") not in {"author", "semantic", "confirmed_plan"}
+            or meta.get("scope") not in {"stable", "dynamic"}
+            or not isinstance(meta.get("updated_model_rev"), int)
+            for field, meta in authority.items()
+        ):
+            raise ProjectModelError("项目模型依赖 field_authority 非法。")
         if edge.get("source_ref") not in model["objects"] or edge.get("target_ref") not in model["objects"]:
             raise ProjectModelError("项目模型依赖指向未知或跨项目 ref。")
         if not edge.get("tombstoned") and (
@@ -457,7 +533,7 @@ def create_foundation_record(
     if field_authority not in {"author", "semantic", "confirmed_plan"}:
         raise ProjectModelError("field_authority 非法。")
 
-    def mutate(model: dict[str, Any], _next_rev: int) -> dict[str, Any]:
+    def mutate(model: dict[str, Any], next_rev: int) -> dict[str, Any]:
         ref = _next_ref(model, "obj")
         model["objects"][ref] = {
             "ref": ref,
@@ -467,7 +543,11 @@ def create_foundation_record(
             "title": title.strip(),
             "material_state": material_state,
             "data": record_data,
-            "author_fields": sorted(record_data) if field_authority == "author" else [],
+            "field_authority": _initial_field_authority(record_data, field_authority, next_rev),
+            "author_fields": sorted(
+                field for field in record_data
+                if field_authority == "author" and not _is_internal_data_field(field)
+            ),
             "tombstoned": False,
         }
         return {"ref": ref, "action": "created", "kind": "foundation"}
@@ -495,7 +575,7 @@ def update_object(
     if field_authority not in {"author", "semantic", "confirmed_plan"}:
         raise ProjectModelError("field_authority 非法。")
 
-    def mutate(model: dict[str, Any], _next_rev: int) -> dict[str, Any]:
+    def mutate(model: dict[str, Any], next_rev: int) -> dict[str, Any]:
         item = _active_object(model, ref)
         changes: dict[str, dict[str, Any]] = {}
         if title is not None and item.get("title") != title.strip():
@@ -513,8 +593,19 @@ def update_object(
             before = copy.deepcopy(item.get("data"))
             item["data"] = next_data
             changes["data"] = {"before": before, "after": copy.deepcopy(next_data)}
-            if field_authority == "author":
-                item["author_fields"] = sorted(next_data)
+            changed_fields = {
+                field for field in set(before or {}) | set(next_data)
+                if (before or {}).get(field, _UNSET) != next_data.get(field, _UNSET)
+                and not _is_internal_data_field(field)
+            }
+            authority = item.setdefault("field_authority", {})
+            for field in changed_fields:
+                authority[field] = _authority_entry(field_authority, field, next_rev)
+            item["author_fields"] = sorted(
+                field for field, meta in authority.items()
+                if isinstance(meta, dict) and meta.get("source") == "author"
+            )
+            changes["data"]["changed_fields"] = sorted(changed_fields)
         if not changes:
             raise ProjectModelError("编辑未产生任何实际变化。")
         return {"ref": ref, "action": "updated", "changes": changes}
@@ -530,6 +621,8 @@ def patch_object_data(
     patch: dict[str, Any],
     title: str | None = None,
     material_state: str | None = None,
+    protect_author_model_rev: int | None = None,
+    allow_dynamic_author_override: bool = False,
 ) -> dict[str, Any]:
     """Apply an evidence-backed semantic patch without overwriting author fields."""
     patch = _validate_data(patch)
@@ -540,19 +633,31 @@ def patch_object_data(
     if material_state is not None:
         _validate_material_state(material_state)
 
-    def mutate(model: dict[str, Any], _next_rev: int) -> dict[str, Any]:
+    def mutate(model: dict[str, Any], next_rev: int) -> dict[str, Any]:
         item = _active_object(model, ref)
         current = copy.deepcopy(item.get("data") or {})
         author_fields = set(item.get("author_fields") or [])
+        authority = item.setdefault("field_authority", {})
         applied: dict[str, Any] = {}
         skipped: list[str] = []
         for key, value in patch.items():
-            if key in author_fields and key in current:
-                skipped.append(key)
-                continue
+            meta = authority.get(key) if isinstance(authority.get(key), dict) else {}
+            is_author = key in author_fields or meta.get("source") == "author"
+            if is_author:
+                same_change = (
+                    protect_author_model_rev is not None
+                    and meta.get("updated_model_rev") == protect_author_model_rev
+                )
+                dynamic = meta.get("scope", _field_scope(key)) == "dynamic"
+                if same_change or not (allow_dynamic_author_override and dynamic):
+                    skipped.append(key)
+                    continue
             if current.get(key) != value:
                 current[key] = copy.deepcopy(value)
                 applied[key] = copy.deepcopy(value)
+                if not _is_internal_data_field(key):
+                    authority[key] = _authority_entry("semantic", key, next_rev)
+                    author_fields.discard(key)
         title_changed = False
         if title is not None and item.get("title") != title.strip():
             item["title"] = title.strip()
@@ -566,6 +671,7 @@ def patch_object_data(
         if item.get("category") == "event":
             current = apply_deterministic_time_arithmetic(current)
         item["data"] = current
+        item["author_fields"] = sorted(author_fields)
         return {
             "ref": ref, "action": "semantic_patch", "applied_fields": sorted(applied),
             "skipped_author_fields": sorted(skipped),
@@ -600,7 +706,7 @@ def create_system(
     if field_authority not in {"author", "semantic", "confirmed_plan"}:
         raise ProjectModelError("field_authority 非法。")
 
-    def mutate(model: dict[str, Any], _next_rev: int) -> dict[str, Any]:
+    def mutate(model: dict[str, Any], next_rev: int) -> dict[str, Any]:
         ref = _next_ref(model, "obj")
         model["objects"][ref] = {
             "ref": ref,
@@ -608,7 +714,11 @@ def create_system(
             "title": title.strip(),
             "material_state": material_state,
             "data": definition,
-            "author_fields": sorted(definition) if field_authority == "author" else [],
+            "field_authority": _initial_field_authority(definition, field_authority, next_rev),
+            "author_fields": sorted(
+                field for field in definition
+                if field_authority == "author" and not _is_internal_data_field(field)
+            ),
             "tombstoned": False,
         }
         return {"ref": ref, "action": "created", "kind": "system"}
@@ -798,7 +908,12 @@ def set_length_plan(
                 ref = _next_ref(model, "obj")
                 model["objects"][ref] = {
                     "ref": ref, "kind": kind, "title": title, "material_state": "future",
-                    "data": data, "tombstoned": False,
+                    "data": data,
+                    "field_authority": _initial_field_authority(data, "author", next_rev),
+                    "author_fields": sorted(
+                        field for field in data if not _is_internal_data_field(field)
+                    ),
+                    "tombstoned": False,
                 }
                 object_changes.append({"ref": ref, "action": "created"})
             else:
@@ -813,8 +928,24 @@ def set_length_plan(
                     changes["title"] = {"before": item.get("title"), "after": title}
                     item["title"] = title
                 if item.get("data") != data:
-                    changes["data"] = {"before": copy.deepcopy(item.get("data")), "after": copy.deepcopy(data)}
+                    before_data = copy.deepcopy(item.get("data") or {})
+                    changed_fields = {
+                        field for field in set(before_data) | set(data)
+                        if before_data.get(field, _UNSET) != data.get(field, _UNSET)
+                        and not _is_internal_data_field(field)
+                    }
+                    changes["data"] = {
+                        "before": before_data, "after": copy.deepcopy(data),
+                        "changed_fields": sorted(changed_fields),
+                    }
                     item["data"] = data
+                    authority = item.setdefault("field_authority", {})
+                    for field in changed_fields:
+                        authority[field] = _authority_entry("author", field, next_rev)
+                    item["author_fields"] = sorted(
+                        field for field, meta in authority.items()
+                        if isinstance(meta, dict) and meta.get("source") == "author"
+                    )
                 if changes:
                     object_changes.append({"ref": ref, "action": "updated", "changes": changes})
             submitted_refs.add(ref)
@@ -893,7 +1024,7 @@ def add_dependency(
     if field_authority not in {"author", "semantic", "confirmed_plan"}:
         raise ProjectModelError("field_authority 非法。")
 
-    def mutate(model: dict[str, Any], _next_rev: int) -> dict[str, Any]:
+    def mutate(model: dict[str, Any], next_rev: int) -> dict[str, Any]:
         _active_object(model, source_ref)
         _active_object(model, target_ref)
         edge_ref = _next_ref(model, "edge")
@@ -905,7 +1036,11 @@ def add_dependency(
             "title": title.strip() if isinstance(title, str) else relation_kind.strip(),
             "material_state": material_state,
             "data": edge_data,
-            "author_fields": sorted(edge_data) if field_authority == "author" else [],
+            "field_authority": _initial_field_authority(edge_data, field_authority, next_rev),
+            "author_fields": sorted(
+                field for field in edge_data
+                if field_authority == "author" and not _is_internal_data_field(field)
+            ),
             "tombstoned": False,
         }
         return {"ref": edge_ref, "action": "created", "source_ref": source_ref, "target_ref": target_ref}
@@ -938,7 +1073,7 @@ def update_dependency(
     if field_authority not in {"author", "semantic", "confirmed_plan"}:
         raise ProjectModelError("field_authority 非法。")
 
-    def mutate(model: dict[str, Any], _next_rev: int) -> dict[str, Any]:
+    def mutate(model: dict[str, Any], next_rev: int) -> dict[str, Any]:
         edge = model["dependencies"].get(ref)
         if not isinstance(edge, dict):
             raise ProjectModelError("未知或跨项目依赖 ref，已拒绝。")
@@ -963,8 +1098,21 @@ def update_dependency(
             if edge.get(key) != value:
                 changes[key] = {"before": copy.deepcopy(edge.get(key)), "after": copy.deepcopy(value)}
                 edge[key] = value
-        if data is not None and field_authority == "author":
-            edge["author_fields"] = sorted(data)
+        if data is not None and "data" in changes:
+            before_data = changes["data"].get("before") or {}
+            changed_fields = {
+                field for field in set(before_data) | set(data)
+                if before_data.get(field, _UNSET) != data.get(field, _UNSET)
+                and not _is_internal_data_field(field)
+            }
+            authority = edge.setdefault("field_authority", {})
+            for field in changed_fields:
+                authority[field] = _authority_entry(field_authority, field, next_rev)
+            edge["author_fields"] = sorted(
+                field for field, meta in authority.items()
+                if isinstance(meta, dict) and meta.get("source") == "author"
+            )
+            changes["data"]["changed_fields"] = sorted(changed_fields)
         if not changes:
             raise ProjectModelError("关系编辑未产生任何实际变化。")
         return {"ref": ref, "action": "updated", "changes": changes}
@@ -979,30 +1127,45 @@ def patch_dependency_data(
     ref: str,
     patch: dict[str, Any],
     title: str | None = None,
+    protect_author_model_rev: int | None = None,
+    allow_dynamic_author_override: bool = False,
 ) -> dict[str, Any]:
     patch = _validate_data(patch)
     if not patch:
         raise ProjectModelError("关系语义补丁不能为空。")
 
-    def mutate(model: dict[str, Any], _next_rev: int) -> dict[str, Any]:
+    def mutate(model: dict[str, Any], next_rev: int) -> dict[str, Any]:
         edge = model["dependencies"].get(ref)
         if not isinstance(edge, dict) or edge.get("tombstoned"):
             raise ProjectModelError("未知或已退役关系 ref。")
         current = copy.deepcopy(edge.get("data") or {})
         author_fields = set(edge.get("author_fields") or [])
+        authority = edge.setdefault("field_authority", {})
         applied: dict[str, Any] = {}
         skipped: list[str] = []
         for key, value in patch.items():
-            if key in author_fields and key in current:
-                skipped.append(key)
-                continue
+            meta = authority.get(key) if isinstance(authority.get(key), dict) else {}
+            is_author = key in author_fields or meta.get("source") == "author"
+            if is_author:
+                same_change = (
+                    protect_author_model_rev is not None
+                    and meta.get("updated_model_rev") == protect_author_model_rev
+                )
+                dynamic = meta.get("scope", _field_scope(key)) == "dynamic"
+                if same_change or not (allow_dynamic_author_override and dynamic):
+                    skipped.append(key)
+                    continue
             if current.get(key) != value:
                 current[key] = copy.deepcopy(value)
                 applied[key] = copy.deepcopy(value)
+                if not _is_internal_data_field(key):
+                    authority[key] = _authority_entry("semantic", key, next_rev)
+                    author_fields.discard(key)
         title_changed = isinstance(title, str) and title.strip() and edge.get("title") != title.strip()
         if not applied and not title_changed:
             raise ProjectModelError("关系语义补丁未产生变化；显式作者字段保持优先。")
         edge["data"] = current
+        edge["author_fields"] = sorted(author_fields)
         if title_changed:
             edge["title"] = title.strip()
         return {
@@ -1053,7 +1216,7 @@ def create_relationship(
     if field_authority not in {"author", "semantic", "confirmed_plan"}:
         raise ProjectModelError("field_authority 非法。")
 
-    def mutate(model: dict[str, Any], _next_rev: int) -> dict[str, Any]:
+    def mutate(model: dict[str, Any], next_rev: int) -> dict[str, Any]:
         ensure_character(model, source_ref)
         ensure_character(model, target_ref)
         if source_ref == target_ref:
@@ -1067,7 +1230,11 @@ def create_relationship(
             "title": label.strip(),
             "material_state": material_state,
             "data": relation_data,
-            "author_fields": sorted(relation_data) if field_authority == "author" else [],
+            "field_authority": _initial_field_authority(relation_data, field_authority, next_rev),
+            "author_fields": sorted(
+                field for field in relation_data
+                if field_authority == "author" and not _is_internal_data_field(field)
+            ),
             "tombstoned": False,
         }
         return {"ref": edge_ref, "action": "created", "source_ref": source_ref, "target_ref": target_ref}
@@ -1159,7 +1326,7 @@ def apply_planning_projection(
         "mystery_information": "mystery_information",
     }
 
-    def mutate(model: dict[str, Any], _next_rev: int) -> dict[str, Any]:
+    def mutate(model: dict[str, Any], next_rev: int) -> dict[str, Any]:
         key_to_ref: dict[str, str] = {}
         created_objects: list[str] = []
         created_edges: list[str] = []
@@ -1202,7 +1369,9 @@ def apply_planning_projection(
                 model["objects"][ref] = {
                     "ref": ref, "kind": "foundation", "category": category,
                     "category_name": None, "title": item["title"], "material_state": "future",
-                    "data": payload, "author_fields": [], "tombstoned": False,
+                    "data": payload,
+                    "field_authority": _initial_field_authority(payload, "confirmed_plan", next_rev),
+                    "author_fields": [], "tombstoned": False,
                 }
                 key_to_ref[key] = ref
                 created_objects.append(ref)
@@ -1215,7 +1384,9 @@ def apply_planning_projection(
             payload["planning_source_ref"] = source_ref.strip()
             model["objects"][ref] = {
                 "ref": ref, "kind": "system", "title": item["title"], "material_state": "future",
-                "data": payload, "author_fields": [], "tombstoned": False,
+                "data": payload,
+                "field_authority": _initial_field_authority(payload, "confirmed_plan", next_rev),
+                "author_fields": [], "tombstoned": False,
             }
             key_to_ref[key] = ref
             created_objects.append(ref)
@@ -1236,7 +1407,9 @@ def apply_planning_projection(
             model["dependencies"][edge_ref] = {
                 "ref": edge_ref, "source_ref": source, "target_ref": target,
                 "relation_kind": "character_relationship", "title": rel["label"].strip(),
-                "material_state": "future", "data": payload, "author_fields": [], "tombstoned": False,
+                "material_state": "future", "data": payload,
+                "field_authority": _initial_field_authority(payload, "confirmed_plan", next_rev),
+                "author_fields": [], "tombstoned": False,
             }
             created_edges.append(edge_ref)
         for item in normalized["chapter_changes"]:
@@ -1249,7 +1422,9 @@ def apply_planning_projection(
             payload["planning_source_ref"] = source_ref.strip()
             model["objects"][ref] = {
                 "ref": ref, "kind": "chapter_target", "title": item["title"],
-                "material_state": "future", "data": payload, "author_fields": [], "tombstoned": False,
+                "material_state": "future", "data": payload,
+                "field_authority": _initial_field_authority(payload, "confirmed_plan", next_rev),
+                "author_fields": [], "tombstoned": False,
             }
             model["length_plan"]["chapter_target_refs"].append(ref)
             created_objects.append(ref)

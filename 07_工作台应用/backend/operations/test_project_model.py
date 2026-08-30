@@ -164,6 +164,22 @@ def test_atomic_persisted_reload(project):
     assert not list(artifact.parent.glob(".gowrite-project-model-*"))
 
 
+def test_v2_authority_artifact_migrates_additively(project):
+    written = _add_character(project, title="迁移人物")
+    ref = written["change_history"][-1]["detail"]["ref"]
+    artifact = Path(project["project_dir"]) / "_工作台状态" / model_ops.ARTIFACT_NAME
+    legacy = json.loads(artifact.read_text(encoding="utf-8"))
+    legacy["schema_version"] = "gowrite_project_model/v2"
+    legacy["objects"][ref].pop("field_authority", None)
+    artifact.write_text(json.dumps(legacy, ensure_ascii=False, indent=2), encoding="utf-8")
+    migrated = model_ops.load_project_model(project["project_id"])
+    assert migrated["schema_version"] == model_ops.SCHEMA_VERSION
+    assert migrated["objects"][ref]["field_authority"]["note"] == {
+        "source": "author", "scope": "stable", "updated_model_rev": migrated["model_rev"],
+    }
+    assert json.loads(artifact.read_text(encoding="utf-8"))["schema_version"] == model_ops.SCHEMA_VERSION
+
+
 def test_malformed_or_cross_project_artifact_is_rejected(project, isolated):
     model_ops.load_project_model(project["project_id"])
     artifact = Path(project["project_dir"]) / "_工作台状态" / model_ops.ARTIFACT_NAME

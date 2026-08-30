@@ -96,6 +96,83 @@ def test_character_core_optional_custom_fields_and_author_precedence(projects_ro
     assert detail["skipped_author_fields"] == ["current_state", "one_line_intro"]
 
 
+def test_full_editor_payload_marks_only_changed_field_as_author(projects_root):
+    project = _create("字段级权威")
+    created = project_model.create_foundation_record(
+        project["project_id"], base_model_rev=0, category="character", title="林澈",
+        data={"one_line_intro": "调查者", "current_state": "平静", "speech_style": "短句"},
+        field_authority="semantic",
+    )
+    ref = _ref(created)
+    edited = project_model.update_object(
+        project["project_id"], base_model_rev=created["model_rev"], ref=ref,
+        data={"one_line_intro": "谨慎的调查者", "current_state": "平静", "speech_style": "短句"},
+    )
+    record = edited["objects"][ref]
+    assert record["author_fields"] == ["one_line_intro"]
+    assert record["field_authority"]["current_state"]["source"] == "semantic"
+    changed = edited["change_history"][-1]["detail"]["changes"]["data"]["changed_fields"]
+    assert changed == ["one_line_intro"]
+
+
+def test_explicit_author_clear_remains_protected_for_same_change(projects_root):
+    project = _create("显式清空")
+    created = project_model.create_foundation_record(
+        project["project_id"], base_model_rev=0, category="character", title="林澈",
+        data={"secrets": "旧秘密", "current_state": "平静"}, field_authority="semantic",
+    )
+    ref = _ref(created)
+    edited = project_model.update_object(
+        project["project_id"], base_model_rev=created["model_rev"], ref=ref,
+        data={"current_state": "平静"},
+    )
+    assert "secrets" in edited["objects"][ref]["author_fields"]
+    with pytest.raises(project_model.ProjectModelError, match="未产生变化"):
+        project_model.patch_object_data(
+            project["project_id"], base_model_rev=edited["model_rev"], ref=ref,
+            patch={"secrets": "AI 又补回"}, protect_author_model_rev=edited["model_rev"],
+        )
+
+
+def test_later_prose_may_advance_dynamic_but_not_stable_author_field(projects_root):
+    project = _create("动态字段时序")
+    created = project_model.create_foundation_record(
+        project["project_id"], base_model_rev=0, category="character", title="林澈",
+        data={"current_state": "未受伤", "persona_core": "谨慎"},
+    )
+    ref = _ref(created)
+    patched = project_model.patch_object_data(
+        project["project_id"], base_model_rev=created["model_rev"], ref=ref,
+        patch={"current_state": "腿部受伤", "persona_core": "鲁莽"},
+        allow_dynamic_author_override=True,
+    )
+    assert patched["objects"][ref]["data"]["current_state"] == "腿部受伤"
+    assert patched["objects"][ref]["data"]["persona_core"] == "谨慎"
+    assert patched["objects"][ref]["author_fields"] == ["persona_core"]
+
+
+def test_relationship_full_payload_preserves_unchanged_semantic_authority(projects_root):
+    project = _create("关系字段级权威")
+    one = project_model.create_foundation_record(
+        project["project_id"], base_model_rev=0, category="character", title="甲",
+    )
+    two = project_model.create_foundation_record(
+        project["project_id"], base_model_rev=one["model_rev"], category="character", title="乙",
+    )
+    relation = project_model.create_relationship(
+        project["project_id"], base_model_rev=two["model_rev"],
+        source_ref=_ref(one), target_ref=_ref(two), label="盟友",
+        data={"current_state": "合作", "key_history": "共同调查"}, field_authority="semantic",
+    )
+    ref = _ref(relation)
+    edited = project_model.update_dependency(
+        project["project_id"], base_model_rev=relation["model_rev"], ref=ref,
+        data={"current_state": "互相怀疑", "key_history": "共同调查"},
+    )
+    assert edited["dependencies"][ref]["author_fields"] == ["current_state"]
+    assert edited["dependencies"][ref]["field_authority"]["key_history"]["source"] == "semantic"
+
+
 def test_legacy_state_sentence_is_diagnostic_not_character_identity(projects_root):
     project = _create("旧状态归一")
     state_path = Path(project["project_dir"]) / "_工作台状态" / "story_state.json"
@@ -223,6 +300,16 @@ def test_confirmed_plan_projection_creates_future_domains_from_same_result(proje
         for item in projected["objects"].values()
         if not item.get("tombstoned") and item.get("ref") != existing_ref
     )
+    assert all(
+        all(meta["source"] == "confirmed_plan" for meta in item["field_authority"].values())
+        for item in projected["objects"].values()
+        if not item.get("tombstoned") and item.get("ref") != existing_ref
+    )
+    assert all(
+        all(meta["source"] == "confirmed_plan" for meta in edge["field_authority"].values())
+        for edge in projected["dependencies"].values()
+        if not edge.get("tombstoned")
+    )
 
 
 def test_prose_settlement_writes_actual_result_and_targeted_entities(projects_root):
@@ -275,7 +362,7 @@ def test_prose_settlement_writes_actual_result_and_targeted_entities(projects_ro
     assert result["status"] == "synchronized"
     model = project_model.load_project_model(project["project_id"])
     data = model["objects"][character_ref]["data"]
-    assert data["current_state"] == "作者明确：未受伤"
+    assert data["current_state"] == "腿部受伤"
     assert data["current_objective"] == "继续调查"
     assert model["chapter_actual_results"]["1"]["summary"].startswith("林澈负伤")
     chapter_ref = model["length_plan"]["chapter_target_refs"][0]
@@ -305,6 +392,47 @@ def test_meaningful_foundation_edit_pending_display_edit_mechanical(projects_roo
         data={"one_line_intro": "谨慎的调查者", "display_order": 2},
     )
     assert semantic["change"]["status"] == "pending"
+
+
+def test_planning_stage_semantics_settle_but_word_budget_stays_mechanical(projects_root):
+    project = _create("阶段结算")
+    created = author_edit.set_length_plan(
+        project["project_id"], base_model_rev=0, total_target_words=100_000,
+        stages=[{"title": "第一卷", "target_words": 40_000, "kind": "调查"}],
+        chapter_targets=[],
+    )
+    assert created["change"]["status"] == "pending"
+    stage_ref = created["model"]["length_plan"]["stage_refs"][0]
+    budget_only = author_edit.set_length_plan(
+        project["project_id"], base_model_rev=created["model"]["model_rev"],
+        total_target_words=120_000,
+        stages=[{"ref": stage_ref, "title": "第一卷", "target_words": 50_000, "kind": "调查"}],
+        chapter_targets=[],
+    )
+    assert budget_only["change"]["status"] == "synchronized"
+
+
+def test_existing_system_edit_and_retire_require_semantic_settlement(projects_root):
+    project = _create("系统结算")
+    created = author_edit.create_foundation_record(
+        project["project_id"], base_model_rev=0, category="system", title="航行许可",
+        material_state="current", data={"type": "technology_access"},
+    )
+    ref = _ref(created["model"])
+    edited = author_edit.update_foundation_record(
+        project["project_id"], base_model_rev=created["model"]["model_rev"], ref=ref,
+        data={"type": "technology_access", "limitations_costs": "燃料有限"},
+    )
+    assert edited["change"]["status"] == "pending"
+    display = author_edit.update_foundation_record(
+        project["project_id"], base_model_rev=edited["model"]["model_rev"], ref=ref,
+        data={"type": "technology_access", "limitations_costs": "燃料有限", "display_order": 2},
+    )
+    assert display["change"]["status"] == "synchronized"
+    retired = author_edit.retire_foundation_record(
+        project["project_id"], base_model_rev=display["model"]["model_rev"], ref=ref,
+    )
+    assert retired["change"]["status"] == "pending"
 
 
 def test_writing_context_uses_outline_previous_digest_and_relevant_state_only(projects_root):

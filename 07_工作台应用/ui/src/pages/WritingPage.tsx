@@ -1,5 +1,4 @@
 import { Bot, Check, CircleCheck, FolderOpen, PenLine, Plus, RefreshCw, Save, Sparkles, X } from 'lucide-react'
-import { ExecutionSummary } from '../components/ExecutionSummary'
 import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { useWritingController } from '../features/writing/useWritingController'
@@ -30,6 +29,11 @@ export function WritingPage() {
   const previousSummary = previousActual && typeof previousActual.summary === 'string'
     ? previousActual.summary
     : ''
+  const consequenceLabel = (classification: unknown) => classification === 'mechanically_certain'
+    ? '自动事实更新'
+    : classification === 'ambiguous'
+      ? '需要你决定'
+      : '可选创作建议'
 
   // 未选择正式作品：安全空态 + 返回作品页；绝不在这里自动挑选项目
   if (!selected) {
@@ -122,13 +126,14 @@ export function WritingPage() {
               : ''}
           </span>
           <div className="editor-save-actions">
-            {state.editorDirty && <span className="unsaved-note">有未保存修改</span>}
-            <button disabled={!state.editorDirty || state.saving} onClick={() => void c.save(false)}><Save /> 仅保存</button>
+            {state.editorDirty ? <span className="unsaved-note">未保存</span> : selectedChapter?.content_sha256 ? <span className="muted-note">已保存</span> : null}
+            <button disabled={!state.editorDirty || state.saving} onClick={() => void c.save(false)}><Save /> 保存</button>
             <button className="primary" disabled={!state.editorDirty || state.saving} onClick={() => void c.save(true)}><Save /> 保存并同步</button>
           </div>
         </footer>
 
         {state.settlementStatus === 'syncing' && <div className="sync-warning">正文已保存，正在增量同步人物、关系、事件、时间与伏笔状态…</div>}
+        {state.settlementStatus === 'failed' && <div className="sync-warning">同步失败；正文已经保存，可以使用下方同一条变更重试。</div>}
         {state.pendingChanges.map((change) => {
           const consequences = change.semantic?.consequences ?? []
           const undecidedIndexes = consequences
@@ -140,7 +145,7 @@ export function WritingPage() {
               {change.semantic?.summary && <p>{change.semantic.summary}</p>}
               {change.error && <p className="error-text">{change.error}</p>}
               {change.status === 'awaiting_author' && (
-                <ul>{undecidedIndexes.map((index) => <li key={index}>{String(consequences[index].title ?? '未命名后果')} · {String(consequences[index].reason ?? '')}</li>)}</ul>
+                <ul>{undecidedIndexes.map((index) => <li key={index}><b>{consequenceLabel(consequences[index].classification)}</b> · {String(consequences[index].title ?? '未命名后果')} · {String(consequences[index].reason ?? '')}</li>)}</ul>
               )}
               <div className="candidate-actions">
                 {(change.status === 'failed' || change.status === 'pending') && <button onClick={() => void c.retrySettlement(change.change_id)}><RefreshCw /> 重试同步</button>}
@@ -183,12 +188,12 @@ export function WritingPage() {
                 <>{state.phaseMessage ?? '上下文已准备好，请再次执行 /gowrite 生成正文'}</>
               )}
               {state.status === 'running' && (
-                <>{state.execution?.execution_mode === 'direct' ? '后台 AI 正在执行（直接模式）…' : '正在准备执行…'}</>
+                <>{state.execution?.execution_mode === 'interactive_bridge' ? '请到 Qoder 执行 /gowrite' : 'AI 正在写作'}</>
               )}
             </div>
             {state.execution?.execution_mode === 'interactive_bridge' && (
               <p className="muted-note execution-summary">
-                交互桥已就绪：任务已交给 Qoder，请在 Qoder 会话中执行 /gowrite。
+                请到 Qoder 执行 /gowrite
               </p>
             )}
             <div className="candidate-actions">
@@ -214,7 +219,6 @@ export function WritingPage() {
 
         {state.status === 'waiting_confirmation' && state.candidate && (
           <>
-            <ExecutionSummary execution={state.execution} />
             <textarea
               aria-label="候选正文（只读）"
               className="candidate-view"

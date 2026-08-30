@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   createFoundationRecord,
   createRelationship,
+  getChangeSettlementRequest,
   getProjectData,
   retireFoundationRecord,
   retireRelationship,
@@ -14,14 +15,18 @@ import {
   setStoryBibleProfile,
   updateFoundationRecord,
   updateRelationship,
+  type AuthorEditResult,
   type ProjectData,
 } from '../../bridge/client'
+import { isCurrentProjectResult, settlementFollowUp } from './mutationSettlement'
 
 export interface ProjectDataController {
   data: ProjectData | null
   loading: boolean
   error: string | null
   saving: boolean
+  syncing: boolean
+  syncMessage: string | null
   reload(): Promise<void>
   createFoundation(input: { category: string; title: string; material_state: 'current' | 'future'; data: Record<string, unknown> }): Promise<boolean>
   updateFoundation(input: { ref: string; title: string; material_state: 'current' | 'future'; data: Record<string, unknown> }): Promise<boolean>
@@ -40,7 +45,10 @@ export function useProjectDataController(projectId: string | null): ProjectDataC
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [syncMessage, setSyncMessage] = useState<string | null>(null)
   const projectRef = useRef<string | null>(projectId)
+  const followedRequestsRef = useRef(new Set<string>())
   projectRef.current = projectId
 
   const load = useCallback(async (pid: string) => {
@@ -49,6 +57,7 @@ export function useProjectDataController(projectId: string | null): ProjectDataC
     try {
       const next = await getProjectData(pid)
       if (projectRef.current !== pid) return
+      if (next.project_id !== pid) throw new Error('返回的作品数据与当前作品不一致，已拒绝。')
       setData(next)
     } catch (e) {
       if (projectRef.current !== pid) return
@@ -59,8 +68,11 @@ export function useProjectDataController(projectId: string | null): ProjectDataC
   }, [])
 
   useEffect(() => {
+    setSyncing(false)
+    setSyncMessage(null)
+    followedRequestsRef.current.clear()
+    setData(null)
     if (!projectId) {
-      setData(null)
       setLoading(false)
       setError(null)
       return
@@ -72,9 +84,60 @@ export function useProjectDataController(projectId: string | null): ProjectDataC
     if (projectId) await load(projectId)
   }, [load, projectId])
 
-  const mutate = useCallback(async (action: (pid: string, rev: number) => Promise<unknown>) => {
+  const followSettlement = useCallback(async (pid: string, result: AuthorEditResult) => {
+    const follow = settlementFollowUp(result)
+    if (!follow) return
+    if (!isCurrentProjectResult(pid, projectRef.current)) return
+    if (followedRequestsRef.current.has(follow.requestId)) return
+    followedRequestsRef.current.add(follow.requestId)
+    setSyncing(true)
+    setSyncMessage(follow.message ?? '正在同步最新作品状态。')
+    try {
+      let status = await getChangeSettlementRequest(follow.requestId)
+      while (isCurrentProjectResult(pid, projectRef.current) && status.status === 'pending') {
+        setSyncMessage(status.message ?? follow.message ?? '正在同步最新作品状态。')
+        await new Promise((resolve) => window.setTimeout(resolve, 1000))
+        status = await getChangeSettlementRequest(follow.requestId)
+      }
+      if (!isCurrentProjectResult(pid, projectRef.current)) return
+      if (status.project_id && status.project_id !== pid) return
+      if (status.status === 'failed') throw new Error(status.error || '同步失败，可稍后重试。')
+      await load(pid)
+      if (!isCurrentProjectResult(pid, projectRef.current)) return
+      setSyncMessage(null)
+    } catch (e) {
+      if (isCurrentProjectResult(pid, projectRef.current)) {
+        setError(toMessage(e))
+        setSyncMessage('同步失败')
+        await load(pid)
+      }
+    } finally {
+      followedRequestsRef.current.delete(follow.requestId)
+      if (isCurrentProjectResult(pid, projectRef.current)) setSyncing(false)
+    }
+  }, [load])
+
+  useEffect(() => {
+    if (!projectId || !data) return
+    const pending = data.settlement.changes.find((change) => (
+      change.status === 'pending'
+      && change.requires_semantic
+      && change.settlement_started
+      && change.settlement_request_id
+    ))
+    if (!pending?.settlement_request_id) return
+    void followSettlement(projectId, {
+      change: pending,
+      settlement_request: {
+        change_id: pending.change_id, requires_semantic: true, status: pending.status,
+        complete: false, request_started: true, request_id: pending.settlement_request_id,
+      },
+    })
+  }, [data, followSettlement, projectId])
+
+  const mutate = useCallback(async (action: (pid: string, rev: number) => Promise<AuthorEditResult>) => {
     const pid = projectRef.current
-    const rev = data?.model_rev
+    const rev = data?.project_id === pid ? data.model_rev : null
     if (!pid || rev == null) {
       setError('作品数据尚未加载完成。')
       return false
@@ -82,8 +145,9 @@ export function useProjectDataController(projectId: string | null): ProjectDataC
     setSaving(true)
     setError(null)
     try {
-      await action(pid, rev)
+      const result = await action(pid, rev)
       await load(pid)
+      void followSettlement(pid, result)
       return true
     } catch (e) {
       if (projectRef.current === pid) setError(toMessage(e))
@@ -91,7 +155,7 @@ export function useProjectDataController(projectId: string | null): ProjectDataC
     } finally {
       if (projectRef.current === pid) setSaving(false)
     }
-  }, [data?.model_rev, load])
+  }, [data?.model_rev, data?.project_id, followSettlement, load])
 
   const createFoundation = useCallback((input: { category: string; title: string; material_state: 'current' | 'future'; data: Record<string, unknown> }) => (
     mutate((pid, rev) => createFoundationRecord({ project_id: pid, base_model_rev: rev, ...input }))
@@ -126,7 +190,7 @@ export function useProjectDataController(projectId: string | null): ProjectDataC
   ), [mutate])
 
   return {
-    data, loading, error, saving, reload,
+    data, loading, error, saving, syncing, syncMessage, reload,
     createFoundation, updateFoundation, retireFoundation,
     createRelationship: createRelationshipAction,
     updateRelationship: updateRelationshipAction,

@@ -1,5 +1,5 @@
 import { BookOpen, ChevronRight, Plus, Save, Target, Trash2, X } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ProjectDataController } from '../projectData/useProjectDataController'
 
 interface StageDraft { ref?: string; title: string; target_words: string; kind: string }
@@ -31,6 +31,7 @@ interface ChapterDraft {
   stage: string
   actual_words: number
 }
+interface PlanningDraftState { total: string; stages: StageDraft[]; chapters: ChapterDraft[] }
 
 const text = (value: unknown) => typeof value === 'string' ? value : ''
 const numberText = (value: unknown) => typeof value === 'number' ? String(value) : ''
@@ -42,16 +43,25 @@ export function PlanningStructure({ controller }: { controller: ProjectDataContr
   const [stages, setStages] = useState<StageDraft[]>([])
   const [chapters, setChapters] = useState<ChapterDraft[]>([])
   const [editingChapter, setEditingChapter] = useState<number | null>(null)
+  const baselineRef = useRef<PlanningDraftState>({ total: '', stages: [], chapters: [] })
+  const loadedProjectRef = useRef<string | null>(null)
+  const allowRefreshRef = useRef(false)
+
+  const draftSignature = useMemo(() => JSON.stringify({ total, stages, chapters }), [chapters, stages, total])
+  const dirty = draftSignature !== JSON.stringify(baselineRef.current)
 
   useEffect(() => {
     const plan = controller.data?.length_plan
     if (!plan) return
-    setTotal(plan.total_target_words == null ? '' : String(plan.total_target_words))
-    setStages(plan.stages.map((item) => {
+    const projectId = controller.data?.project_id ?? null
+    const projectChanged = loadedProjectRef.current !== projectId
+    if (!projectChanged && dirty && !allowRefreshRef.current) return
+    const nextTotal = plan.total_target_words == null ? '' : String(plan.total_target_words)
+    const nextStages = plan.stages.map((item) => {
       const record = item.record && typeof item.record === 'object' ? item.record as Record<string, unknown> : {}
       return { ref: item.source_ref ?? undefined, title: item.label, target_words: numberText(record.target_words), kind: text(record.kind) }
-    }))
-    setChapters(plan.chapters.map((item) => ({
+    })
+    const nextChapters = plan.chapters.map((item) => ({
       ref: typeof item.ref === 'string' ? item.ref : undefined,
       chapter_number: item.chapter_number,
       title: text(item.title) || `第${item.chapter_number}章`,
@@ -67,8 +77,14 @@ export function PlanningStructure({ controller }: { controller: ProjectDataContr
       information_release_gap: text(item.information_release_gap),
       foreshadowing_setup_payoff: listText(item.foreshadowing_setup_payoff),
       end_state_hook: text(item.end_state_hook),
-    })))
-  }, [controller.data?.length_plan])
+    }))
+    baselineRef.current = { total: nextTotal, stages: nextStages, chapters: nextChapters }
+    loadedProjectRef.current = projectId
+    allowRefreshRef.current = false
+    setTotal(nextTotal)
+    setStages(nextStages)
+    setChapters(nextChapters)
+  }, [controller.data?.length_plan, controller.data?.project_id])
 
   const activeChapter = useMemo(
     () => chapters.find((item) => item.chapter_number === editingChapter) ?? null,
@@ -93,6 +109,14 @@ export function PlanningStructure({ controller }: { controller: ProjectDataContr
     setEditingChapter(next)
   }
 
+  const cancelDrafts = () => {
+    const baseline = baselineRef.current
+    setTotal(baseline.total)
+    setStages(baseline.stages.map((item) => ({ ...item })))
+    setChapters(baseline.chapters.map((item) => ({ ...item })))
+    setEditingChapter(null)
+  }
+
   const save = async () => {
     const totalWords = total.trim() ? Number(total) : null
     const stagePayload = stages.map((item) => ({
@@ -113,14 +137,20 @@ export function PlanningStructure({ controller }: { controller: ProjectDataContr
       foreshadowing_setup_payoff: splitList(item.foreshadowing_setup_payoff),
       end_state_hook: item.end_state_hook.trim(), stage: item.stage.trim(),
     }))
-    await controller.saveLengthPlan({ total_target_words: totalWords, stages: stagePayload, chapter_targets: chapterPayload })
+    allowRefreshRef.current = true
+    const ok = await controller.saveLengthPlan({ total_target_words: totalWords, stages: stagePayload, chapter_targets: chapterPayload })
+    if (!ok) allowRefreshRef.current = false
   }
 
   return (
     <section className="panel planning-structure">
       <header className="planning-structure-head">
         <div><h2><Target /> 全书与章节规划</h2><p className="muted-note">总目标 → 可选阶段 → 章节范围 → 正式正文实际字数。阶段结构按作品需要使用，不强制分卷。</p></div>
-        <button className="primary" disabled={controller.saving} onClick={() => void save()}><Save /> {controller.saving ? '保存中…' : '保存规划'}</button>
+        <div className="editor-save-actions">
+          {dirty && <span className="unsaved-note">未保存</span>}
+          <button disabled={!dirty || controller.saving} onClick={cancelDrafts}><X /> 取消修改</button>
+          <button className="primary" disabled={!dirty || controller.saving} onClick={() => void save()}><Save /> {controller.saving ? '保存中…' : '保存规划'}</button>
+        </div>
       </header>
 
       <div className="length-overview">
@@ -174,7 +204,7 @@ export function PlanningStructure({ controller }: { controller: ProjectDataContr
           <label>伏笔 / 埋设 / 回收<textarea value={activeChapter.foreshadowing} onChange={(event) => updateChapter({ foreshadowing: event.target.value })} /></label>
           <details><summary>更多可选项</summary><label>冲突<input value={activeChapter.conflict} onChange={(event) => updateChapter({ conflict: event.target.value })} /></label><label>情绪移动<input value={activeChapter.emotional_movement} onChange={(event) => updateChapter({ emotional_movement: event.target.value })} /></label><label>信息释放 / 信息差<input value={activeChapter.information_release_gap} onChange={(event) => updateChapter({ information_release_gap: event.target.value })} /></label><label>伏笔埋设 / 回收<input value={activeChapter.foreshadowing_setup_payoff} onChange={(event) => updateChapter({ foreshadowing_setup_payoff: event.target.value })} /></label><label>结束状态 / 钩子<input value={activeChapter.end_state_hook} onChange={(event) => updateChapter({ end_state_hook: event.target.value })} /></label><label>阶段 / 分卷关联<input value={activeChapter.stage} onChange={(event) => updateChapter({ stage: event.target.value })} /></label></details>
           <label>作者备注<textarea rows={3} value={activeChapter.notes} onChange={(event) => updateChapter({ notes: event.target.value })} /></label>
-          <footer><button className="danger" onClick={() => { setChapters((items) => items.filter((item) => item.chapter_number !== activeChapter.chapter_number)); setEditingChapter(null) }}><Trash2 /> 删除细纲</button><button className="primary" onClick={() => { setEditingChapter(null); void save() }}><Save /> 保存全部规划</button></footer>
+          <footer><button className="danger" onClick={() => { setChapters((items) => items.filter((item) => item.chapter_number !== activeChapter.chapter_number)); setEditingChapter(null) }}><Trash2 /> 删除细纲</button><button onClick={() => setEditingChapter(null)}><X /> 关闭</button><button className="primary" disabled={!dirty || controller.saving} onClick={() => { setEditingChapter(null); void save() }}><Save /> 保存全部规划</button></footer>
         </aside>
       )}
     </section>

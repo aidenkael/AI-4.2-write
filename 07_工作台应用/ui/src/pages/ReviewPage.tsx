@@ -1,6 +1,5 @@
 import { CheckCircle2, FolderOpen, Search, ShieldCheck, Sparkles, TriangleAlert, X } from 'lucide-react'
 import { useEffect, useRef } from 'react'
-import { ExecutionSummary } from '../components/ExecutionSummary'
 import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { useReviewController } from '../features/review/useReviewController'
@@ -23,7 +22,7 @@ export function ReviewPage() {
   const { actions } = useApp()
   const { selected } = useFormalProjectShell()
   const controller = useReviewController(selected?.project_id ?? null)
-  const { surface, surfaceLoading, surfaceError, report, status, error, selectedChapter, execution } = controller
+  const { surface, surfaceLoading, surfaceError, report, status, error, selectedChapter } = controller
 
   // 一次性章节交接（"检查这段"）：项目匹配且章节仍有效才选中，消费即清
   const handoffConsumedRef = useRef(false)
@@ -67,7 +66,7 @@ export function ReviewPage() {
             title={!surface?.has_accepted_prose ? '需要先有已接受的正文才能开始检查' : undefined}
             onClick={() => void controller.start()}
           >
-            <Search /> {running ? (execution?.execution_mode === 'direct' ? '后台 AI 正在执行（直接模式）…' : '检查中…') : '开始检查'}
+            <Search /> {running ? '正在检查' : '开始检查'}
           </button>
           {running && (
             <button onClick={() => void controller.cancel()}>
@@ -76,7 +75,6 @@ export function ReviewPage() {
           )}
         </div>
       </section>
-      {running && <ExecutionSummary execution={execution} />}
 
       <section className="panel review-surface">
         <h2>检查目标</h2>
@@ -115,7 +113,6 @@ export function ReviewPage() {
 
       {report && (
         <div className="review-columns">
-          <ExecutionSummary execution={execution} />
           <section className="panel review-group summary">
             <header><CheckCircle2 /><div><h2>检查结论</h2><p>第 {report.chapter_number} 章 · 结果仅供参考</p></div></header>
             <p>{report.summary}</p>

@@ -204,6 +204,34 @@ def _ensure_model_character(
     return next_model, created_ref
 
 
+def _allowed_semantic_patch(
+    record: dict[str, Any],
+    patch: dict[str, Any],
+    *,
+    protect_author_model_rev: int | None,
+    allow_dynamic_author_override: bool,
+) -> dict[str, Any]:
+    """Mirror the project-model authority gate without creating a no-op revision."""
+    current = record.get("data") if isinstance(record.get("data"), dict) else {}
+    author_fields = set(record.get("author_fields") or [])
+    authority = record.get("field_authority") if isinstance(record.get("field_authority"), dict) else {}
+    allowed: dict[str, Any] = {}
+    for key, value in patch.items():
+        meta = authority.get(key) if isinstance(authority.get(key), dict) else {}
+        is_author = key in author_fields or meta.get("source") == "author"
+        if is_author:
+            same_change = (
+                protect_author_model_rev is not None
+                and meta.get("updated_model_rev") == protect_author_model_rev
+            )
+            dynamic = meta.get("scope") == "dynamic"
+            if same_change or not (allow_dynamic_author_override and dynamic):
+                continue
+        if key not in current or current.get(key) != value:
+            allowed[key] = copy.deepcopy(value)
+    return allowed
+
+
 def _apply_one(
     project_id: str,
     model: dict[str, Any],
@@ -211,6 +239,8 @@ def _apply_one(
     item: dict[str, Any],
     *,
     author_confirmed: bool = False,
+    source_model_rev: int | None = None,
+    source_kind: str | None = None,
 ) -> dict[str, Any]:
     if item["classification"] != "mechanically_certain" and not author_confirmed:
         return model
@@ -253,15 +283,17 @@ def _apply_one(
             )
         if action == "update":
             edge = model["dependencies"][target_ref]
-            allowed = {
-                key: value for key, value in data.items()
-                if key not in set(edge.get("author_fields") or [])
-                or key not in (edge.get("data") or {})
-            }
+            allow_dynamic = source_kind in {"manual_prose_edit", "accepted_ai_prose"}
+            allowed = _allowed_semantic_patch(
+                edge, data, protect_author_model_rev=source_model_rev,
+                allow_dynamic_author_override=allow_dynamic,
+            )
             if not allowed:
                 return model
             return project_model.patch_dependency_data(
                 project_id, base_model_rev=model["model_rev"], ref=target_ref, patch=allowed,
+                protect_author_model_rev=source_model_rev,
+                allow_dynamic_author_override=allow_dynamic,
             )
         return project_model.tombstone_dependency(
             project_id, base_model_rev=model["model_rev"], ref=target_ref,
@@ -293,16 +325,18 @@ def _apply_one(
     if isinstance(target_ref, str) and target_ref in model.get("objects", {}):
         if action == "update":
             target = model["objects"][target_ref]
-            allowed = {
-                key: value for key, value in data.items()
-                if key not in set(target.get("author_fields") or [])
-                or key not in (target.get("data") or {})
-            }
+            allow_dynamic = source_kind in {"manual_prose_edit", "accepted_ai_prose"}
+            allowed = _allowed_semantic_patch(
+                target, data, protect_author_model_rev=source_model_rev,
+                allow_dynamic_author_override=allow_dynamic,
+            )
             if not allowed:
                 return model
             return project_model.patch_object_data(
                 project_id, base_model_rev=model["model_rev"], ref=target_ref,
                 patch=allowed, material_state=material_state,
+                protect_author_model_rev=source_model_rev,
+                allow_dynamic_author_override=allow_dynamic,
             )
         return project_model.tombstone_object(
             project_id, base_model_rev=model["model_rev"], ref=target_ref,
@@ -352,7 +386,11 @@ def apply_semantic_result(
     undecided = [item for item in parsed["consequences"] if item["classification"] != "mechanically_certain"]
     try:
         for item in mechanical:
-            model = _apply_one(project_id, model, snapshot, item)
+            model = _apply_one(
+                project_id, model, snapshot, item,
+                source_model_rev=change_before.get("source_model_rev"),
+                source_kind=change_before.get("source_kind"),
+            )
         chapter_result = parsed.get("chapter_actual_result")
         if chapter_result is not None:
             if change_before.get("source_kind") not in {"manual_prose_edit", "accepted_ai_prose"}:
@@ -433,6 +471,18 @@ def prepare_change_settlement(project_id: str, change_id: str) -> dict[str, Any]
         raise ChangeSettlementError("这条变更只需要确定性处理，已经同步完成。")
     if change.get("status") not in {"pending", "failed"}:
         raise ChangeSettlementError("这条变更当前不需要重新执行语义同步。")
+    existing_request_id = change.get("settlement_request_id")
+    if isinstance(existing_request_id, str) and existing_request_id:
+        existing = bridge.get_request(existing_request_id)
+        if existing and existing.get("kind") == "change_settlement" and bridge.read_response(existing_request_id) is None:
+            execution = (existing.get("meta") or {}).get("execution") or {}
+            interactive = execution.get("execution_mode") != EXECUTION_MODE_DIRECT
+            return {
+                "request_id": existing_request_id, "project_id": project_id,
+                "change_id": change_id, "status": "pending", "execution": execution,
+                "request_started": True,
+                "message": "等待 /gowrite 完成语义同步。" if interactive else "正在后台同步本次修改。",
+            }
     delta = copy.deepcopy(change.get("delta") or {})
     chapter_number = delta.get("chapter_number") if isinstance(delta.get("chapter_number"), int) else None
     task_context = focused_task_context(project_id, chapter_number=chapter_number)
@@ -480,9 +530,18 @@ def prepare_change_settlement(project_id: str, change_id: str) -> dict[str, Any]
         ):
             bridge.cleanup_request(request_id)
             raise ChangeSettlementError(_DIRECT_BUSY_ERROR)
+    try:
+        author_edit.update_change(
+            project_id, change_id, status="pending", error=None,
+            settlement_request_id=request_id, settlement_started=True,
+        )
+    except (author_edit.AuthorEditError, OSError) as exc:
+        _exec_task_manager.cancel(request_id)
+        bridge.cleanup_request(request_id)
+        raise ChangeSettlementError(f"语义同步请求记账失败：{exc}") from exc
     return {
         "request_id": request_id, "project_id": project_id, "change_id": change_id,
-        "status": "pending", "execution": execution,
+        "status": "pending", "execution": execution, "request_started": True,
         "message": "等待 /gowrite 完成语义同步。" if interactive else "正在后台同步本次修改。",
     }
 
@@ -496,20 +555,36 @@ def get_change_settlement_request(request_id: str) -> dict[str, Any]:
     change_id = str(meta.get("change_id") or "")
     response = bridge.read_response(request_id)
     if response is None:
-        return {"request_id": request_id, "status": "pending", "message": "语义同步仍在进行。"}
+        return {
+            "request_id": request_id, "project_id": project_id, "change_id": change_id,
+            "status": "pending", "message": "语义同步仍在进行。",
+        }
     if response.get("status") != "completed":
         error = response.get("error") or "语义同步失败。"
         author_edit.update_change(project_id, change_id, status="failed", error=error)
-        return {"request_id": request_id, "status": "failed", "error": error}
+        bridge.cleanup_request(request_id)
+        _exec_task_manager.remove(request_id)
+        return {
+            "request_id": request_id, "project_id": project_id, "change_id": change_id,
+            "status": "failed", "error": error,
+        }
     try:
         parsed = _parse_output(response.get("output") or "")
         settled = apply_semantic_result(project_id, change_id, parsed)
     except (ChangeSettlementError, author_edit.AuthorEditError) as exc:
         author_edit.update_change(project_id, change_id, status="failed", error=str(exc))
-        return {"request_id": request_id, "status": "failed", "error": str(exc)}
+        bridge.cleanup_request(request_id)
+        _exec_task_manager.remove(request_id)
+        return {
+            "request_id": request_id, "project_id": project_id, "change_id": change_id,
+            "status": "failed", "error": str(exc),
+        }
     bridge.cleanup_request(request_id)
     _exec_task_manager.remove(request_id)
-    return {"request_id": request_id, "status": "completed", "result": settled}
+    return {
+        "request_id": request_id, "project_id": project_id, "change_id": change_id,
+        "status": "completed", "result": settled,
+    }
 
 
 def cancel_change_settlement_request(request_id: str) -> dict[str, Any]:
@@ -550,7 +625,11 @@ def confirm_ambiguous_consequences(
             item = consequences[index]
             if item.get("classification") == "mechanically_certain":
                 continue
-            model = _apply_one(project_id, model, snapshot, item, author_confirmed=True)
+            model = _apply_one(
+                project_id, model, snapshot, item, author_confirmed=True,
+                source_model_rev=change.get("source_model_rev"),
+                source_kind=change.get("source_kind"),
+            )
     except (project_model.ProjectModelError, ChangeSettlementError, OSError) as exc:
         _restore_model(model_path, before)
         raise ChangeSettlementError(str(exc)) from exc
