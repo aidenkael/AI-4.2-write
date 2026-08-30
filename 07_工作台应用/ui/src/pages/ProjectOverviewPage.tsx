@@ -7,12 +7,12 @@ import { getProjectOverview, getStoryWriteSurface, type ProjectOverview, type St
 const toMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 /**
- * 作品概览：紧凑的作品首页，回答"这本书现在到哪里，我接下来做什么？"
+ * 作品概览：仅当前状态与下一步动作（不复制地基/规划/地图明细）。
  *
  * - 正式身份来自 FormalProjectShell（唯一 project_id）；
- * - 正式状态来自 `getProjectOverview`（work_direction / reader_promise / 有效规划 / last_accepted）；
+ * - 正式状态来自 `getProjectOverview`（work_direction / reader_promise / 有效规划计数 / last_accepted）；
  * - 当前章节号 / 已采用字数只来自 `getStoryWriteSurface`；
- * - 不复制人物 / 关系 / 事件 / 地基记录 / 完整规划 / 检查指标等明细（各有专属页面）；
+ * - 规划只呈现计数，明细属于故事规划页；人物/关系/事件属于地基/地图；
  * - 不展示任何 Mock 状态 / 更新时间 / 简介 / 假进度。
  */
 export function ProjectOverviewPage() {
@@ -105,18 +105,11 @@ export function ProjectOverviewPage() {
               </span>
             </div>
             {planCount > 0 && (
-              <div className="overview-plans">
-                <strong>当前有效规划</strong>
-                <ul>
-                  {overview!.current_plans!.map((plan) => (
-                    <li key={plan.id}>{plan.description}</li>
-                  ))}
-                </ul>
-              </div>
+              <p className="muted-note">当前有效规划 {planCount} 条；明细与下一步决定在故事规划中查看。</p>
             )}
             {overview?.last_accepted && (
               <p className="muted-note">
-                最近已接受：{overview.last_accepted.chapter_path} · {overview.last_accepted.scene_ref}
+                最近已接受：{overview.last_accepted.chapter_path.split('/').pop()?.replace(/\.md$/, '') ?? overview.last_accepted.chapter_path}
               </p>
             )}
           </>

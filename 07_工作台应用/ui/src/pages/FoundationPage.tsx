@@ -3,16 +3,17 @@ import { useMemo, useState } from 'react'
 import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { useProjectDataController } from '../features/projectData/useProjectDataController'
-import type { ProjectDataEntry } from '../bridge/client'
+import { describeRecord } from '../features/storyMap/storyMapModel'
 
 /**
- * 作品地基：当前已确定事实的作者可读投影（只读，零写回、零模型）。
+ * 作品地基：当前已确定事实的作者可读源表示（只读，零写回、零模型）。
  *
  * - 数据只来自 getProjectData 的当前正式状态：work_direction / reader_promise /
  *   characters / relationships / canon_facts；
  * - 不重复 approved_plan（规划属于故事规划）；occurred_events / open_threads
  *   属于故事地图的消费面，不作为地基主体；
  * - 不提供任意 Canon 编辑（编辑未安全接入，宁可如实只读）；
+ * - 字段描述规则与故事地图共用 storyMapModel.describeRecord（单一投影层）；
  * - 空态如实说明"当前尚未记录"，不暗示后端缺失。
  */
 
@@ -23,31 +24,6 @@ const tabs: Array<{ key: FoundationTab; label: string; Icon: typeof UserRound }>
   { key: 'relationships', label: '关系', Icon: MapPin },
   { key: 'canon_facts', label: '已确认设定', Icon: FileCheck2 },
 ]
-
-// 常见正式字段的作者面标签；未收录的键按原样低调展示（真实数据，不翻译也不隐藏）。
-const fieldLabels: Record<string, string> = {
-  name: '名称', label: '名称', description: '描述', summary: '概述',
-  role: '角色定位', identity: '身份', goal: '目标', motivation: '动机',
-  personality: '性格', background: '背景', appearance: '外貌', ability: '能力',
-  arc: '人物弧光', status: '当前状态', relation: '关系', relationship: '关系',
-  between: '双方', parties: '双方', fact: '事实', content: '内容', note: '备注',
-}
-
-function fields(entry: ProjectDataEntry): Array<{ key: string; label: string; value: string }> {
-  const record = entry.record
-  if (!record || typeof record !== 'object' || Array.isArray(record)) return []
-  const out: Array<{ key: string; label: string; value: string }> = []
-  for (const [k, v] of Object.entries(record as Record<string, unknown>)) {
-    if (k === 'id' || k === 'authority' || k === 'label' || k === 'name') continue
-    if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
-      out.push({ key: k, label: fieldLabels[k] ?? k, value: String(v) })
-    } else if (Array.isArray(v)) {
-      const text = v.filter((x) => typeof x === 'string').join('、')
-      if (text) out.push({ key: k, label: fieldLabels[k] ?? k, value: text })
-    }
-  }
-  return out
-}
 
 export function FoundationPage() {
   const { actions } = useApp()
@@ -95,7 +71,7 @@ export function FoundationPage() {
 
         <div className="foundation-cards">
           {entries.map((entry) => {
-            const fs = fields(entry)
+            const fs = describeRecord(entry)
             return (
               <article className="foundation-card" key={`${tab}-${entry.id ?? entry.label}`}>
                 <h3>{entry.label || '（未命名条目）'}</h3>

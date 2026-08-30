@@ -114,8 +114,6 @@ p{line-height:1.65}
 .project-stats span{border-right:1px solid var(--line);padding:0 18px;color:var(--muted)}
 .project-stats span:last-child{border:0}
 .project-stats strong{display:block;color:var(--text);font-size:18px;margin-top:4px}
-.overview-plans{margin:6px 0 12px}
-.overview-plans ul{margin:8px 0 0;padding-left:20px;color:#33415e;line-height:1.7}
 .overview-cta{margin-top:6px}
 .overview-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}
 .overview-actions>button{padding:16px 18px;justify-content:flex-start;text-align:left;align-items:center}
@@ -187,18 +185,41 @@ p{line-height:1.65}
 .status-accepted{background:#eaf9f3;color:var(--green)}
 .status-failed{background:#fff0f0;color:var(--red)}
 
-/* ============ 故事地图：派生只读视图（页内切换） ============ */
-.map-page{overflow:hidden;min-height:640px}
+/* ============ 故事地图：派生只读视图（关系图 / 时间事件 / 未解决线索） ============ */
+.map-page{overflow:hidden;min-height:480px}
 .map-tabs{height:56px;border-bottom:1px solid var(--line);display:flex;align-items:stretch;padding:0 26px}
 .map-tabs button{border:0;border-radius:0;background:transparent;position:relative}
 .map-tabs button.active{color:var(--blue)}
 .map-tabs button.active:after{content:"";position:absolute;bottom:0;left:12px;right:12px;height:3px;background:var(--blue)}
-.map-overview{min-height:480px;display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;padding:24px 26px;background:linear-gradient(135deg,#f7fbff,#fff);align-content:start}
-.map-overview-card{align-items:flex-start;justify-content:flex-start;text-align:left;flex-direction:column;padding:18px}
-.map-overview-card strong{margin-bottom:6px}
-.map-overview-card span{color:var(--muted);font-size:13px;line-height:1.6}
+.map-graph-wrap{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:0;min-height:560px}
+.map-graph-main{padding:18px 22px;min-width:0}
+.map-graph{height:480px;border:1px solid var(--line);border-radius:10px;background:linear-gradient(135deg,#f7fbff,#fff)}
+.map-graph-tools{display:flex;align-items:center;gap:14px;margin-top:10px}
+.map-detail{border-left:1px solid var(--line);padding:18px 20px}
+.map-detail h3{margin:0 0 10px;font-size:15px}
+.map-detail p{margin:6px 0;font-size:13px;line-height:1.6}
+.map-detail b{color:var(--muted);font-weight:600}
+.map-unresolved{margin-top:16px;border:1px dashed var(--line);border-radius:10px;padding:12px 16px;background:#fafcff}
+.map-unresolved h3{margin:0 0 8px;font-size:14px;color:var(--muted)}
+.map-unresolved ul{margin:0;padding-left:18px;display:grid;gap:6px}
+.map-unresolved li{font-size:13px;display:grid;gap:2px}
+.map-unresolved li span{font-size:12px}
+.map-time{padding:20px 26px}
+.map-time-note{margin:0 0 14px}
+.map-timeline{list-style:none;margin:0;padding:0;display:grid;gap:14px}
+.map-timeline li{display:flex;gap:12px;align-items:flex-start}
+.map-timeline-dot{width:10px;height:10px;border-radius:50%;background:#c9d6ec;margin-top:6px;flex:none}
+.map-timeline-dot.anchored{background:var(--blue)}
+.map-timeline p{margin:2px 0 0;line-height:1.6}
+.map-timeline-anchor{display:block;font-size:13px;color:var(--blue)}
+.map-timeline small{display:block;margin-top:2px}
+.map-threads{padding:20px 26px;display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));align-content:start}
+.map-thread-card{border:1px solid var(--line);border-radius:10px;padding:14px 16px;background:#fafcff}
+.map-thread-card h3{margin:0 0 8px;font-size:15px}
+.map-thread-card p{margin:6px 0;font-size:13px;line-height:1.6}
+.map-thread-card b{color:var(--muted);font-weight:600}
 .map-note{padding:12px 26px 16px}
-.map-note p{margin:0}
+.map-note p{margin:0;display:flex;align-items:center;gap:6px}
 
 /* ============ 作品检查：聚焦审阅，不做分析仪表盘 ============ */
 .review-page{max-width:1280px;margin:0 auto;display:grid;gap:16px}
@@ -424,6 +445,8 @@ p{line-height:1.65}
 .ai-collab{grid-column:1/-1;min-height:420px}
 .planning-page{grid-template-columns:1fr}
 .overview-facts,.foundation-direction{grid-template-columns:1fr}
+.map-graph-wrap{grid-template-columns:1fr}
+.map-detail{border-left:0;border-top:1px solid var(--line)}
 .split{grid-template-columns:1fr}
 .review-columns{grid-template-columns:1fr}
 .settings-layout{grid-template-columns:240px 1fr}
