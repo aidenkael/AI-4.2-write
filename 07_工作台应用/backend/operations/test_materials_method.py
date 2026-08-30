@@ -8,10 +8,14 @@
   - 定稿方法知识包 → 素材列表投影 writing_callable=true（author_group=usable）。
 """
 import json
+import sys
+from pathlib import Path
 
 import pytest
 
-from operations import materials
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from operations import materials  # noqa: E402
 
 
 @pytest.fixture()

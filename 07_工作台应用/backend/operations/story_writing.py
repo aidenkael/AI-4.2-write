@@ -66,6 +66,8 @@ from operations import agent_runner
 from operations import execution_audit as audit
 from operations import execution_tasks
 from operations import qoder_bridge as bridge
+from operations import author_edit as author_edit_ops
+from operations.project_snapshot import focused_task_context, get_project_snapshot
 from operations.agent_runner import AgentRunError
 from config.settings import EXECUTION_MODE_DIRECT, SettingsStore
 from operations.story_planning import (  # noqa: E402  复用同一 P0 检索包机制
@@ -175,6 +177,9 @@ _SELECTION_TASK_TEMPLATE = """你是 Go Write 的正文上下文选择执行器�
 当前 Story State 候选条目：
 {state_entries_summary}
 
+最新有效作者工作区（显式作者编辑优先；current 与 future/planned 严格分开）：
+{effective_project_context}
+
 作者本轮要求：{author_input}
 
 最终回复必须只有合法 JSON；但在生成最终回复之前，若 knowledge_needs 非空，你必须先调用工具执行检索命令并读取结果。工具调用属于任务执行过程，不属于最终回复。"""
@@ -220,6 +225,9 @@ entry.id 规则：
 
 Context Package：
 {context_summary}
+
+最新有效作者工作区与本章细纲（只包含本任务相关的显式作者数据）：
+{effective_project_context}
 
 {recent_prose_section}
 
@@ -834,6 +842,7 @@ def _compile_context_and_stage2(
         context_fingerprint=context_fp,
         brief_summary=brief_summary,
         context_summary=_build_context_summary(context),
+        effective_project_context=json.dumps(ctx["effective_context"], ensure_ascii=False, indent=2),
         recent_prose_section=recent_prose_section,
         author_input=ctx["author_input"],
     )
@@ -880,6 +889,7 @@ def _assemble_candidate(
         "source_versions": {
             "intent_rev": ctx["intent"].get("intent_rev"),
             "state_rev": ctx["state"].get("state_rev"),
+            "model_rev": ctx["effective_context"].get("model_rev"),
         },
         "index_fingerprint": ctx["index_fingerprint"],
         "brief": compiled["brief"],
@@ -927,6 +937,7 @@ def _build_selection_task(
     state: dict[str, Any],
     author_input: str,
     request_id: str,
+    effective_context: dict[str, Any],
 ) -> str:
     """构建 Stage 1 上下文选择任务（含 P0 检索命令：显式 --request <request_id>）。"""
     state_summary = _build_state_entries_summary(state)
@@ -937,6 +948,7 @@ def _build_selection_task(
         hard_constraints=", ".join(intent.get("hard_constraints") or []) or "（暂无）",
         open_space=", ".join(intent.get("open_space") or []) or "（暂无）",
         state_entries_summary=state_summary,
+        effective_project_context=json.dumps(effective_context, ensure_ascii=False, indent=2),
         author_input=author_input,
         retrieval_command=f'"{_RETRIEVAL_SCRIPT}"',
         request_id=request_id,
@@ -944,7 +956,11 @@ def _build_selection_task(
     )
 
 
-def prepare_story_write(project_id: str, author_input: str) -> dict[str, Any]:
+def prepare_story_write(
+    project_id: str,
+    author_input: str,
+    chapter_number: int | None = None,
+) -> dict[str, Any]:
     """"这一段想写什么"：按已保存 Settings 执行模式准备本轮任务。
 
     - Direct：校验配置 → 创建临时 writing 工作区与桥请求 → 启动两阶段后台
@@ -1000,10 +1016,15 @@ def prepare_story_write(project_id: str, author_input: str) -> dict[str, Any]:
     writing_dir = _writing_dir(project_id, writing_turn_id)
     writing_dir.mkdir(parents=True, exist_ok=False)
 
-    # 5. index fingerprint + chapter number（不重设计章节路由）
+    # 5. index fingerprint + explicit/active chapter number
     index_entries = loaded.get("index", {}).get("entries", [])
     index_fingerprint = _index_fingerprint(index_entries)
-    chapter_number = index_entries[-1].get("chapter_number", 1) if index_entries else 1
+    if chapter_number is None:
+        chapter_number = index_entries[-1].get("chapter_number", 1) if index_entries else 1
+    if not isinstance(chapter_number, int) or isinstance(chapter_number, bool) or chapter_number < 1:
+        _cleanup_writing(project_id, writing_turn_id)
+        raise StoryWritingError("chapter_number 必须是正整数。")
+    effective_context = focused_task_context(project_id, chapter_number=chapter_number)
 
     # 6. scene_ref（后台生成，不由模型决定）
     scene_ref = f"scene-{writing_turn_id}"
@@ -1014,7 +1035,7 @@ def prepare_story_write(project_id: str, author_input: str) -> dict[str, Any]:
     # 8. 构建 Stage 1 任务（含 P0 检索命令：显式 --request <request_id>）
     selection_task = _build_selection_task(
         name=name, intent=intent, state=state,
-        author_input=author_input, request_id=request_id,
+        author_input=author_input, request_id=request_id, effective_context=effective_context,
     )
 
     # 9. 创建桥请求（同一请求生命周期；交互桥带阶段标记与更长超时；
@@ -1030,6 +1051,7 @@ def prepare_story_write(project_id: str, author_input: str) -> dict[str, Any]:
                 "author_input": author_input,
                 "intent_rev": intent["intent_rev"],
                 "state_rev": state["state_rev"],
+                "model_rev": effective_context["model_rev"],
                 "index_fingerprint": index_fingerprint,
                 "execution": {
                     "execution_mode": execution_mode,
@@ -1068,6 +1090,7 @@ def prepare_story_write(project_id: str, author_input: str) -> dict[str, Any]:
         "project_dir": proj["project_dir"],
         "intent": intent,
         "state": state,
+        "effective_context": effective_context,
         "work_direction": intent.get("work_direction") or "",
         "author_input": author_input,
         "index_entries": index_entries,
@@ -1561,6 +1584,11 @@ def confirm_story_write(project_id: str, writing_token: str) -> dict[str, Any]:
         _cleanup_writing(project_id, writing_turn_id)
         raise StoryWritingError("作品在这期间已经有了新的内容，请重新生成这一段。")
 
+    current_snapshot = get_project_snapshot(project_id)
+    if current_snapshot.get("model_rev") != (meta.get("source_versions") or {}).get("model_rev"):
+        _cleanup_writing(project_id, writing_turn_id)
+        raise StoryWritingError("作品地基或章节细纲在这期间已经变化，请重新生成这一段。")
+
     # 6. 调用 ProjectWorkspace.accept_prose（frozen gate）
     try:
         result = accept_prose(
@@ -1574,6 +1602,15 @@ def confirm_story_write(project_id: str, writing_token: str) -> dict[str, Any]:
     except (PWContractError, PWWorkspaceError) as exc:
         _cleanup_writing(project_id, writing_turn_id)
         raise StoryWritingError(f"接受正文失败：{exc}") from exc
+
+    try:
+        author_edit_ops.record_accepted_ai_prose(
+            project_id, chapter_number=chapter_number, scene_ref=scene_ref, settlement=settlement,
+        )
+    except author_edit_ops.AuthorEditError as exc:
+        ledger_warning = f"正文已保留，但统一变更记录失败：{exc}"
+    else:
+        ledger_warning = None
 
     # 7. 清理临时写作工作区；审计 authority.confirmed
     _cleanup_writing(project_id, writing_turn_id)
@@ -1589,6 +1626,8 @@ def confirm_story_write(project_id: str, writing_token: str) -> dict[str, Any]:
         "chapter_path": result.get("chapter_path"),
         "chapter_number": chapter_number,
         "scene_ref": scene_ref,
+        "settlement_status": "synchronized" if ledger_warning is None else "failed",
+        "warning": ledger_warning,
         "message": "这段已经保留下来了。",
     }
 
@@ -1603,26 +1642,6 @@ def confirm_story_write(project_id: str, writing_token: str) -> dict[str, Any]:
 #   不静默展示错误正文）；
 # - 无任何写副作用。
 
-def _validate_surface_chapter_path(chapter_path_str: Any, project_dir: Path) -> Path:
-    """校验 accepted index 中的章节路径必须落在 <project_dir>/03_正文/ 下。
-
-    仅做路径包含校验（frozen ProjectWorkspace._validate_chapter_path 的等价守卫），
-    不复制其业务规则；非法路径直接拒绝，绝不返回给前端。
-    """
-    if not isinstance(chapter_path_str, str) or not chapter_path_str.strip():
-        raise StoryWritingError("accepted_text_index 章节路径缺失或非法。")
-    chapter_path_str = chapter_path_str.strip()
-    if Path(chapter_path_str).is_absolute() or ".." in chapter_path_str:
-        raise StoryWritingError(f"accepted_text_index 章节路径非法（绝对路径或含 ..）：{chapter_path_str}")
-    prose_root = (project_dir / "03_正文").resolve()
-    full = (project_dir / chapter_path_str).resolve()
-    try:
-        full.relative_to(prose_root)
-    except ValueError:
-        raise StoryWritingError(f"accepted_text_index 章节路径不在 03_正文/ 下：{chapter_path_str}")
-    return full
-
-
 def get_story_write_surface(project_id: str) -> dict[str, Any]:
     """WritingPage 正式写作面：只读返回已采用正文（按章分组，按 chapter_number 排序）。
 
@@ -1636,87 +1655,31 @@ def get_story_write_surface(project_id: str) -> dict[str, Any]:
         raise StoryWritingError("缺少作品标识（project_id）。")
 
     try:
-        proj = resolve_project(project_id)
-        loaded = load_project(proj["project_dir"])
-    except (PWContractError, PWWorkspaceError) as exc:
+        snapshot = get_project_snapshot(project_id)
+    except Exception as exc:  # noqa: BLE001 - stable operation error boundary
         raise StoryWritingError(str(exc)) from exc
-
-    project_dir = Path(loaded["project_dir"])
-    index = loaded.get("index") or {}
-    entries = index.get("entries") or []
-
-    if not entries:
-        return {
-            "project_id": loaded["project_id"],
-            "name": loaded["name"],
-            "chapters": [{
-                "chapter_number": 1,
-                "title": "第1章",
-                "content": "",
-                "words": 0,
-                "scene_count": 0,
-            }],
-            "active_chapter_number": 1,
-            "total_words": 0,
+    chapters = []
+    for item in snapshot["chapters"]:
+        chapter = {
+            "chapter_number": item["chapter_number"],
+            "title": item["title"],
+            "content": item["content"],
+            "words": item["actual_words"],
+            "scene_count": item["accepted_scene_count"],
         }
-
-    # 按章分组（chapter_number 缺失/非法 → 显式报错，不猜测）
-    by_chapter: dict[int, list[dict[str, Any]]] = {}
-    for entry in entries:
-        try:
-            chapter_number = int(entry.get("chapter_number") or 0)
-        except (TypeError, ValueError):
-            raise StoryWritingError("accepted_text_index 存在非法 chapter_number。")
-        if chapter_number < 1:
-            raise StoryWritingError("accepted_text_index 存在非法 chapter_number。")
-        by_chapter.setdefault(chapter_number, []).append(entry)
-
-    chapters: list[dict[str, Any]] = []
-    for chapter_number in sorted(by_chapter):
-        chapter_entries = by_chapter[chapter_number]
-        # 同章所有 entry 必须指向同一合法章节路径
-        chapter_paths = {
-            _validate_surface_chapter_path(entry.get("chapter_path"), project_dir)
-            for entry in chapter_entries
-        }
-        if len(chapter_paths) != 1:
-            raise StoryWritingError(
-                f"第{chapter_number}章的 accepted_text_index 章节路径不一致，请检查。"
-            )
-        chapter_path = chapter_paths.pop()
-        if not chapter_path.exists():
-            raise StoryWritingError(f"章节文件不存在：{chapter_path}")
-        content = chapter_path.read_text(encoding="utf-8")
-        # 逐条 entry 校验边界与 SHA（index 漂移 → 显式报错）
-        for entry in chapter_entries:
-            try:
-                start = int(entry.get("start_char") or 0)
-                end = int(entry.get("end_char") or 0)
-            except (TypeError, ValueError):
-                raise StoryWritingError(
-                    f"第{chapter_number}章 accepted_text_index 存在非法字符区间。"
-                )
-            if start < 0 or end < start or end > len(content):
-                raise StoryWritingError(
-                    f"第{chapter_number}章 accepted_text_index 与正文不一致（越界）。"
-                )
-            segment = content[start:end]
-            if hashlib.sha256(segment.encode("utf-8")).hexdigest() != entry.get("content_sha256"):
-                raise StoryWritingError(
-                    f"第{chapter_number}章 accepted_text_index 与正文不一致（SHA 不匹配）。"
-                )
-        chapters.append({
-            "chapter_number": chapter_number,
-            "title": f"第{chapter_number}章",
-            "content": content,
-            "words": len(content),
-            "scene_count": len(chapter_entries),
-        })
-
+        if Path(item["path"]).exists() or item.get("fine_outline_ref") is not None:
+            chapter.update({
+                "content_sha256": item["content_sha256"],
+                "accepted": item["accepted"],
+                "fine_outline_ref": item.get("fine_outline_ref"),
+                "fine_outline": item.get("fine_outline") or {},
+            })
+        chapters.append(chapter)
     return {
-        "project_id": loaded["project_id"],
-        "name": loaded["name"],
+        "project_id": snapshot["project_id"],
+        "name": snapshot["name"],
         "chapters": chapters,
-        "active_chapter_number": max(by_chapter),
-        "total_words": sum(chapter["words"] for chapter in chapters),
+        "active_chapter_number": max(item["chapter_number"] for item in chapters),
+        "total_words": snapshot["length_plan"]["actual_total_words"],
+        "settlement": snapshot["settlement"],
     }

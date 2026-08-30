@@ -80,16 +80,6 @@ export function ProjectOverviewPage() {
         )}
         {!loading && !error && (
           <>
-            <div className="overview-facts">
-              <div>
-                <h3>作品方向</h3>
-                {overview?.work_direction ? <p>{overview.work_direction}</p> : <p className="muted-note">当前尚未记录。</p>}
-              </div>
-              <div>
-                <h3>读者期待</h3>
-                {overview?.reader_promise ? <p>{overview.reader_promise}</p> : <p className="muted-note">当前尚未记录。</p>}
-              </div>
-            </div>
             <div className="project-stats">
               <span>
                 当前章节
@@ -97,13 +87,19 @@ export function ProjectOverviewPage() {
               </span>
               <span>
                 已采用字数
-                <strong>{(surface?.total_words ?? 0).toLocaleString()} 字</strong>
+                <strong>{(overview?.progress?.actual_words ?? surface?.total_words ?? 0).toLocaleString()} 字</strong>
+                {overview?.progress?.target_words != null && <small>目标 {overview.progress.target_words.toLocaleString()} 字</small>}
               </span>
               <span>
                 有效规划
                 <strong>{planCount} 条</strong>
               </span>
             </div>
+            {overview?.settlement && overview.settlement.status !== 'synchronized' && (
+              <div className="sync-warning">
+                已保存的作者修改尚未完全同步：{overview.settlement.pending_count} 项待处理，{overview.settlement.failed_count} 项失败。继续使用 AI 前请先到「正在写」重试或确认。
+              </div>
+            )}
             {planCount > 0 && (
               <p className="muted-note">当前有效规划 {planCount} 条；明细与下一步决定在故事规划中查看。</p>
             )}

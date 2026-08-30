@@ -82,7 +82,7 @@ const toMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
 export type TaskPayload =
   | { kind: 'new_project'; name: string; idea: string }
   | { kind: 'story_plan'; project_id: string; author_question: string }
-  | { kind: 'story_write'; project_id: string; author_input: string }
+  | { kind: 'story_write'; project_id: string; author_input: string; chapter_number?: number }
   | { kind: 'review'; project_id: string; chapter_number?: number }
   | { kind: 'material_classify' }
   | { kind: 'material_distill'; asset_id: string }
@@ -309,7 +309,11 @@ export function AuthorTaskCoordinatorProvider({ children }: { children: ReactNod
             prepared = await prepareStoryPlan({ project_id: payload.project_id, author_question: payload.author_question })
             break
           case 'story_write':
-            prepared = await prepareStoryWrite({ project_id: payload.project_id, author_input: payload.author_input })
+            prepared = await prepareStoryWrite({
+              project_id: payload.project_id,
+              author_input: payload.author_input,
+              chapter_number: payload.chapter_number,
+            })
             break
           case 'review':
             prepared = await prepareReview({ project_id: payload.project_id, chapter_number: payload.chapter_number })

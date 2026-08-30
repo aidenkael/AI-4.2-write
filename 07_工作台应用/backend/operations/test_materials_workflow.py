@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from agents.base import AgentRequest, AgentResult
 from config.settings import AppSettings, SettingsStore
 from operations import agent_runner

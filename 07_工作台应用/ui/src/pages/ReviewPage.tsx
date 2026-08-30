@@ -83,11 +83,16 @@ export function ReviewPage() {
         {surfaceLoading && <p className="muted-note">正在加载…</p>}
         {surfaceError && <p className="error-text">{surfaceError}</p>}
         {!surfaceLoading && !surfaceError && surface && (
-          <div className="review-stats">
-            <span><strong>{surface.active_plan_count}</strong> 条有效规划</span>
-            <span><strong>{surface.open_thread_count}</strong> 条未解决线索</span>
-            <span><strong>{surface.chapters.length}</strong> 个已接受章节</span>
-          </div>
+          <>
+            <div className="review-stats">
+              <span><strong>{surface.active_plan_count}</strong> 条有效规划</span>
+              <span><strong>{surface.open_thread_count}</strong> 条未解决线索</span>
+              <span><strong>{surface.chapters.length}</strong> 个已接受章节</span>
+            </div>
+            {surface.settlement && surface.settlement.status !== 'synchronized' && (
+              <div className="sync-warning">当前有作者修改尚未完全同步。检查会优先采用显式编辑，但人物、时间、关系或伏笔的派生状态可能暂不完整。</div>
+            )}
+          </>
         )}
         {surface && surface.has_accepted_prose && (
           <div className="review-chapters">

@@ -1,0 +1,479 @@
+# -*- coding: utf-8 -*-
+"""One incremental semantic-settlement path for every author change source."""
+from __future__ import annotations
+
+import copy
+import json
+import uuid
+from pathlib import Path
+from typing import Any
+
+from config.settings import EXECUTION_MODE_DIRECT, SettingsStore
+from operations import agent_runner
+from operations import author_edit
+from operations import execution_tasks
+from operations import project_model
+from operations import qoder_bridge as bridge
+from operations.project_snapshot import focused_task_context, get_project_snapshot
+from operations.agent_runner import AgentRunError
+
+
+_exec_task_manager = execution_tasks.manager
+_DIRECT_BUSY_ERROR = "已有直连任务正在执行，请先等待其完成或取消，再同步本次修改。"
+_ALLOWED_KINDS = {
+    "character", "relationship", "event", "time", "foreshadowing",
+    "setting", "location", "organization", "storyline", "planning", "open_thread",
+}
+_ALLOWED_CLASSIFICATIONS = {"mechanically_certain", "ambiguous", "creative_optional"}
+_ALLOWED_ACTIONS = {"create", "update", "retire"}
+
+_TASK_TEMPLATE = """你是 Go Write 的增量语义结算执行器。只分析本次明确变更及给出的相关当前快照，不重写正文，不臆造绝对日期，不把未来规划当成已发生事实。
+
+请识别人物状态、关系、已发生事件、时间语义、伏笔/承诺、世界/地点/组织状态、未解决线索和规划有效性后果。代码已经处理哈希、字数、章节、显式字段与引用；不要重复机械计数。
+
+最终回复必须只有合法 JSON 对象，不要 markdown。结构：
+{{
+  "summary": "本次结算摘要",
+  "consequences": [
+    {{
+      "classification": "mechanically_certain|ambiguous|creative_optional",
+      "kind": "character|relationship|event|time|foreshadowing|setting|location|organization|storyline|planning|open_thread",
+      "action": "create|update|retire",
+      "target_ref": "更新/退役时的显式 ref；新建可为空",
+      "title": "作者可读标题",
+      "source_ref": "关系起点人物的显式 ref；非关系可为空",
+      "target_character_ref": "关系终点人物的显式 ref；非关系可为空",
+      "data": {{"只放本次文本明确支持的结构化字段": "值"}},
+      "reason": "短理由"
+    }}
+  ]
+}}
+
+只有文本或作者显式字段直接支持、无需创造性选择的后果才能标 mechanically_certain。相对时间如“过了一年”保留 relative_duration/ordering，不得发明年份。含歧义的解释标 ambiguous；文学选择标 creative_optional。关系端点必须使用快照中的明确人物 ref，绝不按名称猜测。
+
+本次变更：
+{change}
+
+相关当前快照：
+{snapshot}
+"""
+
+
+class ChangeSettlementError(Exception):
+    """Safe semantic-settlement failure exposed to the author workbench."""
+
+
+def _parse_output(output: str) -> dict[str, Any]:
+    text = (output or "").strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].strip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ChangeSettlementError("语义结算结果不是合法 JSON。") from exc
+    if not isinstance(value, dict) or not isinstance(value.get("summary"), str):
+        raise ChangeSettlementError("语义结算结果缺少 summary。")
+    consequences = value.get("consequences")
+    if not isinstance(consequences, list):
+        raise ChangeSettlementError("语义结算结果 consequences 必须是列表。")
+    normalized = []
+    for index, item in enumerate(consequences):
+        if not isinstance(item, dict):
+            raise ChangeSettlementError(f"consequences[{index}] 必须是对象。")
+        classification = item.get("classification")
+        kind = item.get("kind")
+        action = item.get("action")
+        if classification not in _ALLOWED_CLASSIFICATIONS:
+            raise ChangeSettlementError(f"consequences[{index}].classification 非法。")
+        if kind not in _ALLOWED_KINDS:
+            raise ChangeSettlementError(f"consequences[{index}].kind 非法。")
+        if action not in _ALLOWED_ACTIONS:
+            raise ChangeSettlementError(f"consequences[{index}].action 非法。")
+        if not isinstance(item.get("title"), str) or not item["title"].strip():
+            raise ChangeSettlementError(f"consequences[{index}].title 不能为空。")
+        if not isinstance(item.get("data", {}), dict):
+            raise ChangeSettlementError(f"consequences[{index}].data 必须是对象。")
+        if action in {"update", "retire"} and (
+            not isinstance(item.get("target_ref"), str) or not item["target_ref"].strip()
+        ):
+            raise ChangeSettlementError(f"consequences[{index}] 更新/退役缺少 target_ref。")
+        if kind == "relationship" and (
+            not isinstance(item.get("source_ref"), str)
+            or not item["source_ref"].strip()
+            or not isinstance(item.get("target_character_ref"), str)
+            or not item["target_character_ref"].strip()
+        ):
+            raise ChangeSettlementError(f"consequences[{index}] 关系缺少明确人物端点 ref。")
+        normalized.append(copy.deepcopy(item))
+    return {"summary": value["summary"].strip(), "consequences": normalized}
+
+
+def _model_artifact(project_id: str) -> Path:
+    snapshot = get_project_snapshot(project_id)
+    return Path(snapshot["identity"]["project_dir"]) / "_工作台状态" / project_model.ARTIFACT_NAME
+
+
+def _write_bytes_atomic(path: Path, payload: bytes) -> None:
+    # Reuse the project model's proven atomic writer through a validated JSON value.
+    value = json.loads(payload.decode("utf-8"))
+    project_model._atomic_write_json(path, value)
+
+
+def _restore_model(path: Path, before: bytes | None) -> None:
+    if before is None:
+        if path.exists():
+            path.unlink()
+    else:
+        _write_bytes_atomic(path, before)
+
+
+def _find_snapshot_record(snapshot: dict[str, Any], ref: str) -> dict[str, Any] | None:
+    for bucket_name in ("current", "future"):
+        for records in snapshot[bucket_name].values():
+            for record in records:
+                if record.get("ref") == ref:
+                    return record
+    return None
+
+
+def _ensure_model_character(
+    project_id: str,
+    model: dict[str, Any],
+    snapshot: dict[str, Any],
+    ref: str,
+) -> tuple[dict[str, Any], str]:
+    item = model.get("objects", {}).get(ref)
+    if isinstance(item, dict) and not item.get("tombstoned"):
+        if item.get("kind") == "foundation" and item.get("category") == "character":
+            return model, ref
+        raise ChangeSettlementError("关系端点 ref 不是人物记录。")
+    source = _find_snapshot_record(snapshot, ref)
+    if not source or source.get("source_kind") != "production_story_state":
+        raise ChangeSettlementError("关系端点无法对应到明确人物 ref。")
+    data = copy.deepcopy(source.get("record") if isinstance(source.get("record"), dict) else {})
+    data["source_state_ref"] = ref
+    next_model = project_model.create_foundation_record(
+        project_id,
+        base_model_rev=model["model_rev"],
+        category="character",
+        title=source.get("title") or "未命名人物",
+        material_state="current",
+        data=data,
+    )
+    created_ref = next_model["change_history"][-1]["detail"]["ref"]
+    return next_model, created_ref
+
+
+def _apply_one(
+    project_id: str,
+    model: dict[str, Any],
+    snapshot: dict[str, Any],
+    item: dict[str, Any],
+    *,
+    author_confirmed: bool = False,
+) -> dict[str, Any]:
+    if item["classification"] != "mechanically_certain" and not author_confirmed:
+        return model
+    data = copy.deepcopy(item.get("data") or {})
+    data["settlement_provenance"] = "author_confirmed" if author_confirmed else "semantic_mechanical"
+    action = item["action"]
+    kind = item["kind"]
+    target_ref = item.get("target_ref")
+    if kind == "relationship":
+        model, source_ref = _ensure_model_character(project_id, model, snapshot, item["source_ref"])
+        model, target_character_ref = _ensure_model_character(
+            project_id, model, snapshot, item["target_character_ref"],
+        )
+        if action == "create":
+            return project_model.create_relationship(
+                project_id, base_model_rev=model["model_rev"], source_ref=source_ref,
+                target_ref=target_character_ref, label=item["title"], material_state="current", data=data,
+            )
+        if not isinstance(target_ref, str):
+            raise ChangeSettlementError("关系更新/退役 target_ref 不是活动关系。")
+        existing_edge = model.get("dependencies", {}).get(target_ref)
+        if not isinstance(existing_edge, dict) or existing_edge.get("tombstoned"):
+            source_relation = author_edit._snapshot_record(snapshot, target_ref, relationship=True)
+            if not source_relation or source_relation.get("source_kind") != "production_story_state":
+                raise ChangeSettlementError("关系更新/退役 target_ref 不是活动关系。")
+            if action == "retire" and not author_confirmed:
+                raise ChangeSettlementError("正式 Story State 关系的退役必须由作者明确确认。")
+            overlay_data = author_edit._overlay_data(source_relation, data)
+            model = project_model.create_relationship(
+                project_id, base_model_rev=model["model_rev"], source_ref=source_ref,
+                target_ref=target_character_ref, label=item["title"],
+                material_state="current", data=overlay_data,
+            )
+            if action == "update":
+                return model
+            marker_ref = model["change_history"][-1]["detail"]["ref"]
+            return project_model.tombstone_dependency(
+                project_id, base_model_rev=model["model_rev"], ref=marker_ref,
+            )
+        if action == "update":
+            return project_model.update_dependency(
+                project_id, base_model_rev=model["model_rev"], ref=target_ref,
+                source_ref=source_ref, target_ref=target_character_ref, title=item["title"], data=data,
+            )
+        return project_model.tombstone_dependency(
+            project_id, base_model_rev=model["model_rev"], ref=target_ref,
+        )
+
+    category = {
+        "character": "character", "event": "event", "time": "event",
+        "foreshadowing": "promise_foreshadowing", "setting": "world_setting",
+        "location": "location", "organization": "organization_force",
+        "storyline": "story_line", "planning": "story_line", "open_thread": "promise_foreshadowing",
+    }[kind]
+    if kind == "time":
+        data["time_semantics"] = True
+    material_state = "future" if kind == "planning" else "current"
+    if action == "create":
+        return project_model.create_foundation_record(
+            project_id, base_model_rev=model["model_rev"], category=category,
+            title=item["title"], material_state=material_state, data=data,
+        )
+    if isinstance(target_ref, str) and target_ref in model.get("objects", {}):
+        if action == "update":
+            return project_model.update_object(
+                project_id, base_model_rev=model["model_rev"], ref=target_ref,
+                title=item["title"], material_state=material_state, data=data,
+            )
+        return project_model.tombstone_object(
+            project_id, base_model_rev=model["model_rev"], ref=target_ref,
+        )
+    source = _find_snapshot_record(snapshot, str(target_ref or ""))
+    if not source or source.get("source_kind") != "production_story_state":
+        raise ChangeSettlementError("后果 target_ref 无法对应当前有效记录。")
+    if action == "retire":
+        if not author_confirmed:
+            # A retirement of production Story State is never mechanically
+            # safe at the overlay boundary; it needs explicit author choice.
+            raise ChangeSettlementError("正式 Story State 条目的退役必须由作者明确确认。")
+        marker_data = author_edit._overlay_data(source, data)
+        model = project_model.create_foundation_record(
+            project_id, base_model_rev=model["model_rev"], category=category,
+            title=item["title"], material_state=material_state, data=marker_data,
+        )
+        marker_ref = model["change_history"][-1]["detail"]["ref"]
+        return project_model.tombstone_object(
+            project_id, base_model_rev=model["model_rev"], ref=marker_ref,
+        )
+    data["supersedes_state_ref"] = target_ref
+    return project_model.create_foundation_record(
+        project_id, base_model_rev=model["model_rev"], category=category,
+        title=item["title"], material_state="current", data=data,
+    )
+
+
+def apply_semantic_result(
+    project_id: str,
+    change_id: str,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    parsed = _parse_output(json.dumps(result, ensure_ascii=False)) if "summary" in result else result
+    change_before = author_edit.get_change(project_id, change_id)
+    if not change_before.get("requires_semantic"):
+        raise ChangeSettlementError("这条变更不需要语义同步。")
+    if change_before.get("status") not in {"pending", "failed"}:
+        raise ChangeSettlementError("这条变更当前不能重复执行语义同步。")
+    snapshot = get_project_snapshot(project_id)
+    model = project_model.load_project_model(project_id)
+    model_path = _model_artifact(project_id)
+    before = model_path.read_bytes() if model_path.exists() else None
+    mechanical = [item for item in parsed["consequences"] if item["classification"] == "mechanically_certain"]
+    undecided = [item for item in parsed["consequences"] if item["classification"] != "mechanically_certain"]
+    try:
+        for item in mechanical:
+            model = _apply_one(project_id, model, snapshot, item)
+    except (project_model.ProjectModelError, ChangeSettlementError, OSError) as exc:
+        try:
+            _restore_model(model_path, before)
+        except OSError as rollback_exc:
+            raise ChangeSettlementError(f"语义结算失败且项目模型回滚未完成：{rollback_exc}") from exc
+        author_edit.update_change(
+            project_id, change_id, status="failed", semantic=parsed, error=str(exc),
+        )
+        raise ChangeSettlementError(str(exc)) from exc
+    status = "awaiting_author" if undecided else "synchronized"
+    try:
+        change = author_edit.update_change(
+            project_id, change_id, status=status, semantic=parsed, error=None,
+        )
+    except (author_edit.AuthorEditError, OSError) as exc:
+        try:
+            _restore_model(model_path, before)
+        except OSError as rollback_exc:
+            raise ChangeSettlementError(f"语义结算记账失败且项目模型回滚未完成：{rollback_exc}") from exc
+        raise ChangeSettlementError(f"语义结算记账失败，项目模型已回滚：{exc}") from exc
+    return {
+        "project_id": project_id, "change_id": change_id, "status": status,
+        "mechanical_count": len(mechanical), "undecided_count": len(undecided),
+        "change": change,
+    }
+
+
+def _worker(adapter: Any, request: Any, request_id: str) -> None:
+    try:
+        result = adapter.run(request)
+    except Exception as exc:  # noqa: BLE001
+        if not _exec_task_manager.is_canceled(request_id):
+            bridge.write_response(request_id, status="failed", error=f"语义同步执行失败：{exc}")
+            _exec_task_manager.finish(request_id, execution_tasks.TASK_FAILED)
+        return
+    if _exec_task_manager.is_canceled(request_id):
+        return
+    if result.status != "completed":
+        bridge.write_response(
+            request_id, status="failed", error=result.error or f"语义同步未完成（{result.status}）。",
+        )
+        _exec_task_manager.finish(request_id, execution_tasks.TASK_FAILED)
+        return
+    bridge.write_response(request_id, status="completed", output=result.output)
+    _exec_task_manager.finish(request_id, execution_tasks.TASK_COMPLETED)
+
+
+def prepare_change_settlement(project_id: str, change_id: str) -> dict[str, Any]:
+    change = author_edit.get_change(project_id, change_id)
+    if not change.get("requires_semantic"):
+        raise ChangeSettlementError("这条变更只需要确定性处理，已经同步完成。")
+    if change.get("status") not in {"pending", "failed"}:
+        raise ChangeSettlementError("这条变更当前不需要重新执行语义同步。")
+    delta = copy.deepcopy(change.get("delta") or {})
+    chapter_number = delta.get("chapter_number") if isinstance(delta.get("chapter_number"), int) else None
+    task_context = focused_task_context(project_id, chapter_number=chapter_number)
+    task = _TASK_TEMPLATE.format(
+        change=json.dumps(delta, ensure_ascii=False, indent=2),
+        snapshot=json.dumps(task_context, ensure_ascii=False, indent=2),
+    )
+    settings = SettingsStore().load()
+    interactive = settings.default_execution_mode != EXECUTION_MODE_DIRECT
+    request_id = uuid.uuid4().hex
+    adapter = None
+    agent_request = None
+    execution = {
+        "execution_mode": settings.default_execution_mode,
+        "agent_id": settings.interactive_agent if interactive else settings.direct_agent,
+        "model": None,
+    }
+    if not interactive:
+        try:
+            adapter, agent_request = agent_runner._build_adapter()
+        except AgentRunError as exc:
+            raise ChangeSettlementError(f"直连执行配置不可用：{exc}") from exc
+        except Exception as exc:  # noqa: BLE001
+            raise ChangeSettlementError(f"直连执行配置不可用：{exc}") from exc
+        if _exec_task_manager.is_busy():
+            raise ChangeSettlementError(_DIRECT_BUSY_ERROR)
+        agent_request.task = task
+        agent_request.cwd = str(Path(get_project_snapshot(project_id)["identity"]["project_dir"]))
+        execution = {
+            "execution_mode": "direct", "agent_id": adapter.name,
+            "model": agent_request.custom_model or agent_request.model,
+        }
+    try:
+        bridge.create_request(
+            task=task, kind="change_settlement", request_id=request_id,
+            meta={"project_id": project_id, "change_id": change_id, "execution": execution},
+            activate_for_gowrite=interactive,
+        )
+    except bridge.BridgeBusyError as exc:
+        raise ChangeSettlementError(str(exc)) from exc
+    if not interactive:
+        worker = lambda: _worker(adapter, agent_request, request_id)  # noqa: E731
+        if not _exec_task_manager.start(
+            request_id=request_id, worker=worker, adapter=adapter, execution=execution,
+        ):
+            bridge.cleanup_request(request_id)
+            raise ChangeSettlementError(_DIRECT_BUSY_ERROR)
+    return {
+        "request_id": request_id, "project_id": project_id, "change_id": change_id,
+        "status": "pending", "execution": execution,
+        "message": "等待 /gowrite 完成语义同步。" if interactive else "正在后台同步本次修改。",
+    }
+
+
+def get_change_settlement_request(request_id: str) -> dict[str, Any]:
+    request = bridge.get_request(request_id)
+    if not request or request.get("kind") != "change_settlement":
+        raise ChangeSettlementError("语义同步请求不存在或已失效。")
+    meta = request.get("meta") or {}
+    project_id = str(meta.get("project_id") or "")
+    change_id = str(meta.get("change_id") or "")
+    response = bridge.read_response(request_id)
+    if response is None:
+        return {"request_id": request_id, "status": "pending", "message": "语义同步仍在进行。"}
+    if response.get("status") != "completed":
+        error = response.get("error") or "语义同步失败。"
+        author_edit.update_change(project_id, change_id, status="failed", error=error)
+        return {"request_id": request_id, "status": "failed", "error": error}
+    try:
+        parsed = _parse_output(response.get("output") or "")
+        settled = apply_semantic_result(project_id, change_id, parsed)
+    except (ChangeSettlementError, author_edit.AuthorEditError) as exc:
+        author_edit.update_change(project_id, change_id, status="failed", error=str(exc))
+        return {"request_id": request_id, "status": "failed", "error": str(exc)}
+    bridge.cleanup_request(request_id)
+    _exec_task_manager.remove(request_id)
+    return {"request_id": request_id, "status": "completed", "result": settled}
+
+
+def cancel_change_settlement_request(request_id: str) -> dict[str, Any]:
+    request = bridge.get_request(request_id)
+    if not request or request.get("kind") != "change_settlement":
+        return {"request_id": request_id, "status": "canceled"}
+    meta = request.get("meta") or {}
+    project_id = str(meta.get("project_id") or "")
+    change_id = str(meta.get("change_id") or "")
+    _exec_task_manager.cancel(request_id)
+    bridge.mark_canceled(request_id)
+    if project_id and change_id:
+        author_edit.update_change(project_id, change_id, status="pending", error=None)
+    return {"request_id": request_id, "status": "canceled"}
+
+
+def confirm_ambiguous_consequences(
+    project_id: str,
+    change_id: str,
+    accepted_indexes: list[int],
+) -> dict[str, Any]:
+    change = author_edit.get_change(project_id, change_id)
+    semantic = change.get("semantic")
+    if change.get("status") != "awaiting_author" or not isinstance(semantic, dict):
+        raise ChangeSettlementError("这条变更当前没有待确认的语义后果。")
+    consequences = semantic.get("consequences") or []
+    if not isinstance(accepted_indexes, list) or any(
+        not isinstance(index, int) or isinstance(index, bool) or index < 0 or index >= len(consequences)
+        for index in accepted_indexes
+    ):
+        raise ChangeSettlementError("待确认后果索引非法。")
+    snapshot = get_project_snapshot(project_id)
+    model = project_model.load_project_model(project_id)
+    model_path = _model_artifact(project_id)
+    before = model_path.read_bytes() if model_path.exists() else None
+    try:
+        for index in accepted_indexes:
+            item = consequences[index]
+            if item.get("classification") == "mechanically_certain":
+                continue
+            model = _apply_one(project_id, model, snapshot, item, author_confirmed=True)
+    except (project_model.ProjectModelError, ChangeSettlementError, OSError) as exc:
+        _restore_model(model_path, before)
+        raise ChangeSettlementError(str(exc)) from exc
+    try:
+        updated = author_edit.update_change(
+            project_id, change_id, status="synchronized",
+            semantic={**semantic, "author_accepted_indexes": sorted(set(accepted_indexes))}, error=None,
+        )
+    except (author_edit.AuthorEditError, OSError) as exc:
+        try:
+            _restore_model(model_path, before)
+        except OSError as rollback_exc:
+            raise ChangeSettlementError(f"确认结果记账失败且项目模型回滚未完成：{rollback_exc}") from exc
+        raise ChangeSettlementError(f"确认结果记账失败，项目模型已回滚：{exc}") from exc
+    return {"project_id": project_id, "change_id": change_id, "status": "synchronized", "change": updated}

@@ -282,3 +282,13 @@ def test_object_tombstone_retires_incident_dependency_edges(project):
     assert retired["dependencies"][edge_ref]["tombstoned_at_rev"] == retired["model_rev"]
     assert retired["change_history"][-1]["detail"]["retired_dependency_refs"] == [edge_ref]
     assert model_ops.list_direct_dependencies(project["project_id"], target_ref) == []
+
+
+def test_total_target_words_can_be_explicitly_cleared(project):
+    planned = model_ops.set_length_plan(
+        project["project_id"], base_model_rev=0, total_target_words=180000,
+    )
+    cleared = model_ops.set_length_plan(
+        project["project_id"], base_model_rev=planned["model_rev"], total_target_words=None,
+    )
+    assert cleared["length_plan"]["total_target_words"] is None

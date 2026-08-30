@@ -31,6 +31,10 @@ from operations.materials import MaterialsError
 from operations import materials as materials_ops
 from operations.project_data import ProjectDataError
 from operations import project_data as project_data_ops
+from operations.author_edit import AuthorEditError
+from operations import author_edit as author_edit_ops
+from operations.change_settlement import ChangeSettlementError
+from operations import change_settlement as change_settlement_ops
 from operations.review import ReviewError
 from operations import review as review_ops
 from operations import author_operation as author_operation_ops
@@ -46,6 +50,8 @@ CODE_STORY_WRITING_ERROR = "STORY_WRITING_ERROR"
 CODE_IDEAS_ERROR = "IDEAS_ERROR"
 CODE_MATERIALS_ERROR = "MATERIALS_ERROR"
 CODE_PROJECT_DATA_ERROR = "PROJECT_DATA_ERROR"
+CODE_AUTHOR_EDIT_ERROR = "AUTHOR_EDIT_ERROR"
+CODE_CHANGE_SETTLEMENT_ERROR = "CHANGE_SETTLEMENT_ERROR"
 CODE_REVIEW_ERROR = "REVIEW_ERROR"
 CODE_BRIDGE_INTERNAL = "BRIDGE_INTERNAL"
 
@@ -279,6 +285,7 @@ class AppApi:
             data = story_writing_ops.prepare_story_write(
                 project_id=str(payload.get("project_id") or ""),
                 author_input=str(payload.get("author_input") or ""),
+                chapter_number=(int(payload["chapter_number"]) if payload.get("chapter_number") is not None else None),
             )
             # 只有交互模式需要把 Qoder 桌面端切到前台（阶段 1 等待第一次 /gowrite）
             if data.get("execution_mode") != "direct":
@@ -589,6 +596,176 @@ class AppApi:
             ))
         except ProjectDataError as exc:
             return _err(CODE_PROJECT_DATA_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    # ---------------- 统一作者编辑 / 增量语义结算 ----------------
+
+    def get_project_snapshot(self, payload: dict) -> dict:
+        try:
+            return _ok(author_edit_ops.get_author_edit_surface(str(payload.get("project_id") or "")))
+        except AuthorEditError as exc:
+            return _err(CODE_AUTHOR_EDIT_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def create_foundation_record(self, payload: dict) -> dict:
+        try:
+            return _ok(author_edit_ops.create_foundation_record(
+                str(payload.get("project_id") or ""),
+                base_model_rev=int(payload.get("base_model_rev")),
+                category=str(payload.get("category") or ""),
+                title=str(payload.get("title") or ""),
+                material_state=str(payload.get("material_state") or "current"),
+                data=payload.get("data") if isinstance(payload.get("data"), dict) else {},
+                category_name=(str(payload.get("category_name")) if payload.get("category_name") is not None else None),
+            ))
+        except (AuthorEditError, TypeError, ValueError) as exc:
+            return _err(CODE_AUTHOR_EDIT_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def update_foundation_record(self, payload: dict) -> dict:
+        try:
+            return _ok(author_edit_ops.update_foundation_record(
+                str(payload.get("project_id") or ""),
+                base_model_rev=int(payload.get("base_model_rev")),
+                ref=str(payload.get("ref") or ""),
+                title=(str(payload.get("title")) if payload.get("title") is not None else None),
+                material_state=(str(payload.get("material_state")) if payload.get("material_state") is not None else None),
+                data=payload.get("data") if isinstance(payload.get("data"), dict) else None,
+            ))
+        except (AuthorEditError, TypeError, ValueError) as exc:
+            return _err(CODE_AUTHOR_EDIT_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def retire_foundation_record(self, payload: dict) -> dict:
+        try:
+            return _ok(author_edit_ops.retire_foundation_record(
+                str(payload.get("project_id") or ""),
+                base_model_rev=int(payload.get("base_model_rev")), ref=str(payload.get("ref") or ""),
+            ))
+        except (AuthorEditError, TypeError, ValueError) as exc:
+            return _err(CODE_AUTHOR_EDIT_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def create_relationship(self, payload: dict) -> dict:
+        try:
+            return _ok(author_edit_ops.create_relationship(
+                str(payload.get("project_id") or ""),
+                base_model_rev=int(payload.get("base_model_rev")),
+                source_ref=str(payload.get("source_ref") or ""),
+                target_ref=str(payload.get("target_ref") or ""),
+                label=str(payload.get("label") or ""),
+                material_state=str(payload.get("material_state") or "current"),
+                data=payload.get("data") if isinstance(payload.get("data"), dict) else {},
+            ))
+        except (AuthorEditError, TypeError, ValueError) as exc:
+            return _err(CODE_AUTHOR_EDIT_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def update_relationship(self, payload: dict) -> dict:
+        try:
+            return _ok(author_edit_ops.update_relationship(
+                str(payload.get("project_id") or ""),
+                base_model_rev=int(payload.get("base_model_rev")), ref=str(payload.get("ref") or ""),
+                source_ref=(str(payload.get("source_ref")) if payload.get("source_ref") is not None else None),
+                target_ref=(str(payload.get("target_ref")) if payload.get("target_ref") is not None else None),
+                label=(str(payload.get("label")) if payload.get("label") is not None else None),
+                material_state=(str(payload.get("material_state")) if payload.get("material_state") is not None else None),
+                data=payload.get("data") if isinstance(payload.get("data"), dict) else None,
+            ))
+        except (AuthorEditError, TypeError, ValueError) as exc:
+            return _err(CODE_AUTHOR_EDIT_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def retire_relationship(self, payload: dict) -> dict:
+        try:
+            return _ok(author_edit_ops.retire_relationship(
+                str(payload.get("project_id") or ""),
+                base_model_rev=int(payload.get("base_model_rev")), ref=str(payload.get("ref") or ""),
+            ))
+        except (AuthorEditError, TypeError, ValueError) as exc:
+            return _err(CODE_AUTHOR_EDIT_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def set_length_plan(self, payload: dict) -> dict:
+        try:
+            total = payload.get("total_target_words")
+            return _ok(author_edit_ops.set_length_plan(
+                str(payload.get("project_id") or ""),
+                base_model_rev=int(payload.get("base_model_rev")),
+                total_target_words=(int(total) if total is not None else None),
+                stages=payload.get("stages") if isinstance(payload.get("stages"), list) else None,
+                chapter_targets=(payload.get("chapter_targets") if isinstance(payload.get("chapter_targets"), list) else None),
+            ))
+        except (AuthorEditError, TypeError, ValueError) as exc:
+            return _err(CODE_AUTHOR_EDIT_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def create_chapter(self, payload: dict) -> dict:
+        try:
+            return _ok(author_edit_ops.create_chapter(
+                str(payload.get("project_id") or ""), chapter_number=int(payload.get("chapter_number")),
+            ))
+        except (AuthorEditError, TypeError, ValueError) as exc:
+            return _err(CODE_AUTHOR_EDIT_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def save_formal_prose(self, payload: dict) -> dict:
+        try:
+            return _ok(author_edit_ops.save_formal_prose(
+                str(payload.get("project_id") or ""), chapter_number=int(payload.get("chapter_number")),
+                base_content_sha256=str(payload.get("base_content_sha256") or ""),
+                content=str(payload.get("content") or ""),
+            ))
+        except (AuthorEditError, TypeError, ValueError) as exc:
+            return _err(CODE_AUTHOR_EDIT_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def prepare_change_settlement(self, payload: dict) -> dict:
+        try:
+            return _ok(change_settlement_ops.prepare_change_settlement(
+                str(payload.get("project_id") or ""), str(payload.get("change_id") or ""),
+            ))
+        except (ChangeSettlementError, AuthorEditError) as exc:
+            return _err(CODE_CHANGE_SETTLEMENT_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def get_change_settlement_request(self, payload: dict) -> dict:
+        try:
+            return _ok(change_settlement_ops.get_change_settlement_request(str(payload.get("request_id") or "")))
+        except ChangeSettlementError as exc:
+            return _err(CODE_CHANGE_SETTLEMENT_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def cancel_change_settlement_request(self, payload: dict) -> dict:
+        try:
+            return _ok(change_settlement_ops.cancel_change_settlement_request(str(payload.get("request_id") or "")))
+        except ChangeSettlementError as exc:
+            return _err(CODE_CHANGE_SETTLEMENT_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def confirm_change_consequences(self, payload: dict) -> dict:
+        try:
+            indexes = payload.get("accepted_indexes")
+            return _ok(change_settlement_ops.confirm_ambiguous_consequences(
+                str(payload.get("project_id") or ""), str(payload.get("change_id") or ""),
+                indexes if isinstance(indexes, list) else [],
+            ))
+        except (ChangeSettlementError, AuthorEditError) as exc:
+            return _err(CODE_CHANGE_SETTLEMENT_ERROR, str(exc))
         except Exception as exc:  # noqa: BLE001
             return _err(CODE_BRIDGE_INTERNAL, str(exc))
 

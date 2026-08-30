@@ -57,6 +57,12 @@ export interface ProjectOverview {
     latest_id?: string
     latest_occurred?: boolean
   }
+  progress?: {
+    current_chapter: number
+    actual_words: number
+    target_words: number | null
+  }
+  settlement?: SettlementSummary
 }
 
 interface ApiResult<T> {
@@ -357,6 +363,17 @@ export async function confirmNewProject(payload: { proposal_token: string }): Pr
 export interface StoryPlanCandidate {
   proposal: string
   planning_items: string[]
+  planning_projection?: PlanningProjection
+}
+
+export interface PlanningProjection {
+  characters: Array<Record<string, unknown>>
+  relationships: Array<Record<string, unknown>>
+  settings: Array<Record<string, unknown>>
+  storylines: Array<Record<string, unknown>>
+  events: Array<Record<string, unknown>>
+  foreshadowing: Array<Record<string, unknown>>
+  chapter_changes: Array<Record<string, unknown>>
 }
 
 export interface ProposeStoryPlanResult {
@@ -471,6 +488,7 @@ export interface ConfirmStoryWriteResult {
 export async function prepareStoryWrite(payload: {
   project_id: string
   author_input: string
+  chapter_number?: number
 }): Promise<PrepareStoryWriteResult> {
   return call<PrepareStoryWriteResult>('prepare_story_write', payload)
 }
@@ -503,6 +521,10 @@ export interface StoryWriteChapter {
   content: string
   words: number
   scene_count: number
+  content_sha256?: string
+  accepted?: boolean
+  fine_outline_ref?: string | null
+  fine_outline?: Record<string, unknown>
 }
 
 export interface StoryWriteSurface {
@@ -511,6 +533,7 @@ export interface StoryWriteSurface {
   chapters: StoryWriteChapter[]
   active_chapter_number: number
   total_words: number
+  settlement?: SettlementSummary
 }
 
 /** 获取正式已采用正文写作面（只读；按章排序，active = 最新已接受章）。 */
@@ -771,6 +794,12 @@ export interface ProjectDataEntry {
   id: string | null
   label: string
   record: unknown
+  source_ref?: string | null
+  source_kind?: string | null
+  provenance?: string | null
+  category?: string | null
+  status?: 'current' | 'future'
+  editable?: boolean
 }
 
 export interface ProjectDataSections {
@@ -779,22 +808,183 @@ export interface ProjectDataSections {
   canon_facts: ProjectDataEntry[]
   occurred_events: ProjectDataEntry[]
   open_threads: ProjectDataEntry[]
+  foreshadowing: ProjectDataEntry[]
+  storylines: ProjectDataEntry[]
   approved_plan: ProjectDataEntry[]
+}
+
+export interface SettlementChange {
+  change_id: string
+  source_kind: string
+  status: 'pending' | 'failed' | 'awaiting_author' | 'synchronized'
+  delta: Record<string, unknown>
+  semantic?: { summary?: string; consequences?: Array<Record<string, unknown>> } | null
+  error?: string | null
+}
+
+export interface SettlementSummary {
+  status: 'synchronized' | 'pending' | 'failed'
+  pending_count: number
+  failed_count: number
+  changes: SettlementChange[]
+}
+
+export interface LengthPlanView {
+  total_target_words: number | null
+  actual_total_words: number
+  stages: ProjectDataEntry[]
+  chapters: Array<Record<string, unknown> & { chapter_number: number; actual_words: number; ref?: string | null }>
 }
 
 export interface ProjectData {
   project_id: string
   name: string
   state_rev: number | null
+  model_rev: number
   last_authority_source: string | null
   work_direction: string
   reader_promise: string
+  settlement: SettlementSummary
+  length_plan: LengthPlanView
   sections: ProjectDataSections
 }
 
 /** 只读正式 Story State 投影（ProjectData / StoryMap 共用）。 */
 export async function getProjectData(projectId: string): Promise<ProjectData> {
   return call<ProjectData>('get_project_data', { project_id: projectId })
+}
+
+export interface AuthorEditResult {
+  model?: { model_rev: number }
+  change: SettlementChange
+}
+
+export async function createFoundationRecord(payload: {
+  project_id: string
+  base_model_rev: number
+  category: string
+  title: string
+  material_state: 'current' | 'future'
+  data: Record<string, unknown>
+  category_name?: string
+}): Promise<AuthorEditResult> {
+  return call<AuthorEditResult>('create_foundation_record', payload)
+}
+
+export async function updateFoundationRecord(payload: {
+  project_id: string
+  base_model_rev: number
+  ref: string
+  title?: string
+  material_state?: 'current' | 'future'
+  data?: Record<string, unknown>
+}): Promise<AuthorEditResult> {
+  return call<AuthorEditResult>('update_foundation_record', payload)
+}
+
+export async function retireFoundationRecord(payload: {
+  project_id: string
+  base_model_rev: number
+  ref: string
+}): Promise<AuthorEditResult> {
+  return call<AuthorEditResult>('retire_foundation_record', payload)
+}
+
+export async function createRelationship(payload: {
+  project_id: string
+  base_model_rev: number
+  source_ref: string
+  target_ref: string
+  label: string
+  material_state: 'current' | 'future'
+  data: Record<string, unknown>
+}): Promise<AuthorEditResult> {
+  return call<AuthorEditResult>('create_relationship', payload)
+}
+
+export async function updateRelationship(payload: {
+  project_id: string
+  base_model_rev: number
+  ref: string
+  source_ref?: string
+  target_ref?: string
+  label?: string
+  material_state?: 'current' | 'future'
+  data?: Record<string, unknown>
+}): Promise<AuthorEditResult> {
+  return call<AuthorEditResult>('update_relationship', payload)
+}
+
+export async function retireRelationship(payload: {
+  project_id: string
+  base_model_rev: number
+  ref: string
+}): Promise<AuthorEditResult> {
+  return call<AuthorEditResult>('retire_relationship', payload)
+}
+
+export async function setLengthPlan(payload: {
+  project_id: string
+  base_model_rev: number
+  total_target_words: number | null
+  stages?: Array<Record<string, unknown>>
+  chapter_targets?: Array<Record<string, unknown>>
+}): Promise<AuthorEditResult> {
+  return call<AuthorEditResult>('set_length_plan', payload)
+}
+
+export async function createChapter(payload: {
+  project_id: string
+  chapter_number: number
+}): Promise<{ project_id: string; chapter_number: number; change: SettlementChange }> {
+  return call('create_chapter', payload)
+}
+
+export async function saveFormalProse(payload: {
+  project_id: string
+  chapter_number: number
+  base_content_sha256: string
+  content: string
+}): Promise<{
+  project_id: string
+  chapter_number: number
+  content_sha256: string
+  actual_words: number
+  change: SettlementChange
+  message: string
+}> {
+  return call('save_formal_prose', payload)
+}
+
+export interface ChangeSettlementRequest {
+  request_id: string
+  status: 'pending' | 'completed' | 'failed' | 'canceled'
+  message?: string
+  error?: string | null
+  result?: Record<string, unknown>
+}
+
+export async function prepareChangeSettlement(payload: {
+  project_id: string
+  change_id: string
+}): Promise<ChangeSettlementRequest> {
+  return call('prepare_change_settlement', payload)
+}
+
+export async function getChangeSettlementRequest(requestId: string): Promise<ChangeSettlementRequest> {
+  return call('get_change_settlement_request', { request_id: requestId })
+}
+
+export async function cancelChangeSettlementRequest(requestId: string): Promise<ChangeSettlementRequest> {
+  return call('cancel_change_settlement_request', { request_id: requestId })
+}
+
+export async function confirmChangeConsequences(payload: {
+  project_id: string
+  change_id: string
+  accepted_indexes: number[]
+}): Promise<Record<string, unknown>> {
+  return call('confirm_change_consequences', payload)
 }
 
 // ---------------- 作品检查（真实、显式、范围受控的 AI 检查） ----------------
@@ -807,6 +997,7 @@ export interface ReviewSurface {
   chapters: Array<{ chapter_number: number }>
   latest_chapter_number: number | null
   has_accepted_prose: boolean
+  settlement?: SettlementSummary
 }
 
 export interface ReviewIssue {

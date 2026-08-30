@@ -1,0 +1,157 @@
+import { BookOpen, ChevronRight, Plus, Save, Target, Trash2, X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import type { ProjectDataController } from '../projectData/useProjectDataController'
+
+interface StageDraft { ref?: string; title: string; target_words: string; kind: string }
+interface ChapterDraft {
+  ref?: string
+  chapter_number: number
+  title: string
+  min_words: string
+  max_words: string
+  task: string
+  previous_recap: string
+  synopsis: string
+  new_characters: string
+  key_events: string
+  foreshadowing: string
+  notes: string
+  storyline: string
+  conflict: string
+  emotional_movement: string
+  information_gap: string
+  stage: string
+  actual_words: number
+}
+
+const text = (value: unknown) => typeof value === 'string' ? value : ''
+const numberText = (value: unknown) => typeof value === 'number' ? String(value) : ''
+const listText = (value: unknown) => Array.isArray(value) ? value.filter((item) => typeof item === 'string').join('、') : text(value)
+const splitList = (value: string) => value.split(/[、,，\n]/).map((item) => item.trim()).filter(Boolean)
+
+export function PlanningStructure({ controller }: { controller: ProjectDataController }) {
+  const [total, setTotal] = useState('')
+  const [stages, setStages] = useState<StageDraft[]>([])
+  const [chapters, setChapters] = useState<ChapterDraft[]>([])
+  const [editingChapter, setEditingChapter] = useState<number | null>(null)
+
+  useEffect(() => {
+    const plan = controller.data?.length_plan
+    if (!plan) return
+    setTotal(plan.total_target_words == null ? '' : String(plan.total_target_words))
+    setStages(plan.stages.map((item) => {
+      const record = item.record && typeof item.record === 'object' ? item.record as Record<string, unknown> : {}
+      return { ref: item.source_ref ?? undefined, title: item.label, target_words: numberText(record.target_words), kind: text(record.kind) }
+    }))
+    setChapters(plan.chapters.map((item) => ({
+      ref: typeof item.ref === 'string' ? item.ref : undefined,
+      chapter_number: item.chapter_number,
+      title: text(item.title) || `第${item.chapter_number}章`,
+      min_words: numberText(item.min_words), max_words: numberText(item.max_words),
+      task: text(item.task), previous_recap: text(item.previous_recap), synopsis: text(item.synopsis),
+      new_characters: listText(item.new_characters), key_events: listText(item.key_events),
+      foreshadowing: listText(item.foreshadowing), notes: text(item.notes), storyline: text(item.storyline),
+      conflict: text(item.conflict), emotional_movement: text(item.emotional_movement),
+      information_gap: text(item.information_gap), stage: text(item.stage), actual_words: item.actual_words,
+    })))
+  }, [controller.data?.length_plan])
+
+  const activeChapter = useMemo(
+    () => chapters.find((item) => item.chapter_number === editingChapter) ?? null,
+    [chapters, editingChapter],
+  )
+
+  const updateChapter = (patch: Partial<ChapterDraft>) => {
+    if (!activeChapter) return
+    setChapters((items) => items.map((item) => item.chapter_number === activeChapter.chapter_number ? { ...item, ...patch } : item))
+  }
+
+  const addChapter = () => {
+    const next = Math.max(0, ...chapters.map((item) => item.chapter_number)) + 1
+    setChapters((items) => [...items, {
+      chapter_number: next, title: `第${next}章`, min_words: '2500', max_words: '4000',
+      task: '', previous_recap: '', synopsis: '', new_characters: '', key_events: '',
+      foreshadowing: '', notes: '', storyline: '', conflict: '', emotional_movement: '',
+      information_gap: '', stage: '', actual_words: 0,
+    }])
+    setEditingChapter(next)
+  }
+
+  const save = async () => {
+    const totalWords = total.trim() ? Number(total) : null
+    const stagePayload = stages.map((item) => ({
+      ...(item.ref ? { ref: item.ref } : {}), title: item.title.trim(),
+      target_words: Number(item.target_words || 0), ...(item.kind.trim() ? { kind: item.kind.trim() } : {}),
+    })).filter((item) => item.title)
+    const chapterPayload = chapters.filter((item) => item.min_words && item.max_words).map((item) => ({
+      ...(item.ref ? { ref: item.ref } : {}), title: item.title.trim() || `第${item.chapter_number}章`,
+      chapter_number: item.chapter_number, min_words: Number(item.min_words), max_words: Number(item.max_words),
+      chapter_title: item.title.trim(), task: item.task.trim(), previous_recap: item.previous_recap.trim(),
+      synopsis: item.synopsis.trim(), new_characters: splitList(item.new_characters), key_events: splitList(item.key_events),
+      foreshadowing: splitList(item.foreshadowing), notes: item.notes.trim(), storyline: item.storyline.trim(),
+      conflict: item.conflict.trim(), emotional_movement: item.emotional_movement.trim(),
+      information_gap: item.information_gap.trim(), stage: item.stage.trim(),
+    }))
+    await controller.saveLengthPlan({ total_target_words: totalWords, stages: stagePayload, chapter_targets: chapterPayload })
+  }
+
+  return (
+    <section className="panel planning-structure">
+      <header className="planning-structure-head">
+        <div><h2><Target /> 全书与章节规划</h2><p className="muted-note">总目标 → 可选阶段 → 章节范围 → 正式正文实际字数。阶段结构按作品需要使用，不强制分卷。</p></div>
+        <button className="primary" disabled={controller.saving} onClick={() => void save()}><Save /> {controller.saving ? '保存中…' : '保存规划'}</button>
+      </header>
+
+      <div className="length-overview">
+        <label>全书目标字数<input type="number" min="0" value={total} onChange={(event) => setTotal(event.target.value)} placeholder="例如 200000" /></label>
+        <div><strong>{controller.data?.length_plan.actual_total_words.toLocaleString() ?? 0}</strong><span>已完成字数</span></div>
+        <div><strong>{total ? `${Math.min(100, Math.round(((controller.data?.length_plan.actual_total_words ?? 0) / Number(total)) * 100))}%` : '—'}</strong><span>全书进度</span></div>
+      </div>
+
+      <div className="planning-structure-grid">
+        <section className="stage-planning">
+          <header><h3>阶段 / 分卷 / 篇章预算</h3><button onClick={() => setStages((items) => [...items, { title: '', target_words: '', kind: '' }])}><Plus /> 添加</button></header>
+          {stages.length === 0 && <p className="muted-note">可选。作品不需要阶段层级时可以留空。</p>}
+          {stages.map((stage, index) => (
+            <div className="stage-row" key={stage.ref ?? index}>
+              <input aria-label="阶段名称" value={stage.title} onChange={(event) => setStages((items) => items.map((item, i) => i === index ? { ...item, title: event.target.value } : item))} placeholder="第一幕 / 第一卷 / 调查阶段" />
+              <input aria-label="阶段字数" type="number" min="0" value={stage.target_words} onChange={(event) => setStages((items) => items.map((item, i) => i === index ? { ...item, target_words: event.target.value } : item))} placeholder="目标字数" />
+              <input aria-label="阶段类型" value={stage.kind} onChange={(event) => setStages((items) => items.map((item, i) => i === index ? { ...item, kind: event.target.value } : item))} placeholder="类型（可选）" />
+              <button aria-label="删除阶段" onClick={() => setStages((items) => items.filter((_, i) => i !== index))}><Trash2 /></button>
+            </div>
+          ))}
+        </section>
+
+        <section className="chapter-planning">
+          <header><h3><BookOpen /> 章节细纲</h3><button onClick={addChapter}><Plus /> 添加章节</button></header>
+          <div className="chapter-plan-list">
+            {chapters.map((chapter) => (
+              <button key={chapter.chapter_number} onClick={() => setEditingChapter(chapter.chapter_number)}>
+                <span><strong>{chapter.title}</strong><small>{chapter.task || '尚未填写章节任务'}</small></span>
+                <span>{chapter.min_words && chapter.max_words ? `${chapter.min_words}–${chapter.max_words} 字` : '未设目标'}<small>实际 {chapter.actual_words.toLocaleString()} 字</small></span>
+                <ChevronRight />
+              </button>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      {activeChapter && (
+        <aside className="record-drawer chapter-outline-drawer panel" aria-label="章节细纲编辑">
+          <header><h2>第 {activeChapter.chapter_number} 章细纲</h2><button onClick={() => setEditingChapter(null)}><X /></button></header>
+          <label>章节标题<input value={activeChapter.title} onChange={(event) => updateChapter({ title: event.target.value })} /></label>
+          <div className="two-fields"><label>目标最少字数<input type="number" min="0" value={activeChapter.min_words} onChange={(event) => updateChapter({ min_words: event.target.value })} /></label><label>目标最多字数<input type="number" min="0" value={activeChapter.max_words} onChange={(event) => updateChapter({ max_words: event.target.value })} /></label></div>
+          <label>章节任务 / 目的<textarea value={activeChapter.task} onChange={(event) => updateChapter({ task: event.target.value })} /></label>
+          <label>上一章回顾<textarea value={activeChapter.previous_recap} onChange={(event) => updateChapter({ previous_recap: event.target.value })} /></label>
+          <label>章节梗概<textarea rows={4} value={activeChapter.synopsis} onChange={(event) => updateChapter({ synopsis: event.target.value })} /></label>
+          <div className="two-fields"><label>新登场人物<input value={activeChapter.new_characters} onChange={(event) => updateChapter({ new_characters: event.target.value })} /></label><label>故事线<input value={activeChapter.storyline} onChange={(event) => updateChapter({ storyline: event.target.value })} /></label></div>
+          <label>关键事件<textarea value={activeChapter.key_events} onChange={(event) => updateChapter({ key_events: event.target.value })} /></label>
+          <label>伏笔 / 埋设 / 回收<textarea value={activeChapter.foreshadowing} onChange={(event) => updateChapter({ foreshadowing: event.target.value })} /></label>
+          <details><summary>更多可选项</summary><label>冲突<input value={activeChapter.conflict} onChange={(event) => updateChapter({ conflict: event.target.value })} /></label><label>情绪移动<input value={activeChapter.emotional_movement} onChange={(event) => updateChapter({ emotional_movement: event.target.value })} /></label><label>信息差<input value={activeChapter.information_gap} onChange={(event) => updateChapter({ information_gap: event.target.value })} /></label><label>阶段 / 分卷关联<input value={activeChapter.stage} onChange={(event) => updateChapter({ stage: event.target.value })} /></label></details>
+          <label>作者备注<textarea rows={3} value={activeChapter.notes} onChange={(event) => updateChapter({ notes: event.target.value })} /></label>
+          <footer><button className="danger" onClick={() => { setChapters((items) => items.filter((item) => item.chapter_number !== activeChapter.chapter_number)); setEditingChapter(null) }}><Trash2 /> 删除细纲</button><button className="primary" onClick={() => { setEditingChapter(null); void save() }}><Save /> 保存全部规划</button></footer>
+        </aside>
+      )}
+    </section>
+  )
+}

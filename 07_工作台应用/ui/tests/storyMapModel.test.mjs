@@ -29,6 +29,8 @@ function makeData(overrides = {}) {
       canon_facts: [],
       occurred_events: [],
       open_threads: [],
+      foreshadowing: [],
+      storylines: [],
       approved_plan: [],
     },
     ...overrides,
@@ -146,4 +148,44 @@ test('describeRecord 跳过机械键、保留真实字段', () => {
   assert.ok(!keys.includes('id') && !keys.includes('authority') && !keys.includes('name'))
   assert.deepEqual(fields.find((f) => f.key === 'note'), { key: 'note', label: '备注', value: '主角' })
   assert.deepEqual(fields.find((f) => f.key === 'tags'), { key: 'tags', label: 'tags', value: '医生、雾城' })
+})
+
+test('当前与规划中的人物关系保持清晰状态并保留统一编辑源', () => {
+  const data = makeData({
+    sections: {
+      characters: [
+        { id: 'obj:1', label: '当前人物', source_ref: 'obj:1', status: 'current', editable: true, record: { name: '当前人物' } },
+        { id: 'obj:2', label: '规划人物', source_ref: 'obj:2', status: 'future', editable: true, record: { name: '规划人物' } },
+      ],
+      relationships: [
+        { id: 'edge:1', label: '未来合作', source_ref: 'edge:1', status: 'future', editable: true, record: { source: 'obj:1', target: 'obj:2' } },
+      ],
+      canon_facts: [], occurred_events: [], open_threads: [], foreshadowing: [], storylines: [], approved_plan: [],
+    },
+  })
+  const graph = projectRelationshipGraph(data)
+  assert.deepEqual(graph.nodes.map((item) => item.status), ['current', 'future'])
+  assert.equal(graph.edges[0].status, 'future')
+  assert.equal(graph.edges[0].sourceRef, 'edge:1')
+  assert.equal(graph.edges[0].editable, true)
+})
+
+test('时间事件区分已发生与规划，线索视图同时包含结构化伏笔', () => {
+  const data = makeData({
+    sections: {
+      characters: [], relationships: [], canon_facts: [], storylines: [], approved_plan: [],
+      occurred_events: [
+        { id: 'e1', label: '已经发生', status: 'current', record: {} },
+        { id: 'e2', label: '未来事件', status: 'future', record: { relative_duration: '一年后' } },
+      ],
+      open_threads: [{ id: 't1', label: '谁寄了信', status: 'current', record: {} }],
+      foreshadowing: [{ id: 'f1', label: '旧信', source_ref: 'obj:f1', status: 'future', editable: true, record: { status: 'planned' } }],
+    },
+  })
+  const timeline = projectTimeEvents(data)
+  assert.deepEqual(timeline.items.map((item) => item.status), ['current', 'future'])
+  const threads = projectOpenThreads(data)
+  assert.deepEqual(threads.map((item) => item.kind), ['thread', 'foreshadowing'])
+  assert.equal(threads[1].status, 'future')
+  assert.equal(threads[1].sourceRef, 'obj:f1')
 })

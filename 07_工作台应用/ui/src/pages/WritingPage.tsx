@@ -1,4 +1,4 @@
-import { Bot, Check, CircleCheck, FolderOpen, PenLine, RefreshCw, Sparkles, X } from 'lucide-react'
+import { Bot, Check, CircleCheck, FolderOpen, PenLine, Plus, RefreshCw, Save, Sparkles, X } from 'lucide-react'
 import { ExecutionSummary } from '../components/ExecutionSummary'
 import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
@@ -10,8 +10,8 @@ import { StatusBadge } from '../components/StatusBadge'
  *
  * - 右侧只有一个协作面板：动作前保持安静，候选只在实际生成后出现；
  *   不再同时存在常驻的“AI 助手”与“AI 候选稿”两个重复面板；
- * - 保留 StoryWrite 两阶段执行与候选接受流程；已采用正文按合同如实只读；
- * - 不伪造手动保存 / 自动保存 / 新建章节 / 语义结算 / 时间戳。
+ * - 保留 StoryWrite 两阶段执行与候选接受流程；正式正文使用显式保存；
+ * - 新章节、stale guard、修订索引与语义同步都走真实后端合同，无假 autosave。
  */
 
 export function WritingPage() {
@@ -56,6 +56,7 @@ export function WritingPage() {
       <aside className="panel chapters">
         <header>
           <h2>章节目录</h2>
+          <button aria-label="新建章节" disabled={state.saving || state.editorDirty} onClick={() => void c.createChapter()}><Plus /></button>
         </header>
         {state.writingSurface?.chapters.map((ch) => (
           <button
@@ -79,31 +80,55 @@ export function WritingPage() {
         <header>
           <h2>{selectedChapter ? selectedChapter.title : '已采用正文'}</h2>
           <span>
-            <span className="readonly-label">
+            <span className="readonly-label editable-label">
               <CircleCheck size={15} />
-              已采用正文（只读）
+              正式正文 · 显式保存
             </span>
             {state.writingSurface ? `${state.writingSurface.total_words.toLocaleString()} 字` : ''}
           </span>
         </header>
         <textarea
-          aria-label="已采用正文（只读）"
-          value={selectedChapter?.content ?? ''}
-          readOnly
-          placeholder="还没有已采用的正文。在右侧写下这一段想写什么，生成候选并确认后，正文会出现在这里。"
+          aria-label="正式正文编辑器"
+          value={state.editorContent}
+          onChange={(event) => c.setEditorContent(event.target.value)}
+          disabled={!selectedChapter?.content_sha256}
+          placeholder={selectedChapter?.content_sha256 ? '开始写这一章…' : '这是尚未创建的章节位置。点击左侧“+”新建正式章节后即可编辑。'}
         />
         <footer>
           <span>
-            {selectedChapter ? `${selectedChapter.words.toLocaleString()} 字` : ''}
+            {selectedChapter ? `${state.editorContent.length.toLocaleString()} 字` : ''}
             {selectedChapter && selectedChapter.scene_count > 0
               ? `　已收录 ${selectedChapter.scene_count} 段`
               : ''}
           </span>
-          <span>
-            <CircleCheck size={15} />
-            正式正文，来自作品工程
-          </span>
+          <div className="editor-save-actions">
+            {state.editorDirty && <span className="unsaved-note">有未保存修改</span>}
+            <button disabled={!state.editorDirty || state.saving} onClick={() => void c.save(false)}><Save /> 仅保存</button>
+            <button className="primary" disabled={!state.editorDirty || state.saving} onClick={() => void c.save(true)}><Save /> 保存并同步</button>
+          </div>
         </footer>
+
+        {state.settlementStatus === 'syncing' && <div className="sync-warning">正文已保存，正在增量同步人物、关系、事件、时间与伏笔状态…</div>}
+        {state.pendingChanges.map((change) => {
+          const consequences = change.semantic?.consequences ?? []
+          const undecidedIndexes = consequences
+            .map((item, index) => item.classification !== 'mechanically_certain' ? index : -1)
+            .filter((index) => index >= 0)
+          return (
+            <section className="settlement-card" key={change.change_id}>
+              <strong>{change.status === 'awaiting_author' ? '有语义后果需要你决定' : change.status === 'failed' ? '作品状态同步失败' : '作品状态等待同步'}</strong>
+              {change.semantic?.summary && <p>{change.semantic.summary}</p>}
+              {change.error && <p className="error-text">{change.error}</p>}
+              {change.status === 'awaiting_author' && (
+                <ul>{undecidedIndexes.map((index) => <li key={index}>{String(consequences[index].title ?? '未命名后果')} · {String(consequences[index].reason ?? '')}</li>)}</ul>
+              )}
+              <div className="candidate-actions">
+                {(change.status === 'failed' || change.status === 'pending') && <button onClick={() => void c.retrySettlement(change.change_id)}><RefreshCw /> 重试同步</button>}
+                {change.status === 'awaiting_author' && <><button className="primary" onClick={() => void c.confirmConsequences(change.change_id, undecidedIndexes)}>采用这些后果</button><button onClick={() => void c.confirmConsequences(change.change_id, [])}>只保留正文</button></>}
+              </div>
+            </section>
+          )
+        })}
       </section>
 
       <aside className="panel ai-collab">

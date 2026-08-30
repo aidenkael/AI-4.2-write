@@ -1858,3 +1858,42 @@ def test_discard_cannot_touch_other_project(isolated, real_project, fake_agent):
         project_id=other["project_id"], planning_token=result_b["planning_token"],
     )
     assert confirmed["message"] == "规划已确认并写入"
+
+
+def test_confirmed_projection_creates_future_entities_only(isolated, real_project, fake_agent):
+    from operations.project_snapshot import get_project_snapshot
+    from operations.project_model import ARTIFACT_NAME
+
+    output = json.loads(VALID_AGENT_JSON)
+    output["planning_projection"] = {
+        "characters": [
+            {"key": "lead", "title": "林砚", "role": "主角"},
+            {"key": "ally", "title": "苏晚晴", "role": "盟友"},
+        ],
+        "relationships": [
+            {"source_key": "lead", "target_key": "ally", "label": "规划中的同盟"},
+        ],
+        "settings": [], "storylines": [], "events": [], "foreshadowing": [],
+        "chapter_changes": [{
+            "title": "第一章", "chapter_number": 1, "min_words": 2500, "max_words": 3500,
+            "task": "让两人第一次合作", "synopsis": "共同处理一封匿名信",
+        }],
+    }
+
+    def write_response(request_id):
+        fake_agent(request_id, output=json.dumps(output, ensure_ascii=False))
+
+    result = _propose(real_project["project_id"], "规划第一章", write_response)
+    assert result["candidate"]["planning_projection"]["characters"][0]["title"] == "林砚"
+    model_path = Path(real_project["project_dir"]) / "_工作台状态" / ARTIFACT_NAME
+    assert not model_path.exists(), "未确认候选不得创建作者工作区投影"
+
+    confirmed = sp_ops.confirm_story_plan(
+        project_id=real_project["project_id"], planning_token=result["planning_token"],
+    )
+    assert confirmed["planning_projection_count"] == 4
+    snapshot = get_project_snapshot(real_project["project_id"])
+    assert [item["title"] for item in snapshot["current"]["characters"]] == []
+    assert [item["title"] for item in snapshot["future"]["characters"]] == ["林砚", "苏晚晴"]
+    assert snapshot["future"]["relationships"][0]["title"] == "规划中的同盟"
+    assert snapshot["chapters"][0]["fine_outline"]["task"] == "让两人第一次合作"

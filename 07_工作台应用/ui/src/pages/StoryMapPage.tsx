@@ -1,7 +1,8 @@
-import { GitBranch, Hourglass, ListTree, Maximize2, RefreshCw } from 'lucide-react'
+import { GitBranch, Hourglass, ListTree, Maximize2, Pencil, RefreshCw } from 'lucide-react'
 import cytoscape, { type Core } from 'cytoscape'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
+import { useApp } from '../features/app/AppStore'
 import { useProjectDataController } from '../features/projectData/useProjectDataController'
 import {
   projectOpenThreads,
@@ -34,6 +35,17 @@ interface SelectedDetail {
   kind: '人物' | '关系'
   label: string
   fields: RecordField[]
+  status: 'current' | 'future'
+  sourceRef: string | null
+  sourceKind: string | null
+  editable: boolean
+}
+
+const sourceLabel = (sourceKind: string | null) => {
+  if (sourceKind === 'production_story_state') return '已采用正文与作品状态'
+  if (sourceKind === 'approved_plan') return '已确认规划'
+  if (sourceKind === 'author_workspace_relationship' || sourceKind === 'author_workspace') return '作者编辑'
+  return '作品数据'
 }
 
 function DetailFields({ fields }: { fields: RecordField[] }) {
@@ -48,6 +60,7 @@ function DetailFields({ fields }: { fields: RecordField[] }) {
 }
 
 export function StoryMapPage() {
+  const { actions } = useApp()
   const { selected } = useFormalProjectShell()
   const controller = useProjectDataController(selected?.project_id ?? null)
   const [tab, setTab] = useState<MapTab>('graph')
@@ -66,8 +79,8 @@ export function StoryMapPage() {
     const cy = cytoscape({
       container: graphHostRef.current,
       elements: [
-        ...graph.nodes.map((n) => ({ data: { id: n.id, label: n.short } })),
-        ...graph.edges.map((e) => ({ data: { id: e.id, source: e.source, target: e.target, label: e.label } })),
+        ...graph.nodes.map((n) => ({ data: { id: n.id, label: n.short, status: n.status } })),
+        ...graph.edges.map((e) => ({ data: { id: e.id, source: e.source, target: e.target, label: e.label, status: e.status } })),
       ],
       style: [
         {
@@ -87,6 +100,15 @@ export function StoryMapPage() {
           },
         },
         {
+          selector: 'node[status = "future"]',
+          style: {
+            'background-color': '#ffffff',
+            'border-color': '#6f91df',
+            'border-width': 3,
+            'border-style': 'dashed',
+          },
+        },
+        {
           selector: 'edge',
           style: {
             label: 'data(label)',
@@ -100,6 +122,10 @@ export function StoryMapPage() {
             'text-max-width': '140px',
           },
         },
+        {
+          selector: 'edge[status = "future"]',
+          style: { 'line-style': 'dashed', 'line-color': '#9aa8c5', color: '#7c89a3' },
+        },
         { selector: ':selected', style: { 'overlay-opacity': 0.15, 'overlay-color': '#2868f7' } },
       ],
       wheelSensitivity: 0.2,
@@ -109,11 +135,17 @@ export function StoryMapPage() {
     cy.layout({ name: graph.edges.length > 0 ? 'cose' : 'grid', animate: false, fit: true, padding: 24 } as never).run()
     cy.on('tap', 'node', (event) => {
       const node = graph.nodes.find((n) => n.id === event.target.id())
-      if (node) setDetail({ kind: '人物', label: node.label, fields: node.fields })
+      if (node) setDetail({
+        kind: '人物', label: node.label, fields: node.fields, status: node.status,
+        sourceRef: node.sourceRef, sourceKind: node.sourceKind, editable: node.editable,
+      })
     })
     cy.on('tap', 'edge', (event) => {
       const edge = graph.edges.find((e) => e.id === event.target.id())
-      if (edge) setDetail({ kind: '关系', label: edge.label, fields: edge.fields })
+      if (edge) setDetail({
+        kind: '关系', label: edge.label, fields: edge.fields, status: edge.status,
+        sourceRef: edge.sourceRef, sourceKind: edge.sourceKind, editable: edge.editable,
+      })
     })
     cyRef.current = cy
     return () => {
@@ -128,6 +160,12 @@ export function StoryMapPage() {
 
   if (!selected) {
     return <div className="empty-state">请先选择正式作品。</div>
+  }
+
+  const editSource = (sourceRef: string | null) => {
+    if (!sourceRef) return
+    actions.setFoundationEditHandoff({ project_id: selected.project_id, source_ref: sourceRef })
+    actions.setProjectSection('foundation')
   }
 
   return (
@@ -159,7 +197,9 @@ export function StoryMapPage() {
             {graph.nodes.length > 0 && (
               <div className="map-graph-tools">
                 <button onClick={() => cyRef.current?.fit(undefined, 24)}><Maximize2 /> 适应视图</button>
-                <span className="muted-note">{graph.nodes.length} 人物 · {graph.edges.length} 连线 · 只读派生视图</span>
+                <span className="muted-note">
+                  {graph.nodes.length} 人物 · {graph.edges.length} 连线 · 实心为当前、虚线为规划中
+                </span>
               </div>
             )}
             {graph.unresolved.length > 0 && (
@@ -169,7 +209,9 @@ export function StoryMapPage() {
                   {graph.unresolved.map((u) => (
                     <li key={`${u.id}-${u.reason}`}>
                       <strong>{u.label}</strong>
+                      <span className={`material-state ${u.status}`}>{u.status === 'future' ? '规划中' : '当前'}</span>
                       <span className="muted-note">{u.reason}</span>
+                      {u.editable && <button onClick={() => editSource(u.sourceRef)}><Pencil /> 编辑源记录</button>}
                     </li>
                   ))}
                 </ul>
@@ -180,7 +222,10 @@ export function StoryMapPage() {
             {detail ? (
               <>
                 <h3>{detail.kind} · {detail.label}</h3>
+                <p><span className={`material-state ${detail.status}`}>{detail.status === 'future' ? '规划中' : '当前'}</span></p>
+                <p className="muted-note">来源：{sourceLabel(detail.sourceKind)}</p>
                 <DetailFields fields={detail.fields} />
+                {detail.editable && <button onClick={() => editSource(detail.sourceRef)}><Pencil /> 编辑源记录</button>}
               </>
             ) : (
               <p className="muted-note">点击图中人物或连线，查看其真实记录详情。</p>
@@ -204,8 +249,9 @@ export function StoryMapPage() {
                   <span className={`map-timeline-dot ${item.anchor ? 'anchored' : ''}`} />
                   <div>
                     {item.anchor && <strong className="map-timeline-anchor">{item.anchor}</strong>}
-                    <p>{item.label}</p>
+                    <p>{item.label} <span className={`material-state ${item.status}`}>{item.status === 'future' ? '规划中' : '已发生/当前'}</span></p>
                     {!item.anchor && <small className="muted-note">无精确时间锚点 · 叙事顺序 {item.order + 1}</small>}
+                    {item.editable && <button onClick={() => editSource(item.sourceRef)}><Pencil /> 编辑源记录</button>}
                   </div>
                 </li>
               ))}
@@ -222,14 +268,16 @@ export function StoryMapPage() {
           {threads.map((t) => (
             <article className="map-thread-card" key={t.id}>
               <h3>{t.label}</h3>
+              <p><span className={`material-state ${t.status}`}>{t.status === 'future' ? '规划中' : '当前'}</span> · {t.kind === 'foreshadowing' ? '伏笔/承诺' : '未解决线索'}</p>
               <DetailFields fields={t.fields} />
+              {t.editable && <button onClick={() => editSource(t.sourceRef)}><Pencil /> 编辑源记录</button>}
             </article>
           ))}
         </div>
       )}
 
       <footer className="map-note">
-        <p className="muted-note"><RefreshCw size={13} /> 地图是正式 Story State 的只读派生视图；人物/关系的源记录在作品地基中查看，本页不持有第二套事实。</p>
+        <p className="muted-note"><RefreshCw size={13} /> 地图只从当前作品数据生成；编辑会回到作品地基的同一条源记录，本页不保存第二份故事事实。</p>
       </footer>
     </div>
   )

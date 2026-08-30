@@ -39,9 +39,11 @@ _FOUNDATION_CATEGORIES = {
     "organization_force",
     "story_line",
     "promise_foreshadowing",
+    "event",
     "custom",
 }
 _MATERIAL_STATES = {"current", "future"}
+_UNSET = object()
 
 
 class ProjectModelError(Exception):
@@ -195,6 +197,24 @@ def load_project_model(project_id: str) -> dict[str, Any]:
     """Load the isolated model, lazily creating a revision-0 artifact if absent."""
     model, _ = _load_or_initialize(project_id)
     return copy.deepcopy(model)
+
+
+def read_project_model(project_id: str) -> dict[str, Any]:
+    """Read the author model without creating an artifact.
+
+    Snapshot/read-model consumers must stay read-only.  A project that has not
+    received author-workspace edits therefore gets an in-memory revision-0
+    model; the first real mutation still creates the artifact atomically.
+    """
+    loaded = _require_project(project_id)
+    artifact = _artifact_path(loaded)
+    if not artifact.exists():
+        return _initial_model(project_id)
+    try:
+        model = json.loads(artifact.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ProjectModelError(f"项目模型读取失败：{exc}") from exc
+    return copy.deepcopy(_validate_model(model, project_id))
 
 
 def _next_ref(model: dict[str, Any], prefix: str) -> str:
@@ -388,13 +408,17 @@ def set_length_plan(
     project_id: str,
     *,
     base_model_rev: int,
-    total_target_words: int | None = None,
+    total_target_words: int | None | object = _UNSET,
     stages: list[dict[str, Any]] | None = None,
     chapter_targets: list[dict[str, Any]] | None = None,
     actual_word_counts: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """Set only explicit soft planning values; never derives actual word counts."""
-    if total_target_words is not None and (not isinstance(total_target_words, int) or total_target_words < 0):
+    if total_target_words is not _UNSET and total_target_words is not None and (
+        not isinstance(total_target_words, int)
+        or isinstance(total_target_words, bool)
+        or total_target_words < 0
+    ):
         raise ProjectModelError("total_target_words 必须是非负整数。")
     if stages is not None and not isinstance(stages, list):
         raise ProjectModelError("stages 必须是列表或省略。")
@@ -480,7 +504,7 @@ def set_length_plan(
     def mutate(model: dict[str, Any], next_rev: int) -> dict[str, Any]:
         plan = model["length_plan"]
         changed: dict[str, Any] = {}
-        if total_target_words is not None and plan.get("total_target_words") != total_target_words:
+        if total_target_words is not _UNSET and plan.get("total_target_words") != total_target_words:
             changed["total_target_words"] = {
                 "before": plan.get("total_target_words"), "after": total_target_words,
             }
@@ -526,10 +550,17 @@ def add_dependency(
     source_ref: str,
     target_ref: str,
     relation_kind: str,
+    title: str | None = None,
+    material_state: str = "current",
+    data: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Record one explicit direct dependency; no semantic inference is performed."""
     if not isinstance(relation_kind, str) or not relation_kind.strip():
         raise ProjectModelError("relation_kind 不能为空。")
+    if title is not None and (not isinstance(title, str) or not title.strip()):
+        raise ProjectModelError("依赖 title 不能为空。")
+    material_state = _validate_material_state(material_state)
+    edge_data = _validate_data(data)
 
     def mutate(model: dict[str, Any], _next_rev: int) -> dict[str, Any]:
         _active_object(model, source_ref)
@@ -540,11 +571,246 @@ def add_dependency(
             "source_ref": source_ref,
             "target_ref": target_ref,
             "relation_kind": relation_kind.strip(),
+            "title": title.strip() if isinstance(title, str) else relation_kind.strip(),
+            "material_state": material_state,
+            "data": edge_data,
             "tombstoned": False,
         }
         return {"ref": edge_ref, "action": "created", "source_ref": source_ref, "target_ref": target_ref}
 
     return _commit(project_id, base_model_rev, "dependency.created", mutate)
+
+
+def update_dependency(
+    project_id: str,
+    *,
+    base_model_rev: int,
+    ref: str,
+    source_ref: str | None = None,
+    target_ref: str | None = None,
+    relation_kind: str | None = None,
+    title: str | None = None,
+    material_state: str | None = None,
+    data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Update one explicit dependency while preserving its stable identity."""
+    if relation_kind is not None and (not isinstance(relation_kind, str) or not relation_kind.strip()):
+        raise ProjectModelError("relation_kind 不能为空。")
+    if title is not None and (not isinstance(title, str) or not title.strip()):
+        raise ProjectModelError("依赖 title 不能为空。")
+    if material_state is not None:
+        _validate_material_state(material_state)
+    if data is not None:
+        data = _validate_data(data)
+
+    def mutate(model: dict[str, Any], _next_rev: int) -> dict[str, Any]:
+        edge = model["dependencies"].get(ref)
+        if not isinstance(edge, dict):
+            raise ProjectModelError("未知或跨项目依赖 ref，已拒绝。")
+        if edge.get("tombstoned"):
+            raise ProjectModelError("依赖 ref 已 tombstone，不能再编辑。")
+        next_source = source_ref if source_ref is not None else edge["source_ref"]
+        next_target = target_ref if target_ref is not None else edge["target_ref"]
+        _active_object(model, next_source)
+        _active_object(model, next_target)
+        if next_source == next_target:
+            raise ProjectModelError("关系两端不能指向同一对象。")
+        changes: dict[str, dict[str, Any]] = {}
+        replacements = {
+            "source_ref": next_source,
+            "target_ref": next_target,
+            "relation_kind": relation_kind.strip() if isinstance(relation_kind, str) else edge.get("relation_kind"),
+            "title": title.strip() if isinstance(title, str) else edge.get("title", edge.get("relation_kind")),
+            "material_state": material_state if material_state is not None else edge.get("material_state", "current"),
+            "data": data if data is not None else copy.deepcopy(edge.get("data") or {}),
+        }
+        for key, value in replacements.items():
+            if edge.get(key) != value:
+                changes[key] = {"before": copy.deepcopy(edge.get(key)), "after": copy.deepcopy(value)}
+                edge[key] = value
+        if not changes:
+            raise ProjectModelError("关系编辑未产生任何实际变化。")
+        return {"ref": ref, "action": "updated", "changes": changes}
+
+    return _commit(project_id, base_model_rev, "dependency.updated", mutate)
+
+
+def tombstone_dependency(project_id: str, *, base_model_rev: int, ref: str) -> dict[str, Any]:
+    """Retire one explicit dependency without deleting its history."""
+    def mutate(model: dict[str, Any], next_rev: int) -> dict[str, Any]:
+        edge = model["dependencies"].get(ref)
+        if not isinstance(edge, dict):
+            raise ProjectModelError("未知或跨项目依赖 ref，已拒绝。")
+        if edge.get("tombstoned"):
+            raise ProjectModelError("依赖 ref 已 tombstone。")
+        edge["tombstoned"] = True
+        edge["tombstoned_at_rev"] = next_rev
+        return {"ref": ref, "action": "tombstoned"}
+
+    return _commit(project_id, base_model_rev, "dependency.tombstoned", mutate)
+
+
+def create_relationship(
+    project_id: str,
+    *,
+    base_model_rev: int,
+    source_ref: str,
+    target_ref: str,
+    label: str,
+    material_state: str = "current",
+    data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Create the single editable author-managed character relationship contract."""
+    if not isinstance(label, str) or not label.strip():
+        raise ProjectModelError("关系名称不能为空。")
+
+    def ensure_character(model: dict[str, Any], ref: str) -> None:
+        item = _active_object(model, ref)
+        if item.get("kind") != "foundation" or item.get("category") != "character":
+            raise ProjectModelError("人物关系端点必须是活动人物记录。")
+
+    material_state = _validate_material_state(material_state)
+    relation_data = _validate_data(data)
+
+    def mutate(model: dict[str, Any], _next_rev: int) -> dict[str, Any]:
+        ensure_character(model, source_ref)
+        ensure_character(model, target_ref)
+        if source_ref == target_ref:
+            raise ProjectModelError("关系两端不能指向同一人物。")
+        edge_ref = _next_ref(model, "edge")
+        model["dependencies"][edge_ref] = {
+            "ref": edge_ref,
+            "source_ref": source_ref,
+            "target_ref": target_ref,
+            "relation_kind": "character_relationship",
+            "title": label.strip(),
+            "material_state": material_state,
+            "data": relation_data,
+            "tombstoned": False,
+        }
+        return {"ref": edge_ref, "action": "created", "source_ref": source_ref, "target_ref": target_ref}
+
+    return _commit(project_id, base_model_rev, "relationship.created", mutate)
+
+
+def validate_planning_projection(value: Any) -> dict[str, list[dict[str, Any]]]:
+    """Strict, side-effect-free validation for the optional StoryPlan projection."""
+    if value is None:
+        value = {}
+    if not isinstance(value, dict):
+        raise ProjectModelError("planning_projection 必须是对象。")
+    allowed = {
+        "characters", "relationships", "settings", "storylines", "events",
+        "foreshadowing", "chapter_changes",
+    }
+    unknown = set(value) - allowed
+    if unknown:
+        raise ProjectModelError(f"planning_projection 包含未知字段：{', '.join(sorted(unknown))}。")
+    normalized: dict[str, list[dict[str, Any]]] = {}
+    for key in sorted(allowed):
+        entries = value.get(key, [])
+        if not isinstance(entries, list):
+            raise ProjectModelError(f"planning_projection.{key} 必须是列表。")
+        normalized[key] = []
+        for index, entry in enumerate(entries):
+            if not isinstance(entry, dict):
+                raise ProjectModelError(f"planning_projection.{key}[{index}] 必须是对象。")
+            item = copy.deepcopy(entry)
+            if key == "relationships":
+                required = ("source_key", "target_key", "label")
+                if any(not isinstance(item.get(field), str) or not item[field].strip() for field in required):
+                    raise ProjectModelError("规划关系必须提供 source_key、target_key、label。")
+            else:
+                title = item.get("title") or item.get("name")
+                if not isinstance(title, str) or not title.strip():
+                    raise ProjectModelError(f"planning_projection.{key}[{index}] 缺少 title/name。")
+                item["title"] = title.strip()
+                if key != "chapter_changes":
+                    entity_key = item.get("key") or item["title"]
+                    if not isinstance(entity_key, str) or not entity_key.strip():
+                        raise ProjectModelError("规划实体 key 必须是非空字符串。")
+                    item["key"] = entity_key.strip()
+            normalized[key].append(item)
+    return normalized
+
+
+def apply_planning_projection(
+    project_id: str,
+    *,
+    base_model_rev: int,
+    projection: dict[str, Any],
+    source_ref: str,
+) -> dict[str, Any]:
+    """Commit one confirmed candidate's explicit fields as future workspace data."""
+    normalized = validate_planning_projection(projection)
+    if not any(normalized.values()):
+        return load_project_model(project_id)
+    if not isinstance(source_ref, str) or not source_ref.strip():
+        raise ProjectModelError("规划投影 source_ref 不能为空。")
+
+    category_for = {
+        "characters": "character",
+        "settings": "world_setting",
+        "storylines": "story_line",
+        "events": "event",
+        "foreshadowing": "promise_foreshadowing",
+    }
+
+    def mutate(model: dict[str, Any], _next_rev: int) -> dict[str, Any]:
+        key_to_ref: dict[str, str] = {}
+        created_objects: list[str] = []
+        created_edges: list[str] = []
+        for collection, category in category_for.items():
+            for item in normalized[collection]:
+                key = item["key"]
+                if key in key_to_ref:
+                    raise ProjectModelError(f"规划投影实体 key 重复：{key}。")
+                ref = _next_ref(model, "obj")
+                payload = {k: copy.deepcopy(v) for k, v in item.items() if k not in {"key", "title", "name"}}
+                payload["planning_source_ref"] = source_ref.strip()
+                model["objects"][ref] = {
+                    "ref": ref, "kind": "foundation", "category": category,
+                    "category_name": None, "title": item["title"], "material_state": "future",
+                    "data": payload, "tombstoned": False,
+                }
+                key_to_ref[key] = ref
+                created_objects.append(ref)
+        for rel in normalized["relationships"]:
+            source = key_to_ref.get(rel["source_key"])
+            target = key_to_ref.get(rel["target_key"])
+            if not source or not target:
+                raise ProjectModelError("规划关系端点必须引用同一投影中的明确人物 key。")
+            if model["objects"][source].get("category") != "character" or model["objects"][target].get("category") != "character":
+                raise ProjectModelError("规划关系端点必须引用规划人物。")
+            edge_ref = _next_ref(model, "edge")
+            payload = {k: copy.deepcopy(v) for k, v in rel.items() if k not in {"source_key", "target_key", "label"}}
+            payload["planning_source_ref"] = source_ref.strip()
+            model["dependencies"][edge_ref] = {
+                "ref": edge_ref, "source_ref": source, "target_ref": target,
+                "relation_kind": "character_relationship", "title": rel["label"].strip(),
+                "material_state": "future", "data": payload, "tombstoned": False,
+            }
+            created_edges.append(edge_ref)
+        for item in normalized["chapter_changes"]:
+            minimum = item.get("min_words")
+            maximum = item.get("max_words")
+            if not isinstance(minimum, int) or not isinstance(maximum, int) or minimum < 0 or maximum < minimum:
+                raise ProjectModelError("规划章节变化必须提供合法 min_words/max_words。")
+            ref = _next_ref(model, "obj")
+            payload = {k: copy.deepcopy(v) for k, v in item.items() if k not in {"title", "name"}}
+            payload["planning_source_ref"] = source_ref.strip()
+            model["objects"][ref] = {
+                "ref": ref, "kind": "chapter_target", "title": item["title"],
+                "material_state": "future", "data": payload, "tombstoned": False,
+            }
+            model["length_plan"]["chapter_target_refs"].append(ref)
+            created_objects.append(ref)
+        return {
+            "action": "planning_projection.applied", "source_ref": source_ref.strip(),
+            "created_object_refs": created_objects, "created_dependency_refs": created_edges,
+        }
+
+    return _commit(project_id, base_model_rev, "planning_projection.applied", mutate)
 
 
 def list_direct_dependencies(project_id: str, ref: str | None = None) -> list[dict[str, Any]]:

@@ -4,6 +4,8 @@ import { ExecutionSummary } from '../components/ExecutionSummary'
 import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { useDevelopmentController } from '../features/development/useDevelopmentController'
+import { useProjectDataController } from '../features/projectData/useProjectDataController'
+import { PlanningStructure } from '../features/planning/PlanningStructure'
 
 /**
  * 故事规划：真实 StoryPlan 消费者（唯一自然语言规划入口）。
@@ -21,6 +23,7 @@ export function PlanningPage() {
   const { actions } = useApp()
   const { selected } = useFormalProjectShell()
   const c = useDevelopmentController({ projectId: selected?.project_id ?? null, notify: actions.notify })
+  const projectData = useProjectDataController(selected?.project_id ?? null)
   const { state } = c
   const questionInputRef = useRef<HTMLTextAreaElement>(null)
   const hasActiveTask = state.status === 'running' || state.status === 'confirming'
@@ -57,6 +60,7 @@ export function PlanningPage() {
 
   return (
     <div className="planning-page">
+      <PlanningStructure controller={projectData} />
       <section className="panel planning-main">
         <header className="planning-head">
           <h2><Sparkles /> 接下来准备怎么写？</h2>

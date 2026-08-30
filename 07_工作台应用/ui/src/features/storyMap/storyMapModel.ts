@@ -63,6 +63,10 @@ export interface GraphNode {
   /** 图内短标签：name 优先，否则 label 截断（完整文本在详情面板查看，不臆造） */
   short: string
   fields: RecordField[]
+  status: 'current' | 'future'
+  sourceRef: string | null
+  sourceKind: string | null
+  editable: boolean
 }
 
 export interface GraphEdge {
@@ -71,12 +75,19 @@ export interface GraphEdge {
   source: string
   target: string
   fields: RecordField[]
+  status: 'current' | 'future'
+  sourceRef: string | null
+  sourceKind: string | null
+  editable: boolean
 }
 
 export interface UnresolvedRelation {
   id: string
   label: string
   reason: string
+  status: 'current' | 'future'
+  sourceRef: string | null
+  editable: boolean
 }
 
 export interface RelationshipGraph {
@@ -102,6 +113,10 @@ const isNonEmptyString = (v: unknown): v is string => typeof v === 'string' && v
 function entryLabel(entry: ProjectDataEntry): string {
   return entry.label || entry.id || '（未命名条目）'
 }
+
+const entryStatus = (entry: ProjectDataEntry): 'current' | 'future' => (
+  entry.status === 'future' ? 'future' : 'current'
+)
 
 function rawEndpointText(value: unknown): string | null {
   if (isNonEmptyString(value)) return value.trim()
@@ -144,7 +159,16 @@ export function projectRelationshipGraph(data: ProjectData | null): Relationship
       if (isNonEmptyString(n)) name = n.trim()
     }
     const short = name ?? (label.length > 12 ? `${label.slice(0, 12)}…` : label)
-    nodes.push({ id: nodeId, label, short, fields: describeRecord(entry) })
+    nodes.push({
+      id: nodeId,
+      label,
+      short,
+      fields: describeRecord(entry),
+      status: entryStatus(entry),
+      sourceRef: entry.source_ref ?? null,
+      sourceKind: entry.source_kind ?? null,
+      editable: Boolean(entry.editable && entry.source_ref),
+    })
     idIndex.set(nodeId, nodeId)
     if (isNonEmptyString(entry.label)) idIndex.set(entry.label.trim(), nodeId)
     if (name) idIndex.set(name, nodeId)
@@ -159,7 +183,11 @@ export function projectRelationshipGraph(data: ProjectData | null): Relationship
     const key = `${entry.id ?? entry.label}::${reason}`
     if (unresolvedIdentity.has(key)) return
     unresolvedIdentity.add(key)
-    unresolved.push({ id: entry.id ?? '', label: entryLabel(entry), reason })
+    unresolved.push({
+      id: entry.id ?? '', label: entryLabel(entry), reason,
+      status: entryStatus(entry), sourceRef: entry.source_ref ?? null,
+      editable: Boolean(entry.editable && entry.source_ref),
+    })
   }
 
   for (const entry of data.sections.relationships) {
@@ -197,6 +225,10 @@ export function projectRelationshipGraph(data: ProjectData | null): Relationship
       source,
       target,
       fields: describeRecord(entry),
+      status: entryStatus(entry),
+      sourceRef: entry.source_ref ?? null,
+      sourceKind: entry.source_kind ?? null,
+      editable: Boolean(entry.editable && entry.source_ref),
     })
   }
 
@@ -213,6 +245,9 @@ export interface TimelineItem {
   /** 真实叙事顺序（数组下标），不是臆造时间。 */
   order: number
   fields: RecordField[]
+  status: 'current' | 'future'
+  sourceRef: string | null
+  editable: boolean
 }
 
 export interface TimeEventModel {
@@ -246,6 +281,9 @@ export function projectTimeEvents(data: ProjectData | null): TimeEventModel {
       anchor,
       order: i,
       fields: describeRecord(entry),
+      status: entryStatus(entry),
+      sourceRef: entry.source_ref ?? null,
+      editable: Boolean(entry.editable && entry.source_ref),
     }
   })
   return { items, hasPreciseAnchors: items.some((it) => it.anchor !== null) }
@@ -257,14 +295,26 @@ export interface ThreadItem {
   id: string
   label: string
   fields: RecordField[]
+  kind: 'thread' | 'foreshadowing'
+  status: 'current' | 'future'
+  sourceRef: string | null
+  editable: boolean
 }
 
 /** 权威 open_threads → 聚焦线索视图模型。 */
 export function projectOpenThreads(data: ProjectData | null): ThreadItem[] {
   if (!data) return []
-  return data.sections.open_threads.map((entry, i) => ({
-    id: isNonEmptyString(entry.id) ? entry.id : `thread:${i}`,
+  const project = (entry: ProjectDataEntry, i: number, kind: ThreadItem['kind']): ThreadItem => ({
+    id: isNonEmptyString(entry.id) ? entry.id : `${kind}:${i}`,
     label: entryLabel(entry),
     fields: describeRecord(entry),
-  }))
+    kind,
+    status: entryStatus(entry),
+    sourceRef: entry.source_ref ?? null,
+    editable: Boolean(entry.editable && entry.source_ref),
+  })
+  return [
+    ...data.sections.open_threads.map((entry, i) => project(entry, i, 'thread')),
+    ...(data.sections.foreshadowing ?? []).map((entry, i) => project(entry, i, 'foreshadowing')),
+  ]
 }

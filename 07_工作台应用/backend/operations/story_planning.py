@@ -61,6 +61,8 @@ from operations import agent_runner
 from operations import execution_audit as audit
 from operations import execution_tasks
 from operations import qoder_bridge as bridge
+from operations import project_model as project_model_ops
+from operations.project_snapshot import focused_task_context, get_project_snapshot
 from operations.agent_runner import AgentRunError
 from config.settings import EXECUTION_MODE_DIRECT, SettingsStore
 
@@ -86,6 +88,7 @@ from project_workspace import (  # noqa: E402  ProjectWorkspace frozen runtime
     load_project,
     persist_state_transition,
     resolve_project,
+    _safe_write_file,
 )
 from story_plan import (  # noqa: E402  StoryPlan frozen runtime
     ContractError as SPContractError,
@@ -154,8 +157,19 @@ _AGENT_TASK_TEMPLATE = """你是 Go Write 的规划执行器。必须严格按�
       {{"description": "第一条规划建议"}},
       {{"description": "第二条规划建议"}}
     ]
+  }},
+  "planning_projection": {{
+    "characters": [{{"key": "本候选内唯一人物键", "title": "人物名", "role": "可选", "goal": "可选"}}],
+    "relationships": [{{"source_key": "人物键", "target_key": "人物键", "label": "关系", "description": "可选"}}],
+    "settings": [{{"key": "唯一键", "title": "设定名", "description": "可选"}}],
+    "storylines": [{{"key": "唯一键", "title": "故事线名", "description": "可选"}}],
+    "events": [{{"key": "唯一键", "title": "计划事件", "description": "可选", "time_anchor": "仅显式已知时填写"}}],
+    "foreshadowing": [{{"key": "唯一键", "title": "伏笔/承诺", "status": "planned", "description": "可选"}}],
+    "chapter_changes": [{{"title": "第1章", "chapter_number": 1, "min_words": 2500, "max_words": 4000, "task": "章节任务", "synopsis": "章节梗概"}}]
   }}
 }}
+
+planning_projection 只投影 model_output 中明确出现的结构化事实；未提到的类别必须是空列表。所有投影仍是 future/planned，不是当前 Canon。关系端点只能引用本投影 characters 的 key。章节变化只有在候选明确给出合法目标字数范围时才填写，否则保持空列表。
 
 作品信息：
 - 作品名：{name}
@@ -530,7 +544,17 @@ def _parse_agent_result(output: str) -> dict[str, Any]:
         if not isinstance(item, dict) or not isinstance(item.get("description"), str) or not item["description"].strip():
             raise StoryPlanningError(f"Agent 输出 model_output.planning_items[{i}] 缺少有效 description。")
 
-    return {"semantic_interpretation": si, "planning_target": pt, "model_output": mo}
+    try:
+        projection = project_model_ops.validate_planning_projection(data.get("planning_projection") or {})
+    except project_model_ops.ProjectModelError as exc:
+        raise StoryPlanningError(f"Agent 输出 planning_projection 非法：{exc}") from exc
+
+    return {
+        "semantic_interpretation": si,
+        "planning_target": pt,
+        "model_output": mo,
+        "planning_projection": projection,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -626,6 +650,7 @@ def prepare_story_plan(project_id: str, author_question: str) -> dict[str, Any]:
 
     # 预生成 request_id（检索命令需要内嵌真实 id；Interactive/Direct 共用）
     request_id = uuid.uuid4().hex
+    effective_context = focused_task_context(project_id)
 
     task = _AGENT_TASK_TEMPLATE.format(
         name=name,
@@ -639,6 +664,10 @@ def prepare_story_plan(project_id: str, author_question: str) -> dict[str, Any]:
         # 按请求 id 定位（与 StoryWrite/Review/NewProject 同一 P0 精确绑定）
         retrieval_command=f'"{_RETRIEVAL_SCRIPT}" --request {request_id}',
         max_knowledge_hits=_MAX_KNOWLEDGE_HITS,
+    )
+    task += (
+        "\n\n最新有效作者工作区（显式作者编辑优先；current 与 future/planned 严格分开）：\n"
+        + json.dumps(effective_context, ensure_ascii=False, indent=2)
     )
 
     # 5. Direct 模式：显式配置校验（无有效配置 → 稳定报错，绝不回退）
@@ -686,6 +715,7 @@ def prepare_story_plan(project_id: str, author_question: str) -> dict[str, Any]:
                 "planning_sources": planning_sources,
                 "intent_rev": intent["intent_rev"],
                 "state_rev": state["state_rev"],
+                "model_rev": effective_context["model_rev"],
                 "execution": {
                     "execution_mode": execution_mode,
                     "agent_id": execution_agent,
@@ -961,7 +991,9 @@ def _finalize_story_plan(
         "source_versions": {
             "intent_rev": meta.get("intent_rev"),
             "state_rev": meta.get("state_rev"),
+            "model_rev": meta.get("model_rev"),
         },
+        "planning_projection": parsed["planning_projection"],
     }
     write_json(planning_dir / "planning_meta.json", planning_meta)
     audit.append_event(
@@ -994,6 +1026,7 @@ def _finalize_story_plan(
         "candidate": {
             "proposal": content.get("proposal") or "",
             "planning_items": planning_items_display,
+            "planning_projection": parsed["planning_projection"],
         },
         "knowledge": knowledge_summary,
         "execution": dict(meta.get("execution") or {}),
@@ -1213,6 +1246,7 @@ def confirm_story_plan(project_id: str, planning_token: str) -> dict[str, Any]:
     current_intent = loaded["intent"]
     current_state = loaded["state"]
     project_dir = Path(loaded["project_dir"])
+    projection = project_model_ops.validate_planning_projection(meta.get("planning_projection") or {})
 
     # 5. Stale 检查：Brief 编译时的 intent_rev/state_rev 必须与当前一致
     request_id = str(meta.get("request_id") or "")
@@ -1223,6 +1257,9 @@ def confirm_story_plan(project_id: str, planning_token: str) -> dict[str, Any]:
     if source_versions.get("state_rev") != current_state.get("state_rev"):
         _cleanup_planning(project_id, planning_turn_id)
         raise StoryPlanningError("作品在这期间已经有了新的变化，请重新生成这次规划。")
+    if get_project_snapshot(project_id).get("model_rev") != (meta.get("source_versions") or {}).get("model_rev"):
+        _cleanup_planning(project_id, planning_turn_id)
+        raise StoryPlanningError("作品地基或章节规划在这期间已经变化，请重新生成这次规划。")
 
     # 6. 构造 Decision
     decision_id = f"decision-plan-{planning_turn_id}"
@@ -1259,6 +1296,11 @@ def confirm_story_plan(project_id: str, planning_token: str) -> dict[str, Any]:
 
     # 8. 使用 StoryPlan 的 make_plan_diff（带完整验证）
     diff_id = f"diff-plan-{planning_turn_id}"
+    state_file = project_dir / "_工作台状态" / "story_state.json"
+    model_file = project_dir / "_工作台状态" / project_model_ops.ARTIFACT_NAME
+    state_before = state_file.read_bytes()
+    model_before = model_file.read_bytes() if model_file.exists() else None
+    projection_model = None
     try:
         diff = make_plan_diff(
             diff_id=diff_id,
@@ -1274,7 +1316,29 @@ def confirm_story_plan(project_id: str, planning_token: str) -> dict[str, Any]:
             expected_base_state=current_state,
             new_state=new_state,
         )
-    except (SPContractError, PWContractError, PWWorkspaceError) as exc:
+        if any(projection.values()):
+            current_model = project_model_ops.read_project_model(project_id)
+            projection_model = project_model_ops.apply_planning_projection(
+                project_id,
+                base_model_rev=current_model["model_rev"],
+                projection=projection,
+                source_ref=decision_id,
+            )
+    except (SPContractError, PWContractError, PWWorkspaceError, project_model_ops.ProjectModelError) as exc:
+        # Planning authority + future projection are one confirmation outcome.
+        # If the second artifact fails, restore both exact pre-confirmation states.
+        try:
+            _safe_write_file(state_file, state_before)
+            if model_before is None:
+                if model_file.exists():
+                    model_file.unlink()
+            else:
+                project_model_ops._atomic_write_json(
+                    model_file, json.loads(model_before.decode("utf-8")),
+                )
+        except Exception as rollback_exc:  # noqa: BLE001
+            _cleanup_planning(project_id, planning_turn_id)
+            raise StoryPlanningError(f"写入规划失败且回滚未完成：{rollback_exc}") from exc
         _cleanup_planning(project_id, planning_turn_id)
         raise StoryPlanningError(f"写入规划失败：{exc}") from exc
 
@@ -1290,5 +1354,7 @@ def confirm_story_plan(project_id: str, planning_token: str) -> dict[str, Any]:
         "project_id": project_id,
         "name": loaded["name"],
         "state_rev": new_state.get("state_rev"),
+        "project_model_rev": projection_model.get("model_rev") if projection_model else None,
+        "planning_projection_count": sum(len(items) for items in projection.values()),
         "message": "规划已确认并写入",
     }

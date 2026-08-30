@@ -26,9 +26,12 @@
 """
 from __future__ import annotations
 
+import copy
 import sys
 from pathlib import Path
 from typing import Any
+
+from operations.project_snapshot import ProjectSnapshotError, get_project_snapshot
 
 _PW = Path(__file__).resolve().parents[3] / "05_Skills与自动化" / "01_Skills" / "ProjectWorkspace"
 if str(_PW) not in sys.path:
@@ -114,27 +117,53 @@ def get_project_data(project_id: str) -> dict[str, Any]:
         raise ProjectDataError("缺少作品标识（project_id）。")
 
     try:
-        proj = resolve_project(project_id)
-        loaded = load_project(proj["project_dir"])
-    except (PWContractError, PWWorkspaceError) as exc:
+        snapshot = get_project_snapshot(project_id)
+    except ProjectSnapshotError as exc:
         raise ProjectDataError(str(exc)) from exc
 
-    intent = loaded["intent"]
-    state = loaded["state"]
+    def project(item: dict[str, Any], status: str) -> dict[str, Any]:
+        record = copy.deepcopy(item.get("record"))
+        if isinstance(record, dict):
+            record.setdefault("material_state", status)
+            record.setdefault("source_ref", item.get("source_ref"))
+            record.setdefault("source_kind", item.get("source_kind"))
+        return {
+            "id": item.get("id") or item.get("ref"),
+            "label": item.get("title") or "",
+            "record": record,
+            "source_ref": item.get("source_ref"),
+            "source_kind": item.get("source_kind"),
+            "provenance": item.get("provenance"),
+            "category": item.get("category"),
+            "status": status,
+            "editable": bool(item.get("editable")),
+        }
 
+    def combined(section: str) -> list[dict[str, Any]]:
+        return [
+            *[project(item, "current") for item in snapshot["current"].get(section, [])],
+            *[project(item, "future") for item in snapshot["future"].get(section, [])],
+        ]
+
+    intent = snapshot["author_intent"]
     return {
-        "project_id": loaded["project_id"],
-        "name": loaded["name"],
-        "state_rev": state.get("state_rev"),
-        "last_authority_source": state.get("last_authority_source"),
+        "project_id": snapshot["project_id"],
+        "name": snapshot["name"],
+        "state_rev": snapshot["story_state"].get("state_rev"),
+        "model_rev": snapshot["model_rev"],
+        "last_authority_source": snapshot["story_state"].get("last_authority_source"),
         "work_direction": intent.get("work_direction") or "",
         "reader_promise": intent.get("reader_promise") or "",
+        "settlement": snapshot["settlement"],
+        "length_plan": snapshot["length_plan"],
         "sections": {
-            "characters": _section(state.get("character_state")),
-            "relationships": _section(state.get("relationship_state")),
-            "canon_facts": _section(state.get("canon_facts")),
-            "occurred_events": _section(state.get("occurred_events")),
-            "open_threads": _section(state.get("open_threads")),
-            "approved_plan": _active_plans(state),
+            "characters": combined("characters"),
+            "relationships": combined("relationships"),
+            "canon_facts": combined("settings"),
+            "occurred_events": combined("events"),
+            "open_threads": combined("open_threads"),
+            "foreshadowing": combined("foreshadowing"),
+            "storylines": combined("storylines"),
+            "approved_plan": [project(item, "future") for item in snapshot["future"]["approved_plan"]],
         },
     }

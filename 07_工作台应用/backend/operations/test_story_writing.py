@@ -270,6 +270,32 @@ def _writing_meta(real_project, isolated) -> dict:
     return json.loads(metas[0].read_text(encoding="utf-8"))
 
 
+def test_selected_chapter_fine_outline_enters_writing_context_only(
+    isolated, real_project, fake_bridge,
+):
+    from operations import project_model
+
+    project_model.set_length_plan(
+        real_project["project_id"], base_model_rev=0,
+        chapter_targets=[
+            {"title": "第一章", "chapter_number": 1, "min_words": 2000, "max_words": 3000, "task": "不应注入"},
+            {"title": "第二章", "chapter_number": 2, "min_words": 2500, "max_words": 3500, "task": "只写匿名信", "synopsis": "两人第一次合作"},
+        ],
+    )
+    SettingsStore().save(AppSettings(default_execution_mode="interactive_bridge", interactive_agent="qoder"))
+    prepared = sw_ops.prepare_story_write(
+        project_id=real_project["project_id"], author_input="写第二章", chapter_number=2,
+    )
+    request = bridge.get_request(prepared["request_id"])
+    assert request is not None
+    task = request["task"]
+    assert '"chapter_number": 2' in task
+    assert "只写匿名信" in task
+    assert "两人第一次合作" in task
+    assert "不应注入" not in task
+    sw_ops.cancel_story_write_request(prepared["request_id"])
+
+
 # ---------------------------------------------------------------------------
 # A. Direct prepare 非阻塞
 # ---------------------------------------------------------------------------

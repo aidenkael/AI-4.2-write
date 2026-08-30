@@ -20,10 +20,6 @@ _PW = Path(__file__).resolve().parents[3] / "05_Skills与自动化" / "01_Skills
 if str(_PW) not in sys.path:
     sys.path.insert(0, str(_PW))
 
-_SP = Path(__file__).resolve().parents[3] / "05_Skills与自动化" / "01_Skills" / "StoryPlan"
-if str(_SP) not in sys.path:
-    sys.path.insert(0, str(_SP))
-
 from project_workspace import (  # noqa: E402
     ContractError,
     WorkspaceError,
@@ -32,7 +28,7 @@ from project_workspace import (  # noqa: E402
     load_project,
     resolve_project,
 )
-from story_plan import resolve_plan_activity  # noqa: E402  StoryPlan frozen runtime
+from operations.project_snapshot import ProjectSnapshotError, get_project_snapshot
 
 
 class ProjectOpError(Exception):
@@ -65,21 +61,24 @@ def open_project(project: dict | str) -> dict:
 def get_project_overview(project_id: str) -> dict:
     """最小作品概览：只读正式状态 → 展示数据（保持最小，字段只在真实存在时出现）。"""
     try:
-        proj = resolve_project(project_id)
-        loaded = load_project(proj["project_dir"])
-    except (ContractError, WorkspaceError) as exc:
+        snapshot = get_project_snapshot(project_id)
+        loaded = load_project(snapshot["identity"]["project_dir"])
+    except (ContractError, WorkspaceError, ProjectSnapshotError) as exc:
         raise ProjectOpError(str(exc)) from exc
 
-    intent = loaded["intent"]
+    intent = snapshot["author_intent"]
     state = loaded["state"]
     index = loaded["index"] or {}
 
     overview: dict = {
-        "project_id": loaded["project_id"],
-        "name": loaded["name"],
-        "state": {
-            "state_rev": state.get("state_rev"),
-            "last_authority_source": state.get("last_authority_source"),
+        "project_id": snapshot["project_id"],
+        "name": snapshot["name"],
+        "state": snapshot["story_state"],
+        "settlement": snapshot["settlement"],
+        "progress": {
+            "current_chapter": max(item["chapter_number"] for item in snapshot["chapters"]),
+            "actual_words": snapshot["length_plan"]["actual_total_words"],
+            "target_words": snapshot["length_plan"]["total_target_words"],
         },
     }
 
@@ -91,22 +90,16 @@ def get_project_overview(project_id: str) -> dict:
     if reader_promise:
         overview["reader_promise"] = reader_promise
 
-    # 当前已确定的规划：只使用 frozen resolve_plan_activity 的 active 投影
+    # 当前已确定的规划：统一快照的 active 投影（snapshot 内部复用 frozen resolve_plan_activity）
     # superseded 的旧规划继续保留在 Story State 历史中，但不显示为"当前已经确定"
-    all_plans = state.get("approved_plan") or []
-    activity = resolve_plan_activity(state)
-    active_ids = set(activity["active"])
-
-    if all_plans:
-        current_plans = []
-        for plan in all_plans:
-            pid = plan.get("id")
-            if pid and pid in active_ids:
-                desc = plan.get("description") or plan.get("text") or ""
-                if desc:
-                    current_plans.append({"id": pid, "description": desc})
-        if current_plans:
-            overview["current_plans"] = current_plans
+    active_plans = snapshot["future"]["approved_plan"]
+    current_plans = [
+        {"id": item.get("id"), "description": item.get("title") or ""}
+        for item in active_plans
+        if item.get("id") and item.get("title")
+    ]
+    if current_plans:
+        overview["current_plans"] = current_plans
 
     # 最近写作位置：accepted_text_index 最后一条（可靠）
     entries = index.get("entries") or []
@@ -129,19 +122,13 @@ def get_project_overview(project_id: str) -> dict:
             pass
 
     # 当前有效规划摘要：只取 active 条目的最新一条（用于向后兼容旧 UI 字段）
-    if all_plans:
-        active_plans = [p for p in all_plans if p.get("id") and p["id"] in active_ids]
-        if active_plans:
-            latest = active_plans[-1]
-            text = None
-            for key in ("description", "text", "title", "summary", "content"):
-                if isinstance(latest.get(key), str) and latest[key].strip():
-                    text = latest[key].strip()
-                    break
-            overview["planning"] = {
-                "entries": len(active_plans),
-                "latest": text,
-                "latest_id": latest.get("id"),
-                "latest_occurred": latest.get("occurred"),
-            }
+    if active_plans:
+        latest = active_plans[-1]
+        overview["planning"] = {
+            "entries": len(active_plans),
+            "latest": latest.get("title") or None,
+            "latest_id": latest.get("id"),
+            "latest_occurred": (latest.get("record") or {}).get("occurred")
+            if isinstance(latest.get("record"), dict) else None,
+        }
     return overview

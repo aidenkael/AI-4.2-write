@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
 """素材目录 targeted tests：只读目录、显式 refresh、只读 inbox scan、确定性 intake 事务。"""
 import json
+import sys
 from pathlib import Path
 
 import pytest
 
-from operations import materials
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from operations import materials  # noqa: E402
 
 
 def _ledger():

@@ -29,6 +29,11 @@ interface ReviewChapterHandoff {
   chapter_number: number
 }
 
+interface FoundationEditHandoff {
+  project_id: string
+  source_ref: string
+}
+
 interface AppState {
   page: GlobalPage
   projectSection: ProjectSection | null
@@ -39,6 +44,7 @@ interface AppState {
   preferences: Record<string, boolean>
   planningPrefill: PlanningPrefill | null
   reviewChapterHandoff: ReviewChapterHandoff | null
+  foundationEditHandoff: FoundationEditHandoff | null
 }
 
 interface Actions {
@@ -55,6 +61,8 @@ interface Actions {
   consumePlanningPrefill(): PlanningPrefill | null
   setReviewChapterHandoff(handoff: ReviewChapterHandoff): void
   consumeReviewChapterHandoff(): ReviewChapterHandoff | null
+  setFoundationEditHandoff(handoff: FoundationEditHandoff): void
+  consumeFoundationEditHandoff(): FoundationEditHandoff | null
 }
 
 const initial: AppState = {
@@ -67,6 +75,7 @@ const initial: AppState = {
   preferences: { sound: false },
   planningPrefill: null,
   reviewChapterHandoff: null,
+  foundationEditHandoff: null,
 }
 
 const Context = createContext<{ state: AppState; actions: Actions } | null>(null)
@@ -95,7 +104,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (value) setState((current) => ({ ...current, reviewChapterHandoff: null }))
       return value
     },
-  }), [state.planningPrefill, state.reviewChapterHandoff])
+    setFoundationEditHandoff(foundationEditHandoff) { setState((current) => ({ ...current, foundationEditHandoff })) },
+    consumeFoundationEditHandoff() {
+      const value = state.foundationEditHandoff
+      if (value) setState((current) => ({ ...current, foundationEditHandoff: null }))
+      return value
+    },
+  }), [state.foundationEditHandoff, state.planningPrefill, state.reviewChapterHandoff])
   return <Context.Provider value={{ state, actions }}>{children}</Context.Provider>
 }
 

@@ -34,6 +34,7 @@ from typing import Any
 from operations import agent_runner
 from operations import execution_audit as audit
 from operations import execution_tasks
+from operations.project_snapshot import focused_task_context, get_project_snapshot
 from operations import qoder_bridge as bridge
 from operations.agent_runner import AgentRunError
 from config.settings import EXECUTION_MODE_DIRECT, SettingsStore
@@ -126,6 +127,9 @@ severity 只允许：priority（优先处理）/ watch（值得看看）。
 
 未解决线索：
 {open_threads}
+
+最新有效作者工作区与本章细纲（显式作者编辑优先；current/future 分开）：
+{effective_project_context}
 
 本次检查章节（第 {chapter_number} 章）正文：
 {chapter_text}
@@ -338,24 +342,20 @@ def get_review_surface(project_id: str) -> dict[str, Any]:
     if not project_id:
         raise ReviewError("缺少作品标识（project_id）。")
     try:
-        proj = resolve_project(project_id)
-        loaded = load_project(proj["project_dir"])
-    except (PWContractError, PWWorkspaceError) as exc:
+        snapshot = get_project_snapshot(project_id)
+    except Exception as exc:  # noqa: BLE001
         raise ReviewError(str(exc)) from exc
-
-    state = loaded["state"]
-    index = loaded.get("index") or {}
-    entries = index.get("entries") or []
-    chapters = sorted({int(e.get("chapter_number") or 1) for e in entries}) if entries else []
-    latest = chapters[-1] if chapters else None
+    accepted = [item for item in snapshot["chapters"] if item.get("accepted")]
+    chapters = [item["chapter_number"] for item in accepted]
     return {
-        "project_id": loaded["project_id"],
-        "name": loaded["name"],
-        "active_plan_count": len(_active_plan_descriptions(state)),
-        "open_thread_count": len(_open_thread_labels(state)),
-        "chapters": [{"chapter_number": n} for n in chapters],
-        "latest_chapter_number": latest,
-        "has_accepted_prose": bool(entries),
+        "project_id": snapshot["project_id"],
+        "name": snapshot["name"],
+        "active_plan_count": len(snapshot["future"]["approved_plan"]),
+        "open_thread_count": len(snapshot["current"]["open_threads"]),
+        "chapters": [{"chapter_number": number} for number in chapters],
+        "latest_chapter_number": chapters[-1] if chapters else None,
+        "has_accepted_prose": bool(accepted),
+        "settlement": snapshot["settlement"],
     }
 
 
@@ -618,6 +618,11 @@ def prepare_review(project_id: str, chapter_number: int | None = None) -> dict[s
         reader_promise=intent.get("reader_promise") or "",
         current_planning=current_planning,
         open_threads=open_threads,
+        effective_project_context=json.dumps(
+            focused_task_context(project_id, chapter_number=chapter_number),
+            ensure_ascii=False,
+            indent=2,
+        ),
         chapter_number=chapter_number,
         chapter_text=chapter_text,
         retrieval_command=f'"{_RETRIEVAL_SCRIPT}"',

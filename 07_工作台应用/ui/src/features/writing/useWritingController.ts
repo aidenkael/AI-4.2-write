@@ -13,8 +13,14 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  confirmChangeConsequences,
+  createChapter as createFormalChapter,
+  getChangeSettlementRequest,
   getStoryWriteSurface,
+  prepareChangeSettlement,
+  saveFormalProse,
   type ProposeStoryWriteResult,
+  type SettlementChange,
   type StoryWriteSurface,
 } from '../../bridge/client'
 import { useAuthorTask } from '../tasks/AuthorTaskCoordinator'
@@ -47,12 +53,22 @@ export interface WritingControllerState {
   error: string | null
   /** 后端返回的非机密执行元数据（execution_mode / agent_id / model）。 */
   execution: { execution_mode?: string; agent_id?: string | null; model?: string | null } | null
+  editorContent: string
+  editorDirty: boolean
+  saving: boolean
+  settlementStatus: 'idle' | 'syncing' | 'failed'
+  pendingChanges: SettlementChange[]
 }
 
 export interface WritingController {
   state: WritingControllerState
   selectChapter(chapterNumber: number): void
   setAuthorInput(input: string): void
+  setEditorContent(input: string): void
+  createChapter(): Promise<void>
+  save(sync: boolean): Promise<void>
+  retrySettlement(changeId: string): Promise<void>
+  confirmConsequences(changeId: string, acceptedIndexes: number[]): Promise<void>
   generate(): Promise<void>
   cancel(): Promise<void>
   discard(): Promise<void>
@@ -118,6 +134,10 @@ export function useWritingController(options: {
   const [localError, setLocalError] = useState<string | null>(null)
   const [surfaceLoading, setSurfaceLoading] = useState(true)
   const [surfaceError, setSurfaceError] = useState<string | null>(null)
+  const [editorContent, setEditorContentState] = useState('')
+  const [editorDirty, setEditorDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [settlementStatus, setSettlementStatus] = useState<'idle' | 'syncing' | 'failed'>('idle')
 
   const projectRef = useRef<string | null>(projectId)
   projectRef.current = projectId
@@ -129,7 +149,15 @@ export function useWritingController(options: {
       const surface = await getStoryWriteSurface(pid)
       if (projectRef.current !== pid) return // 加载期间已切换项目 → 丢弃过期结果
       setWritingSurface(surface)
-      setSelectedChapterNumber((current) => current ?? surface.active_chapter_number)
+      setSelectedChapterNumber((current) => {
+        const next = current != null && surface.chapters.some((chapter) => chapter.chapter_number === current)
+          ? current
+          : surface.active_chapter_number
+        const chapter = surface.chapters.find((item) => item.chapter_number === next)
+        setEditorContentState(chapter?.content ?? '')
+        setEditorDirty(false)
+        return next
+      })
     } catch (e) {
       if (projectRef.current !== pid) return
       setSurfaceError(toMessage(e))
@@ -168,6 +196,11 @@ export function useWritingController(options: {
     phaseMessage: view?.phaseMessage ?? null,
     error: view?.error ?? surfaceError ?? localError,
     execution: view?.execution ?? null,
+    editorContent,
+    editorDirty,
+    saving,
+    settlementStatus,
+    pendingChanges: (writingSurface?.settlement?.changes ?? []).filter((change) => change.status !== 'synchronized'),
   }
 
   const setAuthorInput = useCallback((input: string) => {
@@ -176,8 +209,118 @@ export function useWritingController(options: {
   }, [])
 
   const selectChapter = useCallback((chapterNumber: number) => {
+    if (editorDirty && chapterNumber !== selectedChapterNumber) {
+      setLocalError('当前正文有未保存修改，请先保存后再切换章节。')
+      return
+    }
     setSelectedChapterNumber(chapterNumber)
+    const chapter = writingSurface?.chapters.find((item) => item.chapter_number === chapterNumber)
+    setEditorContentState(chapter?.content ?? '')
+    setEditorDirty(false)
+    setLocalError(null)
+  }, [editorDirty, selectedChapterNumber, writingSurface?.chapters])
+
+  const setEditorContent = useCallback((input: string) => {
+    setEditorContentState(input)
+    setEditorDirty(true)
+    setLocalError(null)
   }, [])
+
+  const syncChange = useCallback(async (pid: string, changeId: string) => {
+    setSettlementStatus('syncing')
+    try {
+      const prepared = await prepareChangeSettlement({ project_id: pid, change_id: changeId })
+      let status = prepared
+      while (projectRef.current === pid && status.status === 'pending') {
+        await new Promise((resolve) => window.setTimeout(resolve, 1000))
+        status = await getChangeSettlementRequest(prepared.request_id)
+      }
+      if (projectRef.current !== pid) return
+      if (status.status === 'failed') throw new Error(status.error || '语义同步失败，可稍后重试。')
+      setSettlementStatus('idle')
+      await loadSurface(pid)
+    } catch (e) {
+      if (projectRef.current === pid) {
+        setSettlementStatus('failed')
+        setLocalError(toMessage(e))
+        await loadSurface(pid)
+      }
+    }
+  }, [loadSurface])
+
+  const createChapter = useCallback(async () => {
+    const pid = projectRef.current
+    if (!pid || !writingSurface) return
+    const onlyVirtualFirst = writingSurface.chapters.length === 1
+      && writingSurface.chapters[0].chapter_number === 1
+      && !writingSurface.chapters[0].content_sha256
+    const next = onlyVirtualFirst
+      ? 1
+      : Math.max(0, ...writingSurface.chapters.map((chapter) => chapter.chapter_number)) + 1
+    setSaving(true)
+    setLocalError(null)
+    try {
+      await createFormalChapter({ project_id: pid, chapter_number: next })
+      await loadSurface(pid)
+      setSelectedChapterNumber(next)
+      setEditorContentState('')
+      setEditorDirty(false)
+    } catch (e) {
+      setLocalError(toMessage(e))
+    } finally {
+      if (projectRef.current === pid) setSaving(false)
+    }
+  }, [loadSurface, writingSurface])
+
+  const save = useCallback(async (sync: boolean) => {
+    const pid = projectRef.current
+    const chapter = writingSurface?.chapters.find((item) => item.chapter_number === selectedChapterNumber)
+    if (!pid || !chapter) return
+    if (!chapter.content_sha256) {
+      setLocalError('请先新建正式章节，再保存正文。')
+      return
+    }
+    if (!editorDirty) return
+    setSaving(true)
+    setLocalError(null)
+    try {
+      const result = await saveFormalProse({
+        project_id: pid, chapter_number: chapter.chapter_number,
+        base_content_sha256: chapter.content_sha256, content: editorContent,
+      })
+      await loadSurface(pid)
+      setSelectedChapterNumber(chapter.chapter_number)
+      setEditorContentState(editorContent)
+      setEditorDirty(false)
+      notify?.(sync ? '正文已保存，正在同步作品状态。' : result.message)
+      if (sync) void syncChange(pid, result.change.change_id)
+    } catch (e) {
+      setLocalError(toMessage(e))
+    } finally {
+      if (projectRef.current === pid) setSaving(false)
+    }
+  }, [editorContent, editorDirty, loadSurface, notify, selectedChapterNumber, syncChange, writingSurface?.chapters])
+
+  const retrySettlement = useCallback(async (changeId: string) => {
+    const pid = projectRef.current
+    if (pid) await syncChange(pid, changeId)
+  }, [syncChange])
+
+  const confirmConsequences = useCallback(async (changeId: string, acceptedIndexes: number[]) => {
+    const pid = projectRef.current
+    if (!pid) return
+    setSaving(true)
+    setLocalError(null)
+    try {
+      await confirmChangeConsequences({ project_id: pid, change_id: changeId, accepted_indexes: acceptedIndexes })
+      await loadSurface(pid)
+      notify?.('你确认的后果已同步到最新作品状态。')
+    } catch (e) {
+      setLocalError(toMessage(e))
+    } finally {
+      if (projectRef.current === pid) setSaving(false)
+    }
+  }, [loadSurface, notify])
 
   const generate = useCallback(async () => {
     const pid = projectRef.current
@@ -191,9 +334,12 @@ export function useWritingController(options: {
       return
     }
     setAcceptedNote(false)
-    const busy = await start({ kind: 'story_write', project_id: pid, author_input: input })
+    const busy = await start({
+      kind: 'story_write', project_id: pid, author_input: input,
+      chapter_number: selectedChapterNumber ?? undefined,
+    })
     if (busy) setLocalError(busy)
-  }, [authorInput, start])
+  }, [authorInput, selectedChapterNumber, start])
 
   const cancel = useCallback(async () => {
     setAcceptedNote(false)
@@ -241,6 +387,11 @@ export function useWritingController(options: {
     state,
     selectChapter,
     setAuthorInput,
+    setEditorContent,
+    createChapter,
+    save,
+    retrySettlement,
+    confirmConsequences,
     generate,
     cancel,
     discard,

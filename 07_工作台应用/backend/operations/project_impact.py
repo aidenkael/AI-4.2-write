@@ -103,8 +103,13 @@ def _extract_changed(change: dict[str, Any]) -> tuple[list[str], list[str], list
         if kind == "object.tombstoned":
             for edge_ref in detail.get("retired_dependency_refs") or []:
                 _add_ref(dependency_refs, edge_ref)
-    elif kind == "dependency.created":
+    elif kind in {"dependency.created", "relationship.created", "dependency.updated", "dependency.tombstoned"}:
         _add_ref(dependency_refs, detail.get("ref"))
+    elif kind == "planning_projection.applied":
+        for ref in detail.get("created_object_refs") or []:
+            _add_ref(object_refs, ref)
+        for ref in detail.get("created_dependency_refs") or []:
+            _add_ref(dependency_refs, ref)
     elif kind == "length_plan.set":
         _length_plan_refs(detail, object_refs, dependency_refs, scopes)
     return sorted(object_refs), sorted(dependency_refs), sorted(scopes)
@@ -173,7 +178,7 @@ def build_direct_impact_report(project_id: str, source_model_rev: int) -> dict[s
     candidates = _dependency_candidates(model, changed_object_refs, source_model_rev)
     snapshot_refs = set(changed_object_refs)
     snapshot_refs.update(candidate["other_ref"] for candidate in candidates if isinstance(candidate.get("other_ref"), str))
-    if change.get("kind") == "dependency.created":
+    if change.get("kind") in {"dependency.created", "relationship.created", "dependency.updated", "dependency.tombstoned"}:
         if len(changed_dependency_refs) != 1:
             raise ProjectImpactError("dependency.created 必须解析到一条现存依赖边。")
         edge = model.get("dependencies", {}).get(changed_dependency_refs[0])
