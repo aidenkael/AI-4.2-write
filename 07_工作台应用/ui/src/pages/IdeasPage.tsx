@@ -50,8 +50,8 @@ export function IdeasPage() {
     try {
       const ok = await openProjectById(targetProject)
       if (ok) {
-        actions.setDevelopmentPrefill({ project_id: targetProject, text: developing.content })
-        actions.setProjectSection('development')
+        actions.setPlanningPrefill({ project_id: targetProject, text: developing.content })
+        actions.setProjectSection('planning')
         setDeveloping(null)
       } else {
         actions.notify('无法打开所选作品。')
@@ -109,7 +109,7 @@ export function IdeasPage() {
             <footer>
               <button
                 disabled={projects.length === 0}
-                title={projects.length === 0 ? '还没有正式作品，先去「我的作品」新建一部' : '把这条灵感带入故事发展'}
+                title={projects.length === 0 ? '还没有正式作品，先去「作品」新建一部' : '把这条灵感带入故事规划'}
                 onClick={() => openDevelop(idea)}
               >
                 <Send /> 帮我发展
@@ -119,7 +119,7 @@ export function IdeasPage() {
               ) : (
                 <button
                   disabled={projects.length === 0}
-                  title={projects.length === 0 ? '还没有正式作品，先去「我的作品」新建一部' : '把这条灵感标记为已用于某部作品'}
+                  title={projects.length === 0 ? '还没有正式作品，先去「作品」新建一部' : '把这条灵感标记为已用于某部作品'}
                   onClick={() => openMark(idea)}
                 >
                   标记已用于作品
@@ -139,10 +139,10 @@ export function IdeasPage() {
       {developing && (
         <div className="dialog-backdrop" role="presentation" onMouseDown={() => setDeveloping(null)}>
           <section className="dialog panel" role="dialog" aria-modal="true" aria-label="帮我发展" onMouseDown={(e) => e.stopPropagation()}>
-            <header><h2>把灵感带入故事发展</h2><button aria-label="关闭" onClick={() => setDeveloping(null)}><X /></button></header>
-            <p>选择一个正式作品，把这条灵感作为故事发展的一次预填（不会自动提交）。</p>
+            <header><h2>把灵感带入故事规划</h2><button aria-label="关闭" onClick={() => setDeveloping(null)}><X /></button></header>
+            <p>选择一个正式作品，把这条灵感作为故事规划的一次预填（不会自动提交）。</p>
             {projects.length === 0 ? (
-              <p className="muted-note">还没有正式作品，请先在「我的作品」新建一部。</p>
+              <p className="muted-note">还没有正式作品，请先在「作品」新建一部。</p>
             ) : (
               <label>
                 目标作品：
@@ -154,7 +154,7 @@ export function IdeasPage() {
             <footer>
               <button onClick={() => setDeveloping(null)}>取消</button>
               <button className="primary" disabled={!targetProject || opening} onClick={() => void confirmDevelop()}>
-                {opening ? '打开中…' : '进入故事发展'}
+                {opening ? '打开中…' : '进入故事规划'}
               </button>
             </footer>
           </section>
@@ -167,7 +167,7 @@ export function IdeasPage() {
             <header><h2>标记灵感已用于作品</h2><button aria-label="关闭" onClick={() => setMarking(null)}><X /></button></header>
             <p>选择一部作品，把这条灵感标记为已使用（仅本地笔记，不写入作品状态）。</p>
             {projects.length === 0 ? (
-              <p className="muted-note">还没有正式作品，请先在「我的作品」新建一部。</p>
+              <p className="muted-note">还没有正式作品，请先在「作品」新建一部。</p>
             ) : (
               <label>
                 目标作品：

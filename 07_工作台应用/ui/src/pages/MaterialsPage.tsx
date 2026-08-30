@@ -3,7 +3,6 @@ import { useMemo, useState } from 'react'
 import { useApp } from '../features/app/AppStore'
 import { useMaterialsController } from '../features/materials/useMaterialsController'
 import { PageHeader } from '../components/PageHeader'
-import { defaultIllustrations } from '../assets/illustrations'
 
 const typeLabels: Record<string, string> = {
   REFERENCE_WORK: '参考作品', METHOD_SOURCE: '方法/技巧资料', RESEARCH: '研究资料',
@@ -70,7 +69,7 @@ export function MaterialsPage() {
 
   return (
     <div className="page">
-      <PageHeader title="素材与学习" subtitle="导入素材 → 提纯 → 蒸馏 → 可用于写作；打开本页不会运行任何 AI。" art={defaultIllustrations.mountains} />
+      <PageHeader title="素材与学习" subtitle="导入素材 → 提纯 → 蒸馏 → 可用于写作；打开本页不会运行任何 AI。" />
 
       <div className="filterbar panel materials-toolbar">
         {([
@@ -97,7 +96,7 @@ export function MaterialsPage() {
           <div className="drop-zone">
             <UploadCloud size={34} />
             <p><strong>选择本地文件（EPUB / PDF / TXT 等）</strong></p>
-            <p className="muted-note">所有文件先进入待入库（MaterialIntake 收件箱），确认后才会正式入库。</p>
+            <p className="muted-note">所有文件先进入待入库收件箱，确认后才会正式入库。</p>
             <button className="primary" disabled={controller.importing} onClick={() => void controller.pickAndImport()}>
               {controller.importing ? '导入中…' : '选择文件'}
             </button>
@@ -105,7 +104,7 @@ export function MaterialsPage() {
 
           <div className="learning">
             <p><strong>待处理</strong> = <code>01_原始素材/00_待入库</code> 中的文件（只读扫描事实，不自动分类）。</p>
-            <p><strong>入库</strong>：先按确定性事实处理（重复文件并入已有素材、不支持类型人工确认）；只有无法定论的文件才会调用一次分类 Agent。Agent 只给决策，绝不移动文件或改台账；最终入库走 MaterialIntake 事务。</p>
+            <p><strong>入库</strong>：先按确定性事实处理（重复文件并入已有素材、不支持类型人工确认）；只有无法定论的文件才会调用一次分类助手。它只给决策，绝不移动文件或改台账；确认后统一完成正式入库。</p>
             <p className="muted-note">素材页负责管理和加工；真正写作时由 Go Write 按当前问题自动检索已经蒸馏完成的知识。</p>
           </div>
 
@@ -255,7 +254,7 @@ export function MaterialsPage() {
               )}
               {!selected && (
                 <div className="learning">
-                  <p>素材目录来自正式素材资产台账（MaterialIntake）。打开本页不会运行任何 AI 或提纯/蒸馏过程。</p>
+                  <p>素材目录来自正式素材资产台账。打开本页不会运行任何 AI 或提纯/蒸馏过程。</p>
                   <p>选择一个素材查看：它写作时能否被调用、当前阶段、下一步该做什么。</p>
                   <ul>
                     <li>「可用于写作」= 已蒸馏出定稿知识包，写作/规划/检查时按需检索。</li>

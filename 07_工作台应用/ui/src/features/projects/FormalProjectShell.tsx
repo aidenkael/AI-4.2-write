@@ -1,5 +1,5 @@
 /**
- * 正式项目外壳：Projects → Overview → Writing 共享的唯一正式 project_id。
+ * 正式项目外壳：作品页 → 概览 → 正在写 共享的唯一正式 project_id。
  *
  * 职责只限：
  * - 通过后端 `listProjects()` 加载正式作品列表；
@@ -8,12 +8,12 @@
  * - 暴露 loading / error / reload；
  * - 显式 clearSelection() 仅供明确的"关闭/切换项目"动作使用。
  *
- * 选择是工作台上下文，不是页面挂载状态：全局导航（Settings / Materials /
- * Ideas / Home）绝不自动清除正式项目选择；打开另一部正式作品显式替换选择。
+ * 选择是工作台上下文，不是页面挂载状态：全局导航（设置 / 素材与学习 /
+ * 灵感箱 / 作品）绝不自动清除正式项目选择；打开另一部正式作品显式替换选择。
  *
  * 明确不引入：通用实体 store / Redux / URL 路由迁移 / 持久化 / 全局工作流引擎。
- * Mock AppStore 身份与本外壳严格分离：本任务内的生产页面（Projects /
- * ProjectLayout / Overview / Writing）不得使用 `useActiveProject()` 获取正式身份。
+ * Mock AppStore 身份与本外壳严格分离：生产页面（作品 / ProjectLayout /
+ * 全部作品内页面）不得使用 `useActiveProject()` 获取正式身份。
  */
 import {
   createContext,

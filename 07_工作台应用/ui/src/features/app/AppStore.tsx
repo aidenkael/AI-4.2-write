@@ -11,7 +11,7 @@ import { defaultIllustrations } from '../../assets/illustrations'
  * - 全局搜索（客户端过滤已加载正式实体的输入，见 AppShell）
  * - UI 偏好（会话级，非 Agent 执行配置；sound = 任务完成提示音，真实生效）
  * - 装饰性插图（不含任何假故事事实）
- * - 一次性 Development 预填（"帮我发展"项目内交接：session-only，消费即清，
+ * - 一次性规划预填（"帮我发展"/"给我几个方案"项目内交接：session-only，消费即清，
  *   绝不持久化为 Canon，绝不是事件总线）
  * - 一次性 Review 章节交接（"检查这段"：session-only，消费即清，绝不自动运行）
  *
@@ -19,7 +19,7 @@ import { defaultIllustrations } from '../../assets/illustrations'
  * 正式项目身份一律由 FormalProjectShell（后端 project_id）提供。
  */
 
-interface DevelopmentPrefill {
+interface PlanningPrefill {
   project_id: string
   text: string
 }
@@ -37,7 +37,7 @@ interface AppState {
   toast: string | null
   dialog: { title: string; content: string } | null
   preferences: Record<string, boolean>
-  developmentPrefill: DevelopmentPrefill | null
+  planningPrefill: PlanningPrefill | null
   reviewChapterHandoff: ReviewChapterHandoff | null
 }
 
@@ -51,21 +51,21 @@ interface Actions {
   setPreference(key: string, value: boolean): void
   setIllustration(key: IllustrationKey, url: string): void
   resetIllustration(key: IllustrationKey): void
-  setDevelopmentPrefill(prefill: DevelopmentPrefill): void
-  consumeDevelopmentPrefill(): DevelopmentPrefill | null
+  setPlanningPrefill(prefill: PlanningPrefill): void
+  consumePlanningPrefill(): PlanningPrefill | null
   setReviewChapterHandoff(handoff: ReviewChapterHandoff): void
   consumeReviewChapterHandoff(): ReviewChapterHandoff | null
 }
 
 const initial: AppState = {
-  page: 'home',
+  page: 'works',
   projectSection: null,
   illustrations: { defaults: defaultIllustrations, custom: {} },
   search: '',
   toast: null,
   dialog: null,
   preferences: { sound: false },
-  developmentPrefill: null,
+  planningPrefill: null,
   reviewChapterHandoff: null,
 }
 
@@ -83,10 +83,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setPreference(key, value) { setState((current) => ({ ...current, preferences: { ...current.preferences, [key]: value } })) },
     setIllustration(key, url) { setState((current) => ({ ...current, illustrations: { ...current.illustrations, custom: { ...current.illustrations.custom, [key]: url } } })) },
     resetIllustration(key) { setState((current) => { const custom = { ...current.illustrations.custom }; delete custom[key]; return { ...current, illustrations: { ...current.illustrations, custom } } }) },
-    setDevelopmentPrefill(developmentPrefill) { setState((current) => ({ ...current, developmentPrefill })) },
-    consumeDevelopmentPrefill() {
-      const value = state.developmentPrefill
-      if (value) setState((current) => ({ ...current, developmentPrefill: null }))
+    setPlanningPrefill(planningPrefill) { setState((current) => ({ ...current, planningPrefill })) },
+    consumePlanningPrefill() {
+      const value = state.planningPrefill
+      if (value) setState((current) => ({ ...current, planningPrefill: null }))
       return value
     },
     setReviewChapterHandoff(reviewChapterHandoff) { setState((current) => ({ ...current, reviewChapterHandoff })) },
@@ -95,7 +95,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (value) setState((current) => ({ ...current, reviewChapterHandoff: null }))
       return value
     },
-  }), [state.developmentPrefill, state.reviewChapterHandoff])
+  }), [state.planningPrefill, state.reviewChapterHandoff])
   return <Context.Provider value={{ state, actions }}>{children}</Context.Provider>
 }
 

@@ -1,1 +1,0 @@
-export function EmptyAvatar({ name, color = '#326cff', large = false }: { name: string; color?: string; large?: boolean }) { return <div className={`avatar-mark ${large ? 'avatar-large' : ''}`} style={{ background: `linear-gradient(145deg,${color},#17233d)` }}><span>{name.slice(-1)}</span></div> }

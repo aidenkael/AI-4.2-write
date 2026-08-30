@@ -1,19 +1,21 @@
 import type { ReactNode } from 'react'
-import { BookOpen, Feather, Folder, Home, Lightbulb, Search, Settings, X } from 'lucide-react'
+import { BookOpen, Feather, Folder, Lightbulb, Search, Settings, X } from 'lucide-react'
 import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { TaskStrip } from '../features/tasks/TaskStrip'
 import type { GlobalPage } from '../contracts/ui'
 
-const nav: Array<{ id: GlobalPage; label: string; Icon: typeof Home }> = [
-  { id: 'home', label: '首页', Icon: Home }, { id: 'projects', label: '我的作品', Icon: Folder },
-  { id: 'materials', label: '素材与学习', Icon: BookOpen }, { id: 'ideas', label: '灵感箱', Icon: Lightbulb },
+const nav: Array<{ id: GlobalPage; label: string; Icon: typeof Folder }> = [
+  { id: 'works', label: '作品', Icon: Folder },
+  { id: 'materials', label: '素材与学习', Icon: BookOpen },
+  { id: 'ideas', label: '灵感箱', Icon: Lightbulb },
 ]
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { state, actions } = useApp()
   const { projects, openProjectById } = useFormalProjectShell()
-  const active = state.projectSection ? 'projects' : state.page
+  // 作品内任何分区都属于全局「作品」入口；搜索保留为顶栏工具，不是第五个页面。
+  const active: GlobalPage = state.projectSection ? 'works' : state.page
   const query = state.search.trim()
 
   // 全局搜索：客户端过滤已加载的正式实体（正式项目名 + 全局页面入口），不伪造结果。
@@ -33,7 +35,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <button className="brand" onClick={() => actions.navigate('home')}><Feather size={30} fill="currentColor" /><strong>AI-write</strong></button>
+        <button className="brand" onClick={() => actions.navigate('works')}><Feather size={30} fill="currentColor" /><strong>AI-write</strong></button>
         <nav className="global-nav" aria-label="全局导航">{nav.map(({ id, label, Icon }) => <button key={id} className={active === id ? 'active' : ''} onClick={() => actions.navigate(id)}><Icon /><span>{label}</span></button>)}</nav>
         <div className="search-wrap">
           <label className="search"><Search size={19} /><input aria-label="搜索" value={state.search} onChange={(e) => actions.setSearch(e.target.value)} placeholder={active === 'ideas' ? '搜索灵感' : '搜索'} /></label>

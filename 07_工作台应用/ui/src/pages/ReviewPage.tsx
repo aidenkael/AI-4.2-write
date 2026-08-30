@@ -11,11 +11,11 @@ const severityMeta = {
 } as const
 
 /**
- * 作品检查：真实、显式、范围受控的 AI 检查。
+ * 作品检查：真实、显式、范围受控的 AI 检查（聚焦审阅面，不做分析仪表盘）。
  *
  * - 页面加载只读（确定性检查面），零模型；
  * - 只有作者按下"开始检查"才发起一次 Agent 检查（默认最新已接受章节）；
- * - 报告非权威、零写回；不提供"标记已处理"持久化；
+ * - 报告非权威、零写回；不提供分数 / 雷达图 / 趋势 / 全书审查 / 自动改写；
  * - "检查这段"章节交接：消费一次并选中该章节（项目匹配且章节仍有效时），
  *   绝不自动运行。
  */
@@ -41,9 +41,9 @@ export function ReviewPage() {
   if (!selected) {
     return (
       <div className="empty-state">
-        <p>请先在「我的作品」中选择一部正式作品。</p>
-        <button className="primary" onClick={() => actions.navigate('projects')}>
-          <FolderOpen /> 返回作品列表
+        <p>请先在「作品」中选择一部正式作品。</p>
+        <button className="primary" onClick={() => actions.navigate('works')}>
+          <FolderOpen /> 返回作品
         </button>
       </div>
     )
@@ -54,11 +54,13 @@ export function ReviewPage() {
 
   return (
     <div className="review-page">
-      <section className="review-hero">
+      <section className="panel review-head">
         <ShieldCheck />
         <div>
           <h1>作品检查</h1>
           <p>只检查你选择的章节范围内的内容，结果仅供参考，不会写入正式作品。</p>
+        </div>
+        <div className="review-head-actions">
           <button
             className="primary"
             disabled={running || !surface?.has_accepted_prose}
@@ -77,7 +79,7 @@ export function ReviewPage() {
       {running && <ExecutionSummary execution={execution} />}
 
       <section className="panel review-surface">
-        <h2>检查面（只读）</h2>
+        <h2>检查目标</h2>
         {surfaceLoading && <p className="muted-note">正在加载…</p>}
         {surfaceError && <p className="error-text">{surfaceError}</p>}
         {!surfaceLoading && !surfaceError && surface && (

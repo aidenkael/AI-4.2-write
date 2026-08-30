@@ -1,5 +1,5 @@
 /**
- * Story Development 真实 StoryPlan 消费者控制器（App 级协调器消费者）。
+ * 故事规划真实 StoryPlan 消费者控制器（App 级协调器消费者）。
  *
  * 根不变量：AI 任务属于 Go Write（AuthorTaskCoordinator），不属于页面。
  * 本控制器只保留页面本地数据（正式概览、作者问题），任务状态全部来自

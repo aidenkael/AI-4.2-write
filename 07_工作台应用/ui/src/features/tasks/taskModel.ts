@@ -69,9 +69,9 @@ export function taskLabel(kind: AuthorTaskKind): string {
 export function taskTarget(kind: AuthorTaskKind): TaskTarget {
   switch (kind) {
     case 'new_project':
-      return { page: 'projects' }
+      return { page: 'works' }
     case 'story_plan':
-      return { section: 'development' }
+      return { section: 'planning' }
     case 'story_write':
       return { section: 'writing' }
     case 'review':

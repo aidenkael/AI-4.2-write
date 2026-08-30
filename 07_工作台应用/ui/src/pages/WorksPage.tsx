@@ -1,28 +1,31 @@
-import { Check, FolderOpen, PenLine, Plus, RefreshCw, Sparkles, X } from 'lucide-react'
+import { Check, FolderOpen, Lightbulb, PenLine, Plus, RefreshCw, Sparkles, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { ExecutionSummary } from '../components/ExecutionSummary'
 import { PageHeader } from '../components/PageHeader'
-import { defaultIllustrations } from '../assets/illustrations'
 import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { useNewProjectController } from '../features/projects/useNewProjectController'
+import { useIdeasController } from '../features/ideas/useIdeasController'
 import { useAuthorTask } from '../features/tasks/AuthorTaskCoordinator'
 
 /**
- * 我的作品：真实正式项目列表 + 真实新建作品生命周期。
+ * 作品：唯一的作者落地页（原首页 + 我的作品合并，不再保留两套重复入口）。
  *
- * - 每个项目只显示真实项目名；打开/继续写作先经后端校验；
- * - 新建作品：作品名 + 一句话想法 → Generate → 后端候选 → 确认 → 创建正式项目；
- * - 新建作品任务属于 App 级协调器：离开本页任务继续、候选保留，
- *   返回（含任务条"返回查看"）时自动打开对话框并显示候选。
+ * - 真实正式项目列表（FormalProjectShell）、打开 / 继续写作先经后端校验；
+ * - 新建作品真实生命周期：作品名 + 一句话想法 → 生成候选 → 确认创建；
+ *   任务属于 App 级协调器：离开本页任务继续、候选保留，返回自动打开对话框。
+ * - 快速灵感写入真实灵感箱（与灵感箱页共享同一后端存储）；
+ * - 不显示任何假章节数 / 字数 / 更新时间 / 最近活动 / 进度 / 封面。
  */
-export function ProjectsPage() {
+export function WorksPage() {
   const { actions } = useApp()
   const { projects, loading, error, reload, openProjectById } = useFormalProjectShell()
   const { task } = useAuthorTask()
+  const ideas = useIdeasController({ notify: actions.notify })
+  const np = useNewProjectController({ notify: actions.notify })
   const [openingId, setOpeningId] = useState<string | null>(null)
   const [showNew, setShowNew] = useState(false)
-  const np = useNewProjectController({ notify: actions.notify })
+  const [idea, setIdea] = useState('')
 
   // 协调器存在 new_project 任务时自动打开对话框（返回后候选仍可见）
   useEffect(() => {
@@ -40,9 +43,7 @@ export function ProjectsPage() {
   }
 
   const confirmNew = async () => {
-    // 用 confirm() 的返回值驱动后续流程：绝不在 await setState 之后读
-    // 旧闭包里的 np.state.confirmed（那是本次渲染前的值，必然为 null，
-    // 会导致“作品已创建，正在打开…”永远卡住）。
+    // 用 confirm() 的返回值驱动后续流程：绝不在 await setState 之后读旧闭包里的状态
     const confirmed = await np.confirm()
     if (!confirmed) return
     setShowNew(false)
@@ -52,79 +53,84 @@ export function ProjectsPage() {
     np.reset()
   }
 
+  const saveIdea = async () => {
+    const ok = await ideas.add(idea, 'text')
+    if (ok) {
+      setIdea('')
+      actions.notify('灵感已保存。')
+    }
+  }
+
   return (
-    <div className="page">
+    <div className="page works-page">
       <PageHeader
-        title="我的作品"
-        subtitle="从正式作品工程中选择并继续创作"
-        art={defaultIllustrations.mountains}
+        title="作品"
+        subtitle="选择一部正式作品继续创作，或从一个想法开始新建"
         action={
           <button className="primary" onClick={() => setShowNew(true)}>
             <Plus /> 新建作品
           </button>
         }
       />
-      {loading && <div className="empty-state">正在加载正式作品…</div>}
-      {!loading && error && (
-        <div className="empty-state">
-          <p className="error-text">{error}</p>
-          <button onClick={() => void reload()}><RefreshCw /> 重试</button>
-        </div>
-      )}
-      {!loading && !error && projects.length === 0 && (
-        <div className="empty-state">
-          <p>暂无正式作品。</p>
-          <p className="muted-note">点击「新建作品」，从一个想法开始。</p>
-        </div>
-      )}
-      {!loading && !error && projects.length > 0 && (
-        <div className="projects-featured">
-          {(() => {
-            const first = projects[0]
-            return (
-              <section className="featured-project panel">
-                <div className="featured-art formal-art" />
-                <div>
-                  <div className="title-row">
-                    <h2>{first.name}</h2>
-                    <span className="soft-tag">正式作品</span>
-                  </div>
-                  <p className="muted-note">从正式作品工程中选择并继续创作。</p>
-                  <div>
-                    <button className="primary" disabled={openingId === first.project_id} onClick={() => void openAndNavigate(first.project_id, 'writing')}>
-                      <PenLine /> 继续写作
-                    </button>
-                    <button disabled={openingId === first.project_id} onClick={() => void openAndNavigate(first.project_id, 'overview')}>
-                      <FolderOpen /> 打开作品
-                    </button>
-                  </div>
-                </div>
-              </section>
-            )
-          })()}
-          <div className="project-cards">
-            {projects.slice(1).map((p) => (
-              <article className="project-card panel" key={p.project_id}>
-                <div className="project-thumb formal-art" />
-                <div>
-                  <div className="title-row">
-                    <h3>{p.name}</h3>
-                    <span className="soft-tag">正式作品</span>
-                  </div>
-                  <div>
-                    <button className="primary" disabled={openingId === p.project_id} onClick={() => void openAndNavigate(p.project_id, 'writing')}>
-                      <PenLine /> 继续写作
-                    </button>
-                    <button disabled={openingId === p.project_id} onClick={() => void openAndNavigate(p.project_id, 'overview')}>
-                      <FolderOpen /> 打开作品
-                    </button>
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-        </div>
-      )}
+
+      <div className="works-grid">
+        <section className="panel works-projects">
+          <header>
+            <h2><FolderOpen /> 正式作品</h2>
+          </header>
+          {loading && <p className="muted-note">正在加载正式作品…</p>}
+          {!loading && error && (
+            <div className="empty-state">
+              <p className="error-text">{error}</p>
+              <button onClick={() => void reload()}><RefreshCw /> 重试</button>
+            </div>
+          )}
+          {!loading && !error && projects.length === 0 && (
+            <div className="empty-state">
+              <p>暂无正式作品。</p>
+              <p className="muted-note">点击「新建作品」，从一个想法开始。</p>
+            </div>
+          )}
+          {!loading && !error && projects.length > 0 && (
+            <ul>
+              {projects.map((p) => (
+                <li key={p.project_id}>
+                  <span className="project-name">{p.name}</span>
+                  <span className="soft-tag">正式作品</span>
+                  <button
+                    className="primary"
+                    disabled={openingId === p.project_id}
+                    onClick={() => void openAndNavigate(p.project_id, 'writing')}
+                  >
+                    <PenLine /> 继续写作
+                  </button>
+                  <button
+                    disabled={openingId === p.project_id}
+                    onClick={() => void openAndNavigate(p.project_id, 'overview')}
+                  >
+                    打开作品
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="panel works-idea">
+          <h2><Lightbulb /> 快速记下灵感</h2>
+          <textarea
+            value={idea}
+            onChange={(e) => setIdea(e.target.value)}
+            placeholder="此刻的想法、场景或对白…"
+          />
+          <footer>
+            <button className="link-button" onClick={() => actions.navigate('ideas')}>打开灵感箱</button>
+            <button onClick={() => void saveIdea()} disabled={!idea.trim()}>
+              <PenLine /> 记录
+            </button>
+          </footer>
+        </section>
+      </div>
 
       {showNew && (
         <div className="dialog-backdrop" role="presentation" onMouseDown={() => { if (np.state.status !== 'running' && np.state.status !== 'confirming') setShowNew(false) }}>

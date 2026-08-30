@@ -765,7 +765,7 @@ export async function getMaterialDetail(assetId: string): Promise<MaterialDetail
   return call<MaterialDetail>('get_material_detail', { asset_id: assetId })
 }
 
-// ---------------- 作品资料 / 故事地图（只读正式 Story State 投影） ----------------
+// ---------------- 作品地基 / 故事地图（只读正式 Story State 投影） ----------------
 
 export interface ProjectDataEntry {
   id: string | null

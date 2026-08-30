@@ -22,7 +22,8 @@ test('taskLabel covers all kinds', () => {
 
 test('taskTarget maps to owning page/section', () => {
   assert.deepEqual(taskTarget('story_write'), { section: 'writing' })
-  assert.deepEqual(taskTarget('new_project'), { page: 'projects' })
+  assert.deepEqual(taskTarget('new_project'), { page: 'works' })
+  assert.deepEqual(taskTarget('story_plan'), { section: 'planning' })
   assert.deepEqual(taskTarget('material_classify'), { page: 'materials' })
   assert.deepEqual(taskTarget('material_distill'), { page: 'materials' })
   assert.deepEqual(taskTarget('review'), { section: 'review' })

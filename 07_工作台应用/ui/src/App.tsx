@@ -3,28 +3,28 @@ import { FormalProjectShellProvider } from './features/projects/FormalProjectShe
 import { AuthorTaskCoordinatorProvider } from './features/tasks/AuthorTaskCoordinator'
 import { AppShell } from './layouts/AppShell'
 import { ProjectLayout } from './layouts/ProjectLayout'
-import { HomePage } from './pages/HomePage'
-import { ProjectsPage } from './pages/ProjectsPage'
+import { WorksPage } from './pages/WorksPage'
 import { MaterialsPage } from './pages/MaterialsPage'
 import { IdeasPage } from './pages/IdeasPage'
 import { SettingsFeature } from './features/settings/SettingsFeature'
-import { DevelopmentPage } from './pages/DevelopmentPage'
+import { PlanningPage } from './pages/PlanningPage'
 import { WritingPage } from './pages/WritingPage'
 import { StoryMapPage } from './pages/StoryMapPage'
-import { ProjectDataPage } from './pages/ProjectDataPage'
+import { FoundationPage } from './pages/FoundationPage'
 import { ReviewPage } from './pages/ReviewPage'
 import { ProjectOverviewPage } from './pages/ProjectOverviewPage'
 import type { ProjectSection } from './contracts/ui'
 import './styles.css'
 
-// 正式项目外壳已接入全部作品内页面（overview / development / writing /
-// map / data / review）；所有页面都使用同一正式 project_id，禁止 Mock 身份。
-const CONNECTED_SECTIONS: readonly ProjectSection[] = ['overview', 'development', 'writing', 'map', 'data', 'review']
+// Go Write 2.0 作者面：全局四入口（作品 / 素材与学习 / 灵感箱 / 设置）+
+// 作品内六任务（概览 / 地基 / 规划 / 正在写 / 地图 / 检查）。
+// 正式项目外壳已接入全部作品内页面；所有页面都使用同一正式 project_id，禁止 Mock 身份。
+const CONNECTED_SECTIONS: readonly ProjectSection[] = ['overview', 'foundation', 'planning', 'writing', 'map', 'review']
 
 function Router() {
   const { state } = useApp()
-  const globalPages = { home: <HomePage />, projects: <ProjectsPage />, materials: <MaterialsPage />, ideas: <IdeasPage />, settings: <SettingsFeature /> }
-  const projectPages: Record<ProjectSection, JSX.Element> = { overview: <ProjectOverviewPage />, development: <DevelopmentPage />, writing: <WritingPage />, map: <StoryMapPage />, data: <ProjectDataPage />, review: <ReviewPage /> }
+  const globalPages = { works: <WorksPage />, materials: <MaterialsPage />, ideas: <IdeasPage />, settings: <SettingsFeature /> }
+  const projectPages: Record<ProjectSection, JSX.Element> = { overview: <ProjectOverviewPage />, foundation: <FoundationPage />, planning: <PlanningPage />, writing: <WritingPage />, map: <StoryMapPage />, review: <ReviewPage /> }
   const section = state.projectSection
   const safeSection = section && CONNECTED_SECTIONS.includes(section) ? section : null
   const content = safeSection ? <ProjectLayout>{projectPages[safeSection]}</ProjectLayout> : globalPages[state.page]

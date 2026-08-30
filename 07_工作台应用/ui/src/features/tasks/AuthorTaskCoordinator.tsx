@@ -434,7 +434,7 @@ export function AuthorTaskCoordinatorProvider({ children }: { children: ReactNod
     if (!current) return
     const target = taskTarget(current.kind)
     if (target.section) actions.setProjectSection(target.section)
-    else actions.navigate(target.page ?? 'projects')
+    else actions.navigate(target.page ?? 'works')
   }, [actions])
 
   // ---------------- remount/reload 恢复（幂等一次） ----------------
