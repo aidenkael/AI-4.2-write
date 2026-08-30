@@ -36,7 +36,20 @@ const FIELD_LABELS: Record<string, string> = {
   fact: '事实', content: '内容', note: '备注', event: '事件', text: '内容',
   time: '时间', time_anchor: '时间锚点', story_time: '故事时间', when: '时间',
   date: '日期', temporal_anchor: '时间锚点',
+  aliases: '别名', one_line_intro: '一句话介绍', role_identity: '角色 / 身份',
+  position_title: '职位', faction_org: '阵营 / 组织', visible_traits: '可见特征',
+  persona_core: '人设核心', goal_desire: '目标 / 渴望', fear_weakness: '恐惧 / 弱点',
+  inner_conflict: '内在冲突', values_beliefs: '价值 / 信念', background_summary: '背景摘要',
+  speech_style: '说话特点', behavior_anchors: '行为特点', secrets: '秘密',
+  current_state: '当前状态', current_objective: '当前目标', arc_stage: '人物弧阶段',
+  relationship_phase: '关系阶段', key_history: '关键经历', current_tension: '当前张力',
+  hidden_information: '隐瞒的信息', trust: '信任', closeness: '亲近',
+  power_rank: '武力 / 等级', profession_rank: '职业 / 职级', current_location: '当前位置',
 }
+const INTERNAL_FIELDS = new Set([
+  'id', 'authority', 'label', 'name', 'source_ref', 'source_kind', 'material_state',
+  'planning_source_ref', 'source_state_ref', 'supersedes_state_ref', 'settlement_provenance',
+])
 
 /** 把一条正式记录投影为作者可读字段列表；跳过 id/authority/label 等机械键。 */
 export function describeRecord(entry: ProjectDataEntry): RecordField[] {
@@ -44,7 +57,7 @@ export function describeRecord(entry: ProjectDataEntry): RecordField[] {
   if (!record || typeof record !== 'object' || Array.isArray(record)) return []
   const out: RecordField[] = []
   for (const [k, v] of Object.entries(record as Record<string, unknown>)) {
-    if (k === 'id' || k === 'authority' || k === 'label' || k === 'name') continue
+    if (INTERNAL_FIELDS.has(k)) continue
     if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
       out.push({ key: k, label: FIELD_LABELS[k] ?? k, value: String(v) })
     } else if (Array.isArray(v)) {
@@ -106,7 +119,9 @@ const PAIR_ENDPOINT_KEYS: ReadonlyArray<readonly [string, string]> = [
 ]
 
 // 显式时间锚点键（仅当真实存储时采用）。
-const TEMPORAL_KEYS = ['time', 'time_anchor', 'story_time', 'temporal_anchor', 'when', 'date'] as const
+const TEMPORAL_KEYS = [
+  'computed_story_time_anchor', 'time', 'time_anchor', 'story_time_anchor', 'story_time', 'temporal_anchor', 'when', 'date',
+] as const
 
 const isNonEmptyString = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0
 
@@ -158,7 +173,8 @@ export function projectRelationshipGraph(data: ProjectData | null): Relationship
       const n = (record as Record<string, unknown>).name
       if (isNonEmptyString(n)) name = n.trim()
     }
-    const short = name ?? (label.length > 12 ? `${label.slice(0, 12)}…` : label)
+    const displayName = name ?? (label.length > 12 ? `${label.slice(0, 12)}…` : label)
+    const short = `${displayName.slice(0, 1).toUpperCase()}  ${displayName}`
     nodes.push({
       id: nodeId,
       label,

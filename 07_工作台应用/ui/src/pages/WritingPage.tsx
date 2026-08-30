@@ -24,6 +24,12 @@ export function WritingPage() {
     state.writingSurface?.chapters[0] ??
     null
   const canGenerate = !!selected && state.authorInput.trim().length > 0 && !state.requestId
+  const fineOutline = selectedChapter?.fine_outline ?? {}
+  const outlineText = (key: string) => typeof fineOutline[key] === 'string' ? String(fineOutline[key]) : ''
+  const previousActual = selectedChapter?.previous_actual_result
+  const previousSummary = previousActual && typeof previousActual.summary === 'string'
+    ? previousActual.summary
+    : ''
 
   // 未选择正式作品：安全空态 + 返回作品页；绝不在这里自动挑选项目
   if (!selected) {
@@ -87,6 +93,20 @@ export function WritingPage() {
             {state.writingSurface ? `${state.writingSurface.total_words.toLocaleString()} 字` : ''}
           </span>
         </header>
+        {selectedChapter && (
+          <section className="writing-context-strip">
+            <p><b>本章目的：</b>{outlineText('task') || '尚未填写'}</p>
+            <p><b>目标字数：</b>{
+              typeof fineOutline.min_words === 'number' && typeof fineOutline.max_words === 'number'
+                ? `${fineOutline.min_words}–${fineOutline.max_words} 字`
+                : '尚未设置'
+            }</p>
+            {previousSummary && <p><b>上一章实际回顾：</b>{previousSummary}</p>}
+            {(state.writingSurface?.open_threads?.length ?? 0) > 0 && (
+              <p><b>当前线索：</b>{state.writingSurface?.open_threads?.map((item) => item.title).join('、')}</p>
+            )}
+          </section>
+        )}
         <textarea
           aria-label="正式正文编辑器"
           value={state.editorContent}

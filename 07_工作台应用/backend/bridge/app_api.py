@@ -625,6 +625,21 @@ class AppApi:
         except Exception as exc:  # noqa: BLE001
             return _err(CODE_BRIDGE_INTERNAL, str(exc))
 
+    def set_story_bible_profile(self, payload: dict) -> dict:
+        try:
+            return _ok(author_edit_ops.set_story_bible_profile(
+                str(payload.get("project_id") or ""),
+                base_model_rev=int(payload.get("base_model_rev")),
+                genre_tags=payload.get("genre_tags") if isinstance(payload.get("genre_tags"), list) else [],
+                narrative_mode=(str(payload.get("narrative_mode")) if payload.get("narrative_mode") is not None else None),
+                active_modules=payload.get("active_modules") if isinstance(payload.get("active_modules"), list) else [],
+                field_config=payload.get("field_config") if isinstance(payload.get("field_config"), dict) else {},
+            ))
+        except (AuthorEditError, TypeError, ValueError) as exc:
+            return _err(CODE_AUTHOR_EDIT_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
     def update_foundation_record(self, payload: dict) -> dict:
         try:
             return _ok(author_edit_ops.update_foundation_record(

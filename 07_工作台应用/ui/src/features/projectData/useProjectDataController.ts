@@ -11,6 +11,7 @@ import {
   retireFoundationRecord,
   retireRelationship,
   setLengthPlan,
+  setStoryBibleProfile,
   updateFoundationRecord,
   updateRelationship,
   type ProjectData,
@@ -29,6 +30,7 @@ export interface ProjectDataController {
   updateRelationship(input: { ref: string; source_ref: string; target_ref: string; label: string; material_state: 'current' | 'future'; data: Record<string, unknown> }): Promise<boolean>
   retireRelationship(ref: string): Promise<boolean>
   saveLengthPlan(input: { total_target_words: number | null; stages: Array<Record<string, unknown>>; chapter_targets: Array<Record<string, unknown>> }): Promise<boolean>
+  saveProfile(input: { genre_tags: string[]; narrative_mode: string | null; active_modules: string[]; field_config: Record<string, unknown> }): Promise<boolean>
 }
 
 const toMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
@@ -119,12 +121,16 @@ export function useProjectDataController(projectId: string | null): ProjectDataC
     mutate((pid, rev) => setLengthPlan({ project_id: pid, base_model_rev: rev, ...input }))
   ), [mutate])
 
+  const saveProfile = useCallback((input: { genre_tags: string[]; narrative_mode: string | null; active_modules: string[]; field_config: Record<string, unknown> }) => (
+    mutate((pid, rev) => setStoryBibleProfile({ project_id: pid, base_model_rev: rev, ...input }))
+  ), [mutate])
+
   return {
     data, loading, error, saving, reload,
     createFoundation, updateFoundation, retireFoundation,
     createRelationship: createRelationshipAction,
     updateRelationship: updateRelationshipAction,
     retireRelationship: retireRelationshipAction,
-    saveLengthPlan,
+    saveLengthPlan, saveProfile,
   }
 }

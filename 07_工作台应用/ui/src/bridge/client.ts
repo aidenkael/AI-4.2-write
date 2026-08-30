@@ -525,6 +525,8 @@ export interface StoryWriteChapter {
   accepted?: boolean
   fine_outline_ref?: string | null
   fine_outline?: Record<string, unknown>
+  actual_result?: Record<string, unknown> | null
+  previous_actual_result?: Record<string, unknown> | null
 }
 
 export interface StoryWriteSurface {
@@ -534,6 +536,8 @@ export interface StoryWriteSurface {
   active_chapter_number: number
   total_words: number
   settlement?: SettlementSummary
+  open_threads?: Array<{ title: string; status: 'current' | 'future' }>
+  planning_impact_candidates?: Array<Record<string, unknown>>
 }
 
 /** 获取正式已采用正文写作面（只读；按章排序，active = 最新已接受章）。 */
@@ -806,11 +810,22 @@ export interface ProjectDataSections {
   characters: ProjectDataEntry[]
   relationships: ProjectDataEntry[]
   canon_facts: ProjectDataEntry[]
+  locations: ProjectDataEntry[]
+  organizations: ProjectDataEntry[]
+  systems: ProjectDataEntry[]
   occurred_events: ProjectDataEntry[]
   open_threads: ProjectDataEntry[]
   foreshadowing: ProjectDataEntry[]
   storylines: ProjectDataEntry[]
+  mystery_information: ProjectDataEntry[]
   approved_plan: ProjectDataEntry[]
+}
+
+export interface StoryBibleProfile {
+  genre_tags: string[]
+  narrative_mode: string | null
+  active_modules: string[]
+  field_config: Record<string, unknown>
 }
 
 export interface SettlementChange {
@@ -845,11 +860,20 @@ export interface ProjectData {
   work_direction: string
   reader_promise: string
   settlement: SettlementSummary
+  story_bible_profile: StoryBibleProfile
   length_plan: LengthPlanView
+  chapters: Array<{
+    chapter_number: number
+    title: string
+    actual_words: number
+    fine_outline: Record<string, unknown>
+    actual_result: Record<string, unknown> | null
+  }>
+  planning_impact_candidates: Array<Record<string, unknown>>
   sections: ProjectDataSections
 }
 
-/** 只读正式 Story State 投影（ProjectData / StoryMap 共用）。 */
+/** 统一只读项目快照投影（ProjectData / StoryMap 共用，不是第二 truth store）。 */
 export async function getProjectData(projectId: string): Promise<ProjectData> {
   return call<ProjectData>('get_project_data', { project_id: projectId })
 }
@@ -869,6 +893,17 @@ export async function createFoundationRecord(payload: {
   category_name?: string
 }): Promise<AuthorEditResult> {
   return call<AuthorEditResult>('create_foundation_record', payload)
+}
+
+export async function setStoryBibleProfile(payload: {
+  project_id: string
+  base_model_rev: number
+  genre_tags: string[]
+  narrative_mode: string | null
+  active_modules: string[]
+  field_config: Record<string, unknown>
+}): Promise<AuthorEditResult> {
+  return call<AuthorEditResult>('set_story_bible_profile', payload)
 }
 
 export async function updateFoundationRecord(payload: {

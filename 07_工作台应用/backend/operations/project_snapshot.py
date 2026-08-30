@@ -32,7 +32,7 @@ from project_workspace import (  # noqa: E402
 from story_plan import resolve_plan_activity  # noqa: E402
 
 
-SCHEMA_VERSION = "gowrite_project_snapshot/v1"
+SCHEMA_VERSION = "gowrite_project_snapshot/v2"
 _CHAPTER_RE = re.compile(r"^第(\d+)章\.md$")
 _STATE_SECTIONS = (
     "canon_facts", "character_state", "relationship_state", "occurred_events", "open_threads",
@@ -96,6 +96,63 @@ def _state_records(state: dict[str, Any], area: str) -> list[dict[str, Any]]:
             "kind": "production_story_state",
         })
     return result
+
+
+def _character_state_records(state: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Separate explicit identities from free-form state observations."""
+    entries = state.get("character_state")
+    if not isinstance(entries, list):
+        return [], []
+    identities: list[dict[str, Any]] = []
+    observations: list[tuple[int, Any]] = []
+    aliases: dict[str, set[str]] = {}
+    by_ref: dict[str, dict[str, Any]] = {}
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            observations.append((index, entry))
+            continue
+        explicit_id = entry.get("id") if isinstance(entry.get("id"), str) and entry["id"].strip() else None
+        explicit_name = entry.get("name") if isinstance(entry.get("name"), str) and entry["name"].strip() else None
+        if not explicit_id and not explicit_name:
+            observations.append((index, entry))
+            continue
+        ref = _state_ref("character_state", entry, index)
+        record = copy.deepcopy(entry)
+        projected = {
+            "ref": ref, "source_ref": ref, "id": explicit_id,
+            "title": (explicit_name or explicit_id or "").strip(), "record": record,
+            "material_state": "current", "source_kind": "production_story_state",
+            "provenance": entry.get("authority"), "editable": True, "superseded": False,
+            "category": "character", "kind": "production_story_state",
+        }
+        identities.append(projected)
+        by_ref[ref] = projected
+        alias_values = [explicit_id, explicit_name]
+        if isinstance(entry.get("aliases"), list):
+            alias_values.extend(entry["aliases"])
+        for value in alias_values:
+            if isinstance(value, str) and value.strip():
+                aliases.setdefault(value.strip(), set()).add(ref)
+
+    unresolved: list[dict[str, Any]] = []
+    for index, entry in observations:
+        target = None
+        if isinstance(entry, dict):
+            for key in ("character_ref", "character_id", "character_name", "subject_ref", "subject_name", "character"):
+                if isinstance(entry.get(key), str) and entry[key].strip():
+                    target = entry[key].strip()
+                    break
+        matches = aliases.get(target or "", set())
+        if len(matches) == 1:
+            record = by_ref[next(iter(matches))]["record"]
+            record.setdefault("state_observations", []).append(copy.deepcopy(entry))
+        else:
+            unresolved.append({
+                "source_ref": _state_ref("character_state", entry, index),
+                "observation": copy.deepcopy(entry),
+                "reason": "missing_explicit_identity" if not target else "identity_not_uniquely_resolved",
+            })
+    return identities, unresolved
 
 
 def _active_plans(state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -258,6 +315,7 @@ def _validated_chapters(loaded: dict[str, Any], model: dict[str, Any]) -> list[d
             "accepted": bool(chapter_entries),
             "fine_outline_ref": (target or {}).get("ref"),
             "fine_outline": target_data,
+            "actual_result": copy.deepcopy(model.get("chapter_actual_results", {}).get(str(number))),
         })
     if not chapters:
         chapters.append({
@@ -265,6 +323,7 @@ def _validated_chapters(loaded: dict[str, Any], model: dict[str, Any]) -> list[d
             "content": "", "content_sha256": hashlib.sha256(b"").hexdigest(),
             "actual_words": 0, "accepted_scene_count": 0, "accepted": False,
             "fine_outline_ref": None, "fine_outline": {},
+            "actual_result": copy.deepcopy(model.get("chapter_actual_results", {}).get("1")),
         })
     return chapters
 
@@ -306,24 +365,31 @@ def get_project_snapshot(project_id: str) -> dict[str, Any]:
         raise ProjectSnapshotError("项目身份不一致，已拒绝快照。")
 
     state = loaded["state"]
+    character_records, unresolved_character_observations = _character_state_records(state)
     current: dict[str, list[dict[str, Any]]] = {
-        "characters": _state_records(state, "character_state"),
+        "characters": character_records,
         "relationships": _state_records(state, "relationship_state"),
         "settings": _state_records(state, "canon_facts"),
+        "locations": [],
+        "organizations": [],
+        "systems": [],
         "events": _state_records(state, "occurred_events"),
         "open_threads": _state_records(state, "open_threads"),
         "foreshadowing": [],
         "storylines": [],
+        "mystery_information": [],
     }
     future: dict[str, list[dict[str, Any]]] = {
-        "characters": [], "relationships": [], "settings": [], "events": [],
-        "open_threads": [], "foreshadowing": [], "storylines": [],
+        "characters": [], "relationships": [], "settings": [], "locations": [],
+        "organizations": [], "systems": [], "events": [], "open_threads": [],
+        "foreshadowing": [], "storylines": [], "mystery_information": [],
         "approved_plan": _active_plans(state),
     }
     category_section = {
         "character": "characters", "relationship": "relationships", "world_setting": "settings",
-        "location": "settings", "organization_force": "settings", "custom": "settings",
+        "location": "locations", "organization_force": "organizations", "custom": "settings",
         "event": "events", "promise_foreshadowing": "foreshadowing", "story_line": "storylines",
+        "mystery_information": "mystery_information",
     }
     for item in model.get("objects", {}).values():
         if not isinstance(item, dict) or item.get("tombstoned") or item.get("kind") != "foundation":
@@ -333,6 +399,11 @@ def get_project_snapshot(project_id: str) -> dict[str, Any]:
             continue
         bucket = current if item.get("material_state") == "current" else future
         bucket[section].append(_model_record(item))
+    for item in model.get("objects", {}).values():
+        if not isinstance(item, dict) or item.get("tombstoned") or item.get("kind") != "system":
+            continue
+        bucket = current if item.get("material_state") == "current" else future
+        bucket["systems"].append(_model_record(item))
     for edge in model.get("dependencies", {}).values():
         if not isinstance(edge, dict) or edge.get("tombstoned") or edge.get("relation_kind") != "character_relationship":
             continue
@@ -383,12 +454,60 @@ def get_project_snapshot(project_id: str) -> dict[str, Any]:
             "last_authority_source": state.get("last_authority_source"),
         },
         "model_rev": model.get("model_rev", 0),
+        "story_bible_profile": copy.deepcopy(model["story_bible_profile"]),
         "current": current,
         "future": future,
         "length_plan": length_plan,
         "chapters": chapters,
+        "planning_impact_candidates": copy.deepcopy(model.get("planning_impact_candidates", [])),
+        "legacy_diagnostics": {
+            "unresolved_character_observations": unresolved_character_observations,
+        },
         "settlement": _settlement_summary(project_dir),
     }
+
+
+def _task_relevant_records(
+    snapshot: dict[str, Any],
+    chapter: dict[str, Any] | None,
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, list[dict[str, Any]]]]:
+    """Select only explicit task-near refs/names; never fallback to full state."""
+    tokens: set[str] = set()
+    outline = (chapter or {}).get("fine_outline") if isinstance((chapter or {}).get("fine_outline"), dict) else {}
+    for key in (
+        "participating_characters", "new_characters", "character_refs", "relationship_refs",
+        "location_ref", "location", "organization_refs", "system_refs", "storyline_ref",
+        "storyline", "foreshadowing_refs", "open_thread_refs", "related_refs",
+    ):
+        value = outline.get(key)
+        if isinstance(value, str) and value.strip():
+            tokens.add(value.strip())
+        elif isinstance(value, list):
+            tokens.update(item.strip() for item in value if isinstance(item, str) and item.strip())
+
+    def selected(bucket: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
+        result: dict[str, list[dict[str, Any]]] = {}
+        for section, values in bucket.items():
+            chosen = []
+            for item in values:
+                record = item.get("record") if isinstance(item.get("record"), dict) else {}
+                global_rule = section in {"settings", "systems"} and (
+                    record.get("context_scope") == "global" or bool(record.get("hard_rule"))
+                )
+                if item.get("ref") in tokens or item.get("title") in tokens or global_rule:
+                    chosen.append(item)
+                if len(chosen) >= 12:
+                    break
+            result[section] = chosen
+        return result
+
+    if chapter is None:
+        # Planning sees bounded structured summaries, never an unbounded full dump.
+        return (
+            {key: values[:12] for key, values in snapshot["current"].items()},
+            {key: values[:12] for key, values in snapshot["future"].items()},
+        )
+    return selected(snapshot["current"]), selected(snapshot["future"])
 
 
 def focused_task_context(
@@ -408,23 +527,38 @@ def focused_task_context(
         }
     else:
         settlement_gate = {"status": "synchronized", "message": ""}
+    relevant_current, relevant_future = _task_relevant_records(snapshot, chapter)
+    previous_result = None
+    if chapter_number is not None and chapter_number > 1:
+        previous = next(
+            (item for item in snapshot["chapters"] if item["chapter_number"] == chapter_number - 1),
+            None,
+        )
+        previous_result = copy.deepcopy((previous or {}).get("actual_result"))
     return {
         "project_id": project_id,
         "model_rev": snapshot["model_rev"],
         "state_rev": snapshot["story_state"]["state_rev"],
+        "story_bible_profile": copy.deepcopy(snapshot["story_bible_profile"]),
         "settlement": settlement_gate,
         "current": {
             key: [{"ref": item["ref"], "title": item["title"], "record": item["record"]} for item in values]
-            for key, values in snapshot["current"].items()
+            for key, values in relevant_current.items()
         },
         "future": {
             key: [{"ref": item["ref"], "title": item["title"], "record": item["record"]} for item in values]
-            for key, values in snapshot["future"].items()
+            for key, values in relevant_future.items()
         },
         "chapter": None if chapter is None else {
             "chapter_number": chapter["chapter_number"],
             "title": chapter["title"],
             "actual_words": chapter["actual_words"],
             "fine_outline": copy.deepcopy(chapter.get("fine_outline") or {}),
+            "actual_result": copy.deepcopy(chapter.get("actual_result")),
+            "previous_actual_result": previous_result,
         },
+        "planning_impact_candidates": [
+            item for item in snapshot.get("planning_impact_candidates", [])
+            if item.get("status") == "pending_author"
+        ][:10],
     }

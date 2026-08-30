@@ -159,17 +159,22 @@ _AGENT_TASK_TEMPLATE = """你是 Go Write 的规划执行器。必须严格按�
     ]
   }},
   "planning_projection": {{
-    "characters": [{{"key": "本候选内唯一人物键", "title": "人物名", "role": "可选", "goal": "可选"}}],
+    "domain_profile": null,
+    "characters": [{{"key": "本候选内唯一人物键", "title": "人物名", "one_line_intro": "可选", "role_identity": "可选", "goal_desire": "可选"}}],
     "relationships": [{{"source_key": "人物键", "target_key": "人物键", "label": "关系", "description": "可选"}}],
     "settings": [{{"key": "唯一键", "title": "设定名", "description": "可选"}}],
+    "systems": [{{"key": "唯一键", "title": "通用系统名", "type": "武力/职业/声誉/经济/自定义等", "levels_stages": []}}],
+    "locations": [{{"key": "唯一键", "title": "地点名", "type": "可选"}}],
+    "organizations": [{{"key": "唯一键", "title": "组织名", "purpose": "可选"}}],
     "storylines": [{{"key": "唯一键", "title": "故事线名", "description": "可选"}}],
     "events": [{{"key": "唯一键", "title": "计划事件", "description": "可选", "time_anchor": "仅显式已知时填写"}}],
     "foreshadowing": [{{"key": "唯一键", "title": "伏笔/承诺", "status": "planned", "description": "可选"}}],
-    "chapter_changes": [{{"title": "第1章", "chapter_number": 1, "min_words": 2500, "max_words": 4000, "task": "章节任务", "synopsis": "章节梗概"}}]
+    "mystery_information": [],
+    "chapter_changes": [{{"title": "第1章", "chapter_number": 1, "min_words": 2500, "max_words": 4000, "task": "章节任务", "previous_recap": "上一章实际回顾", "synopsis": "章节梗概", "pov": "可选", "planned_location": "可选", "planned_time": "仅显式", "participating_characters": [], "new_characters": [], "key_beats": [], "conflict": "", "emotional_movement": "", "information_release_gap": "", "foreshadowing_setup_payoff": [], "end_state_hook": "", "storyline": "", "stage": "", "notes": ""}}]
   }}
 }}
 
-planning_projection 只投影 model_output 中明确出现的结构化事实；未提到的类别必须是空列表。所有投影仍是 future/planned，不是当前 Canon。关系端点只能引用本投影 characters 的 key。章节变化只有在候选明确给出合法目标字数范围时才填写，否则保持空列表。
+planning_projection 只投影 model_output 中明确出现的结构化事实；未提到的类别必须是空列表，domain_profile 未涉及时为 null。所有投影仍是 future/planned，不是当前 Canon。关系端点可引用本投影 characters 的 key，或上下文给出的明确人物 ref，绝不按姓名猜测。章节变化只有在候选明确给出合法目标字数范围时才填写，否则保持空列表。世界/人物/关系/system/伏笔设计需要外部方法时可声明对应 knowledge_needs；空 needs 不检索。
 
 作品信息：
 - 作品名：{name}
@@ -1355,6 +1360,9 @@ def confirm_story_plan(project_id: str, planning_token: str) -> dict[str, Any]:
         "name": loaded["name"],
         "state_rev": new_state.get("state_rev"),
         "project_model_rev": projection_model.get("model_rev") if projection_model else None,
-        "planning_projection_count": sum(len(items) for items in projection.values()),
+        "planning_projection_count": sum(
+            len(items) if isinstance(items, list) else (1 if items else 0)
+            for items in projection.values()
+        ),
         "message": "规划已确认并写入",
     }

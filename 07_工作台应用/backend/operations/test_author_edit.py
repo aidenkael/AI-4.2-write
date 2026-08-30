@@ -152,7 +152,8 @@ def test_legacy_relationship_exact_endpoints_promote_to_editable_contract(projec
     snapshot = project_snapshot.get_project_snapshot(project["project_id"])
     assert [item["title"] for item in snapshot["current"]["relationships"]] == ["盟友"]
     assert snapshot["current"]["relationships"][0]["editable"] is True
-    assert edited["change"]["status"] == "synchronized"
+    assert edited["change"]["status"] == "pending"
+    assert edited["change"]["requires_semantic"] is True
 
 
 def test_failed_semantic_writeback_keeps_edit_and_can_retry(project):

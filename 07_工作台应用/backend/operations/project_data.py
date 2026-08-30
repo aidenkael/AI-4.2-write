@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
-"""作品资料 / 故事地图 只读正式数据面（production Story State 投影）。
+"""作品资料 / 故事地图的统一只读派生数据面。
 
 职责（对应 UI 1.0 ProjectData / StoryMap 真实消费者）：
-- 复用 frozen ProjectWorkspace 读取正式 Story State；
+- 复用统一 project snapshot 读取 Author Intent、正式 Story State、active planning 与作者工作区；
 - 返回作者可读的真实字段投影，绝不推断、绝不编造、绝不写回。
 
-来源（唯一权威）：
+来源 authority：
 - Author Intent（work_direction / reader_promise 等）
 - Story State（canon_facts / character_state / relationship_state /
   occurred_events / open_threads / approved_plan）
+- 每项目作者工作区（当前/未来领域对象、细纲与实际章节结果）
 
 映射到 UI 分类（不改变 Canon，只做形状投影）：
 - Characters → character_state
@@ -21,7 +22,7 @@
 约束：
 - 绝不从正文推断缺失的人物/关系/地点；
 - 绝不伪造分类条目；
-- 绝不实现任意 Canon 编辑（无安全的 Canon-edit authority/invalidation 合同）；
+- 本模块只读；作者编辑由统一 author_edit / settlement 合同处理；
 - 零模型 / 零 Skill 调用。
 """
 from __future__ import annotations
@@ -155,15 +156,28 @@ def get_project_data(project_id: str) -> dict[str, Any]:
         "work_direction": intent.get("work_direction") or "",
         "reader_promise": intent.get("reader_promise") or "",
         "settlement": snapshot["settlement"],
+        "story_bible_profile": snapshot["story_bible_profile"],
         "length_plan": snapshot["length_plan"],
+        "chapters": [{
+            "chapter_number": item["chapter_number"],
+            "title": item["title"],
+            "actual_words": item["actual_words"],
+            "fine_outline": copy.deepcopy(item.get("fine_outline") or {}),
+            "actual_result": copy.deepcopy(item.get("actual_result")),
+        } for item in snapshot["chapters"]],
+        "planning_impact_candidates": snapshot.get("planning_impact_candidates", []),
         "sections": {
             "characters": combined("characters"),
             "relationships": combined("relationships"),
             "canon_facts": combined("settings"),
+            "locations": combined("locations"),
+            "organizations": combined("organizations"),
+            "systems": combined("systems"),
             "occurred_events": combined("events"),
             "open_threads": combined("open_threads"),
             "foreshadowing": combined("foreshadowing"),
             "storylines": combined("storylines"),
+            "mystery_information": combined("mystery_information"),
             "approved_plan": [project(item, "future") for item in snapshot["future"]["approved_plan"]],
         },
     }

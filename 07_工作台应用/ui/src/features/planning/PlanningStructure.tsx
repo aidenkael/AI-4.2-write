@@ -12,7 +12,12 @@ interface ChapterDraft {
   task: string
   previous_recap: string
   synopsis: string
+  pov: string
+  planned_location: string
+  planned_time: string
+  participating_characters: string
   new_characters: string
+  key_beats: string
   key_events: string
   foreshadowing: string
   notes: string
@@ -20,6 +25,9 @@ interface ChapterDraft {
   conflict: string
   emotional_movement: string
   information_gap: string
+  information_release_gap: string
+  foreshadowing_setup_payoff: string
+  end_state_hook: string
   stage: string
   actual_words: number
 }
@@ -49,10 +57,16 @@ export function PlanningStructure({ controller }: { controller: ProjectDataContr
       title: text(item.title) || `第${item.chapter_number}章`,
       min_words: numberText(item.min_words), max_words: numberText(item.max_words),
       task: text(item.task), previous_recap: text(item.previous_recap), synopsis: text(item.synopsis),
+      pov: text(item.pov), planned_location: text(item.planned_location), planned_time: text(item.planned_time),
+      participating_characters: listText(item.participating_characters),
       new_characters: listText(item.new_characters), key_events: listText(item.key_events),
+      key_beats: listText(item.key_beats),
       foreshadowing: listText(item.foreshadowing), notes: text(item.notes), storyline: text(item.storyline),
       conflict: text(item.conflict), emotional_movement: text(item.emotional_movement),
       information_gap: text(item.information_gap), stage: text(item.stage), actual_words: item.actual_words,
+      information_release_gap: text(item.information_release_gap),
+      foreshadowing_setup_payoff: listText(item.foreshadowing_setup_payoff),
+      end_state_hook: text(item.end_state_hook),
     })))
   }, [controller.data?.length_plan])
 
@@ -70,9 +84,11 @@ export function PlanningStructure({ controller }: { controller: ProjectDataContr
     const next = Math.max(0, ...chapters.map((item) => item.chapter_number)) + 1
     setChapters((items) => [...items, {
       chapter_number: next, title: `第${next}章`, min_words: '2500', max_words: '4000',
-      task: '', previous_recap: '', synopsis: '', new_characters: '', key_events: '',
+      task: '', previous_recap: '', synopsis: '', pov: '', planned_location: '', planned_time: '',
+      participating_characters: '', new_characters: '', key_beats: '', key_events: '',
       foreshadowing: '', notes: '', storyline: '', conflict: '', emotional_movement: '',
-      information_gap: '', stage: '', actual_words: 0,
+      information_gap: '', information_release_gap: '', foreshadowing_setup_payoff: '',
+      end_state_hook: '', stage: '', actual_words: 0,
     }])
     setEditingChapter(next)
   }
@@ -87,10 +103,15 @@ export function PlanningStructure({ controller }: { controller: ProjectDataContr
       ...(item.ref ? { ref: item.ref } : {}), title: item.title.trim() || `第${item.chapter_number}章`,
       chapter_number: item.chapter_number, min_words: Number(item.min_words), max_words: Number(item.max_words),
       chapter_title: item.title.trim(), task: item.task.trim(), previous_recap: item.previous_recap.trim(),
-      synopsis: item.synopsis.trim(), new_characters: splitList(item.new_characters), key_events: splitList(item.key_events),
+      synopsis: item.synopsis.trim(), pov: item.pov.trim(), planned_location: item.planned_location.trim(),
+      planned_time: item.planned_time.trim(), participating_characters: splitList(item.participating_characters),
+      new_characters: splitList(item.new_characters), key_beats: splitList(item.key_beats),
+      key_events: splitList(item.key_events),
       foreshadowing: splitList(item.foreshadowing), notes: item.notes.trim(), storyline: item.storyline.trim(),
       conflict: item.conflict.trim(), emotional_movement: item.emotional_movement.trim(),
-      information_gap: item.information_gap.trim(), stage: item.stage.trim(),
+      information_gap: item.information_gap.trim(), information_release_gap: item.information_release_gap.trim(),
+      foreshadowing_setup_payoff: splitList(item.foreshadowing_setup_payoff),
+      end_state_hook: item.end_state_hook.trim(), stage: item.stage.trim(),
     }))
     await controller.saveLengthPlan({ total_target_words: totalWords, stages: stagePayload, chapter_targets: chapterPayload })
   }
@@ -144,10 +165,14 @@ export function PlanningStructure({ controller }: { controller: ProjectDataContr
           <label>章节任务 / 目的<textarea value={activeChapter.task} onChange={(event) => updateChapter({ task: event.target.value })} /></label>
           <label>上一章回顾<textarea value={activeChapter.previous_recap} onChange={(event) => updateChapter({ previous_recap: event.target.value })} /></label>
           <label>章节梗概<textarea rows={4} value={activeChapter.synopsis} onChange={(event) => updateChapter({ synopsis: event.target.value })} /></label>
-          <div className="two-fields"><label>新登场人物<input value={activeChapter.new_characters} onChange={(event) => updateChapter({ new_characters: event.target.value })} /></label><label>故事线<input value={activeChapter.storyline} onChange={(event) => updateChapter({ storyline: event.target.value })} /></label></div>
+          <div className="two-fields"><label>视角（可选）<input value={activeChapter.pov} onChange={(event) => updateChapter({ pov: event.target.value })} /></label><label>故事线<input value={activeChapter.storyline} onChange={(event) => updateChapter({ storyline: event.target.value })} /></label></div>
+          <div className="two-fields"><label>规划地点<input value={activeChapter.planned_location} onChange={(event) => updateChapter({ planned_location: event.target.value })} /></label><label>规划时间<input value={activeChapter.planned_time} onChange={(event) => updateChapter({ planned_time: event.target.value })} /></label></div>
+          <label>参与人物<input value={activeChapter.participating_characters} onChange={(event) => updateChapter({ participating_characters: event.target.value })} /></label>
+          <label>新登场人物<input value={activeChapter.new_characters} onChange={(event) => updateChapter({ new_characters: event.target.value })} /></label>
+          <label>关键节拍<input value={activeChapter.key_beats} onChange={(event) => updateChapter({ key_beats: event.target.value })} /></label>
           <label>关键事件<textarea value={activeChapter.key_events} onChange={(event) => updateChapter({ key_events: event.target.value })} /></label>
           <label>伏笔 / 埋设 / 回收<textarea value={activeChapter.foreshadowing} onChange={(event) => updateChapter({ foreshadowing: event.target.value })} /></label>
-          <details><summary>更多可选项</summary><label>冲突<input value={activeChapter.conflict} onChange={(event) => updateChapter({ conflict: event.target.value })} /></label><label>情绪移动<input value={activeChapter.emotional_movement} onChange={(event) => updateChapter({ emotional_movement: event.target.value })} /></label><label>信息差<input value={activeChapter.information_gap} onChange={(event) => updateChapter({ information_gap: event.target.value })} /></label><label>阶段 / 分卷关联<input value={activeChapter.stage} onChange={(event) => updateChapter({ stage: event.target.value })} /></label></details>
+          <details><summary>更多可选项</summary><label>冲突<input value={activeChapter.conflict} onChange={(event) => updateChapter({ conflict: event.target.value })} /></label><label>情绪移动<input value={activeChapter.emotional_movement} onChange={(event) => updateChapter({ emotional_movement: event.target.value })} /></label><label>信息释放 / 信息差<input value={activeChapter.information_release_gap} onChange={(event) => updateChapter({ information_release_gap: event.target.value })} /></label><label>伏笔埋设 / 回收<input value={activeChapter.foreshadowing_setup_payoff} onChange={(event) => updateChapter({ foreshadowing_setup_payoff: event.target.value })} /></label><label>结束状态 / 钩子<input value={activeChapter.end_state_hook} onChange={(event) => updateChapter({ end_state_hook: event.target.value })} /></label><label>阶段 / 分卷关联<input value={activeChapter.stage} onChange={(event) => updateChapter({ stage: event.target.value })} /></label></details>
           <label>作者备注<textarea rows={3} value={activeChapter.notes} onChange={(event) => updateChapter({ notes: event.target.value })} /></label>
           <footer><button className="danger" onClick={() => { setChapters((items) => items.filter((item) => item.chapter_number !== activeChapter.chapter_number)); setEditingChapter(null) }}><Trash2 /> 删除细纲</button><button className="primary" onClick={() => { setEditingChapter(null); void save() }}><Save /> 保存全部规划</button></footer>
         </aside>

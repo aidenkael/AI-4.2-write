@@ -6,22 +6,79 @@ import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { useProjectDataController } from '../features/projectData/useProjectDataController'
 import { describeRecord } from '../features/storyMap/storyMapModel'
 
-type FoundationTab = 'characters' | 'relationships' | 'canon_facts' | 'storylines' | 'foreshadowing'
+type FoundationTab =
+  | 'characters' | 'relationships' | 'canon_facts' | 'locations' | 'organizations'
+  | 'systems' | 'storylines' | 'foreshadowing' | 'mystery_information'
 type MaterialState = 'current' | 'future'
 
 const tabs: Array<{ key: FoundationTab; label: string; Icon: typeof UserRound; category: string }> = [
   { key: 'characters', label: '人物', Icon: UserRound, category: 'character' },
   { key: 'relationships', label: '关系', Icon: GitBranch, category: 'relationship' },
-  { key: 'canon_facts', label: '世界、地点与势力', Icon: FileCheck2, category: 'world_setting' },
+  { key: 'canon_facts', label: '世界', Icon: FileCheck2, category: 'world_setting' },
+  { key: 'locations', label: '地点', Icon: MapPin, category: 'location' },
+  { key: 'organizations', label: '组织', Icon: GitBranch, category: 'organization_force' },
+  { key: 'systems', label: '系统', Icon: FileCheck2, category: 'system' },
   { key: 'storylines', label: '故事线', Icon: MapPin, category: 'story_line' },
   { key: 'foreshadowing', label: '伏笔与承诺', Icon: Check, category: 'promise_foreshadowing' },
+  { key: 'mystery_information', label: '悬疑信息', Icon: Check, category: 'mystery_information' },
 ]
 
 const characterFields = [
-  ['role', '角色定位'], ['identity', '身份'], ['goal', '目标'], ['motivation', '动机'],
-  ['personality', '性格'], ['background', '背景'], ['status', '当前状态'], ['notes', '备注'],
+  ['aliases', '别名'], ['one_line_intro', '一句话介绍'], ['role_identity', '角色 / 身份'],
+  ['position_title', '职位'], ['faction_org', '阵营 / 组织'], ['visible_traits', '可见特征'],
+  ['persona_core', '人设核心'], ['goal_desire', '目标 / 渴望'], ['fear_weakness', '恐惧 / 弱点'],
+  ['inner_conflict', '内在冲突'], ['values_beliefs', '价值 / 信念'], ['background_summary', '背景摘要'],
+  ['speech_style', '说话特点'], ['behavior_anchors', '行为锚点'], ['secrets', '秘密'],
+  ['current_state', '当前状态'], ['current_objective', '当前目标'], ['arc_stage', '人物弧阶段'],
+  ['notes', '备注'],
 ] as const
-const defaultFields = [['description', '描述'], ['status', '状态'], ['notes', '备注']] as const
+const fieldSets = {
+  canon_facts: [
+    ['era_time_background', '时代 / 时间背景'], ['geographic_scope', '地理范围'],
+    ['social_structure', '社会结构'], ['political_order', '政治秩序'], ['economy_resources', '经济 / 资源'],
+    ['culture_customs', '文化 / 习俗'], ['technology_level', '科技水平'],
+    ['supernatural_baseline', '超自然基线'], ['important_history', '重要历史'],
+    ['hard_rules', '硬规则'], ['prohibitions_taboos', '禁忌'], ['known_exceptions', '已知例外'],
+    ['story_constraints', '故事约束'], ['notes', '备注'],
+  ],
+  locations: [
+    ['type', '类型'], ['region_parent', '区域 / 上级'], ['physical_features', '物理特征'],
+    ['story_social_function', '故事 / 社会功能'], ['controlling_organization', '控制组织'],
+    ['rules_risks', '规则 / 风险'], ['current_state', '当前状态'],
+  ],
+  organizations: [
+    ['type', '类型'], ['purpose', '目的'], ['hierarchy', '层级'],
+    ['leader_key_members', '领导 / 关键成员'], ['resources', '资源'], ['territory_scope', '范围'],
+    ['rules', '规则'], ['external_relationships', '外部关系'], ['current_state', '当前状态'],
+  ],
+  systems: [
+    ['type', '类型'], ['purpose', '用途'], ['levels_stages', '等级 / 阶段'],
+    ['entry_progression_requirements', '进入 / 晋升条件'], ['abilities_privileges', '能力 / 权利'],
+    ['limitations_costs', '限制 / 代价'], ['visible_markers', '外显标志'],
+    ['exceptions', '例外'], ['important_rules', '重要规则'], ['notes', '备注'],
+  ],
+  storylines: [
+    ['goal_purpose', '目标 / 用途'], ['stakes', '代价'], ['main_conflict', '主要冲突'],
+    ['participating_characters', '参与人物'], ['related_organizations_locations', '相关组织 / 地点'],
+    ['stage_progress', '阶段 / 进度'], ['dependencies', '依赖'],
+    ['expected_payoff_end_condition', '预期回收 / 结束条件'], ['notes', '备注'],
+  ],
+  foreshadowing: [
+    ['setup_trigger', '埋设 / 触发'], ['reader_question_promise', '读者问题 / 承诺'],
+    ['related_entities', '相关对象'], ['state', '状态'], ['intended_payoff', '计划回收'],
+    ['actual_payoff', '实际回收'], ['notes', '备注'],
+  ],
+  mystery_information: [
+    ['secret_fact', '秘密 / 事实'], ['who_knows', '谁知道'], ['who_does_not_know', '谁不知道'],
+    ['mistaken_beliefs', '错误认知'], ['reveal_status', '揭示状态'],
+    ['planned_reveal', '计划揭示'], ['actual_reveal_event_chapter', '实际揭示事件 / 章节'],
+  ],
+} as const
+const fieldsForTab = (tab: FoundationTab) => tab === 'characters'
+  ? characterFields
+  : tab === 'relationships'
+    ? []
+    : fieldSets[tab]
 
 interface RecordForm {
   mode: 'create' | 'edit'
@@ -44,6 +101,12 @@ interface RelationshipForm {
   description: string
   state: string
   notes: string
+  relationship_phase: string
+  key_history: string
+  current_tension: string
+  hidden_information: string
+  trust: string
+  closeness: string
   preservedData: Record<string, unknown>
 }
 
@@ -88,7 +151,23 @@ const sectionForCategory = (category: string | null | undefined): FoundationTab 
   if (category === 'relationship') return 'relationships'
   if (category === 'story_line') return 'storylines'
   if (category === 'promise_foreshadowing') return 'foreshadowing'
+  if (category === 'location') return 'locations'
+  if (category === 'organization_force') return 'organizations'
+  if (category === 'system') return 'systems'
+  if (category === 'mystery_information') return 'mystery_information'
   return 'canon_facts'
+}
+
+const optionalModules = [
+  ['power_progression', '成长 / 战力'], ['career_rank', '职业 / 职级'],
+  ['economy_resources', '经济 / 资源'], ['politics_factions', '政治 / 阵营'],
+  ['technology', '科技'], ['supernatural_rules', '超自然规则'],
+  ['romance_social', '情感 / 社交'], ['mystery_information', '悬疑信息'], ['custom', '自定义'],
+] as const
+
+const characterInitial = (entry: ProjectDataEntry) => {
+  const label = entry.label.trim()
+  return label ? label.slice(0, 1).toUpperCase() : '？'
 }
 
 function relationshipEndpointRefs(record: Record<string, unknown>, characters: ProjectDataEntry[]): [string, string] {
@@ -120,18 +199,39 @@ export function FoundationPage() {
   const [tab, setTab] = useState<FoundationTab>('characters')
   const [recordForm, setRecordForm] = useState<RecordForm | null>(null)
   const [relationshipForm, setRelationshipForm] = useState<RelationshipForm | null>(null)
+  const [genreTags, setGenreTags] = useState('')
+  const [narrativeMode, setNarrativeMode] = useState('')
+  const [activeModules, setActiveModules] = useState<string[]>([])
+  const [characterOptionalFields, setCharacterOptionalFields] = useState('')
   const handoffRef = useRef<string | null>(null)
 
   const tabMeta = tabs.find((item) => item.key === tab) ?? tabs[0]
   const entries = useMemo(() => controller.data?.sections[tab] ?? [], [controller.data, tab])
-  const fields = tab === 'characters' ? characterFields : defaultFields
+  const fields = fieldsForTab(tab)
   const characters = controller.data?.sections.characters ?? []
+
+  useEffect(() => {
+    const profile = controller.data?.story_bible_profile
+    if (!profile) return
+    setGenreTags(profile.genre_tags.join('、'))
+    setNarrativeMode(profile.narrative_mode ?? '')
+    setActiveModules(profile.active_modules)
+    const characterConfig = profile.field_config.character
+    const optionalFields = characterConfig && typeof characterConfig === 'object' && !Array.isArray(characterConfig)
+      ? (characterConfig as Record<string, unknown>).optional_fields
+      : []
+    setCharacterOptionalFields(Array.isArray(optionalFields)
+      ? optionalFields.filter((item): item is string => typeof item === 'string').join('、')
+      : '')
+  }, [controller.data?.story_bible_profile])
 
   const beginCreate = () => {
     if (tab === 'relationships') {
       setRelationshipForm({
         mode: 'create', ref: null, label: '', source_ref: '', target_ref: '',
-        material_state: 'current', description: '', state: '', notes: '', preservedData: {},
+        material_state: 'current', description: '', state: '', notes: '',
+        relationship_phase: '', key_history: '', current_tension: '', hidden_information: '',
+        trust: '', closeness: '', preservedData: {},
       })
       return
     }
@@ -151,8 +251,12 @@ export function FoundationPage() {
         mode: 'edit', ref: entry.source_ref, label: entry.label,
         source_ref: sourceRef, target_ref: targetRef,
         material_state: entry.status === 'future' ? 'future' : 'current',
-        description: String(record.description ?? ''), state: String(record.state ?? record.status ?? ''),
+        description: String(record.description ?? ''), state: String(record.current_state ?? record.state ?? record.status ?? ''),
         notes: String(record.notes ?? ''),
+        relationship_phase: String(record.relationship_phase ?? ''),
+        key_history: String(record.key_history ?? ''), current_tension: String(record.current_tension ?? ''),
+        hidden_information: String(record.hidden_information ?? ''),
+        trust: String(record.trust ?? ''), closeness: String(record.closeness ?? ''),
         preservedData: Object.fromEntries(
           Object.entries(record).filter(([key]) => ['planning_source_ref', 'source_state_ref', 'supersedes_state_ref', 'settlement_provenance'].includes(key)),
         ),
@@ -173,7 +277,10 @@ export function FoundationPage() {
     if (!selected || controller.loading || !controller.data) return
     const handoff = actions.consumeFoundationEditHandoff()
     if (!handoff || handoff.project_id !== selected.project_id || handoffRef.current === handoff.source_ref) return
-    const sections: FoundationTab[] = ['characters', 'relationships', 'canon_facts', 'storylines', 'foreshadowing']
+    const sections: FoundationTab[] = [
+      'characters', 'relationships', 'canon_facts', 'locations', 'organizations', 'systems',
+      'storylines', 'foreshadowing', 'mystery_information',
+    ]
     for (const section of sections) {
       const entry = controller.data.sections[section].find((item) => item.source_ref === handoff.source_ref)
       if (entry) {
@@ -186,11 +293,14 @@ export function FoundationPage() {
             mode: 'edit', ref: entry.source_ref ?? null, label: entry.label,
             source_ref: sourceRef, target_ref: targetRef,
             material_state: entry.status === 'future' ? 'future' : 'current',
-            description: String(record.description ?? ''), state: String(record.state ?? record.status ?? ''),
-            notes: String(record.notes ?? ''), preservedData: {},
+            description: String(record.description ?? ''), state: String(record.current_state ?? record.state ?? record.status ?? ''),
+            notes: String(record.notes ?? ''), relationship_phase: String(record.relationship_phase ?? ''),
+            key_history: String(record.key_history ?? ''), current_tension: String(record.current_tension ?? ''),
+            hidden_information: String(record.hidden_information ?? ''), trust: String(record.trust ?? ''),
+            closeness: String(record.closeness ?? ''), preservedData: {},
           })
         } else {
-          const entryFields = section === 'characters' ? characterFields : defaultFields
+          const entryFields = fieldsForTab(section)
           setRecordForm({
             mode: 'edit', ref: entry.source_ref ?? null, title: entry.label,
             material_state: entry.status === 'future' ? 'future' : 'current',
@@ -233,7 +343,13 @@ export function FoundationPage() {
     const data = {
       ...relationshipForm.preservedData,
       ...(relationshipForm.description.trim() ? { description: relationshipForm.description.trim() } : {}),
-      ...(relationshipForm.state.trim() ? { state: relationshipForm.state.trim() } : {}),
+      ...(relationshipForm.state.trim() ? { current_state: relationshipForm.state.trim() } : {}),
+      ...(relationshipForm.relationship_phase.trim() ? { relationship_phase: relationshipForm.relationship_phase.trim() } : {}),
+      ...(relationshipForm.key_history.trim() ? { key_history: relationshipForm.key_history.trim() } : {}),
+      ...(relationshipForm.current_tension.trim() ? { current_tension: relationshipForm.current_tension.trim() } : {}),
+      ...(relationshipForm.hidden_information.trim() ? { hidden_information: relationshipForm.hidden_information.trim() } : {}),
+      ...(relationshipForm.trust.trim() ? { trust: relationshipForm.trust.trim() } : {}),
+      ...(relationshipForm.closeness.trim() ? { closeness: relationshipForm.closeness.trim() } : {}),
       ...(relationshipForm.notes.trim() ? { notes: relationshipForm.notes.trim() } : {}),
     }
     const payload = {
@@ -257,12 +373,56 @@ export function FoundationPage() {
     }
   }
 
+  const saveProfile = async () => {
+    const currentConfig = controller.data?.story_bible_profile.field_config ?? {}
+    const currentCharacterConfig = currentConfig.character
+    const optionalFields = characterOptionalFields
+      .split(/[、,，\n]/).map((item) => item.trim()).filter(Boolean)
+    await controller.saveProfile({
+      genre_tags: genreTags.split(/[、,，\n]/).map((item) => item.trim()).filter(Boolean),
+      narrative_mode: narrativeMode.trim() || null,
+      active_modules: activeModules,
+      field_config: {
+        ...currentConfig,
+        character: {
+          ...(currentCharacterConfig && typeof currentCharacterConfig === 'object' && !Array.isArray(currentCharacterConfig)
+            ? currentCharacterConfig as Record<string, unknown>
+            : {}),
+          optional_fields: optionalFields,
+        },
+      },
+    })
+  }
+
   return (
     <div className="foundation-page">
       <div className="foundation-direction">
         <section className="panel"><h3>作品方向</h3><p>{controller.data?.work_direction || '当前尚未记录。'}</p></section>
         <section className="panel"><h3>读者期待</h3><p>{controller.data?.reader_promise || '当前尚未记录。'}</p></section>
       </div>
+
+      <section className="panel foundation-profile">
+        <h3>本书资料结构</h3>
+        <p className="muted-note">控制本书需要显示的可选领域；隐藏模块不会删除已经记录的内容。</p>
+        <label>题材标签<input value={genreTags} onChange={(event) => setGenreTags(event.target.value)} placeholder="例如：历史、悬疑" /></label>
+        <label>叙事方式<input value={narrativeMode} onChange={(event) => setNarrativeMode(event.target.value)} placeholder="明确时填写，例如：第三人称限知" /></label>
+        <label>人物可选字段<input value={characterOptionalFields} onChange={(event) => setCharacterOptionalFields(event.target.value)} placeholder="按本书需要填写，例如：年龄状态、当前地点、声誉" /></label>
+        <div className="profile-modules">
+          {optionalModules.map(([key, label]) => (
+            <label key={key}>
+              <input
+                type="checkbox"
+                checked={activeModules.includes(key)}
+                onChange={(event) => setActiveModules((items) => event.target.checked
+                  ? [...items.filter((item) => item !== key), key]
+                  : items.filter((item) => item !== key))}
+              />
+              {label}
+            </label>
+          ))}
+        </div>
+        <button onClick={() => void saveProfile()} disabled={controller.saving}><Save /> 保存本书结构</button>
+      </section>
 
       <section className="panel foundation-main">
         <header className="foundation-toolbar">
@@ -289,6 +449,7 @@ export function FoundationPage() {
             return (
               <article className="foundation-card" key={`${tab}-${entry.id ?? entry.label}`}>
                 <div className="foundation-card-head">
+                  {tab === 'characters' && <span className="character-avatar" aria-hidden="true">{characterInitial(entry)}</span>}
                   <h3>{entry.label || '（未命名条目）'}</h3>
                   <span className={`material-state ${entry.status === 'future' ? 'future' : 'current'}`}>
                     {entry.status === 'future' ? '规划中' : '当前'}
@@ -311,12 +472,9 @@ export function FoundationPage() {
           <header><h2>{recordForm.mode === 'create' ? '新增' : '编辑'}{tabMeta.label}</h2><button onClick={() => setRecordForm(null)}><X /></button></header>
           <label>名称<input value={recordForm.title} onChange={(event) => setRecordForm({ ...recordForm, title: event.target.value })} /></label>
           <label>状态<select value={recordForm.material_state} onChange={(event) => setRecordForm({ ...recordForm, material_state: event.target.value as MaterialState })}><option value="current">当前有效</option><option value="future">未来规划</option></select></label>
-          {tab === 'canon_facts' && recordForm.mode === 'create' && (
-            <label>记录类型<select value={recordForm.category} onChange={(event) => setRecordForm({ ...recordForm, category: event.target.value })}><option value="world_setting">世界 / 核心设定</option><option value="location">地点</option><option value="organization_force">组织 / 势力</option><option value="custom">自定义系统</option></select></label>
-          )}
           <div className="record-fields">
             {fields.map(([key, label]) => (
-              <label key={key}>{label}<textarea rows={key === 'background' || key === 'notes' ? 3 : 2} value={recordForm.data[key] ?? ''} onChange={(event) => setRecordForm({ ...recordForm, data: { ...recordForm.data, [key]: event.target.value } })} /></label>
+              <label key={key}>{label}<textarea rows={key === 'background_summary' || key === 'notes' ? 3 : 2} value={recordForm.data[key] ?? ''} onChange={(event) => setRecordForm({ ...recordForm, data: { ...recordForm.data, [key]: event.target.value } })} /></label>
             ))}
             {recordForm.extraFields.map((field, index) => (
               <div className="custom-field-row" key={`${field.key}-${index}`}>
@@ -345,6 +503,12 @@ export function FoundationPage() {
           <label>状态<select value={relationshipForm.material_state} onChange={(event) => setRelationshipForm({ ...relationshipForm, material_state: event.target.value as MaterialState })}><option value="current">当前有效</option><option value="future">未来规划</option></select></label>
           <label>描述<textarea rows={3} value={relationshipForm.description} onChange={(event) => setRelationshipForm({ ...relationshipForm, description: event.target.value })} /></label>
           <label>关系状态<input value={relationshipForm.state} onChange={(event) => setRelationshipForm({ ...relationshipForm, state: event.target.value })} placeholder="例如：紧张、合作、疏远" /></label>
+          <label>关系阶段<input value={relationshipForm.relationship_phase} onChange={(event) => setRelationshipForm({ ...relationshipForm, relationship_phase: event.target.value })} /></label>
+          <label>关键经历<textarea rows={3} value={relationshipForm.key_history} onChange={(event) => setRelationshipForm({ ...relationshipForm, key_history: event.target.value })} /></label>
+          <label>当前张力<textarea rows={2} value={relationshipForm.current_tension} onChange={(event) => setRelationshipForm({ ...relationshipForm, current_tension: event.target.value })} /></label>
+          <label>隐瞒的信息<textarea rows={2} value={relationshipForm.hidden_information} onChange={(event) => setRelationshipForm({ ...relationshipForm, hidden_information: event.target.value })} /></label>
+          <label>信任（可选）<input value={relationshipForm.trust} onChange={(event) => setRelationshipForm({ ...relationshipForm, trust: event.target.value })} /></label>
+          <label>亲近（可选）<input value={relationshipForm.closeness} onChange={(event) => setRelationshipForm({ ...relationshipForm, closeness: event.target.value })} /></label>
           <label>备注<textarea rows={3} value={relationshipForm.notes} onChange={(event) => setRelationshipForm({ ...relationshipForm, notes: event.target.value })} /></label>
           <footer>
             {relationshipForm.mode === 'edit' && <button className="danger" onClick={() => void retire({ source_ref: relationshipForm.ref, editable: true } as ProjectDataEntry)}><Trash2 /> 退役</button>}

@@ -22,10 +22,16 @@ _exec_task_manager = execution_tasks.manager
 _DIRECT_BUSY_ERROR = "已有直连任务正在执行，请先等待其完成或取消，再同步本次修改。"
 _ALLOWED_KINDS = {
     "character", "relationship", "event", "time", "foreshadowing",
-    "setting", "location", "organization", "storyline", "planning", "open_thread",
+    "setting", "location", "organization", "system", "storyline", "planning",
+    "open_thread", "mystery_information",
 }
 _ALLOWED_CLASSIFICATIONS = {"mechanically_certain", "ambiguous", "creative_optional"}
 _ALLOWED_ACTIONS = {"create", "update", "retire"}
+_CHARACTER_SUMMARY_FIELDS = {
+    "one_line_intro", "visible_traits", "persona_core", "background_summary",
+    "position_title", "power_rank", "current_state", "current_objective",
+    "arc_stage", "speech_style", "behavior_anchors",
+}
 
 _TASK_TEMPLATE = """你是 Go Write 的增量语义结算执行器。只分析本次明确变更及给出的相关当前快照，不重写正文，不臆造绝对日期，不把未来规划当成已发生事实。
 
@@ -46,10 +52,14 @@ _TASK_TEMPLATE = """你是 Go Write 的增量语义结算执行器。只分析�
       "data": {{"只放本次文本明确支持的结构化字段": "值"}},
       "reason": "短理由"
     }}
-  ]
+  ],
+  "chapter_actual_result": null,
+  "planning_impact_candidate": null
 }}
 
-只有文本或作者显式字段直接支持、无需创造性选择的后果才能标 mechanically_certain。相对时间如“过了一年”保留 relative_duration/ordering，不得发明年份。含歧义的解释标 ambiguous；文学选择标 creative_optional。关系端点必须使用快照中的明确人物 ref，绝不按名称猜测。
+只有文本或作者显式字段直接支持、无需创造性选择的后果才能标 mechanically_certain。相对时间如“过了一年”保留 relative_duration/ordering，不得发明年份；只有同时存在明确 ISO 时间基点时，才可输出 base_story_time_anchor 与结构化 relative_duration={{"value": 数值, "unit": "minutes|hours|days|weeks"}}，最终时间由代码计算。含歧义的解释标 ambiguous；文学选择标 creative_optional。关系端点必须使用快照中的明确人物 ref，绝不按名称猜测。人物摘要更新只允许 one_line_intro / visible_traits / persona_core / background_summary / position_title / power_rank / current_state / current_objective / arc_stage / speech_style / behavior_anchors 中本次证据支持的字段。
+
+若本次是正文变更，chapter_actual_result 必须是对象，包含 summary，并可包含 important_events / characters_involved / character_state_changes / relationship_changes / time_movement / location_state_changes / information_revealed / foreshadowing_planted_paid_off / unresolved_threads / final_chapter_state / outline_divergence；它描述正文现实，不复写细纲。非正文变更填 null。只有正文与细纲存在实质偏差且会影响未来规划时，planning_impact_candidate 才填 {{"summary":"简短影响","affected_refs":[]}}；否则填 null，绝不直接改未来规划。
 
 本次变更：
 {change}
@@ -109,8 +119,33 @@ def _parse_output(output: str) -> dict[str, Any]:
             or not item["target_character_ref"].strip()
         ):
             raise ChangeSettlementError(f"consequences[{index}] 关系缺少明确人物端点 ref。")
+        if kind == "character" and action == "update":
+            unknown_fields = set(item.get("data", {})) - _CHARACTER_SUMMARY_FIELDS
+            if unknown_fields:
+                raise ChangeSettlementError(
+                    f"consequences[{index}] 人物摘要补丁包含不允许字段：{', '.join(sorted(unknown_fields))}。"
+                )
         normalized.append(copy.deepcopy(item))
-    return {"summary": value["summary"].strip(), "consequences": normalized}
+    chapter_result = value.get("chapter_actual_result")
+    if chapter_result is not None:
+        if not isinstance(chapter_result, dict) or not isinstance(chapter_result.get("summary"), str):
+            raise ChangeSettlementError("chapter_actual_result 必须包含 summary。")
+        unknown = set(chapter_result) - project_model._CHAPTER_RESULT_FIELDS
+        if unknown:
+            raise ChangeSettlementError("chapter_actual_result 包含未知字段。")
+    planning_impact = value.get("planning_impact_candidate")
+    if planning_impact is not None:
+        if (
+            not isinstance(planning_impact, dict)
+            or not isinstance(planning_impact.get("summary"), str)
+            or not isinstance(planning_impact.get("affected_refs", []), list)
+        ):
+            raise ChangeSettlementError("planning_impact_candidate 结构非法。")
+    return {
+        "summary": value["summary"].strip(), "consequences": normalized,
+        "chapter_actual_result": copy.deepcopy(chapter_result),
+        "planning_impact_candidate": copy.deepcopy(planning_impact),
+    }
 
 
 def _model_artifact(project_id: str) -> Path:
@@ -193,6 +228,7 @@ def _apply_one(
             return project_model.create_relationship(
                 project_id, base_model_rev=model["model_rev"], source_ref=source_ref,
                 target_ref=target_character_ref, label=item["title"], material_state="current", data=data,
+                field_authority="semantic",
             )
         if not isinstance(target_ref, str):
             raise ChangeSettlementError("关系更新/退役 target_ref 不是活动关系。")
@@ -207,7 +243,7 @@ def _apply_one(
             model = project_model.create_relationship(
                 project_id, base_model_rev=model["model_rev"], source_ref=source_ref,
                 target_ref=target_character_ref, label=item["title"],
-                material_state="current", data=overlay_data,
+                material_state="current", data=overlay_data, field_authority="semantic",
             )
             if action == "update":
                 return model
@@ -216,9 +252,16 @@ def _apply_one(
                 project_id, base_model_rev=model["model_rev"], ref=marker_ref,
             )
         if action == "update":
-            return project_model.update_dependency(
-                project_id, base_model_rev=model["model_rev"], ref=target_ref,
-                source_ref=source_ref, target_ref=target_character_ref, title=item["title"], data=data,
+            edge = model["dependencies"][target_ref]
+            allowed = {
+                key: value for key, value in data.items()
+                if key not in set(edge.get("author_fields") or [])
+                or key not in (edge.get("data") or {})
+            }
+            if not allowed:
+                return model
+            return project_model.patch_dependency_data(
+                project_id, base_model_rev=model["model_rev"], ref=target_ref, patch=allowed,
             )
         return project_model.tombstone_dependency(
             project_id, base_model_rev=model["model_rev"], ref=target_ref,
@@ -229,20 +272,37 @@ def _apply_one(
         "foreshadowing": "promise_foreshadowing", "setting": "world_setting",
         "location": "location", "organization": "organization_force",
         "storyline": "story_line", "planning": "story_line", "open_thread": "promise_foreshadowing",
-    }[kind]
+        "mystery_information": "mystery_information",
+    }.get(kind)
     if kind == "time":
         data["time_semantics"] = True
     material_state = "future" if kind == "planning" else "current"
     if action == "create":
+        if kind == "system":
+            return project_model.create_system(
+                project_id, base_model_rev=model["model_rev"], title=item["title"],
+                material_state=material_state, definition=data, field_authority="semantic",
+            )
+        if category is None:
+            raise ChangeSettlementError("语义后果 kind 无法映射到领域对象。")
         return project_model.create_foundation_record(
             project_id, base_model_rev=model["model_rev"], category=category,
             title=item["title"], material_state=material_state, data=data,
+            field_authority="semantic",
         )
     if isinstance(target_ref, str) and target_ref in model.get("objects", {}):
         if action == "update":
-            return project_model.update_object(
+            target = model["objects"][target_ref]
+            allowed = {
+                key: value for key, value in data.items()
+                if key not in set(target.get("author_fields") or [])
+                or key not in (target.get("data") or {})
+            }
+            if not allowed:
+                return model
+            return project_model.patch_object_data(
                 project_id, base_model_rev=model["model_rev"], ref=target_ref,
-                title=item["title"], material_state=material_state, data=data,
+                patch=allowed, material_state=material_state,
             )
         return project_model.tombstone_object(
             project_id, base_model_rev=model["model_rev"], ref=target_ref,
@@ -259,6 +319,7 @@ def _apply_one(
         model = project_model.create_foundation_record(
             project_id, base_model_rev=model["model_rev"], category=category,
             title=item["title"], material_state=material_state, data=marker_data,
+            field_authority="semantic",
         )
         marker_ref = model["change_history"][-1]["detail"]["ref"]
         return project_model.tombstone_object(
@@ -268,6 +329,7 @@ def _apply_one(
     return project_model.create_foundation_record(
         project_id, base_model_rev=model["model_rev"], category=category,
         title=item["title"], material_state="current", data=data,
+        field_authority="semantic",
     )
 
 
@@ -291,6 +353,33 @@ def apply_semantic_result(
     try:
         for item in mechanical:
             model = _apply_one(project_id, model, snapshot, item)
+        chapter_result = parsed.get("chapter_actual_result")
+        if chapter_result is not None:
+            if change_before.get("source_kind") not in {"manual_prose_edit", "accepted_ai_prose"}:
+                raise ChangeSettlementError("非正文变更不能写入章节实际结果。")
+            delta = change_before.get("delta") if isinstance(change_before.get("delta"), dict) else {}
+            chapter_number = delta.get("chapter_number")
+            chapter = next(
+                (item for item in snapshot["chapters"] if item["chapter_number"] == chapter_number),
+                None,
+            )
+            if not isinstance(chapter_number, int) or chapter is None:
+                raise ChangeSettlementError("正文变更缺少有效章节身份。")
+            content_sha256 = delta.get("after_sha256") or chapter.get("content_sha256")
+            model = project_model.set_chapter_actual_result(
+                project_id, base_model_rev=model["model_rev"], chapter_number=chapter_number,
+                result=chapter_result, content_sha256=content_sha256,
+                source_change_id=change_id, actual_word_count=chapter["actual_words"],
+            )
+            impact = parsed.get("planning_impact_candidate")
+            if impact is not None:
+                model = project_model.add_planning_impact_candidate(
+                    project_id, base_model_rev=model["model_rev"], chapter_number=chapter_number,
+                    summary=impact["summary"], affected_refs=impact.get("affected_refs") or [],
+                    source_change_id=change_id,
+                )
+        elif parsed.get("planning_impact_candidate") is not None:
+            raise ChangeSettlementError("规划影响候选必须绑定章节实际结果。")
     except (project_model.ProjectModelError, ChangeSettlementError, OSError) as exc:
         try:
             _restore_model(model_path, before)

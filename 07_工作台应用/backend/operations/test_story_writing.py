@@ -734,6 +734,9 @@ def test_confirm_uses_backend_draft_only(isolated, real_project, fake_bridge, mo
     assert confirmed["message"] == "这段已经保留下来了。"
     assert confirmed["scene_ref"] == result["scene_ref"]
     assert confirmed["chapter_number"] == result["chapter_number"]
+    from operations import project_model
+    model = project_model.load_project_model(real_project["project_id"])
+    assert model["chapter_actual_results"][str(result["chapter_number"])]["summary"]
 
 
 def test_confirm_calls_accept_prose_author_accepted(isolated, real_project, fake_bridge, monkeypatch):

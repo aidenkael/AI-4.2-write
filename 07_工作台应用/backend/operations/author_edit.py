@@ -250,10 +250,12 @@ def _perform_model_change(
         direct_impact = project_impact.build_direct_impact_report(
             project_id, int(model.get("model_rev") or 0),
         )
+        requires_semantic = _model_change_requires_semantic(source_kind, model, detail)
         change = _append_change(
-            changes_path, project_id, source_kind=source_kind, status="synchronized",
+            changes_path, project_id, source_kind=source_kind,
+            status="pending" if requires_semantic else "synchronized",
             delta={"project_model_change": detail, "direct_impact": direct_impact},
-            requires_semantic=False,
+            requires_semantic=requires_semantic,
             source_model_rev=model.get("model_rev"),
         )
         return {"model": model, "change": change}
@@ -271,6 +273,59 @@ def _perform_model_change(
         raise AuthorEditError(str(exc)) from exc
 
 
+_DISPLAY_ONLY_DATA_FIELDS = {"display_order", "display_group", "collapsed", "color", "avatar_seed"}
+_MECHANICAL_OUTLINE_FIELDS = {
+    "chapter_number", "chapter_title", "min_words", "max_words", "actual_words",
+}
+
+
+def _changed_data_keys(change: dict[str, Any]) -> set[str]:
+    data_change = (change.get("changes") or {}).get("data")
+    if not isinstance(data_change, dict):
+        return set()
+    before = data_change.get("before") if isinstance(data_change.get("before"), dict) else {}
+    after = data_change.get("after") if isinstance(data_change.get("after"), dict) else {}
+    return {key for key in set(before) | set(after) if before.get(key) != after.get(key)}
+
+
+def _model_change_requires_semantic(
+    source_kind: str,
+    model: dict[str, Any],
+    detail: dict[str, Any],
+) -> bool:
+    """Conservative boundary: only proven display/mechanical edits skip AI."""
+    if source_kind in {"relationship_edit", "system_edit"}:
+        return True
+    if source_kind == "profile_edit":
+        return False
+    history_detail = detail.get("detail") if isinstance(detail.get("detail"), dict) else {}
+    if source_kind == "foundation_edit":
+        ref = history_detail.get("ref")
+        item = model.get("objects", {}).get(ref) if isinstance(ref, str) else None
+        category = item.get("category") if isinstance(item, dict) else None
+        if category not in {
+            "character", "world_setting", "location", "organization_force", "story_line",
+            "promise_foreshadowing", "event", "mystery_information",
+        }:
+            return False
+        changes = history_detail.get("changes") if isinstance(history_detail.get("changes"), dict) else {}
+        if changes and set(changes) == {"data"} and _changed_data_keys(history_detail) <= _DISPLAY_ONLY_DATA_FIELDS:
+            return False
+        return True
+    if source_kind == "planning_edit":
+        changed = history_detail.get("changed") if isinstance(history_detail.get("changed"), dict) else {}
+        chapter_changes = (changed.get("chapter_targets") or {}).get("objects", [])
+        for item in chapter_changes if isinstance(chapter_changes, list) else []:
+            if item.get("action") in {"created", "tombstoned"}:
+                return True
+            if "title" in (item.get("changes") or {}):
+                return True
+            if _changed_data_keys(item) - _MECHANICAL_OUTLINE_FIELDS:
+                return True
+        return False
+    return False
+
+
 def create_foundation_record(
     project_id: str,
     *,
@@ -281,12 +336,41 @@ def create_foundation_record(
     data: dict[str, Any] | None = None,
     category_name: str | None = None,
 ) -> dict[str, Any]:
+    if category == "system":
+        return _perform_model_change(
+            project_id,
+            "system_edit",
+            lambda: project_model.create_system(
+                project_id, base_model_rev=base_model_rev, title=title,
+                material_state=material_state, definition=data or {},
+            ),
+        )
     return _perform_model_change(
         project_id,
         "foundation_edit",
         lambda: project_model.create_foundation_record(
             project_id, base_model_rev=base_model_rev, category=category, title=title,
             material_state=material_state, data=data, category_name=category_name,
+        ),
+    )
+
+
+def set_story_bible_profile(
+    project_id: str,
+    *,
+    base_model_rev: int,
+    genre_tags: list[str],
+    narrative_mode: str | None,
+    active_modules: list[str],
+    field_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return _perform_model_change(
+        project_id,
+        "profile_edit",
+        lambda: project_model.set_story_bible_profile(
+            project_id, base_model_rev=base_model_rev, genre_tags=genre_tags,
+            narrative_mode=narrative_mode, active_modules=active_modules,
+            field_config=field_config,
         ),
     )
 
@@ -646,16 +730,22 @@ def record_accepted_ai_prose(
     chapter_number: int,
     scene_ref: str,
     settlement: dict[str, Any],
+    content_sha256: str | None = None,
+    semantic_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Record an already-durable StoryWrite acceptance in the unified ledger."""
     _loaded, _project_dir, changes_path = _load(project_id)
+    requires_semantic = semantic_result is not None
     return _append_change(
-        changes_path, project_id, source_kind="accepted_ai_prose", status="synchronized",
+        changes_path, project_id, source_kind="accepted_ai_prose",
+        status="pending" if requires_semantic else "synchronized",
         delta={
             "chapter_number": chapter_number, "scene_ref": scene_ref,
             "settlement_candidates": copy.deepcopy(settlement.get("candidates") or []),
+            "after_sha256": content_sha256,
+            "precomputed_semantic": copy.deepcopy(semantic_result),
         },
-        requires_semantic=False,
+        requires_semantic=requires_semantic,
     )
 
 

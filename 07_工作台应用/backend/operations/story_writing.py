@@ -198,7 +198,23 @@ _PROSE_TASK_TEMPLATE = """根据下面的创作上下文，写一段正文。最
       "operation": "append",
       "reason": "正文明确写到了这个事实"
     }}
-  ]
+  ],
+  "chapter_actual_result": {{
+    "summary": "本章实际内容的短摘要",
+    "important_events": [],
+    "characters_involved": [],
+    "character_state_changes": [],
+    "relationship_changes": [],
+    "time_movement": [],
+    "location_state_changes": [],
+    "information_revealed": [],
+    "foreshadowing_planted_paid_off": [],
+    "unresolved_threads": [],
+    "final_chapter_state": "",
+    "outline_divergence": ""
+  }},
+  "domain_consequences": [],
+  "planning_impact_candidate": null
 }}
 
 settlement 纪律：
@@ -211,6 +227,10 @@ settlement 纪律：
 - creative：纯粹的创意发挥
 - 只有 mechanical 才可能被写入 Story State
 - operation 只允许：append / replace_existing
+- chapter_actual_result 描述候选正文一旦被作者接受后的实际结果，不得复写/覆盖细纲；
+- domain_consequences 使用统一结算结构（classification=mechanically_certain|ambiguous|creative_optional；kind=character|relationship|event|time|foreshadowing|setting|location|organization|system|storyline|planning|open_thread|mystery_information；action=create|update|retire），只更新本次正文明确影响的实体；人物 update 只补 one_line_intro/visible_traits/persona_core/background_summary/position_title/power_rank/current_state/current_objective/arc_stage/speech_style/behavior_anchors，显式 ref 必须来自下方上下文；
+- 只有实质细纲偏差影响未来规划时才给 planning_impact_candidate={{"summary":"短说明","affected_refs":[]}}，否则为 null；不得直接改未来规划。
+- 塑造人物优先通过行动、对白、选择、反应、对比与具体细节，不反复解释人物标签。
 
 entry.id 规则：
 - append：id 不由你负责，后台自动生成。你可以省略或写占位值（如 "placeholder"）。
@@ -390,10 +410,33 @@ def _parse_prose_result(output: str, *, expected_context_ref: str) -> dict[str, 
                 f"settlement_candidates[{i}]: replace_existing 必须提供非空 entry.id。"
             )
 
+    chapter_result = data.get("chapter_actual_result")
+    if chapter_result is None:
+        # Backward-compatible deterministic floor for older Agent templates:
+        # accepted prose still gets a separate reality record, without another AI pass.
+        chapter_result = {"summary": draft_text.strip()[:160]}
+    if not isinstance(chapter_result, dict) or not isinstance(chapter_result.get("summary"), str):
+        raise StoryWritingError("Agent 输出 chapter_actual_result 非法。")
+    domain_consequences = data.get("domain_consequences", [])
+    planning_impact = data.get("planning_impact_candidate")
+    try:
+        from operations import change_settlement as settlement_ops
+        semantic = settlement_ops._parse_output(json.dumps({
+            "summary": "已接受正文的领域结算",
+            "consequences": domain_consequences,
+            "chapter_actual_result": chapter_result,
+            "planning_impact_candidate": planning_impact,
+        }, ensure_ascii=False))
+    except Exception as exc:  # noqa: BLE001 - stable StoryWrite contract boundary
+        raise StoryWritingError(f"Agent 输出的章节实际结果/领域后果非法：{exc}") from exc
+
     return {
         "context_ref": context_ref.strip(),
         "draft_text": draft_text.strip(),
         "settlement_candidates": candidates,
+        "chapter_actual_result": semantic["chapter_actual_result"],
+        "domain_consequences": semantic["consequences"],
+        "planning_impact_candidate": semantic["planning_impact_candidate"],
     }
 
 
@@ -885,6 +928,12 @@ def _assemble_candidate(
         "settlement": {
             "scene_ref": ctx["scene_ref"],
             "candidates": settlement_candidates,
+        },
+        "semantic_result": {
+            "summary": "已接受正文的领域结算",
+            "consequences": prose["domain_consequences"],
+            "chapter_actual_result": prose["chapter_actual_result"],
+            "planning_impact_candidate": prose["planning_impact_candidate"],
         },
         "source_versions": {
             "intent_rev": ctx["intent"].get("intent_rev"),
@@ -1604,11 +1653,23 @@ def confirm_story_write(project_id: str, writing_token: str) -> dict[str, Any]:
         raise StoryWritingError(f"接受正文失败：{exc}") from exc
 
     try:
-        author_edit_ops.record_accepted_ai_prose(
-            project_id, chapter_number=chapter_number, scene_ref=scene_ref, settlement=settlement,
+        accepted_snapshot = get_project_snapshot(project_id)
+        accepted_chapter = next(
+            item for item in accepted_snapshot["chapters"]
+            if item["chapter_number"] == chapter_number
         )
-    except author_edit_ops.AuthorEditError as exc:
-        ledger_warning = f"正文已保留，但统一变更记录失败：{exc}"
+        change = author_edit_ops.record_accepted_ai_prose(
+            project_id, chapter_number=chapter_number, scene_ref=scene_ref, settlement=settlement,
+            content_sha256=accepted_chapter["content_sha256"],
+            semantic_result=meta.get("semantic_result"),
+        )
+        if meta.get("semantic_result") is not None:
+            from operations import change_settlement as settlement_ops
+            settlement_ops.apply_semantic_result(
+                project_id, change["change_id"], meta["semantic_result"],
+            )
+    except Exception as exc:  # noqa: BLE001 - accepted prose must stay durable across settlement failures
+        ledger_warning = f"正文已保留，但章节结果/统一语义记录失败：{exc}"
     else:
         ledger_warning = None
 
@@ -1673,6 +1734,12 @@ def get_story_write_surface(project_id: str) -> dict[str, Any]:
                 "accepted": item["accepted"],
                 "fine_outline_ref": item.get("fine_outline_ref"),
                 "fine_outline": item.get("fine_outline") or {},
+                "actual_result": item.get("actual_result"),
+                "previous_actual_result": next((
+                    previous.get("actual_result")
+                    for previous in snapshot["chapters"]
+                    if previous["chapter_number"] == item["chapter_number"] - 1
+                ), None),
             })
         chapters.append(chapter)
     return {
@@ -1682,4 +1749,12 @@ def get_story_write_surface(project_id: str) -> dict[str, Any]:
         "active_chapter_number": max(item["chapter_number"] for item in chapters),
         "total_words": snapshot["length_plan"]["actual_total_words"],
         "settlement": snapshot["settlement"],
+        "open_threads": [
+            {"title": item["title"], "status": "current"}
+            for item in snapshot["current"]["open_threads"][:8]
+        ] + [
+            {"title": item["title"], "status": "future"}
+            for item in snapshot["future"]["foreshadowing"][:8]
+        ],
+        "planning_impact_candidates": snapshot.get("planning_impact_candidates", []),
     }
