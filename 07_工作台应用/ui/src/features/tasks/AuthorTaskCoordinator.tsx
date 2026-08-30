@@ -87,7 +87,7 @@ export type TaskPayload =
   | { kind: 'material_classify' }
   | { kind: 'material_distill'; asset_id: string }
 
-interface AuthorTaskController {
+export interface AuthorTaskController {
   /** 当前任务（无任务为 null；failed 保留到页面消费或重试）。 */
   task: AuthorTask | null
   /** 启动操作；已有活跃任务时返回作者可读错误（不覆盖）。 */
@@ -104,7 +104,7 @@ interface AuthorTaskController {
   resume(): Promise<void>
 }
 
-const Context = createContext<AuthorTaskController | null>(null)
+export const AuthorTaskContext = createContext<AuthorTaskController | null>(null)
 
 type PollStatus = { status: string; phase?: string | null; message?: string | null; result?: unknown | null; error?: string | null }
 
@@ -504,11 +504,11 @@ export function AuthorTaskCoordinatorProvider({ children }: { children: ReactNod
     [task, start, cancel, confirm, consume, navigateToTask, resume],
   )
 
-  return <Context.Provider value={controller}>{children}</Context.Provider>
+  return <AuthorTaskContext.Provider value={controller}>{children}</AuthorTaskContext.Provider>
 }
 
 export function useAuthorTask(): AuthorTaskController {
-  const value = useContext(Context)
+  const value = useContext(AuthorTaskContext)
   if (!value) throw new Error('useAuthorTask must be inside AuthorTaskCoordinatorProvider')
   return value
 }

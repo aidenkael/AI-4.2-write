@@ -44,7 +44,7 @@ export interface FormalProjectShellValue {
   clearSelection(): void
 }
 
-const FormalProjectShellContext = createContext<FormalProjectShellValue | null>(null)
+export const FormalProjectShellContext = createContext<FormalProjectShellValue | null>(null)
 
 const toMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
 

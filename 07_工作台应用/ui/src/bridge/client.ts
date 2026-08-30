@@ -887,9 +887,90 @@ export interface ProjectData {
   sections: ProjectDataSections
 }
 
+const PROJECT_DATA_SECTION_KEYS: Array<keyof ProjectDataSections> = [
+  'characters', 'relationships', 'canon_facts', 'locations', 'organizations', 'systems',
+  'occurred_events', 'open_threads', 'foreshadowing', 'storylines', 'mystery_information', 'approved_plan',
+]
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+)
+
+function projectDataInvalid(reason: string): never {
+  throw new BridgeError('PROJECT_DATA_INVALID', `作品数据结构不完整，已拒绝加载：${reason}`)
+}
+
+function requireRecord(value: unknown, name: string): Record<string, unknown> {
+  if (!isRecord(value)) projectDataInvalid(`${name} 必须是对象`)
+  return value
+}
+
+function requireArray(value: unknown, name: string): unknown[] {
+  if (!Array.isArray(value)) projectDataInvalid(`${name} 必须是数组`)
+  return value
+}
+
+function requireNumber(value: unknown, name: string, nullable = false): void {
+  if ((nullable && value === null) || typeof value === 'number') return
+  projectDataInvalid(`${name} 必须是${nullable ? '数字或 null' : '数字'}`)
+}
+
+function requireProjectEntries(value: unknown, name: string): void {
+  for (const [index, entry] of requireArray(value, name).entries()) {
+    const record = requireRecord(entry, `${name}[${index}]`)
+    if (!(record.id === null || typeof record.id === 'string') || typeof record.label !== 'string') {
+      projectDataInvalid(`${name}[${index}] 缺少稳定条目身份`)
+    }
+  }
+}
+
+/** ProjectData 是跨版本 UI 的共享边界：后端必须完整投影，客户端只验证/拒绝。 */
+export function validateProjectData(value: unknown): ProjectData {
+  const data = requireRecord(value, 'ProjectData')
+  if (typeof data.project_id !== 'string' || !data.project_id || typeof data.name !== 'string') {
+    projectDataInvalid('缺少正式作品身份')
+  }
+  requireNumber(data.model_rev, 'model_rev')
+  requireNumber(data.state_rev, 'state_rev', true)
+  if (typeof data.work_direction !== 'string' || typeof data.reader_promise !== 'string') {
+    projectDataInvalid('作品方向字段非法')
+  }
+
+  const settlement = requireRecord(data.settlement, 'settlement')
+  if (!['synchronized', 'pending', 'failed'].includes(String(settlement.status))) projectDataInvalid('settlement.status 非法')
+  requireNumber(settlement.pending_count, 'settlement.pending_count')
+  requireNumber(settlement.failed_count, 'settlement.failed_count')
+  requireArray(settlement.changes, 'settlement.changes')
+
+  const profile = requireRecord(data.story_bible_profile, 'story_bible_profile')
+  if (!Array.isArray(profile.genre_tags) || profile.genre_tags.some((tag) => typeof tag !== 'string')
+    || !(profile.narrative_mode === null || typeof profile.narrative_mode === 'string')
+    || !Array.isArray(profile.active_modules) || profile.active_modules.some((module) => typeof module !== 'string')
+    || !isRecord(profile.field_config)) projectDataInvalid('story_bible_profile 字段非法')
+
+  const lengthPlan = requireRecord(data.length_plan, 'length_plan')
+  requireNumber(lengthPlan.total_target_words, 'length_plan.total_target_words', true)
+  requireNumber(lengthPlan.actual_total_words, 'length_plan.actual_total_words')
+  requireProjectEntries(lengthPlan.stages, 'length_plan.stages')
+  for (const [index, chapter] of requireArray(lengthPlan.chapters, 'length_plan.chapters').entries()) {
+    const record = requireRecord(chapter, `length_plan.chapters[${index}]`)
+    requireNumber(record.chapter_number, `length_plan.chapters[${index}].chapter_number`)
+    requireNumber(record.actual_words, `length_plan.chapters[${index}].actual_words`)
+  }
+  for (const [index, chapter] of requireArray(data.chapters, 'chapters').entries()) {
+    const record = requireRecord(chapter, `chapters[${index}]`)
+    requireNumber(record.chapter_number, `chapters[${index}].chapter_number`)
+    requireNumber(record.actual_words, `chapters[${index}].actual_words`)
+  }
+  requireArray(data.planning_impact_candidates, 'planning_impact_candidates')
+  const sections = requireRecord(data.sections, 'sections')
+  for (const key of PROJECT_DATA_SECTION_KEYS) requireProjectEntries(sections[key], `sections.${key}`)
+  return data as unknown as ProjectData
+}
+
 /** 统一只读项目快照投影（ProjectData / StoryMap 共用，不是第二 truth store）。 */
 export async function getProjectData(projectId: string): Promise<ProjectData> {
-  return call<ProjectData>('get_project_data', { project_id: projectId })
+  return validateProjectData(await call<unknown>('get_project_data', { project_id: projectId }))
 }
 
 export interface AuthorEditResult {

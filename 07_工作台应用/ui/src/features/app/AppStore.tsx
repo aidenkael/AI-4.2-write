@@ -34,7 +34,7 @@ interface FoundationEditHandoff {
   source_ref: string
 }
 
-interface AppState {
+export interface AppState {
   page: GlobalPage
   projectSection: ProjectSection | null
   illustrations: IllustrationState
@@ -47,7 +47,7 @@ interface AppState {
   foundationEditHandoff: FoundationEditHandoff | null
 }
 
-interface Actions {
+export interface Actions {
   navigate(page: GlobalPage): void
   setProjectSection(section: ProjectSection): void
   setSearch(value: string): void
@@ -78,7 +78,7 @@ const initial: AppState = {
   foundationEditHandoff: null,
 }
 
-const Context = createContext<{ state: AppState; actions: Actions } | null>(null)
+export const AppContext = createContext<{ state: AppState; actions: Actions } | null>(null)
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState(initial)
@@ -111,8 +111,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return value
     },
   }), [state.foundationEditHandoff, state.planningPrefill, state.reviewChapterHandoff])
-  return <Context.Provider value={{ state, actions }}>{children}</Context.Provider>
+  return <AppContext.Provider value={{ state, actions }}>{children}</AppContext.Provider>
 }
 
-export function useApp() { const value = useContext(Context); if (!value) throw new Error('useApp must be inside AppProvider'); return value }
+export function useApp() { const value = useContext(AppContext); if (!value) throw new Error('useApp must be inside AppProvider'); return value }
 export function useIllustration(key: IllustrationKey) { const { state } = useApp(); return state.illustrations.custom[key] ?? state.illustrations.defaults[key] }

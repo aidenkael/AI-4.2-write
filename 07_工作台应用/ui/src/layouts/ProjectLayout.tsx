@@ -3,6 +3,7 @@ import { ArrowLeft, CircleCheck } from 'lucide-react'
 import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import type { ProjectSection } from '../contracts/ui'
+import { ProjectPageErrorBoundary } from '../components/ProjectPageErrorBoundary'
 
 // Go Write 2.0 作品内六任务；全部作品内页面已接入正式项目外壳，使用同一正式 project_id，禁止 Mock 身份。
 const items: Array<{ id: ProjectSection; label: string }> = [
@@ -58,7 +59,7 @@ export function ProjectLayout({ children }: { children: ReactNode }) {
           ))}
         </nav>
       </header>
-      <div className="project-content">{children}</div>
+      <div className="project-content"><ProjectPageErrorBoundary pageKey={state.projectSection ?? 'none'}>{children}</ProjectPageErrorBoundary></div>
     </div>
   )
 }

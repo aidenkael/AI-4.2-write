@@ -121,6 +121,8 @@ BKP 长期保存作品身份、作品地图、BookProfile、Observation、Infere
 - State selection 必须 explicit
 - Context Package 是可重建派生层，不是 authority
 
+- 每个 project-page 数据合同必须在共享边界规范化/校验；项目页面不得因加载或切换状态崩溃，修改共享项目 UI 合同时必须保留六页挂载烟测。
+
 ## 开发原则
 
 `CAPABILITY_FIRST_CONSUMER_DRIVEN`：冻结子系统没有真实 consumer blocker 不重开。
