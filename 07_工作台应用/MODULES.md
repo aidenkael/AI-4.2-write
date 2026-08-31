@@ -238,26 +238,29 @@ project.author_edit / confirm / writeback
 
 不新增 WorldBuilder Agent、Character Agent 或 PowerSystem Skill。
 
-## 7. 高频正文同步的模块协作
+## 7. 作者触发语义状态刷新的模块协作
 
-目标迁移方向：
+已批准但尚未实现的迁移方向：
 
 ```text
-正文 durable save
+durable 编辑 / accepted content
   ↓
-project.diff
+确定性 delta / change tracking
   ↓
-Direct AI：一次结构化语义抽取
+作者继续编辑期间零 AI 调用
   ↓
-project.validate semantic patch
+作者显式请求「更新作品状态」
   ↓
-机械确定项自动写回
-歧义/创作项 → 作者确认
+有界 Direct AI 语义整合
   ↓
-Snapshot / Story Map / next Context 刷新
+Code validate semantic patch
+  ↓
+需要时作者确认
+  ↓
+derived state / Snapshot / Story Map / next Context 刷新
 ```
 
-这样人物摘要、关系变化、事件、时间、伏笔、世界状态不会占用 Agent `/gowrite` 单任务槽。
+保存本身不调用 AI；Code 立即完成持久化、revision/hash、字数/章节结构、current/future/retired 与图谱等确定性投影。常规整合只消费自上次确认刷新以来的变更及必要当前 Context，不重读全书；受影响任务 Context 必须让最新作者 truth 覆盖陈旧派生摘要。该方向不改变当前自动 settlement runtime，迁移任务待作者讨论后再定义。
 
 ## 8. 迁移策略：Move on touch
 
@@ -271,13 +274,9 @@ Snapshot / Story Map / next Context 刷新
 6. public contract 变化必须有最小聚焦测试；
 7. 模块边界测试优先于大量重复测试。
 
-## 9. 当前最值得做、但不在本次文档任务中实施的代码顺序
+## 9. 当前实现方向
 
-1. 先完成当前作者 runtime 验收暴露的 UI 可达性、退役恢复等确定性问题；
-2. 接入最薄 Direct AI runner；
-3. 只把 `change_settlement` 的高频轻语义执行从 Agent 迁到 Direct AI，保持 settlement/writeback 合同不变；
-4. 新书重大基座设计继续由 Agent + KnowledgeRetrieve 承载，并验证多轮知识调用质量；
-5. 根据真实使用再判断 StoryPlan/StoryWrite/Review 哪些子任务值得迁 Direct AI；不预先重写全部。
+前瞻方向以 `00_项目控制/长期开发手册.md` §16 为准：作者触发「更新作品状态」的语义刷新设计已批准，运行时/UI 迁移尚未开始；下一项实现任务刻意留待作者进一步讨论。本文件不重新规定 M1–M4 的已完成历史顺序。
 
 ## 10. 明确不做
 

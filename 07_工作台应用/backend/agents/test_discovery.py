@@ -29,18 +29,24 @@ def test_qoder_desktop_command_definition_and_authoritative_path(tmp_path, monke
     assert "type:" not in qoder.command_definition()
 
 
-def test_qoder_command_ready_validates_any_supported_location(tmp_path, monkeypatch):
-    """就绪状态按真实位置+内容校验：任一受支持位置内容精确匹配即为就绪。"""
+def test_qoder_command_ready_requires_every_supported_location(tmp_path, monkeypatch):
+    """所有 Go Write 管理的位置都必须存在且精确匹配当前命令定义。"""
     cn_target = tmp_path / ".qoder-cn" / "commands" / "gowrite.md"
     qoder_target = tmp_path / ".qoder" / "commands" / "gowrite.md"
     monkeypatch.setattr(qoder, "_command_paths", lambda: [qoder_target, cn_target])
 
-    # 只有一个位置存在且内容不符 → 未就绪
+    # qoder 位置精确匹配、cn 位置缺失 → 未就绪
     qoder_target.parent.mkdir(parents=True)
-    qoder_target.write_text("stale content", encoding="utf-8")
-    assert qoder.command_ready() is False
-    # 一个位置内容精确匹配 → 就绪
     qoder_target.write_text(qoder.command_definition(), encoding="utf-8")
+    assert qoder.command_ready() is False
+
+    # cn 位置存在但内容过期 → 未就绪
+    cn_target.parent.mkdir(parents=True)
+    cn_target.write_text("stale content", encoding="utf-8")
+    assert qoder.command_ready() is False
+
+    # 两个位置均精确匹配当前定义 → 就绪
+    cn_target.write_text(qoder.command_definition(), encoding="utf-8")
     assert qoder.command_ready() is True
 
 

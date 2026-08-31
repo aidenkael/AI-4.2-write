@@ -23,7 +23,7 @@
 - 高频明确操作可以按钮化；模糊和创造性需求保留自然语言。
 - candidate / draft / proposal 默认不是 authority，作者明确采用后才能正式写入。
 - 六页是同一作品的六个作者任务，不是六个独立事实仓库：作品概览仅状态+下一步；作品地基拥有关系/人物等源表示；故事地图仅派生可视化（关系图/时间事件/未解决线索），不重复地基列表；同一原始列表不得多页重复呈现。
-- 统一变更循环是目标合同：作者编辑/接受 → delta → 确定性处理 → 需要时 AI 增量语义结算 → 安全 writeback → 派生视图刷新；接入完成前 UI 不得伪造编辑/结算入口。作者编辑与 AI 接受一律进入统一作者变更账本与结算路径（`operations/author_edit` + `operations/change_settlement`）；关系/时间/伏笔/状态更新共享同一条结算路径，不建第二套同步 runtime；Story Map 的编辑入口必须路由到与作品地基相同的源操作。
+- 统一变更循环是目标合同：作者编辑/接受 → delta → 确定性处理并立即保存 truth → 作者显式「更新作品状态」后才进行有界 AI 语义整合 → 安全 writeback → 派生视图刷新。保存不等于 AI 调用；作者可以持续编辑而不触发例行语义整合。作者编辑与 AI 接受一律进入统一作者变更账本与结算路径（`operations/author_edit` + `operations/change_settlement`）；关系/时间/伏笔/状态更新共享同一条结算路径，不建第二套同步 runtime；Story Map 的编辑入口必须路由到与作品地基相同的源操作。该新触发模型已批准但代码迁移尚未开始。
 - **Go Write 2.0 是正式产品基线。**它面向中文长篇小说作者；固定作品管理框架，具体工作内容结构随作品与任务动态生长。稳定的作品一级页面为「作品概览 / 作品地基 / 故事规划 / 正在写 / 故事地图 / 作品检查」。
 - UI 1.0 保留为已验证的技术纵切/实现参考基线；其与 Go Write 2.0 冲突的产品假设已被 supersede，但历史记录不得删除。
 - 字数规划是 Go Write 2.0 的一等能力：总目标 → 卷/阶段预算 → 章节范围 → 实际字数。它是已批准的产品方向，不因本条规则自动宣称已经实现。
@@ -43,10 +43,12 @@
 
 ## 创作 authority 顺序
 
-1. 作者当前明确决定
-2. 作者接受正文 / production Story State
-3. 当前有效规划（active planning）
-4. 参考知识 BKP / 04 knowledge
+1. 最新明确作者内容 / 决定
+2. 最新明确由作者维护的结构化记录
+3. 最新接受正文
+4. 最新确认的派生语义状态
+5. 当前有效规划（active planning，如相关）
+6. 外部知识 BKP / 04 knowledge（仅 advisory）
 
 **BKP 不得成为原创 Canon。** 02/04 的外部知识（参考作品 BKP / 方法知识 / 已验证知识）可以影响 proposal/写作/检查，但永远不能写入或覆盖项目 Canon / Story State authority。未接受文本不得进入 production 正文/State。
 Context/Brief/recent prose 是 derivative，不得成为事实 authority。
@@ -68,7 +70,7 @@ Context/Brief/recent prose 是 derivative，不得成为事实 authority。
 - 只有作者明确 acceptance 的版本进入正式正文。
 - StoryWrite 运行/acceptance 继续使用稳定 scene/write-turn ref；一个章节可包含多个 accepted ref，不把 scene 强制成文学层级。
 - accepted ref 必须可追溯到真实正式正文。
-- 每次写作不重读全文：长期连续性用 Story State；未来方向用 active approved_plan；当前任务用 ContextCompiler 少量显式 selection；短期衔接用最近 accepted 正文末尾约 1000–2000 字；久远原文按需定向读取。
+- 每次写作不重读全文：长期连续性优先用最新作者内容/手工结构化记录与已接受正文，随后才用确认的派生 Story State；未来方向用 active approved_plan；当前任务用 ContextCompiler 少量显式 selection，并暴露相关 pending/unconsolidated changes；短期衔接用最近 accepted 正文末尾约 1000–2000 字；久远原文按需定向读取。未刷新派生状态不得覆盖最新作者 truth，状态刷新不是继续写作/规划/检查的强制阻塞。
 - 当前不升级原创全文 RAG / embedding / vector DB。
 
 ## 正式能力状态
@@ -87,8 +89,8 @@ Context/Brief/recent prose 是 derivative，不得成为事实 authority。
 | StoryWrite primitives | KEEP_AND_FREEZE |
 | Mechanical settlement assist | KEEP_AND_FREEZE |
 | REAL_PROJECT_WIRING_DESIGN | FROZEN |
-| REAL_PROJECT_WIRING_IMPLEMENTATION | READY_FOR_REAL_VERTICAL_SLICE |
-| AUTHOR_FACING_ONE_SENTENCE_ENTRY | NOT_YET_PROVEN |
+| REAL_PROJECT_WIRING_IMPLEMENTATION | M1–M4_REAL_RUNTIME_VERTICAL_SLICE_COMPLETED（历史实现/验收事实） |
+| AUTHOR_FACING_ONE_SENTENCE_ENTRY | M1–M4_REAL_RUNTIME_VERTICAL_SLICE_COMPLETED；新语义刷新触发模型尚未迁移 |
 | AUTHOR_FACING_WORKBENCH_DESIGN | ACTIVE |
 | PRODUCT_BASELINE | GO_WRITE_2_0_APPROVED（产品基线已批准；未实现能力不得标记 DONE） |
 | UI_1_0_BASELINE | TECHNICAL_VERTICAL_SLICE_REFERENCE（历史技术/实现参考；非正式产品基线） |
@@ -209,11 +211,4 @@ BKP 长期保存作品身份、作品地图、BookProfile、Observation、Infere
 
 ## NEXT
 
-里程碑以 `00_项目控制/长期开发手册.md` §16 为唯一定义：
-
-- **M1 AUTHOR_UX_BLOCKERS**：编辑器底部动作永远可达；退役记录可见可恢复（同一 ref）；六个作品页面保持 runtime-safe。
-- **M2 DIRECT_AI_SEMANTIC_V1**：最小独立模型 API 路径；只迁移 change_settlement 高频语义；日常语义维护不再经过 Agent /gowrite。
-- **M3 KNOWLEDGE_GROUNDED_FOUNDATION_DESIGN**：垂直切片已实现（见手册 §18）；重大新书/基座设计保持 Agent 主导（分解基座问题、多轮 KnowledgeRetrieve、综合提案、作者确认后写回）。
-- **M4 FULL_AUTHOR_LOOP_ACCEPTANCE**：真实运行时纵切验收完成（见手册 §19）；idea → foundation → planning → outline → prose → acceptance → 自动语义维护 → map/state 刷新 → 作者编辑 → 重新结算 → 下一次写作使用最新状态。
-
-除非新架构/产品模块阻塞 M1-M4 之一，否则不批准。真实作者完整纵切尚未完成，因此 `AUTHOR_FACING_ONE_SENTENCE_ENTRY` 不得标记 proven。
+以 `00_项目控制/长期开发手册.md` §16 为唯一前瞻定义：作者触发「更新作品状态」的语义刷新设计已批准，代码迁移尚未开始，下一步实现方向待进一步作者讨论。M1–M4 保留为历史实现/运行时验收事实，不据此宣布新触发模型已经实现。

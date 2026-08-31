@@ -1,17 +1,12 @@
 # 07_工作台应用
 
-AI-write 正式作者侧桌面应用（UI 1.0，`UI_1_0_BASELINE = APPROVED`）。当前阶段：`REAL_WRITING_USAGE`。
+Go Write 正式作者侧桌面应用。`PRODUCT_BASELINE = GO_WRITE_2_0_APPROVED`；UI 1.0 仅保留为历史技术纵切/实现参考。当前阶段：`REAL_WRITING_USAGE`。
 
-## 当前状态（2026-08-22）
+## 当前状态（2026-09-01）
 
-- UI 1.0 骨架已建立；`backend/bridge`、`backend/operations`、`backend/agents`、
-  `backend/views`、`backend/config` 与 `ui/src/pages` 已存在并承担真实职责。
-- 新建作品真实纵切 PASS：作者输入 → Go Write 准备任务 → Qoder `/gowrite` →
-  返回候选 → 作者确认。
-- StoryPlan 已接入统一 `/gowrite` 桥模式；仍待真实作者纵切验证。
-- StoryWrite 当前暂不可用：旧后台 AI 路径已禁止，下一阶段再接入统一 Qoder 路径。
-- 作者 AI 执行入口是 Qoder Desktop `/gowrite`；Go Write 不直接调用模型 API；
-  DeepSeek Harness / Qoder CLI 不作为普通作者流程中的隐藏执行器。
+- M1–M4 真实运行时纵切已完成并合并至 main：NewProject、StoryPlan、StoryWrite、Foundation 设计与 Review 均有当前正式路径。
+- Agent 任务按既有任务合同走 Interactive `/gowrite` 或已配置的 Direct 路径；Daily AI 是独立、薄的 Direct-AI 路径，不取代需要工具/多步骤决策的 Agent。
+- 最新前瞻规则：作者编辑立即保存；保存不调用 AI；例行语义整合只能由作者显式「更新作品状态」触发。该 runtime/UI 迁移已批准但尚未实现。
 
 ## 逻辑结构
 
@@ -30,7 +25,7 @@ AI-write 正式作者侧桌面应用（UI 1.0，`UI_1_0_BASELINE = APPROVED`）�
 ## 职责边界
 
 ```text
-UI → Bridge → Author Operations → Agent Adapter / Task Manager → 现有 Skills → 正式项目/知识数据
+UI → Bridge → Author Operations → Code / Direct AI / Agent Adapter / Task Manager → 现有 Skills → 正式项目/知识数据
 ```
 
 - UI 禁止直接调用 StoryWrite、StoryPlan、BookDistill 等 Skill。
@@ -106,14 +101,13 @@ E:\AI-Write\.venv\Scripts\python.exe desktop/main.py --dev
 
 Bridge 链路：React 唯一入口 `ui/src/bridge/client.ts` ↔ `desktop/main.py` 注册的
 `AppApi`（`backend/bridge/app_api.py`）。统一返回合同 `{ok, data, error}`；
-当前已暴露真实作品浏览、设置、新建作品、故事规划、正文写作（暂不可用）等方法。
+当前已暴露真实作品浏览、设置、新建作品、故事规划、正文写作、作品地基设计与检查等方法。
 
 ## Qoder 桥（Go Write 管长期记忆，Qoder 只执行当前任务）
 
-架构（已确认，不重新讨论）：Go Write 绝不直接调用模型 API；模型执行由作者在
-Qoder 桌面端输入 `/gowrite` 完成（使用桌面端已配置好的百炼 Token Plan 模型）。
+Agent 执行可按既有任务合同使用 Qoder Desktop `/gowrite` 或已配置的 Direct 路径；Daily AI 则使用独立、薄的 Direct-AI 调用。无论路径如何，Go Write 仍持有项目 authority 与 Context，模型/Agent 均不得绕过验证和作者确认合同。
 
-- Go Write 侧：`prepare_new_project` / `prepare_story_plan` 只生成唯一 `request_id`
+- Go Write 侧：Interactive Agent 请求（如 `prepare_new_project` / `prepare_story_plan`）生成唯一 `request_id`
   + 保存完整 Agent task + 指定结果写回位置（`06_工作区/应用开发/.qoder_bridge/`，
   Local Only，可删除）；对应的 `get_*_request` 轮询写回结果，校验 `request_id`
   后把模型最终结果交回现有严格 JSON/字段验证与 StoryDesign / StoryPlan。
@@ -123,8 +117,7 @@ Qoder 桌面端输入 `/gowrite` 完成（使用桌面端已配置好的百炼 T
   `response_path` 写回（必须携带相同 `request_id`）→ 给用户一句完成提示。
 - 安全：`request_id` 防串任务；取消/超时/完成后清理桥文件，旧结果不可能被
   下一次请求接受；桥文件绝不在 03_作品工程 中；Qoder 会话历史不是记忆来源。
-- 已接入桥模式的作者链：新建作品（我有个想法）与故事规划（一起往前想）；
-  正文写作暂不可用（旧后台 AI 路径已禁止），待接入统一 Qoder 路径。
+- 已接入当前路径的作者链包括新建作品、故事规划、正文写作、Foundation 设计与检查；每项任务按其既有 Interactive/Direct 合同执行。
 
 ## 运行规则
 
