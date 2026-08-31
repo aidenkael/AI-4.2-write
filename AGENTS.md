@@ -214,6 +214,6 @@ BKP 长期保存作品身份、作品地图、BookProfile、Observation、Infere
 - **M1 AUTHOR_UX_BLOCKERS**：编辑器底部动作永远可达；退役记录可见可恢复（同一 ref）；六个作品页面保持 runtime-safe。
 - **M2 DIRECT_AI_SEMANTIC_V1**：最小独立模型 API 路径；只迁移 change_settlement 高频语义；日常语义维护不再经过 Agent /gowrite。
 - **M3 KNOWLEDGE_GROUNDED_FOUNDATION_DESIGN**：垂直切片已实现（见手册 §18）；重大新书/基座设计保持 Agent 主导（分解基座问题、多轮 KnowledgeRetrieve、综合提案、作者确认后写回）。
-- **M4 FULL_AUTHOR_LOOP_ACCEPTANCE**：idea → foundation → planning → outline → prose → acceptance → 自动语义维护 → map/state 刷新 → 作者编辑 → 重新结算 → 下一次写作使用最新状态。
+- **M4 FULL_AUTHOR_LOOP_ACCEPTANCE**：真实运行时纵切验收完成（见手册 §19）；idea → foundation → planning → outline → prose → acceptance → 自动语义维护 → map/state 刷新 → 作者编辑 → 重新结算 → 下一次写作使用最新状态。
 
 除非新架构/产品模块阻塞 M1-M4 之一，否则不批准。真实作者完整纵切尚未完成，因此 `AUTHOR_FACING_ONE_SENTENCE_ENTRY` 不得标记 proven。

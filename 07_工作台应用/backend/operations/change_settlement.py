@@ -27,6 +27,14 @@ _ALLOWED_KINDS = {
     "setting", "location", "organization", "system", "storyline", "planning",
     "open_thread", "mystery_information",
 }
+_CATEGORY_FOR_KIND = {
+    "character": "character", "event": "event", "time": "event",
+    "foreshadowing": "promise_foreshadowing", "setting": "world_setting",
+    "location": "location", "organization": "organization_force",
+    "storyline": "story_line", "planning": "story_line",
+    "open_thread": "promise_foreshadowing",
+    "mystery_information": "mystery_information",
+}
 _ALLOWED_CLASSIFICATIONS = {"mechanically_certain", "ambiguous", "creative_optional"}
 _ALLOWED_ACTIONS = {"create", "update", "retire"}
 _CHARACTER_SUMMARY_FIELDS = {
@@ -234,6 +242,39 @@ def _allowed_semantic_patch(
     return allowed
 
 
+def _author_owned(obj: dict[str, Any]) -> bool:
+    authority = obj.get("field_authority") if isinstance(obj.get("field_authority"), dict) else {}
+    return any(isinstance(meta, dict) and meta.get("source") == "author" for meta in authority.values())
+
+
+def _needs_author_gate(model: dict[str, Any], item: dict[str, Any]) -> bool:
+    """mechanically_certain 但触及作者主权的后果必须改走作者确认。
+
+    - 退役作者拥有的活动记录：AI 不得机械退役作者主权条目；
+    - 在作者拥有的同名活动记录之上创建重复记录：AI 不得机械复制作者条目。
+    两者都转入 undecided，由作者经既有 awaiting_author/confirm 合同明确选择。
+    """
+    action = item.get("action")
+    target_ref = item.get("target_ref")
+    if action == "retire" and isinstance(target_ref, str):
+        obj = model.get("objects", {}).get(target_ref)
+        if isinstance(obj, dict) and not obj.get("tombstoned") and _author_owned(obj):
+            return True
+    if action == "create":
+        category = _CATEGORY_FOR_KIND.get(str(item.get("kind") or ""))
+        title = str(item.get("title") or "").strip()
+        if category and title:
+            for obj in model.get("objects", {}).values():
+                if (
+                    isinstance(obj, dict) and not obj.get("tombstoned")
+                    and obj.get("category") == category
+                    and str(obj.get("title") or "").strip() == title
+                    and _author_owned(obj)
+                ):
+                    return True
+    return False
+
+
 def _apply_one(
     project_id: str,
     model: dict[str, Any],
@@ -301,13 +342,7 @@ def _apply_one(
             project_id, base_model_rev=model["model_rev"], ref=target_ref,
         )
 
-    category = {
-        "character": "character", "event": "event", "time": "event",
-        "foreshadowing": "promise_foreshadowing", "setting": "world_setting",
-        "location": "location", "organization": "organization_force",
-        "storyline": "story_line", "planning": "story_line", "open_thread": "promise_foreshadowing",
-        "mystery_information": "mystery_information",
-    }.get(kind)
+    category = _CATEGORY_FOR_KIND.get(kind)
     if kind == "time":
         data["time_semantics"] = True
     material_state = "future" if kind == "planning" else "current"
@@ -384,8 +419,15 @@ def apply_semantic_result(
     model = project_model.load_project_model(project_id)
     model_path = _model_artifact(project_id)
     before = model_path.read_bytes() if model_path.exists() else None
-    mechanical = [item for item in parsed["consequences"] if item["classification"] == "mechanically_certain"]
+    mechanical = []
     undecided = [item for item in parsed["consequences"] if item["classification"] != "mechanically_certain"]
+    for item in parsed["consequences"]:
+        if item["classification"] != "mechanically_certain":
+            continue
+        if _needs_author_gate(model, item):
+            undecided.append(item)
+        else:
+            mechanical.append(item)
     try:
         for item in mechanical:
             model = _apply_one(
@@ -777,7 +819,8 @@ def _confirm_ambiguous_locked(
     try:
         for index in accepted_indexes:
             item = consequences[index]
-            if item.get("classification") == "mechanically_certain":
+            # 真机械项在首遍已应用；被作者主权门控的机械项在此经作者确认应用。
+            if item.get("classification") == "mechanically_certain" and not _needs_author_gate(model, item):
                 continue
             model = _apply_one(
                 project_id, model, snapshot, item, author_confirmed=True,

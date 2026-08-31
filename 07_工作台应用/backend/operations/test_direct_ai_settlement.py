@@ -349,6 +349,56 @@ def test_cancel_settlement_dismisses_stale_tasks_and_live_request(
         change_settlement.cancel_change_settlement(pid, edit_change_id)
 
 
+def test_mechanical_retire_or_duplicate_of_author_record_requires_confirmation(
+    projects_root, isolated_bridge, configured_ai, monkeypatch,
+):
+    project = _create("主权门控")
+    pid = project["project_id"]
+    ref, rev = _character(pid, "林砚")
+
+    payload = {
+        "summary": "试图机械退役作者记录并同名重复创建",
+        "consequences": [
+            {"classification": "mechanically_certain", "kind": "character", "action": "retire",
+             "target_ref": ref, "title": "退役林砚", "source_ref": "", "target_character_ref": "",
+             "data": {}, "reason": "模型误判旧记录"},
+            {"classification": "mechanically_certain", "kind": "character", "action": "create",
+             "title": "林砚", "source_ref": "", "target_character_ref": "",
+             "data": {"one_line_intro": "语义重复体"}, "reason": "模型重复创建"},
+            {"classification": "mechanically_certain", "kind": "event", "action": "create",
+             "title": "进入封锁区", "data": {}, "reason": "正常机械创建"},
+        ],
+        "chapter_actual_result": None,
+        "planning_impact_candidate": None,
+    }
+    monkeypatch.setattr(
+        change_settlement.semantic_ai, "run_text",
+        lambda prompt, **kwargs: json.dumps(payload, ensure_ascii=False),
+    )
+    edit = _edit(pid, rev, ref, "受伤")
+    change_id = edit["change"]["change_id"]
+    change_settlement.prepare_change_settlement(pid, change_id)
+    final = _wait_change(pid, change_id, {"awaiting_author", "synchronized", "failed"})
+    assert final["status"] == "awaiting_author", final.get("error")
+
+    model = project_model.read_project_model(pid)
+    # 作者记录未被机械退役，也未产生同名重复体；正常机械创建仍生效
+    assert model["objects"][ref]["tombstoned"] is False
+    assert sum(
+        1 for o in model["objects"].values()
+        if o.get("title") == "林砚" and not o.get("tombstoned")
+    ) == 1
+    assert any(
+        o.get("title") == "进入封锁区" and not o.get("tombstoned")
+        for o in model["objects"].values()
+    )
+
+    # 作者明确确认后，被门控项经既有合同应用
+    change_settlement.confirm_ambiguous_consequences(pid, change_id, [0, 1])
+    model = project_model.read_project_model(pid)
+    assert model["objects"][ref]["tombstoned"] is True
+
+
 def test_migrated_settlement_has_no_agent_path():
     source = Path(change_settlement.__file__).read_text(encoding="utf-8")
     assert "agent_runner" not in source
