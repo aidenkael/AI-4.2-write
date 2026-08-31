@@ -20,6 +20,8 @@ from operations.settings import SettingsOpError
 from operations import settings as settings_ops
 from operations.new_project import NewProjectError
 from operations import new_project as new_project_ops
+from operations.foundation_design import FoundationDesignError
+from operations import foundation_design as foundation_design_ops
 from operations import qoder_bridge as bridge_ops
 from operations.story_planning import StoryPlanningError
 from operations import story_planning as story_planning_ops
@@ -45,6 +47,7 @@ from views import project as project_views
 CODE_PROJECT_OP_ERROR = "PROJECT_OP_ERROR"
 CODE_SETTINGS_ERROR = "SETTINGS_ERROR"
 CODE_NEW_PROJECT_ERROR = "NEW_PROJECT_ERROR"
+CODE_FOUNDATION_DESIGN_ERROR = "FOUNDATION_DESIGN_ERROR"
 CODE_STORY_PLANNING_ERROR = "STORY_PLANNING_ERROR"
 CODE_STORY_WRITING_ERROR = "STORY_WRITING_ERROR"
 CODE_IDEAS_ERROR = "IDEAS_ERROR"
@@ -287,6 +290,57 @@ class AppApi:
             return _ok(data)
         except NewProjectError as exc:
             return _err(CODE_NEW_PROJECT_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    # ---------------- M3 知识驱动重大基座设计（Agent 主导，作者确认后写回） ----------------
+
+    def prepare_foundation_design(self, payload: dict) -> dict:
+        """作者发起基座设计：Agent 分解问题/多轮检索/综合提案（不运行模型）。"""
+        try:
+            return _ok(foundation_design_ops.prepare_foundation_design(
+                project_id=str(payload.get("project_id") or ""),
+                author_request=str(payload.get("author_request") or ""),
+                base_model_rev=int(payload.get("base_model_rev") or 0),
+            ))
+        except (FoundationDesignError, TypeError, ValueError) as exc:
+            return _err(CODE_FOUNDATION_DESIGN_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def get_foundation_design_request(self, payload: dict) -> dict:
+        """轮询基座设计结果：pending / completed / failed / expired / canceled。"""
+        try:
+            return _ok(foundation_design_ops.get_foundation_design_request(
+                request_id=str(payload.get("request_id") or ""),
+            ))
+        except FoundationDesignError as exc:
+            return _err(CODE_FOUNDATION_DESIGN_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def cancel_foundation_design_request(self, payload: dict) -> dict:
+        """取消/丢弃基座设计任务与临时候选；幂等。"""
+        try:
+            return _ok(foundation_design_ops.cancel_foundation_design_request(
+                request_id=str(payload.get("request_id") or ""),
+            ))
+        except FoundationDesignError as exc:
+            return _err(CODE_FOUNDATION_DESIGN_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def confirm_foundation_design(self, payload: dict) -> dict:
+        """作者明确确认 → 选择/编辑后的提案经既有 authority 合同写回。"""
+        try:
+            return _ok(foundation_design_ops.confirm_foundation_design(
+                project_id=str(payload.get("project_id") or ""),
+                proposal_token=str(payload.get("proposal_token") or ""),
+                items=payload.get("items") if isinstance(payload.get("items"), list) else [],
+                base_model_rev=int(payload.get("base_model_rev") or 0),
+            ))
+        except (FoundationDesignError, AuthorEditError) as exc:
+            return _err(CODE_FOUNDATION_DESIGN_ERROR, str(exc))
         except Exception as exc:  # noqa: BLE001
             return _err(CODE_BRIDGE_INTERNAL, str(exc))
 

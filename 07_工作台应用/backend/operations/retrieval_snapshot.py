@@ -40,6 +40,7 @@ from operations import story_planning  # noqa: E402
 from operations import story_writing  # noqa: E402
 from operations import review  # noqa: E402
 from operations import new_project  # noqa: E402
+from operations import foundation_design  # noqa: E402
 
 
 def _usage() -> int:
@@ -84,6 +85,9 @@ def main() -> int:
         package = review.execute_request_scoped_retrieval(query, request_id)
     elif kind == "story_design_propose":
         package = new_project.execute_request_scoped_retrieval(query, request_id)
+    elif kind == "foundation_design_propose":
+        # M3：按主题多轮检索（每轮一个请求级快照；轮数有界）
+        package = foundation_design.execute_request_scoped_retrieval(query, request_id)
     else:
         # StoryPlan：显式 --request 绑定（与其余操作同一 P0 精确绑定）
         package = story_planning.execute_request_scoped_retrieval(query, request_id)

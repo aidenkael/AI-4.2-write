@@ -1,9 +1,10 @@
-import { Check, FileCheck2, GitBranch, MapPin, Pencil, Plus, Save, Trash2, UserRound, X } from 'lucide-react'
+import { Check, FileCheck2, GitBranch, MapPin, Pencil, Plus, Save, Sparkles, Trash2, UserRound, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import type { ProjectDataEntry } from '../bridge/client'
+import type { FoundationDesignResult, ProjectDataEntry } from '../bridge/client'
 import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { useProjectDataController } from '../features/projectData/useProjectDataController'
+import { useAuthorTask } from '../features/tasks/AuthorTaskCoordinator'
 import { describeRecord } from '../features/storyMap/storyMapModel'
 import { authorSourceLabel, authorStatusLabel, compactCharacter } from '../features/presentation/authorPresentation'
 import { CharacterEditor, RelationshipEditor, splitEditorData } from '../features/foundation/recordEditors'
@@ -113,10 +114,149 @@ const optionalModules = [
   ['romance_social', '情感 / 社交'], ['mystery_information', '悬疑信息'], ['custom', '自定义'],
 ] as const
 
+// ---------------- M3 基座设计（Agent 主导 + 多轮知识参考；候选 ≠ authority） ----------------
+
+interface FdEditItem {
+  key: string
+  include: boolean
+  kind: 'character' | 'relationship' | 'world_setting' | 'organization' | 'story_line' | 'core_conflict'
+  title: string
+  summary: string
+  material_state: 'current' | 'future'
+  source_title?: string
+  target_title?: string
+  label?: string
+}
+
+function fdItemsFromResult(result: FoundationDesignResult): FdEditItem[] {
+  const p = result.candidate.proposal
+  const items: FdEditItem[] = []
+  const push = (kind: FdEditItem['kind'], list: Array<Partial<FdEditItem> | null>) => {
+    list.forEach((entry, index) => {
+      if (!entry) return
+      items.push({
+        key: `${kind}-${index}`, include: true, kind,
+        title: String(entry.title ?? ''), summary: String(entry.summary ?? ''),
+        material_state: entry.material_state === 'current' ? 'current' : 'future',
+        source_title: entry.source_title, target_title: entry.target_title, label: entry.label,
+      })
+    })
+  }
+  push('character', p.characters)
+  push('relationship', p.relationships)
+  push('world_setting', p.world_settings)
+  push('organization', p.organizations)
+  push('story_line', p.story_lines)
+  push('core_conflict', [p.core_conflict])
+  return items
+}
+
+function FoundationDesignDrawer(props: {
+  projectId: string
+  modelRev: number
+  notify: (message: string) => void
+  reload: () => Promise<void>
+  onClose: () => void
+}) {
+  const { task, start, cancel, confirm } = useAuthorTask()
+  const fdTask = task && task.kind === 'foundation_design' && task.projectId === props.projectId ? task : null
+  const [request, setRequest] = useState('')
+  const [localError, setLocalError] = useState<string | null>(null)
+  const [edits, setEdits] = useState<FdEditItem[]>([])
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (fdTask?.status === 'candidate' && fdTask.result) {
+      setEdits(fdItemsFromResult(fdTask.result as FoundationDesignResult))
+    }
+  }, [fdTask?.status, fdTask?.result])
+
+  const begin = async () => {
+    setLocalError(null)
+    setBusy(true)
+    const err = await start({
+      kind: 'foundation_design', project_id: props.projectId,
+      author_request: request, base_model_rev: props.modelRev,
+    })
+    setBusy(false)
+    if (err) setLocalError(err)
+  }
+
+  const accept = async () => {
+    setLocalError(null)
+    setBusy(true)
+    const items = edits.filter((item) => item.include).map(({ key, include, ...item }) => item)
+    const result = await confirm('foundation_design', { items, base_model_rev: props.modelRev })
+    setBusy(false)
+    if (result) {
+      props.notify('基座设计已写入作品地基。')
+      await props.reload()
+      props.onClose()
+    } else if (fdTask?.error) {
+      setLocalError(fdTask.error)
+    }
+  }
+
+  const candidate = fdTask?.status === 'candidate' ? (fdTask.result as FoundationDesignResult | null) : null
+  const working = !!fdTask && (fdTask.status === 'running' || fdTask.status === 'waiting_author' || fdTask.status === 'pending')
+  return (
+    <aside className="record-drawer panel foundation-design" aria-label="基座设计">
+      <header><h2>基座设计</h2><button onClick={props.onClose}><X /></button></header>
+      <div className="record-drawer-body">
+        {!fdTask && (
+          <>
+            <p className="muted-note">写下你想确立的基座问题（人物、关系、世界规则、体系、核心冲突、故事线）。AI 会分解问题并参考相关写作/参考知识，给出候选；采用后才写入作品。</p>
+            <textarea rows={4} value={request} onChange={(e) => setRequest(e.target.value)} placeholder="例如：为这本书设计主角结构与核心冲突…" />
+            {localError && <p className="error-text">{localError}</p>}
+          </>
+        )}
+        {working && <div className="running"><span />AI 正在分解基座问题并参考相关知识，请稍候…</div>}
+        {fdTask?.status === 'failed' && <p className="error-text">{fdTask.error ?? '任务失败，请重新发起。'}</p>}
+        {fdTask?.status === 'confirming' && <div className="running"><span />正在写入作品地基…</div>}
+        {candidate && (
+          <>
+            <p><b>目标：</b>{candidate.candidate.objective}</p>
+            {candidate.candidate.knowledge_notes && <p className="muted-note">知识参考：{candidate.candidate.knowledge_notes}</p>}
+            {candidate.candidate.rounds.map((round, i) => (
+              <p className="fd-round" key={`${round.topic}-${i}`}><b>{round.topic}</b>（参考 {round.selected_count} 条）：{round.comparison}</p>
+            ))}
+            {edits.map((item, index) => (
+              <div className="fd-item" key={item.key}>
+                <label className="fd-include">
+                  <input type="checkbox" checked={item.include} onChange={(e) => setEdits(edits.map((it, i) => i === index ? { ...it, include: e.target.checked } : it))} />
+                  采用
+                </label>
+                <input value={item.title} onChange={(e) => setEdits(edits.map((it, i) => i === index ? { ...it, title: e.target.value } : it))} />
+                <textarea rows={2} value={item.summary} onChange={(e) => setEdits(edits.map((it, i) => i === index ? { ...it, summary: e.target.value } : it))} />
+              </div>
+            ))}
+            {candidate.candidate.assumptions.length > 0 && (
+              <p className="muted-note">假设：{candidate.candidate.assumptions.join('；')}</p>
+            )}
+            {localError && <p className="error-text">{localError}</p>}
+          </>
+        )}
+      </div>
+      <footer>
+        {!fdTask && <button className="primary" disabled={busy || !request.trim()} onClick={() => void begin()}>开始设计</button>}
+        {working && <button disabled={busy} onClick={() => void cancel()}>取消</button>}
+        {fdTask?.status === 'failed' && <button onClick={() => void cancel()}>关闭</button>}
+        {candidate && (
+          <>
+            <button disabled={busy} onClick={() => void cancel()}>丢弃</button>
+            <button className="primary" disabled={busy || !edits.some((it) => it.include)} onClick={() => void accept()}>采用所选条目</button>
+          </>
+        )}
+      </footer>
+    </aside>
+  )
+}
+
 export function FoundationPage() {
   const { actions } = useApp()
   const { selected } = useFormalProjectShell()
   const controller = useProjectDataController(selected?.project_id ?? null)
+  const [designOpen, setDesignOpen] = useState(false)
   const [tab, setTab] = useState<FoundationTab>('characters')
   const [recordForm, setRecordForm] = useState<RecordForm | null>(null)
   const [sharedEditor, setSharedEditor] = useState<{ kind: 'character' | 'relationship'; entry: ProjectDataEntry | null } | null>(null)
@@ -315,6 +455,7 @@ export function FoundationPage() {
               </button>
             ))}
           </div>
+          <button onClick={() => setDesignOpen(true)}><Sparkles /> 基座设计</button>
           <button className="primary" onClick={beginCreate}><Plus /> 新增{tabMeta.label}</button>
         </header>
 
@@ -442,6 +583,16 @@ export function FoundationPage() {
           </div>
           </div>
         </aside>
+      )}
+
+      {designOpen && selected && (
+        <FoundationDesignDrawer
+          projectId={selected.project_id}
+          modelRev={controller.data?.model_rev ?? 0}
+          notify={actions.notify}
+          reload={controller.reload}
+          onClose={() => setDesignOpen(false)}
+        />
       )}
     </div>
   )

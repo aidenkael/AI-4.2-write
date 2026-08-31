@@ -1170,6 +1170,77 @@ export async function cancelChangeSettlement(payload: {
   return call('cancel_change_settlement', payload)
 }
 
+// ---------------- M3 知识驱动重大基座设计（Agent 主导；候选 ≠ authority） ----------------
+
+export interface FoundationDesignItem {
+  kind: 'character' | 'relationship' | 'world_setting' | 'organization' | 'story_line' | 'core_conflict'
+  title: string
+  summary: string
+  material_state: 'current' | 'future'
+  source_title?: string
+  target_title?: string
+  label?: string
+}
+
+export interface FoundationDesignCandidate {
+  status: string
+  objective: string
+  topics: string[]
+  rounds: Array<{ topic: string; query: string; comparison: string; selected_count: number }>
+  proposal: {
+    characters: FoundationDesignItem[]
+    relationships: FoundationDesignItem[]
+    world_settings: FoundationDesignItem[]
+    organizations: FoundationDesignItem[]
+    story_lines: FoundationDesignItem[]
+    core_conflict: FoundationDesignItem | null
+  }
+  assumptions: string[]
+  knowledge_notes: string
+  knowledge: { rounds: number; selected_count: number; source_kinds: string[] }
+}
+
+export interface FoundationDesignResult {
+  proposal_token: string
+  project_id: string
+  status: string
+  candidate: FoundationDesignCandidate
+  execution?: { execution_mode?: string; agent_id?: string | null; model?: string | null } | null
+  message: string
+}
+
+export async function prepareFoundationDesign(payload: {
+  project_id: string
+  author_request: string
+  base_model_rev: number
+}): Promise<{ request_id: string; project_id: string; status: string; execution_mode?: string | null; agent_id?: string | null; model?: string | null; message?: string }> {
+  return call('prepare_foundation_design', payload)
+}
+
+export async function getFoundationDesignRequest(requestId: string): Promise<{
+  request_id: string
+  status: string
+  phase?: string | null
+  message?: string | null
+  error?: string | null
+  result?: FoundationDesignResult | null
+}> {
+  return call('get_foundation_design_request', { request_id: requestId })
+}
+
+export async function cancelFoundationDesignRequest(requestId: string): Promise<{ request_id: string; status: string }> {
+  return call('cancel_foundation_design_request', { request_id: requestId })
+}
+
+export async function confirmFoundationDesign(payload: {
+  project_id: string
+  proposal_token: string
+  items: FoundationDesignItem[]
+  base_model_rev: number
+}): Promise<{ project_id: string; model_rev: number; created: Array<{ kind: string; title: string; ref: string }>; warnings: string[]; settlement_started: boolean; message: string }> {
+  return call('confirm_foundation_design', payload)
+}
+
 export async function confirmChangeConsequences(payload: {
   project_id: string
   change_id: string

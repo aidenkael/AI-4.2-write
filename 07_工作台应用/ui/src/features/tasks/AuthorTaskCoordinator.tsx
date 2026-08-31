@@ -32,10 +32,12 @@ import {
   cancelReviewRequest,
   cancelStoryPlanRequest,
   cancelStoryWriteRequest,
+  cancelFoundationDesignRequest,
   classifyMaterialInbox,
   confirmNewProject,
   confirmStoryPlan,
   confirmStoryWrite,
+  confirmFoundationDesign,
   getActiveAuthorOperation,
   getMaterialClassifyRequest,
   getMaterialDistillRequest,
@@ -43,10 +45,12 @@ import {
   getReviewRequest,
   getStoryPlanRequest,
   getStoryWriteRequest,
+  getFoundationDesignRequest,
   prepareNewProject,
   prepareReview,
   prepareStoryPlan,
   prepareStoryWrite,
+  prepareFoundationDesign,
   distillMaterial,
   type BookDistillRequestStatus,
   type ClassifyRequestStatus,
@@ -57,6 +61,8 @@ import {
   type ProposeResult,
   type ProposeStoryPlanResult,
   type ProposeStoryWriteResult,
+  type FoundationDesignResult,
+  type FoundationDesignItem,
   type ReviewReport,
   type ReviewRequestStatus,
   type StoryPlanRequestStatus,
@@ -86,6 +92,7 @@ export type TaskPayload =
   | { kind: 'review'; project_id: string; chapter_number?: number }
   | { kind: 'material_classify' }
   | { kind: 'material_distill'; asset_id: string }
+  | { kind: 'foundation_design'; project_id: string; author_request: string; base_model_rev: number }
 
 export interface AuthorTaskController {
   /** 当前任务（无任务为 null；failed 保留到页面消费或重试）。 */
@@ -94,8 +101,11 @@ export interface AuthorTaskController {
   start(payload: TaskPayload): Promise<string | null>
   /** 显式取消（运行中/等待中）；候选丢弃同样走这里。 */
   cancel(): Promise<void>
-  /** 作者明确确认（new_project / story_plan / story_write）；成功后任务清除。 */
-  confirm(kind: 'new_project' | 'story_plan' | 'story_write'): Promise<unknown | null>
+  /** 作者明确确认（new_project / story_plan / story_write / foundation_design）；成功后任务清除。 */
+  confirm(
+    kind: 'new_project' | 'story_plan' | 'story_write' | 'foundation_design',
+    extra?: { items?: unknown[]; base_model_rev?: number },
+  ): Promise<unknown | null>
   /** 页面显式消费结果（review 报告 / 素材计划 / 蒸馏完成 / 失败展示后清理）。 */
   consume(): void
   /** 返回任务所属页面/区块（保持正式项目选择）。 */
@@ -115,6 +125,7 @@ const pollers: Record<AuthorTaskKind, (requestId: string) => Promise<PollStatus>
   review: async (rid) => (await getReviewRequest(rid)) as ReviewRequestStatus,
   material_classify: async (rid) => (await getMaterialClassifyRequest(rid)) as ClassifyRequestStatus,
   material_distill: async (rid) => (await getMaterialDistillRequest(rid)) as BookDistillRequestStatus,
+  foundation_design: async (rid) => await getFoundationDesignRequest(rid),
 }
 
 const cancellers: Record<AuthorTaskKind, (requestId: string) => Promise<unknown>> = {
@@ -124,9 +135,10 @@ const cancellers: Record<AuthorTaskKind, (requestId: string) => Promise<unknown>
   review: cancelReviewRequest,
   material_classify: cancelMaterialClassifyRequest,
   material_distill: cancelMaterialDistillRequest,
+  foundation_design: cancelFoundationDesignRequest,
 }
 
-const confirmers: Partial<Record<AuthorTaskKind, (task: AuthorTask) => Promise<unknown>> | Record<AuthorTaskKind, ((task: AuthorTask) => Promise<unknown>) | null>> = {
+const confirmers: Partial<Record<AuthorTaskKind, ((task: AuthorTask, extra?: { items?: unknown[]; base_model_rev?: number }) => Promise<unknown>) | null>> = {
   new_project: (task) =>
     confirmNewProject({ proposal_token: (task.result as ProposeResult).proposal_token }),
   story_plan: (task) =>
@@ -138,6 +150,13 @@ const confirmers: Partial<Record<AuthorTaskKind, (task: AuthorTask) => Promise<u
     confirmStoryWrite({
       project_id: task.projectId as string,
       writing_token: (task.result as ProposeStoryWriteResult).writing_token,
+    }),
+  foundation_design: (task, extra) =>
+    confirmFoundationDesign({
+      project_id: task.projectId as string,
+      proposal_token: (task.result as FoundationDesignResult).proposal_token,
+      items: (extra?.items ?? []) as FoundationDesignItem[],
+      base_model_rev: extra?.base_model_rev ?? 0,
     }),
   review: null,
   material_classify: null,
@@ -324,6 +343,13 @@ export function AuthorTaskCoordinatorProvider({ children }: { children: ReactNod
           case 'material_distill':
             prepared = await distillMaterial(payload.asset_id)
             break
+          case 'foundation_design':
+            prepared = await prepareFoundationDesign({
+              project_id: payload.project_id,
+              author_request: payload.author_request,
+              base_model_rev: payload.base_model_rev,
+            })
+            break
         }
         const interactive = prepared.execution_mode !== 'direct'
         const next: AuthorTask = {
@@ -403,14 +429,17 @@ export function AuthorTaskCoordinatorProvider({ children }: { children: ReactNod
   }, [stopPolling])
 
   const confirm = useCallback(
-    async (kind: 'new_project' | 'story_plan' | 'story_write'): Promise<unknown | null> => {
+    async (
+      kind: 'new_project' | 'story_plan' | 'story_write' | 'foundation_design',
+      extra?: { items?: unknown[]; base_model_rev?: number },
+    ): Promise<unknown | null> => {
       const current = taskRef.current
       if (!current || current.kind !== kind || current.status !== 'candidate') return null
       const confirmer = confirmers[kind]
       if (!confirmer) return null
       patchTask({ status: 'confirming', error: null })
       try {
-        const result = await confirmer(current)
+        const result = await confirmer(current, extra)
         // 成功：任务完成，结果已消费（页面自行刷新正式面）
         stopPolling()
         setTask(null)

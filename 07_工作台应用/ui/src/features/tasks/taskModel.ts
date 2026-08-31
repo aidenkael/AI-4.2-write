@@ -13,6 +13,7 @@ export type AuthorTaskKind =
   | 'review'
   | 'material_classify'
   | 'material_distill'
+  | 'foundation_design'
 
 /** 协调器任务状态（与后端轮询状态解耦的 App 级投影）。 */
 export type AuthorTaskStatus =
@@ -60,6 +61,7 @@ export const TASK_LABELS: Record<AuthorTaskKind, string> = {
   review: '作品检查',
   material_classify: '素材分类',
   material_distill: '素材蒸馏',
+  foundation_design: '基座设计',
 }
 
 export function taskLabel(kind: AuthorTaskKind): string {
@@ -79,6 +81,8 @@ export function taskTarget(kind: AuthorTaskKind): TaskTarget {
     case 'material_classify':
     case 'material_distill':
       return { page: 'materials' }
+    case 'foundation_design':
+      return { section: 'foundation' }
   }
 }
 
@@ -127,6 +131,8 @@ export function candidateReadyMessage(kind: AuthorTaskKind): string {
       return '入库建议已生成 · 返回查看'
     case 'material_distill':
       return '蒸馏完成 · 返回查看'
+    case 'foundation_design':
+      return '基座设计候选已生成 · 返回查看'
   }
 }
 
