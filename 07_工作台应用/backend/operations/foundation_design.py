@@ -35,7 +35,6 @@ from typing import Any, Optional
 from config.settings import EXECUTION_MODE_DIRECT, SettingsStore
 from operations import agent_runner
 from operations import author_edit
-from operations import change_settlement
 from operations import execution_audit as audit
 from operations import execution_tasks
 from operations import project_model
@@ -789,7 +788,6 @@ def confirm_foundation_design(
             if isinstance(obj, dict) and not obj.get("tombstoned") and obj.get("category") == "character":
                 title_to_ref.setdefault(str(obj.get("title") or ""), str(obj.get("ref") or ""))
         rev = int(model["model_rev"])
-        first_semantic_change: Optional[str] = None
         for item in confirmed_items:
             if item["kind"] == "relationship":
                 source_ref = title_to_ref.get(item["source_title"])
@@ -814,19 +812,13 @@ def confirm_foundation_design(
                 if item["kind"] == "character":
                     title_to_ref[item["title"]] = result["model"]["change_history"][-1]["detail"]["ref"]
             rev = int(result["model"]["model_rev"])
-            change = result.get("change") or {}
-            if change.get("requires_semantic") and first_semantic_change is None:
-                first_semantic_change = str(change.get("change_id") or "")
             created.append({"kind": item["kind"], "title": item["title"], "ref": (
                 result["model"]["change_history"][-1]["detail"]["ref"]
             )})
+        # Author acceptance makes the selected records durable immediately.
+        # Any semantic work is deliberately deferred to the single project
+        # action “更新作品状态”; never start Direct AI from acceptance.
         settlement_started = False
-        if first_semantic_change:
-            try:
-                change_settlement.prepare_change_settlement(project_id, first_semantic_change)
-                settlement_started = True
-            except Exception:  # noqa: BLE001 — durable 写入保留，可稍后重试同步
-                settlement_started = False
     _cleanup_proposal(project_id)
     audit.append_event(
         str(meta.get("request_id") or ""), audit.EVENT_AUTHORITY_CONFIRMED, "foundation_design",

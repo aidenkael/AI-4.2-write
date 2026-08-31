@@ -2,6 +2,7 @@
 import hashlib
 import json
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -185,56 +186,93 @@ def test_failed_semantic_writeback_keeps_edit_and_can_retry(project):
     assert project_snapshot.get_project_snapshot(project["project_id"])["settlement"]["status"] == "synchronized"
 
 
-def test_application_boundary_auto_starts_required_settlement(project, monkeypatch):
+def test_application_boundary_never_auto_starts_settlement(project, monkeypatch):
     created = author_edit.create_foundation_record(
         project["project_id"], base_model_rev=0, category="character", title="林澈",
         material_state="current", data={"one_line_intro": "调查者"},
     )
     called = []
-    monkeypatch.setattr(
-        app_api.change_settlement_ops,
-        "prepare_change_settlement",
-        lambda project_id, change_id: called.append((project_id, change_id)) or {
-            "request_id": "req-1", "change_id": change_id, "project_id": project_id,
-            "status": "pending", "request_started": True,
-        },
-    )
-    result = app_api._start_required_settlement(created)
-    assert called == [(project["project_id"], created["change"]["change_id"])]
-    assert result["settlement_request"]["request_started"] is True
-    assert result["settlement_request"]["request_id"] == "req-1"
+    monkeypatch.setattr(app_api.change_settlement_ops, "prepare_project_state_refresh", lambda *_args: called.append(True))
+    assert created["change"]["status"] == "pending"
+    assert called == []
 
 
-def test_application_boundary_skips_deterministic_change(project, monkeypatch):
+def test_deterministic_change_stays_synchronized_without_ai(project, monkeypatch):
     author_edit.create_chapter(project["project_id"], chapter_number=1)
     change = author_edit.get_author_edit_surface(project["project_id"])["settlement"]["changes"][-1]
     called = []
-    monkeypatch.setattr(
-        app_api.change_settlement_ops,
-        "prepare_change_settlement",
-        lambda *_args: called.append(True),
-    )
-    result = app_api._start_required_settlement({
-        "project_id": project["project_id"], "change": change,
-    })
+    monkeypatch.setattr(app_api.change_settlement_ops, "prepare_project_state_refresh", lambda *_args: called.append(True))
     assert called == []
-    assert result["settlement_request"]["request_started"] is False
-    assert result["settlement_request"]["complete"] is True
+    assert change["status"] == "synchronized"
 
 
-def test_application_boundary_keeps_durable_edit_when_settlement_start_fails(project, monkeypatch):
+def test_application_boundary_keeps_durable_edit_pending_without_config(project, monkeypatch):
     created = author_edit.create_foundation_record(
         project["project_id"], base_model_rev=0, category="character", title="林澈",
         material_state="current", data={"one_line_intro": "调查者"},
     )
-    monkeypatch.setattr(
-        app_api.change_settlement_ops,
-        "prepare_change_settlement",
-        lambda *_args: (_ for _ in ()).throw(change_settlement.ChangeSettlementError("配置不可用")),
-    )
-    result = app_api._start_required_settlement(created)
-    assert result["change"]["status"] == "failed"
-    assert result["settlement_request"]["request_started"] is False
-    assert result["settlement_request"]["error"] == "配置不可用"
+    assert created["change"]["status"] == "pending"
     snapshot = project_snapshot.get_project_snapshot(project["project_id"])
     assert [item["title"] for item in snapshot["current"]["characters"]] == ["林澈"]
+
+
+def _wait_refresh(project_id: str, timeout: float = 3.0) -> dict:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        state = change_settlement.get_project_state_refresh(project_id)
+        if state["status"] != "running":
+            return state
+        time.sleep(0.01)
+    raise AssertionError("project refresh did not finish")
+
+
+def test_project_refresh_batches_and_coalesces_latest_prose(project, monkeypatch):
+    author_edit.create_chapter(project["project_id"], chapter_number=1)
+    first = author_edit.save_formal_prose(
+        project["project_id"], chapter_number=1, base_content_sha256=_empty_hash(), content="旧稿内容",
+    )
+    author_edit.save_formal_prose(
+        project["project_id"], chapter_number=1, base_content_sha256=first["content_sha256"], content="最新正文",
+    )
+    calls: list[str] = []
+    monkeypatch.setattr(change_settlement.semantic_ai, "require_semantic_ai", lambda: (object(), "secret"))
+    monkeypatch.setattr(change_settlement.semantic_ai, "run_text", lambda prompt: calls.append(prompt) or json.dumps({
+        "summary": "已整理", "consequences": [],
+        "chapter_actual_results": [{"chapter_number": 1, "result": {"summary": "最新正文结果"}}],
+    }, ensure_ascii=False))
+    started = change_settlement.prepare_project_state_refresh(project["project_id"])
+    assert started["status"] == "running"
+    state = _wait_refresh(project["project_id"])
+    assert state["status"] == "synchronized"
+    assert len(calls) == 1
+    assert "最新正文" in calls[0] and "旧稿内容" not in calls[0]
+    ledger = author_edit.get_change_ledger(project["project_id"])
+    assert all(item["status"] == "synchronized" for item in ledger["changes"] if item["requires_semantic"])
+    change_settlement.prepare_project_state_refresh(project["project_id"])
+    assert len(calls) == 1, "zero pending changes must not call Direct AI"
+
+
+def test_project_refresh_cutoff_leaves_concurrent_save_pending(project, monkeypatch):
+    import threading
+    author_edit.create_chapter(project["project_id"], chapter_number=1)
+    first = author_edit.save_formal_prose(
+        project["project_id"], chapter_number=1, base_content_sha256=_empty_hash(), content="刷新前正文",
+    )
+    entered, release = threading.Event(), threading.Event()
+    monkeypatch.setattr(change_settlement.semantic_ai, "require_semantic_ai", lambda: (object(), "secret"))
+    def run_text(_prompt):
+        entered.set()
+        assert release.wait(2)
+        return json.dumps({"summary": "已整理", "consequences": [], "chapter_actual_results": []}, ensure_ascii=False)
+    monkeypatch.setattr(change_settlement.semantic_ai, "run_text", run_text)
+    change_settlement.prepare_project_state_refresh(project["project_id"])
+    assert entered.wait(1)
+    author_edit.save_formal_prose(
+        project["project_id"], chapter_number=1, base_content_sha256=first["content_sha256"], content="刷新后正文",
+    )
+    release.set()
+    assert _wait_refresh(project["project_id"])["status"] == "synchronized"
+    ledger = author_edit.get_change_ledger(project["project_id"])
+    assert ledger["changes"][-1]["status"] == "pending"
+    snapshot = project_snapshot.get_project_snapshot(project["project_id"])
+    assert snapshot["chapters"][0]["content"] == "刷新后正文"

@@ -240,7 +240,7 @@ project.author_edit / confirm / writeback
 
 ## 7. 作者触发语义状态刷新的模块协作
 
-已批准但尚未实现的迁移方向：
+当前实现：
 
 ```text
 durable 编辑 / accepted content
@@ -260,7 +260,7 @@ Code validate semantic patch
 derived state / Snapshot / Story Map / next Context 刷新
 ```
 
-保存本身不调用 AI；Code 立即完成持久化、revision/hash、字数/章节结构、current/future/retired 与图谱等确定性投影。常规整合只消费自上次确认刷新以来的变更及必要当前 Context，不重读全书；受影响任务 Context 必须让最新作者 truth 覆盖陈旧派生摘要。该方向不改变当前自动 settlement runtime，迁移任务待作者讨论后再定义。
+保存本身不调用 AI；Code 立即完成持久化、revision/hash、字数/章节结构、current/future/retired 与图谱等确定性投影。常规整合在单次作者点击后捕获 cutoff，合并同一目标的中间编辑并只向 Direct AI 发送最新当前真相；post-cutoff 编辑保持 pending。受影响任务 Context 暴露有界 pending manifest/相关正文，最新作者 truth 覆盖陈旧派生摘要；StoryPlan、StoryWrite、Review 不因未刷新而阻塞。
 
 ## 8. 迁移策略：Move on touch
 
@@ -276,7 +276,7 @@ derived state / Snapshot / Story Map / next Context 刷新
 
 ## 9. 当前实现方向
 
-前瞻方向以 `00_项目控制/长期开发手册.md` §16 为准：作者触发「更新作品状态」的语义刷新设计已批准，运行时/UI 迁移尚未开始；下一项实现任务刻意留待作者进一步讨论。本文件不重新规定 M1–M4 的已完成历史顺序。
+作者触发「更新作品状态」已由现有 `author_edit` 账本和 `change_settlement` authority/writeback 路径实现；不引入第二状态库、队列或 Agent runtime。M1–M4 的自动结算记录保留为历史，不再定义当前运行时。
 
 ## 10. 明确不做
 

@@ -305,7 +305,7 @@ def test_stage2_task_contains_only_compiled_context(isolated, real_project, fake
     assert "state_selections" not in stage2_task
     assert "Context Package" in stage2_task
     assert "本次 Context 快照指纹" in stage2_task
-    assert "settlement_candidates" in stage2_task
+    assert "settlement_candidates" not in stage2_task
 
 
 def test_stage1_knowledge_exact_package_single_retrieval(isolated, real_project, fake_bridge, monkeypatch):

@@ -331,7 +331,10 @@ def _validated_chapters(loaded: dict[str, Any], model: dict[str, Any]) -> list[d
 def _settlement_summary(project_dir: Path) -> dict[str, Any]:
     path = project_dir / "_工作台状态" / "author_changes.json"
     if not path.exists():
-        return {"status": "synchronized", "pending_count": 0, "failed_count": 0, "changes": []}
+        return {
+            "status": "synchronized", "pending_count": 0, "failed_count": 0,
+            "changes": [], "state_refresh": {},
+        }
     try:
         artifact = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -351,11 +354,13 @@ def _settlement_summary(project_dir: Path) -> dict[str, Any]:
         and item["error"].startswith("NEEDS_SEMANTIC_AI_CONFIG")
         for item in changes
     )
+    stored_refresh = artifact.get("state_refresh") if isinstance(artifact.get("state_refresh"), dict) else {}
     return {
         "status": "pending" if pending else ("failed" if failed else "synchronized"),
         "pending_count": pending, "failed_count": failed,
         "needs_semantic_ai_config": needs_semantic_ai_config,
         "changes": copy.deepcopy(changes[-20:]),
+        "state_refresh": copy.deepcopy(stored_refresh),
     }
 
 
@@ -561,19 +566,50 @@ def focused_task_context(
     else:
         settlement_gate = {"status": "synchronized", "message": ""}
     relevant_current, relevant_future = _task_relevant_records(snapshot, chapter)
+    pending_manifest = []
+    pending_chapter_numbers: set[int] = set()
+    for item in snapshot["settlement"].get("changes", []):
+        if not isinstance(item, dict) or item.get("status") not in {"pending", "failed", "awaiting_author"}:
+            continue
+        delta = item.get("delta") if isinstance(item.get("delta"), dict) else {}
+        chapter_no = delta.get("chapter_number")
+        if isinstance(chapter_no, int):
+            pending_chapter_numbers.add(chapter_no)
+        pending_manifest.append({
+            "change_id": item.get("change_id"), "sequence": item.get("sequence"),
+            "source_kind": item.get("source_kind"), "chapter_number": chapter_no,
+            "target": (delta.get("project_model_change") or {}).get("detail", {}).get("ref")
+            if isinstance(delta.get("project_model_change"), dict) else None,
+        })
+    pending_manifest = pending_manifest[-12:]
     previous_result = None
+    previous_content = None
     if chapter_number is not None and chapter_number > 1:
         previous = next(
             (item for item in snapshot["chapters"] if item["chapter_number"] == chapter_number - 1),
             None,
         )
         previous_result = copy.deepcopy((previous or {}).get("actual_result"))
+        previous_content = str((previous or {}).get("content") or "")[-2000:]
+    changed_chapters = []
+    for item in snapshot["chapters"]:
+        if item["chapter_number"] in pending_chapter_numbers:
+            changed_chapters.append({
+                "chapter_number": item["chapter_number"], "content_sha256": item.get("content_sha256"),
+                "content_excerpt": str(item.get("content") or "")[-2000:],
+            })
+        if len(changed_chapters) >= 4:
+            break
     return {
         "project_id": project_id,
         "model_rev": snapshot["model_rev"],
         "state_rev": snapshot["story_state"]["state_rev"],
         "story_bible_profile": copy.deepcopy(snapshot["story_bible_profile"]),
         "settlement": settlement_gate,
+        "unconsolidated_changes": {
+            "present": bool(pending_manifest), "manifest": pending_manifest,
+            "changed_chapters": changed_chapters,
+        },
         "current": {
             key: [{"ref": item["ref"], "title": item["title"], "record": item["record"]} for item in values]
             for key, values in relevant_current.items()
@@ -589,6 +625,8 @@ def focused_task_context(
             "fine_outline": copy.deepcopy(chapter.get("fine_outline") or {}),
             "actual_result": copy.deepcopy(chapter.get("actual_result")),
             "previous_actual_result": previous_result,
+            "content": str(chapter.get("content") or "")[-2000:],
+            "previous_content": previous_content,
         },
         "planning_impact_candidates": [
             item for item in snapshot.get("planning_impact_candidates", [])

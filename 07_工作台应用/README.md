@@ -6,7 +6,7 @@ Go Write 正式作者侧桌面应用。`PRODUCT_BASELINE = GO_WRITE_2_0_APPROVED
 
 - M1–M4 真实运行时纵切已完成并合并至 main：NewProject、StoryPlan、StoryWrite、Foundation 设计与 Review 均有当前正式路径。
 - Agent 任务按既有任务合同走 Interactive `/gowrite` 或已配置的 Direct 路径；Daily AI 是独立、薄的 Direct-AI 路径，不取代需要工具/多步骤决策的 Agent。
-- 最新前瞻规则：作者编辑立即保存；保存不调用 AI；例行语义整合只能由作者显式「更新作品状态」触发。该 runtime/UI 迁移已批准但尚未实现。
+- 当前规则：作者编辑/采用立即保存；保存不调用 AI；例行语义整合只能由作者显式「更新作品状态」触发。项目栏显示待整理、整理中、待确认或可重试状态；刷新按 cutoff 合并最新受影响真相，后续编辑继续保持 pending。
 
 ## 逻辑结构
 

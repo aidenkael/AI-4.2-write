@@ -8,7 +8,7 @@
       Stage 1：上下文选择（semantic_interpretation + state_selections +
                conflicts_or_tensions；knowledge_needs 走精确检索包 P0 规则）
       → frozen StoryWrite.prepare_creation_brief / prepare_context（绑定检索包）
-      → Stage 2：正文生成（context_ref + draft_text + settlement_candidates）
+      → Stage 2：正文生成（context_ref + draft_text）
   → Interactive：两阶段交互桥（真实的两次 /gowrite，绝不回退 Direct）：
       Stage 1：作者在 Qoder 输入 /gowrite 执行上下文选择（任务 = 选择任务）
       → Go Write 验收 Stage 1 输出 → P0 绑定 + 编译精确 Context 快照 →
@@ -189,53 +189,10 @@ _PROSE_TASK_TEMPLATE = """根据下面的创作上下文，写一段正文。最
 
 {{
   "context_ref": "<下方给出的 Context 快照指纹，原样复制>",
-  "draft_text": "正文候选全文（直接可读的小说正文，不要 markdown 标题）",
-  "settlement_candidates": [
-    {{
-      "classification": "mechanical",
-      "target_area": "canon_facts",
-      "entry": {{"id": "见下方 id 规则", "fact": "本场景中明确成立的事实"}},
-      "operation": "append",
-      "reason": "正文明确写到了这个事实"
-    }}
-  ],
-  "chapter_actual_result": {{
-    "summary": "本章实际内容的短摘要",
-    "important_events": [],
-    "characters_involved": [],
-    "character_state_changes": [],
-    "relationship_changes": [],
-    "time_movement": [],
-    "location_state_changes": [],
-    "information_revealed": [],
-    "foreshadowing_planted_paid_off": [],
-    "unresolved_threads": [],
-    "final_chapter_state": "",
-    "outline_divergence": ""
-  }},
-  "domain_consequences": [],
-  "planning_impact_candidate": null
+  "draft_text": "正文候选全文（直接可读的小说正文，不要 markdown 标题）"
 }}
 
-settlement 纪律：
-- classification 只允许：mechanical / ambiguous / creative
-- mechanical：正文中明确已经发生/成立的话语、动作、事实，且适合进入 Story State。
-  完成普通 mechanical 判断后，再额外扫描 continuity-critical hard anchors：
-  明确数字、日期/时间/deadline、合同条件、明确承诺。
-  这些额外项如满足 mechanical 定义也应标 mechanical。
-- ambiguous：可能是也可能不是的内容
-- creative：纯粹的创意发挥
-- 只有 mechanical 才可能被写入 Story State
-- operation 只允许：append / replace_existing
-- chapter_actual_result 描述候选正文一旦被作者接受后的实际结果，不得复写/覆盖细纲；
-- domain_consequences 使用统一结算结构（classification=mechanically_certain|ambiguous|creative_optional；kind=character|relationship|event|time|foreshadowing|setting|location|organization|system|storyline|planning|open_thread|mystery_information；action=create|update|retire），只更新本次正文明确影响的实体；人物 update 只补 one_line_intro/visible_traits/persona_core/background_summary/position_title/power_rank/current_state/current_objective/arc_stage/speech_style/behavior_anchors，显式 ref 必须来自下方上下文；
-- 只有实质细纲偏差影响未来规划时才给 planning_impact_candidate={{"summary":"短说明","affected_refs":[]}}，否则为 null；不得直接改未来规划。
 - 塑造人物优先通过行动、对白、选择、反应、对比与具体细节，不反复解释人物标签。
-
-entry.id 规则：
-- append：id 不由你负责，后台自动生成。你可以省略或写占位值（如 "placeholder"）。
-- replace_existing：必须使用下方 Context Package 中明确提供的真实现有 id
-  （见 "selected_story_state" 中的 id）。不得使用不存在的 id。
 
 本次 Context 快照指纹（必须原样复制到 context_ref，否则结果会被拒绝）：
 {context_fingerprint}
@@ -386,57 +343,9 @@ def _parse_prose_result(output: str, *, expected_context_ref: str) -> dict[str, 
     if not isinstance(draft_text, str) or not draft_text.strip():
         raise StoryWritingError("Agent 输出缺少正文（draft_text 应为非空字符串）。")
 
-    candidates = data.get("settlement_candidates")
-    if not isinstance(candidates, list):
-        raise StoryWritingError("Agent 输出缺少 settlement_candidates（应为列表）。")
-    valid_classifications = ("mechanical", "ambiguous", "creative")
-    valid_operations = ("append", "replace_existing")
-    for i, cand in enumerate(candidates):
-        if not isinstance(cand, dict):
-            raise StoryWritingError(f"settlement_candidates[{i}] 不是对象。")
-        if cand.get("classification") not in valid_classifications:
-            raise StoryWritingError(f"settlement_candidates[{i}].classification 非法。")
-        if not isinstance(cand.get("target_area"), str) or not cand["target_area"]:
-            raise StoryWritingError(f"settlement_candidates[{i}].target_area 缺失。")
-        entry = cand.get("entry")
-        if not isinstance(entry, dict):
-            raise StoryWritingError(f"settlement_candidates[{i}].entry 不是对象。")
-        op = cand.get("operation", "append")
-        if op not in valid_operations:
-            raise StoryWritingError(f"settlement_candidates[{i}].operation 非法。")
-        # replace_existing 必须要求非空 id；append 不要求
-        if op == "replace_existing" and not entry.get("id"):
-            raise StoryWritingError(
-                f"settlement_candidates[{i}]: replace_existing 必须提供非空 entry.id。"
-            )
-
-    chapter_result = data.get("chapter_actual_result")
-    if chapter_result is None:
-        # Backward-compatible deterministic floor for older Agent templates:
-        # accepted prose still gets a separate reality record, without another AI pass.
-        chapter_result = {"summary": draft_text.strip()[:160]}
-    if not isinstance(chapter_result, dict) or not isinstance(chapter_result.get("summary"), str):
-        raise StoryWritingError("Agent 输出 chapter_actual_result 非法。")
-    domain_consequences = data.get("domain_consequences", [])
-    planning_impact = data.get("planning_impact_candidate")
-    try:
-        from operations import change_settlement as settlement_ops
-        semantic = settlement_ops._parse_output(json.dumps({
-            "summary": "已接受正文的领域结算",
-            "consequences": domain_consequences,
-            "chapter_actual_result": chapter_result,
-            "planning_impact_candidate": planning_impact,
-        }, ensure_ascii=False))
-    except Exception as exc:  # noqa: BLE001 - stable StoryWrite contract boundary
-        raise StoryWritingError(f"Agent 输出的章节实际结果/领域后果非法：{exc}") from exc
-
     return {
         "context_ref": context_ref.strip(),
         "draft_text": draft_text.strip(),
-        "settlement_candidates": candidates,
-        "chapter_actual_result": semantic["chapter_actual_result"],
-        "domain_consequences": semantic["consequences"],
-        "planning_impact_candidate": semantic["planning_impact_candidate"],
     }
 
 
@@ -506,34 +415,6 @@ def _build_context_summary(context: dict[str, Any]) -> str:
                 parts.append(f"  - {c['text']}")
 
     return "\n".join(parts) if parts else "（Context 中无选定条目）"
-
-
-# ---------------------------------------------------------------------------
-# 辅助：验证 replace_existing 绑定本轮 selected Context
-# ---------------------------------------------------------------------------
-
-def _validate_replace_existing_in_context(
-    settlement_candidates: list[dict],
-    context: dict[str, Any],
-) -> None:
-    """replace_existing 的 target_area + entry.id 必须出现在 selected_story_state 中。"""
-    sel_state = context.get("selected_story_state") or {}
-    valid_refs: set[tuple[str, str]] = set()
-    for area, items in sel_state.items():
-        for item in items:
-            eid = item.get("id")
-            if eid:
-                valid_refs.add((area, eid))
-
-    for i, cand in enumerate(settlement_candidates):
-        if cand.get("operation") == "replace_existing":
-            area = cand.get("target_area", "")
-            eid = cand.get("entry", {}).get("id", "")
-            if (area, eid) not in valid_refs:
-                raise StoryWritingError(
-                    f"settlement_candidates[{i}]: replace_existing 目标 "
-                    f"({area}/{eid}) 不在本轮 Context 的选定条目中，拒绝候选。"
-                )
 
 
 # ---------------------------------------------------------------------------
@@ -904,19 +785,6 @@ def _assemble_candidate(
     compiled: dict[str, Any],
 ) -> dict[str, Any]:
     """后台候选组装：append id 后台生成；replace_existing 必须绑定本轮 Context。"""
-    settlement_candidates = []
-    for i, cand in enumerate(prose["settlement_candidates"]):
-        entry = dict(cand["entry"])
-        if cand.get("operation", "append") == "append":
-            entry["id"] = f"sw-{ctx['writing_turn_id']}-{i + 1}"
-        settlement_candidates.append({
-            "classification": cand["classification"],
-            "target_area": cand["target_area"],
-            "entry": entry,
-            "operation": cand.get("operation", "append"),
-            "reason": cand.get("reason") or "",
-        })
-    _validate_replace_existing_in_context(settlement_candidates, compiled["context"])
     return {
         "writing_token": uuid.uuid4().hex,
         "project_id": ctx["project_id"],
@@ -925,16 +793,6 @@ def _assemble_candidate(
         "scene_ref": ctx["scene_ref"],
         "chapter_number": ctx["chapter_number"],
         "draft_text": prose["draft_text"],
-        "settlement": {
-            "scene_ref": ctx["scene_ref"],
-            "candidates": settlement_candidates,
-        },
-        "semantic_result": {
-            "summary": "已接受正文的领域结算",
-            "consequences": prose["domain_consequences"],
-            "chapter_actual_result": prose["chapter_actual_result"],
-            "planning_impact_candidate": prose["planning_impact_candidate"],
-        },
         "source_versions": {
             "intent_rev": ctx["intent"].get("intent_rev"),
             "state_rev": ctx["state"].get("state_rev"),
@@ -1595,7 +1453,9 @@ def confirm_story_write(project_id: str, writing_token: str) -> dict[str, Any]:
     writing_turn_id = meta["writing_turn_id"]
     scene_ref = meta["scene_ref"]
     draft_text = meta["draft_text"]
-    settlement = meta["settlement"]
+    # Acceptance is authority writeback only.  Semantic interpretation is
+    # intentionally deferred to the author's project-level state refresh.
+    settlement = {"scene_ref": meta["scene_ref"], "candidates": []}
     chapter_number = meta["chapter_number"]
     saved_brief = meta.get("brief", {})
     saved_context = meta.get("context", {})
@@ -1662,13 +1522,7 @@ def confirm_story_write(project_id: str, writing_token: str) -> dict[str, Any]:
             change = author_edit_ops.record_accepted_ai_prose(
                 project_id, chapter_number=chapter_number, scene_ref=scene_ref, settlement=settlement,
                 content_sha256=accepted_chapter["content_sha256"],
-                semantic_result=meta.get("semantic_result"),
             )
-            if meta.get("semantic_result") is not None:
-                from operations import change_settlement as settlement_ops
-                settlement_ops.apply_semantic_result(
-                    project_id, change["change_id"], meta["semantic_result"],
-                )
     except Exception as exc:  # noqa: BLE001 - accepted prose must stay durable across settlement failures
         ledger_warning = f"正文已保留，但章节结果/统一语义记录失败：{exc}"
     else:
@@ -1688,7 +1542,7 @@ def confirm_story_write(project_id: str, writing_token: str) -> dict[str, Any]:
         "chapter_path": result.get("chapter_path"),
         "chapter_number": chapter_number,
         "scene_ref": scene_ref,
-        "settlement_status": "synchronized" if ledger_warning is None else "failed",
+        "settlement_status": "pending" if ledger_warning is None else "failed",
         "warning": ledger_warning,
         "message": "这段已经保留下来了。",
     }

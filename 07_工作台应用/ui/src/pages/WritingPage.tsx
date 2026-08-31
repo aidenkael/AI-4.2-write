@@ -10,7 +10,7 @@ import { StatusBadge } from '../components/StatusBadge'
  * - 右侧只有一个协作面板：动作前保持安静，候选只在实际生成后出现；
  *   不再同时存在常驻的“AI 助手”与“AI 候选稿”两个重复面板；
  * - 保留 StoryWrite 两阶段执行与候选接受流程；正式正文使用显式保存；
- * - 新章节、stale guard、修订索引与语义同步都走真实后端合同，无假 autosave。
+ * - 新章节、stale guard、修订索引与作者触发的作品状态整理都走真实后端合同。
  */
 
 export function WritingPage() {
@@ -29,11 +29,6 @@ export function WritingPage() {
   const previousSummary = previousActual && typeof previousActual.summary === 'string'
     ? previousActual.summary
     : ''
-  const consequenceLabel = (classification: unknown) => classification === 'mechanically_certain'
-    ? '自动事实更新'
-    : classification === 'ambiguous'
-      ? '需要你决定'
-      : '可选创作建议'
 
   // 未选择正式作品：安全空态 + 返回作品页；绝不在这里自动挑选项目
   if (!selected) {
@@ -127,36 +122,10 @@ export function WritingPage() {
           </span>
           <div className="editor-save-actions">
             {state.editorDirty ? <span className="unsaved-note">未保存</span> : selectedChapter?.content_sha256 ? <span className="muted-note">已保存</span> : null}
-            <button disabled={!state.editorDirty || state.saving} onClick={() => void c.save(false)}><Save /> 保存</button>
-            <button className="primary" disabled={!state.editorDirty || state.saving} onClick={() => void c.save(true)}><Save /> 保存并同步</button>
+            <button className="primary" disabled={!state.editorDirty || state.saving} onClick={() => void c.save()}><Save /> 保存</button>
           </div>
         </footer>
 
-        <div className="editor-settlement">
-          {state.settlementStatus === 'syncing' && <div className="sync-warning">正文已保存，正在增量同步人物、关系、事件、时间与伏笔状态…</div>}
-          {state.settlementStatus === 'failed' && <div className="sync-warning">同步失败；正文已经保存，可以使用下方同一条变更重试。</div>}
-          {state.pendingChanges.map((change) => {
-            const consequences = change.semantic?.consequences ?? []
-            const undecidedIndexes = consequences
-              .map((item, index) => item.classification !== 'mechanically_certain' ? index : -1)
-              .filter((index) => index >= 0)
-            return (
-              <section className="settlement-card" key={change.change_id}>
-                <strong>{change.status === 'awaiting_author' ? '有语义后果需要你决定' : change.status === 'failed' ? '作品状态同步失败' : '作品状态等待同步'}</strong>
-                {change.semantic?.summary && <p>{change.semantic.summary}</p>}
-                {change.error && <p className="error-text">{change.error}</p>}
-                {change.status === 'awaiting_author' && (
-                  <ul>{undecidedIndexes.map((index) => <li key={index}><b>{consequenceLabel(consequences[index].classification)}</b> · {String(consequences[index].title ?? '未命名后果')} · {String(consequences[index].reason ?? '')}</li>)}</ul>
-                )}
-                <div className="candidate-actions">
-                  {(change.status === 'failed' || change.status === 'pending') && <button onClick={() => void c.retrySettlement(change.change_id)}><RefreshCw /> 重试同步</button>}
-                  {(change.status === 'failed' || change.status === 'pending') && <button onClick={() => void c.cancelSettlement(change.change_id)}><X /> 取消</button>}
-                  {change.status === 'awaiting_author' && <><button className="primary" onClick={() => void c.confirmConsequences(change.change_id, undecidedIndexes)}>采用这些后果</button><button onClick={() => void c.confirmConsequences(change.change_id, [])}>只保留正文</button></>}
-                </div>
-              </section>
-            )
-          })}
-        </div>
       </section>
 
       <aside className="panel ai-collab">

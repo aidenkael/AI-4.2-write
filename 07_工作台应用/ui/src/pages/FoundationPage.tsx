@@ -459,23 +459,6 @@ export function FoundationPage() {
           <button className="primary" onClick={beginCreate}><Plus /> 新增{tabMeta.label}</button>
         </header>
 
-        {controller.data?.settlement.status !== 'synchronized' && (
-          controller.data?.settlement.needs_semantic_ai_config
-            ? (
-              <div className="sync-warning sync-warning-action">
-                <span>需要在“设置”中配置日常 AI 后才能同步语义状态。已保存的编辑不会丢失。</span>
-                <button disabled={controller.saving} onClick={() => void controller.retrySettlement()}>重试同步</button>
-              </div>
-            )
-            : (
-              <div className="sync-warning sync-warning-action">
-                <span>有 {controller.data?.settlement.pending_count ?? 0} 项变更等待同步；显式编辑已保存，派生状态可能暂未完整刷新。</span>
-                {(controller.data?.settlement.failed_count ?? 0) > 0 && (
-                  <button disabled={controller.saving} onClick={() => void controller.retrySettlement()}>重试同步</button>
-                )}
-              </div>
-            )
-        )}
         {controller.loading && <div className="empty-state">正在加载作品地基…</div>}
         {controller.error && <p className="error-text">{controller.error}</p>}
         {!controller.loading && entries.length === 0 && <div className="empty-state">当前尚未记录{tabMeta.label}，可以直接新增。</div>}

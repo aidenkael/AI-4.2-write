@@ -23,7 +23,7 @@
 - 高频明确操作可以按钮化；模糊和创造性需求保留自然语言。
 - candidate / draft / proposal 默认不是 authority，作者明确采用后才能正式写入。
 - 六页是同一作品的六个作者任务，不是六个独立事实仓库：作品概览仅状态+下一步；作品地基拥有关系/人物等源表示；故事地图仅派生可视化（关系图/时间事件/未解决线索），不重复地基列表；同一原始列表不得多页重复呈现。
-- 统一变更循环是目标合同：作者编辑/接受 → delta → 确定性处理并立即保存 truth → 作者显式「更新作品状态」后才进行有界 AI 语义整合 → 安全 writeback → 派生视图刷新。保存不等于 AI 调用；作者可以持续编辑而不触发例行语义整合。作者编辑与 AI 接受一律进入统一作者变更账本与结算路径（`operations/author_edit` + `operations/change_settlement`）；关系/时间/伏笔/状态更新共享同一条结算路径，不建第二套同步 runtime；Story Map 的编辑入口必须路由到与作品地基相同的源操作。该新触发模型已批准但代码迁移尚未开始。
+- 统一变更循环：作者编辑/接受 → delta → 确定性处理并立即保存 truth → 作者显式「更新作品状态」后才进行有界 AI 语义整合 → 安全 writeback → 派生视图刷新。保存不等于 AI 调用；作者可以持续编辑而不触发例行语义整合。作者编辑与 AI 接受一律进入统一作者变更账本与结算路径（`operations/author_edit` + `operations/change_settlement`）；关系/时间/伏笔/状态更新共享同一条结算路径，不建第二套同步 runtime；Story Map 的编辑入口必须路由到与作品地基相同的源操作。
 - **Go Write 2.0 是正式产品基线。**它面向中文长篇小说作者；固定作品管理框架，具体工作内容结构随作品与任务动态生长。稳定的作品一级页面为「作品概览 / 作品地基 / 故事规划 / 正在写 / 故事地图 / 作品检查」。
 - UI 1.0 保留为已验证的技术纵切/实现参考基线；其与 Go Write 2.0 冲突的产品假设已被 supersede，但历史记录不得删除。
 - 字数规划是 Go Write 2.0 的一等能力：总目标 → 卷/阶段预算 → 章节范围 → 实际字数。它是已批准的产品方向，不因本条规则自动宣称已经实现。
@@ -90,7 +90,7 @@ Context/Brief/recent prose 是 derivative，不得成为事实 authority。
 | Mechanical settlement assist | KEEP_AND_FREEZE |
 | REAL_PROJECT_WIRING_DESIGN | FROZEN |
 | REAL_PROJECT_WIRING_IMPLEMENTATION | M1–M4_REAL_RUNTIME_VERTICAL_SLICE_COMPLETED（历史实现/验收事实） |
-| AUTHOR_FACING_ONE_SENTENCE_ENTRY | M1–M4_REAL_RUNTIME_VERTICAL_SLICE_COMPLETED；新语义刷新触发模型尚未迁移 |
+| AUTHOR_FACING_ONE_SENTENCE_ENTRY | M1–M4_REAL_RUNTIME_VERTICAL_SLICE_COMPLETED；作者触发语义状态刷新已实现 |
 | AUTHOR_FACING_WORKBENCH_DESIGN | ACTIVE |
 | PRODUCT_BASELINE | GO_WRITE_2_0_APPROVED（产品基线已批准；未实现能力不得标记 DONE） |
 | UI_1_0_BASELINE | TECHNICAL_VERTICAL_SLICE_REFERENCE（历史技术/实现参考；非正式产品基线） |
@@ -211,4 +211,4 @@ BKP 长期保存作品身份、作品地图、BookProfile、Observation、Infere
 
 ## NEXT
 
-以 `00_项目控制/长期开发手册.md` §16 为唯一前瞻定义：作者触发「更新作品状态」的语义刷新设计已批准，代码迁移尚未开始，下一步实现方向待进一步作者讨论。M1–M4 保留为历史实现/运行时验收事实，不据此宣布新触发模型已经实现。
+作者触发「更新作品状态」的语义刷新已实现：保存/采用只作 durable Code 写入并进入 pending；项目栏唯一动作执行有界 Direct AI 批量整合。M1–M4 保留为历史实现/运行时验收事实，自动保存触发结算的运行时已被当前模型 supersede。

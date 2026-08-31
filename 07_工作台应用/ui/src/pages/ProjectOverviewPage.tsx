@@ -97,7 +97,7 @@ export function ProjectOverviewPage() {
             </div>
             {overview?.settlement && overview.settlement.status !== 'synchronized' && (
               <div className="sync-warning">
-                已保存的作者修改尚未完全同步：{overview.settlement.pending_count} 项待处理，{overview.settlement.failed_count} 项失败。继续使用 AI 前请先到「正在写」重试或确认。
+                已保存的作者修改尚待整理：{overview.settlement.pending_count} 项待处理，{overview.settlement.failed_count} 项失败。你可以继续创作；需要整理时使用项目栏的「更新作品状态」。
               </div>
             )}
             {planCount > 0 && (

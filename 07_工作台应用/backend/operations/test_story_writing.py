@@ -51,6 +51,7 @@ import project_workspace  # noqa: E402
 
 from agents.base import AgentRequest, AgentResult  # noqa: E402
 from operations import agent_runner  # noqa: E402
+from operations import author_edit  # noqa: E402
 from operations import qoder_bridge as bridge  # noqa: E402
 from operations import story_planning as sp_ops  # noqa: E402
 from operations import story_writing as sw_ops  # noqa: E402
@@ -414,7 +415,7 @@ def test_two_stage_isolation(isolated, real_project, fake_bridge, monkeypatch):
     assert "当前 Story State 候选条目" not in stage2_task
     assert "Context Package" in stage2_task
     assert "本次 Context 快照指纹" in stage2_task
-    assert "settlement_candidates" in stage2_task
+    assert "settlement_candidates" not in stage2_task
 
 
 def test_recent_prose_only_in_stage2_when_index_has_entries(isolated, real_project, fake_bridge, monkeypatch):
@@ -736,7 +737,8 @@ def test_confirm_uses_backend_draft_only(isolated, real_project, fake_bridge, mo
     assert confirmed["chapter_number"] == result["chapter_number"]
     from operations import project_model
     model = project_model.load_project_model(real_project["project_id"])
-    assert model["chapter_actual_results"][str(result["chapter_number"])]["summary"]
+    assert str(result["chapter_number"]) not in model["chapter_actual_results"]
+    assert confirmed["settlement_status"] == "pending"
 
 
 def test_confirm_calls_accept_prose_author_accepted(isolated, real_project, fake_bridge, monkeypatch):
@@ -817,15 +819,14 @@ def test_confirm_workspace_cleaned(isolated, real_project, fake_bridge, monkeypa
         assert list(project_writing_dir.iterdir()) == []
 
 
-def test_append_id_generated_by_backend(isolated, real_project, fake_bridge, monkeypatch):
+def test_storywrite_candidate_does_not_precompute_semantic_settlement(isolated, real_project, fake_bridge, monkeypatch):
     result = _produce_candidate(real_project, isolated, fake_bridge, monkeypatch)
     meta = _writing_meta(real_project, isolated)
-    for cand in meta["settlement"]["candidates"]:
-        if cand["operation"] == "append":
-            assert cand["entry"]["id"].startswith("sw-"), f"append id 应由后台生成：{cand['entry']['id']}"
+    assert "settlement" not in meta
+    assert "semantic_result" not in meta
 
 
-def test_replace_existing_keeps_real_id(isolated, real_project, fake_bridge, monkeypatch):
+def test_storywrite_acceptance_enters_pending_ledger_without_semantic_apply(isolated, real_project, fake_bridge, monkeypatch):
     project_id = real_project["project_id"]
     state_file = real_project["project_dir"] / "_工作台状态" / "story_state.json"
     state = json.loads(state_file.read_text(encoding="utf-8"))
@@ -837,25 +838,12 @@ def test_replace_existing_keeps_real_id(isolated, real_project, fake_bridge, mon
     state["state_rev"] = 3
     state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    adapter = _TwoStageAdapter(
-        selection_json=_selection_json(
-            state_selections=[{"area": "canon_facts", "id": "cf.existing.1", "reason": "测试"}],
-        ),
-        settlement=[{
-            "classification": "mechanical",
-            "target_area": "canon_facts",
-            "entry": {"id": "cf.existing.1", "fact": "修改后的事实"},
-            "operation": "replace_existing",
-            "reason": "修改",
-        }],
-    )
-    prepare_result = _sw_prepare(real_project, adapter, monkeypatch)
-    assert _wait_worker(prepare_result["request_id"])
-    assert sw_ops.get_story_write_request(prepare_result["request_id"])["status"] == "completed"
-    meta = _writing_meta(real_project, isolated)
-    replace_cands = [c for c in meta["settlement"]["candidates"] if c["operation"] == "replace_existing"]
-    assert len(replace_cands) == 1
-    assert replace_cands[0]["entry"]["id"] == "cf.existing.1"
+    result = _produce_candidate(real_project, isolated, fake_bridge, monkeypatch)
+    confirmed = sw_ops.confirm_story_write(project_id=project_id, writing_token=result["writing_token"])
+    assert confirmed["settlement_status"] == "pending"
+    ledger = author_edit.get_change_ledger(project_id)
+    assert ledger["changes"][-1]["source_kind"] == "accepted_ai_prose"
+    assert ledger["changes"][-1]["status"] == "pending"
 
 
 def test_confirm_no_planning_generated(isolated, real_project, fake_bridge, monkeypatch):

@@ -13,14 +13,10 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  cancelChangeSettlement,
-  confirmChangeConsequences,
   createChapter as createFormalChapter,
   getStoryWriteSurface,
-  prepareChangeSettlement,
   saveFormalProse,
   type ProposeStoryWriteResult,
-  type SettlementChange,
   type StoryWriteSurface,
 } from '../../bridge/client'
 import { useAuthorTask } from '../tasks/AuthorTaskCoordinator'
@@ -56,8 +52,6 @@ export interface WritingControllerState {
   editorContent: string
   editorDirty: boolean
   saving: boolean
-  settlementStatus: 'idle' | 'syncing' | 'failed'
-  pendingChanges: SettlementChange[]
 }
 
 export interface WritingController {
@@ -66,10 +60,7 @@ export interface WritingController {
   setAuthorInput(input: string): void
   setEditorContent(input: string): void
   createChapter(): Promise<void>
-  save(sync: boolean): Promise<void>
-  retrySettlement(changeId: string): Promise<void>
-  cancelSettlement(changeId: string): Promise<void>
-  confirmConsequences(changeId: string, acceptedIndexes: number[]): Promise<void>
+  save(): Promise<void>
   generate(): Promise<void>
   cancel(): Promise<void>
   discard(): Promise<void>
@@ -200,12 +191,6 @@ export function useWritingController(options: {
     editorContent,
     editorDirty,
     saving,
-    settlementStatus: writingSurface?.settlement?.worker_active
-      ? 'syncing'
-      : ((writingSurface?.settlement?.changes ?? []).some((change) => change.status === 'failed') ? 'failed' : 'idle'),
-    pendingChanges: (writingSurface?.settlement?.changes ?? []).filter((change) => (
-      change.status !== 'synchronized' && change.status !== 'canceled'
-    )),
   }
 
   const setAuthorInput = useCallback((input: string) => {
@@ -231,49 +216,6 @@ export function useWritingController(options: {
     setLocalError(null)
   }, [])
 
-  // 结算是轻量后台维护：保存后后端 per-project worker 串行 drain 账本，
-  // 前端只静默轮询只读写作面，不跟随任何 request_id——陈旧的持久化
-  // request id（死 worker / 旧进程）不得触发轮询、重载或闪烁。
-  const refreshSettlementQuiet = useCallback(async (pid: string) => {
-    try {
-      const surface = await getStoryWriteSurface(pid)
-      if (projectRef.current !== pid || surface.project_id !== pid) return
-      setWritingSurface(surface)
-    } catch {
-      // 静默轮询：保留上一份有效写作面，绝不把瞬时错误展示给作者。
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!projectId || !writingSurface || writingSurface.project_id !== projectId) return
-    if (writingSurface.settlement?.status === 'synchronized') return
-    const timer = window.setInterval(() => { void refreshSettlementQuiet(projectId) }, 2000)
-    return () => window.clearInterval(timer)
-  }, [projectId, writingSurface, refreshSettlementQuiet])
-
-  const retrySettlement = useCallback(async (changeId: string) => {
-    const pid = projectRef.current
-    if (!pid) return
-    setLocalError(null)
-    try {
-      await prepareChangeSettlement({ project_id: pid, change_id: changeId })
-    } catch (e) {
-      if (projectRef.current === pid) setLocalError(toMessage(e))
-    }
-    if (projectRef.current === pid) await refreshSettlementQuiet(pid)
-  }, [refreshSettlementQuiet])
-
-  const cancelSettlement = useCallback(async (changeId: string) => {
-    const pid = projectRef.current
-    if (!pid) return
-    setLocalError(null)
-    try {
-      await cancelChangeSettlement({ project_id: pid, change_id: changeId })
-    } catch (e) {
-      if (projectRef.current === pid) setLocalError(toMessage(e))
-    }
-    if (projectRef.current === pid) await refreshSettlementQuiet(pid)
-  }, [refreshSettlementQuiet])
 
   const createChapter = useCallback(async () => {
     const pid = projectRef.current
@@ -299,7 +241,7 @@ export function useWritingController(options: {
     }
   }, [loadSurface, writingSurface])
 
-  const save = useCallback(async (sync: boolean) => {
+  const save = useCallback(async () => {
     const pid = projectRef.current
     const chapter = writingSurface?.project_id === pid
       ? writingSurface.chapters.find((item) => item.chapter_number === selectedChapterNumber)
@@ -315,35 +257,19 @@ export function useWritingController(options: {
     try {
       const result = await saveFormalProse({
         project_id: pid, chapter_number: chapter.chapter_number,
-        base_content_sha256: chapter.content_sha256, content: editorContent, sync,
+        base_content_sha256: chapter.content_sha256, content: editorContent,
       })
       await loadSurface(pid)
       setSelectedChapterNumber(chapter.chapter_number)
       setEditorContentState(editorContent)
       setEditorDirty(false)
-      notify?.(sync ? '正文已保存，正在同步作品状态。' : result.message)
+      notify?.(result.message)
     } catch (e) {
       setLocalError(toMessage(e))
     } finally {
       if (projectRef.current === pid) setSaving(false)
     }
   }, [editorContent, editorDirty, loadSurface, notify, selectedChapterNumber, writingSurface?.chapters])
-
-  const confirmConsequences = useCallback(async (changeId: string, acceptedIndexes: number[]) => {
-    const pid = projectRef.current
-    if (!pid) return
-    setSaving(true)
-    setLocalError(null)
-    try {
-      await confirmChangeConsequences({ project_id: pid, change_id: changeId, accepted_indexes: acceptedIndexes })
-      await loadSurface(pid)
-      notify?.('你确认的后果已同步到最新作品状态。')
-    } catch (e) {
-      setLocalError(toMessage(e))
-    } finally {
-      if (projectRef.current === pid) setSaving(false)
-    }
-  }, [loadSurface, notify])
 
   const generate = useCallback(async () => {
     const pid = projectRef.current
@@ -413,9 +339,6 @@ export function useWritingController(options: {
     setEditorContent,
     createChapter,
     save,
-    retrySettlement,
-    cancelSettlement,
-    confirmConsequences,
     generate,
     cancel,
     discard,

@@ -120,6 +120,117 @@ def _read_changes(artifact: Path, project_id: str) -> dict[str, Any]:
     return value
 
 
+def _default_state_refresh() -> dict[str, Any]:
+    """Read-model lifecycle for the one explicit project-state refresh.
+
+    This stays in the existing author-change ledger: it is not a second story
+    state or a queue.  Older ledgers simply receive this deterministic default.
+    """
+    return {
+        "status": "synchronized",
+        "refresh_id": None,
+        "cutoff_sequence": 0,
+        "change_ids": [],
+        "summary": None,
+        "error": None,
+        "awaiting_change_id": None,
+        "proposals": [],
+        "result": None,
+    }
+
+
+def get_change_ledger(project_id: str) -> dict[str, Any]:
+    """Return the existing authoritative ledger for a read-only projection."""
+    _loaded, _project_dir, artifact = _load(project_id)
+    return copy.deepcopy(_read_changes(artifact, project_id))
+
+
+def get_state_refresh(project_id: str) -> dict[str, Any]:
+    ledger = get_change_ledger(project_id)
+    stored = ledger.get("state_refresh")
+    state = _default_state_refresh()
+    if isinstance(stored, dict):
+        state.update(copy.deepcopy(stored))
+    return state
+
+
+def get_state_refresh_read_model(project_id: str, *, worker_active: bool) -> dict[str, Any]:
+    """Author-safe projection of the explicit project refresh lifecycle.
+
+    The ledger remains the source of truth.  In particular, a persisted
+    ``running`` value cannot masquerade as a live worker after an app restart.
+    """
+    ledger = get_change_ledger(project_id)
+    stored = _default_state_refresh()
+    if isinstance(ledger.get("state_refresh"), dict):
+        stored.update(copy.deepcopy(ledger["state_refresh"]))
+    pending = [
+        item for item in ledger["changes"]
+        if isinstance(item, dict)
+        and item.get("requires_semantic")
+        and item.get("status") in {"pending", "failed"}
+    ]
+    awaiting = [
+        item for item in ledger["changes"]
+        if isinstance(item, dict) and item.get("status") == "awaiting_author"
+    ]
+    status = str(stored.get("status") or "synchronized")
+    error = stored.get("error")
+    if status == "running" and not worker_active:
+        status = "failed"
+        error = "整理进程已停止；作者修改仍保留，可重试。"
+    return {
+        "status": status,
+        "pending_change_count": len(pending),
+        "awaiting_confirmation_count": (
+            len(stored.get("proposals") or [])
+            if status == "awaiting_confirmation"
+            else len(awaiting)
+        ),
+        "refresh_id": stored.get("refresh_id"),
+        "worker_active": bool(worker_active),
+        "summary": stored.get("summary"),
+        "error": error,
+        "cutoff_sequence": stored.get("cutoff_sequence", 0),
+        "consequences": [
+            {
+                "title": item.get("title"), "reason": item.get("reason"),
+                "classification": item.get("classification"),
+            }
+            for item in (stored.get("proposals") or []) if isinstance(item, dict)
+        ] if status == "awaiting_confirmation" else [],
+    }
+
+
+def update_changes_and_state_refresh(
+    project_id: str,
+    *,
+    changes: dict[str, dict[str, Any]] | None = None,
+    state_refresh: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Atomically update captured change entries and refresh lifecycle metadata."""
+    with project_write_lock(project_id):
+        _loaded, _project_dir, artifact = _load(project_id)
+        ledger = _read_changes(artifact, project_id)
+        by_id = {
+            str(item.get("change_id")): item
+            for item in ledger["changes"]
+            if isinstance(item, dict) and isinstance(item.get("change_id"), str)
+        }
+        for change_id, patch in (changes or {}).items():
+            item = by_id.get(change_id)
+            if item is None:
+                raise AuthorEditError("作者变更不存在或不属于当前作品。")
+            item.update(copy.deepcopy(patch))
+            item["updated_at"] = _now()
+        if state_refresh is not None:
+            value = _default_state_refresh()
+            value.update(copy.deepcopy(state_refresh))
+            ledger["state_refresh"] = value
+        _atomic_write(artifact, _json_bytes(ledger))
+        return copy.deepcopy(ledger)
+
+
 def _append_change(
     artifact: Path,
     project_id: str,
@@ -872,22 +983,18 @@ def record_accepted_ai_prose(
     scene_ref: str,
     settlement: dict[str, Any],
     content_sha256: str | None = None,
-    semantic_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Record an already-durable StoryWrite acceptance in the unified ledger."""
+    """Record durable StoryWrite acceptance as pending author-triggered work."""
     with project_write_lock(project_id):
         _loaded, _project_dir, changes_path = _load(project_id)
-        requires_semantic = semantic_result is not None
         return _append_change(
             changes_path, project_id, source_kind="accepted_ai_prose",
-            status="pending" if requires_semantic else "synchronized",
+            status="pending",
             delta={
                 "chapter_number": chapter_number, "scene_ref": scene_ref,
-                "settlement_candidates": copy.deepcopy(settlement.get("candidates") or []),
                 "after_sha256": content_sha256,
-                "precomputed_semantic": copy.deepcopy(semantic_result),
             },
-            requires_semantic=requires_semantic,
+            requires_semantic=True,
         )
 
 

@@ -78,6 +78,28 @@ _TASK_TEMPLATE = """你是 Go Write 的增量语义结算执行器。只分析�
 {snapshot}
 """
 
+_BATCH_TASK_TEMPLATE = """你是 Go Write 的作品状态整理器。作者已经明确保存了下列修改；只读取其中每个目标的最新当前真相，不重放中间编辑，也不重读全书。
+
+作者内容和手工结构化记录优先于旧派生状态。不要臆造事实、日期、人物端点或未来已发生事项；未来规划只能提出候选，绝不直接改写。代码已经处理哈希、字数、章节、结构投影和作者字段保护。
+
+最终回复必须只有一个合法 JSON 对象：
+{{
+  "summary": "给作者的简短整理摘要",
+  "consequences": [
+    {{"classification":"mechanically_certain|ambiguous|creative_optional","kind":"character|relationship|event|time|foreshadowing|setting|location|organization|system|storyline|planning|open_thread|mystery_information","action":"create|update|retire","target_ref":"更新或退役的明确 ref；新建可为空","title":"作者可读标题","source_ref":"关系起点 ref；非关系可为空","target_character_ref":"关系终点 ref；非关系可为空","data":{{}},"reason":"短理由"}}
+  ],
+  "chapter_actual_results": [{{"chapter_number": 12, "result": {{"summary":"正文实际结果摘要"}}, "planning_impact_candidate": null}}]
+}}
+
+只有当前输入直接支持且无需创作选择的后果才是 mechanically_certain。关系端点必须使用输入中已有的明确人物 ref。人物更新只允许 one_line_intro、visible_traits、persona_core、background_summary、position_title、power_rank、current_state、current_objective、arc_stage、speech_style、behavior_anchors。正文实际结果只对应输入中列出的正文章节。
+
+本轮合并后的受影响目标（每项列出覆盖的账本变更 id）：
+{affected}
+
+当前作品快照（只为校验和理解，不得以旧派生内容覆盖上述作者真相）：
+{snapshot}
+"""
+
 
 class ChangeSettlementError(Exception):
     """Safe semantic-settlement failure exposed to the author workbench."""
@@ -487,6 +509,284 @@ def apply_semantic_result(
         "mechanical_count": len(mechanical), "undecided_count": len(undecided),
         "change": change,
     }
+
+
+_REFRESH_WORKERS_GUARD = threading.Lock()
+_REFRESH_WORKERS: dict[str, threading.Thread] = {}
+
+
+def _refresh_worker_active(project_id: str) -> bool:
+    with _REFRESH_WORKERS_GUARD:
+        worker = _REFRESH_WORKERS.get(project_id)
+        return bool(worker and worker.is_alive())
+
+
+def _refresh_key(change: dict[str, Any]) -> str:
+    """Stable target key used only to coalesce obsolete intermediate saves."""
+    delta = change.get("delta") if isinstance(change.get("delta"), dict) else {}
+    chapter = delta.get("chapter_number")
+    if change.get("source_kind") in {"manual_prose_edit", "accepted_ai_prose"} and isinstance(chapter, int):
+        return f"prose:{chapter}"
+    model_change = delta.get("project_model_change") if isinstance(delta.get("project_model_change"), dict) else {}
+    detail = model_change.get("detail") if isinstance(model_change.get("detail"), dict) else model_change
+    ref = detail.get("ref") if isinstance(detail, dict) else None
+    if isinstance(ref, str) and ref:
+        return f"record:{ref}"
+    return f"{change.get('source_kind') or 'change'}:{chapter if isinstance(chapter, int) else 'project'}"
+
+
+def _capture_refresh(project_id: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Capture a cutoff and coalesced latest inputs while holding only the write lock."""
+    with author_edit.project_write_lock(project_id):
+        ledger = author_edit.get_change_ledger(project_id)
+        state = author_edit.get_state_refresh(project_id)
+        if state.get("status") == "running" and _refresh_worker_active(project_id):
+            return state, []
+        cutoff = int(ledger.get("sequence") or 0)
+        eligible = [
+            copy.deepcopy(item) for item in ledger.get("changes", [])
+            if isinstance(item, dict)
+            and item.get("requires_semantic")
+            and item.get("status") in {"pending", "failed"}
+            and isinstance(item.get("sequence"), int)
+            and item["sequence"] <= cutoff
+        ]
+        refresh_id = uuid.uuid4().hex
+        next_state = {
+            "status": "running" if eligible else "synchronized",
+            "refresh_id": refresh_id,
+            "cutoff_sequence": cutoff,
+            "change_ids": [str(item["change_id"]) for item in eligible],
+            "summary": "正在整理作品状态。" if eligible else "作品状态已是最新。",
+            "error": None,
+            "proposals": [],
+            "result": None,
+        }
+        author_edit.update_changes_and_state_refresh(project_id, state_refresh=next_state)
+    latest: dict[str, dict[str, Any]] = {}
+    for item in eligible:
+        key = _refresh_key(item)
+        existing = latest.get(key)
+        if existing is None:
+            latest[key] = {"latest": item, "change_ids": [str(item["change_id"])]}
+        else:
+            existing["latest"] = item
+            existing["change_ids"].append(str(item["change_id"]))
+    return next_state, list(latest.values())
+
+
+def _parse_refresh_output(output: str) -> dict[str, Any]:
+    """Strictly normalize the bounded refresh envelope into existing patch rules."""
+    text = (output or "").strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        text = "\n".join(lines[1:-1] if len(lines) >= 2 else lines).strip()
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ChangeSettlementError("作品状态整理结果不是合法 JSON。") from exc
+    if not isinstance(value, dict) or not isinstance(value.get("summary"), str):
+        raise ChangeSettlementError("作品状态整理结果缺少 summary。")
+    base = _parse_output(json.dumps({
+        "summary": value["summary"],
+        "consequences": value.get("consequences"),
+        "chapter_actual_result": None,
+        "planning_impact_candidate": None,
+    }, ensure_ascii=False))
+    outcomes = value.get("chapter_actual_results", [])
+    if not isinstance(outcomes, list):
+        raise ChangeSettlementError("chapter_actual_results 必须是列表。")
+    normalized_outcomes = []
+    for index, item in enumerate(outcomes):
+        if not isinstance(item, dict) or not isinstance(item.get("chapter_number"), int):
+            raise ChangeSettlementError(f"chapter_actual_results[{index}] 缺少合法 chapter_number。")
+        result = _parse_output(json.dumps({
+            "summary": value["summary"], "consequences": [],
+            "chapter_actual_result": item.get("result"),
+            "planning_impact_candidate": item.get("planning_impact_candidate"),
+        }, ensure_ascii=False))
+        normalized_outcomes.append({
+            "chapter_number": item["chapter_number"],
+            "result": result["chapter_actual_result"],
+            "planning_impact_candidate": result["planning_impact_candidate"],
+        })
+    return {"summary": base["summary"], "consequences": base["consequences"], "chapter_actual_results": normalized_outcomes}
+
+
+def _apply_refresh_result(
+    project_id: str, refresh: dict[str, Any], captured: list[dict[str, Any]], result: dict[str, Any],
+) -> None:
+    """Apply a fully validated batch atomically, never touching post-cutoff edits."""
+    with author_edit.project_write_lock(project_id):
+        ledger = author_edit.get_change_ledger(project_id)
+        stored = author_edit.get_state_refresh(project_id)
+        if stored.get("refresh_id") != refresh.get("refresh_id") or stored.get("status") != "running":
+            return
+        captured_ids = set(str(item) for item in refresh.get("change_ids") or [])
+        entries = {str(item.get("change_id")): item for item in ledger.get("changes", []) if isinstance(item, dict)}
+        if any(entries.get(change_id, {}).get("status") not in {"pending", "failed"} for change_id in captured_ids):
+            raise ChangeSettlementError("整理期间的账本状态已变化，已拒绝写入过期结果。")
+        snapshot = get_project_snapshot(project_id)
+        model = project_model.load_project_model(project_id)
+        model_path = _model_artifact(project_id)
+        before = model_path.read_bytes() if model_path.exists() else None
+        mechanical: list[dict[str, Any]] = []
+        proposals: list[dict[str, Any]] = []
+        for item in result["consequences"]:
+            if item["classification"] == "mechanically_certain" and not _needs_author_gate(model, item):
+                mechanical.append(item)
+            else:
+                proposals.append(item)
+        prose_by_chapter: dict[int, dict[str, Any]] = {}
+        for group in captured:
+            latest = group["latest"]
+            delta = latest.get("delta") if isinstance(latest.get("delta"), dict) else {}
+            chapter = delta.get("chapter_number")
+            if latest.get("source_kind") in {"manual_prose_edit", "accepted_ai_prose"} and isinstance(chapter, int):
+                prose_by_chapter[chapter] = latest
+        applied_outcomes: list[int] = []
+        try:
+            for item in mechanical:
+                model = _apply_one(project_id, model, snapshot, item)
+            for outcome in result["chapter_actual_results"]:
+                number = outcome["chapter_number"]
+                source_change = prose_by_chapter.get(number)
+                chapter = next((item for item in snapshot["chapters"] if item["chapter_number"] == number), None)
+                expected_hash = ((source_change or {}).get("delta") or {}).get("after_sha256")
+                if not source_change or not chapter or not isinstance(expected_hash, str) or chapter.get("content_sha256") != expected_hash:
+                    # A later save changed this chapter after the cutoff.  Its
+                    # author truth remains pending for a later refresh.
+                    continue
+                model = project_model.set_chapter_actual_result(
+                    project_id, base_model_rev=model["model_rev"], chapter_number=number,
+                    result=outcome["result"], content_sha256=expected_hash,
+                    source_change_id=str(source_change["change_id"]), actual_word_count=chapter["actual_words"],
+                )
+                impact = outcome.get("planning_impact_candidate")
+                if impact is not None:
+                    model = project_model.add_planning_impact_candidate(
+                        project_id, base_model_rev=model["model_rev"], chapter_number=number,
+                        summary=impact["summary"], affected_refs=impact.get("affected_refs") or [],
+                        source_change_id=str(source_change["change_id"]),
+                    )
+                applied_outcomes.append(number)
+        except (project_model.ProjectModelError, ChangeSettlementError, OSError) as exc:
+            _restore_model(model_path, before)
+            raise ChangeSettlementError(str(exc)) from exc
+        change_patches = {
+            change_id: {
+                "status": "awaiting_author" if proposals else "synchronized",
+                "semantic": {"refresh_id": refresh["refresh_id"], "summary": result["summary"]},
+                "error": None,
+                "settlement_started": False,
+            }
+            for change_id in captured_ids
+        }
+        next_state = {
+            "status": "awaiting_confirmation" if proposals else "synchronized",
+            "refresh_id": refresh["refresh_id"],
+            "cutoff_sequence": refresh["cutoff_sequence"],
+            "change_ids": sorted(captured_ids),
+            "summary": result["summary"],
+            "error": None,
+            "proposals": copy.deepcopy(proposals),
+            "result": {"applied_outcome_chapters": applied_outcomes},
+        }
+        try:
+            author_edit.update_changes_and_state_refresh(
+                project_id, changes=change_patches, state_refresh=next_state,
+            )
+        except (author_edit.AuthorEditError, OSError) as exc:
+            _restore_model(model_path, before)
+            raise ChangeSettlementError(f"作品状态整理记账失败，项目模型已回滚：{exc}") from exc
+
+
+def _refresh_worker(project_id: str, refresh: dict[str, Any], captured: list[dict[str, Any]]) -> None:
+    try:
+        snapshot = get_project_snapshot(project_id)
+        affected = []
+        for group in captured:
+            latest = group["latest"]
+            delta = copy.deepcopy(latest.get("delta") or {})
+            chapter = delta.get("chapter_number")
+            current_chapter = next((item for item in snapshot["chapters"] if item["chapter_number"] == chapter), None)
+            affected.append({
+                "change_ids": group["change_ids"], "source_kind": latest.get("source_kind"),
+                "latest_delta": delta,
+                "current_chapter": current_chapter if isinstance(chapter, int) else None,
+            })
+        prompt = _BATCH_TASK_TEMPLATE.format(
+            affected=json.dumps(affected, ensure_ascii=False, indent=2),
+            snapshot=json.dumps(focused_task_context(project_id), ensure_ascii=False, indent=2),
+        )
+        output = semantic_ai.run_text(prompt)
+        parsed = _parse_refresh_output(output)
+        _apply_refresh_result(project_id, refresh, captured, parsed)
+    except Exception as exc:  # durable edits remain pending and retryable
+        try:
+            author_edit.update_changes_and_state_refresh(project_id, state_refresh={
+                **refresh, "status": "failed", "error": str(exc), "summary": "整理失败，可重试。", "proposals": [],
+            })
+        except (author_edit.AuthorEditError, OSError):
+            pass
+
+
+def prepare_project_state_refresh(project_id: str) -> dict[str, Any]:
+    """Start the one explicit, bounded Direct-AI project refresh."""
+    existing = author_edit.get_state_refresh(project_id)
+    if existing.get("status") == "running" and _refresh_worker_active(project_id):
+        return get_project_state_refresh(project_id)
+    refresh, captured = _capture_refresh(project_id)
+    if not captured:
+        return get_project_state_refresh(project_id)
+    try:
+        semantic_ai.require_semantic_ai()
+    except semantic_ai.SemanticAiConfigError as exc:
+        author_edit.update_changes_and_state_refresh(project_id, state_refresh={
+            **refresh, "status": "failed", "error": f"{NEEDS_CONFIG_PREFIX}: {exc}",
+            "summary": "需要先配置日常 AI，作者修改仍待整理。",
+        })
+        return get_project_state_refresh(project_id)
+    worker = threading.Thread(
+        target=_refresh_worker, args=(project_id, refresh, captured),
+        name=f"gowrite-project-state-refresh-{project_id}", daemon=True,
+    )
+    with _REFRESH_WORKERS_GUARD:
+        _REFRESH_WORKERS[project_id] = worker
+    worker.start()
+    return get_project_state_refresh(project_id)
+
+
+def get_project_state_refresh(project_id: str) -> dict[str, Any]:
+    return author_edit.get_state_refresh_read_model(
+        project_id, worker_active=_refresh_worker_active(project_id),
+    )
+
+
+def confirm_project_state_refresh(project_id: str, refresh_id: str, *, accept: bool) -> dict[str, Any]:
+    """Resolve only this refresh's author-gated consequences; truth is never reverted."""
+    with author_edit.project_write_lock(project_id):
+        state = author_edit.get_state_refresh(project_id)
+        if state.get("refresh_id") != refresh_id or state.get("status") != "awaiting_confirmation":
+            raise ChangeSettlementError("作品状态整理确认已过期或不属于当前作品。")
+        proposals = state.get("proposals") if isinstance(state.get("proposals"), list) else []
+        model_path = _model_artifact(project_id)
+        before = model_path.read_bytes() if model_path.exists() else None
+        try:
+            if accept:
+                snapshot = get_project_snapshot(project_id)
+                model = project_model.load_project_model(project_id)
+                for item in proposals:
+                    model = _apply_one(project_id, model, snapshot, item, author_confirmed=True)
+            patches = {str(change_id): {"status": "synchronized", "error": None} for change_id in state.get("change_ids") or []}
+            author_edit.update_changes_and_state_refresh(project_id, changes=patches, state_refresh={
+                **state, "status": "synchronized", "proposals": [],
+                "summary": "作品状态已更新。" if accept else "已忽略这些待确认项；作者内容未回滚。", "error": None,
+            })
+        except (project_model.ProjectModelError, ChangeSettlementError, author_edit.AuthorEditError, OSError) as exc:
+            _restore_model(model_path, before)
+            raise ChangeSettlementError(str(exc)) from exc
+    return get_project_state_refresh(project_id)
 
 
 _SETTLEMENT_WORKERS_GUARD = threading.Lock()

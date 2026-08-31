@@ -8,7 +8,6 @@ import {
   createFoundationRecord,
   createRelationship,
   getProjectData,
-  prepareChangeSettlement,
   restoreFoundationRecord,
   restoreRelationship,
   retireFoundationRecord,
@@ -26,8 +25,6 @@ export interface ProjectDataController {
   loading: boolean
   error: string | null
   saving: boolean
-  syncing: boolean
-  syncMessage: string | null
   reload(): Promise<void>
   createFoundation(input: { category: string; title: string; material_state: 'current' | 'future'; data: Record<string, unknown> }): Promise<boolean>
   updateFoundation(input: { ref: string; title: string; material_state: 'current' | 'future'; data: Record<string, unknown> }): Promise<boolean>
@@ -39,8 +36,6 @@ export interface ProjectDataController {
   restoreRelationship(ref: string): Promise<boolean>
   saveLengthPlan(input: { total_target_words: number | null; stages: Array<Record<string, unknown>>; chapter_targets: Array<Record<string, unknown>> }): Promise<boolean>
   saveProfile(input: { genre_tags: string[]; narrative_mode: string | null; active_modules: string[]; field_config: Record<string, unknown> }): Promise<boolean>
-  /** 显式重试一条待同步/失败的语义变更（配置日常 AI 之后的恢复入口）。 */
-  retrySettlement(): Promise<void>
 }
 
 const toMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
@@ -83,25 +78,6 @@ export function useProjectDataController(projectId: string | null): ProjectDataC
     if (projectId) await load(projectId)
   }, [load, projectId])
 
-  const refreshQuiet = useCallback(async (pid: string) => {
-    try {
-      const next = await getProjectData(pid)
-      if (projectRef.current !== pid || next.project_id !== pid) return
-      setData(next)
-    } catch {
-      // 静默轮询：保留上一份有效数据，绝不把瞬时错误展示给作者。
-    }
-  }, [])
-
-  // Direct AI 结算是轻量后台维护：只轮询只读投影，不进全局任务条，
-  // 也不触发加载态闪烁。“正在同步”只来自后端 worker 真实存亡事实，
-  // 陈旧的 settlement_request_id 绝不呈现为运行中，也不被跟随。
-  useEffect(() => {
-    if (!projectId || !data) return
-    if (data.settlement.status === 'synchronized') return
-    const timer = window.setInterval(() => { void refreshQuiet(projectId) }, 2000)
-    return () => window.clearInterval(timer)
-  }, [projectId, data, refreshQuiet])
 
   const mutate = useCallback(async (action: (pid: string, rev: number) => Promise<AuthorEditResult>) => {
     const pid = projectRef.current
@@ -164,30 +140,14 @@ export function useProjectDataController(projectId: string | null): ProjectDataC
     mutate((pid, rev) => setStoryBibleProfile({ project_id: pid, base_model_rev: rev, ...input }))
   ), [mutate])
 
-  const retrySettlement = useCallback(async () => {
-    const pid = projectRef.current
-    const target = data?.settlement.changes.find((change) => (
-      change.requires_semantic && (change.status === 'pending' || change.status === 'failed')
-    ))
-    if (!pid || !target) return
-    try {
-      await prepareChangeSettlement({ project_id: pid, change_id: target.change_id })
-    } catch (e) {
-      if (projectRef.current === pid) setError(toMessage(e))
-    }
-    if (projectRef.current === pid) await load(pid)
-  }, [data?.settlement.changes, load])
-
   return {
     data, loading, error, saving,
-    syncing: !!data?.settlement.worker_active,
-    syncMessage: data?.settlement.worker_active ? '正在同步最新作品状态。' : null,
     reload,
     createFoundation, updateFoundation, retireFoundation, restoreFoundation,
     createRelationship: createRelationshipAction,
     updateRelationship: updateRelationshipAction,
     retireRelationship: retireRelationshipAction,
     restoreRelationship: restoreRelationshipAction,
-    saveLengthPlan, saveProfile, retrySettlement,
+    saveLengthPlan, saveProfile,
   }
 }

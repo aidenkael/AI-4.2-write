@@ -71,6 +71,13 @@ interface ApiResult<T> {
   error: { code: string; message: string } | null
 }
 
+const projectMutationMethods = new Set([
+  'create_foundation_record', 'update_foundation_record', 'retire_foundation_record', 'restore_foundation_record',
+  'create_relationship', 'update_relationship', 'retire_relationship', 'restore_relationship',
+  'set_length_plan', 'set_story_bible_profile', 'save_formal_prose', 'confirm_story_write',
+  'confirm_story_plan', 'confirm_foundation_design', 'confirm_project_state_refresh',
+])
+
 /**
  * 等待 pywebview Bridge 就绪。
  *
@@ -121,6 +128,7 @@ async function call<T>(method: string, ...args: unknown[]): Promise<T> {
       err?.message ?? `${method} 返回异常`,
     )
   }
+  if (projectMutationMethods.has(method)) window.dispatchEvent?.(new Event('gowrite-project-mutated'))
   return result.data
 }
 
@@ -559,6 +567,7 @@ export interface StoryWriteSurface {
   active_chapter_number: number
   total_words: number
   settlement?: SettlementSummary
+  state_refresh?: ProjectStateRefresh
   open_threads?: Array<{ title: string; status: 'current' | 'future' }>
   planning_impact_candidates?: Array<Record<string, unknown>>
 }
@@ -874,6 +883,18 @@ export interface SettlementStart {
   error?: string | null
 }
 
+export interface ProjectStateRefresh {
+  status: 'synchronized' | 'running' | 'awaiting_confirmation' | 'failed'
+  pending_change_count: number
+  awaiting_confirmation_count: number
+  refresh_id: string | null
+  worker_active: boolean
+  summary: string | null
+  error: string | null
+  cutoff_sequence?: number
+  consequences?: Array<{ title?: string; reason?: string; classification?: string }>
+}
+
 export interface SettlementSummary {
   status: 'synchronized' | 'pending' | 'failed'
   pending_count: number
@@ -901,6 +922,7 @@ export interface ProjectData {
   work_direction: string
   reader_promise: string
   settlement: SettlementSummary
+  state_refresh: ProjectStateRefresh
   story_bible_profile: StoryBibleProfile
   length_plan: LengthPlanView
   chapters: Array<{
@@ -970,6 +992,12 @@ export function validateProjectData(value: unknown): ProjectData {
   requireNumber(settlement.pending_count, 'settlement.pending_count')
   requireNumber(settlement.failed_count, 'settlement.failed_count')
   requireArray(settlement.changes, 'settlement.changes')
+  const refresh = requireRecord(data.state_refresh, 'state_refresh')
+  if (!['synchronized', 'running', 'awaiting_confirmation', 'failed'].includes(String(refresh.status))) {
+    projectDataInvalid('state_refresh.status 非法')
+  }
+  requireNumber(refresh.pending_change_count, 'state_refresh.pending_change_count')
+  requireNumber(refresh.awaiting_confirmation_count, 'state_refresh.awaiting_confirmation_count')
 
   const profile = requireRecord(data.story_bible_profile, 'story_bible_profile')
   if (!Array.isArray(profile.genre_tags) || profile.genre_tags.some((tag) => typeof tag !== 'string')
@@ -1124,50 +1152,31 @@ export async function saveFormalProse(payload: {
   chapter_number: number
   base_content_sha256: string
   content: string
-  sync?: boolean
 }): Promise<{
   project_id: string
   chapter_number: number
   content_sha256: string
   actual_words: number
   change: SettlementChange
-  settlement_request?: SettlementStart
   message: string
 }> {
   return call('save_formal_prose', payload)
 }
 
-export interface ChangeSettlementRequest {
-  request_id: string
-  project_id?: string
-  change_id?: string
-  status: 'pending' | 'completed' | 'failed' | 'canceled'
-  message?: string
-  error?: string | null
-  result?: Record<string, unknown>
+export async function prepareProjectStateRefresh(payload: { project_id: string }): Promise<ProjectStateRefresh> {
+  return call('prepare_project_state_refresh', payload)
 }
 
-export async function prepareChangeSettlement(payload: {
+export async function getProjectStateRefresh(projectId: string): Promise<ProjectStateRefresh> {
+  return call('get_project_state_refresh', { project_id: projectId })
+}
+
+export async function confirmProjectStateRefresh(payload: {
   project_id: string
-  change_id: string
-}): Promise<ChangeSettlementRequest> {
-  return call('prepare_change_settlement', payload)
-}
-
-export async function getChangeSettlementRequest(requestId: string): Promise<ChangeSettlementRequest> {
-  return call('get_change_settlement_request', { request_id: requestId })
-}
-
-export async function cancelChangeSettlementRequest(requestId: string): Promise<ChangeSettlementRequest> {
-  return call('cancel_change_settlement_request', { request_id: requestId })
-}
-
-/** 作者显式取消一条 pending/failed 语义同步任务（持久编辑保留，仅清除同步任务）。 */
-export async function cancelChangeSettlement(payload: {
-  project_id: string
-  change_id: string
-}): Promise<{ project_id: string; change_id: string; status: string }> {
-  return call('cancel_change_settlement', payload)
+  refresh_id: string
+  accept: boolean
+}): Promise<ProjectStateRefresh> {
+  return call('confirm_project_state_refresh', payload)
 }
 
 // ---------------- M3 知识驱动重大基座设计（Agent 主导；候选 ≠ authority） ----------------
@@ -1241,13 +1250,6 @@ export async function confirmFoundationDesign(payload: {
   return call('confirm_foundation_design', payload)
 }
 
-export async function confirmChangeConsequences(payload: {
-  project_id: string
-  change_id: string
-  accepted_indexes: number[]
-}): Promise<Record<string, unknown>> {
-  return call('confirm_change_consequences', payload)
-}
 
 // ---------------- 作品检查（真实、显式、范围受控的 AI 检查） ----------------
 

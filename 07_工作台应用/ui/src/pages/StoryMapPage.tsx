@@ -201,10 +201,6 @@ export function StoryMapPage() {
 
       {controller.loading && <div className="empty-state">正在加载正式作品数据…</div>}
       {controller.error && <p className="error-text">{controller.error}</p>}
-      {controller.syncing && <div className="sync-warning">{controller.syncMessage ?? '正在同步最新作品状态。'}</div>}
-      {controller.data?.settlement.needs_semantic_ai_config && (
-        <div className="sync-warning">需要在“设置”中配置日常 AI 后才能同步语义状态。已保存的编辑不会丢失，配置后可重试。</div>
-      )}
 
       {!controller.loading && !controller.error && tab === 'graph' && (
         <div className="map-graph-wrap">
