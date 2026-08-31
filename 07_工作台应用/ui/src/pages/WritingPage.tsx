@@ -132,28 +132,31 @@ export function WritingPage() {
           </div>
         </footer>
 
-        {state.settlementStatus === 'syncing' && <div className="sync-warning">正文已保存，正在增量同步人物、关系、事件、时间与伏笔状态…</div>}
-        {state.settlementStatus === 'failed' && <div className="sync-warning">同步失败；正文已经保存，可以使用下方同一条变更重试。</div>}
-        {state.pendingChanges.map((change) => {
-          const consequences = change.semantic?.consequences ?? []
-          const undecidedIndexes = consequences
-            .map((item, index) => item.classification !== 'mechanically_certain' ? index : -1)
-            .filter((index) => index >= 0)
-          return (
-            <section className="settlement-card" key={change.change_id}>
-              <strong>{change.status === 'awaiting_author' ? '有语义后果需要你决定' : change.status === 'failed' ? '作品状态同步失败' : '作品状态等待同步'}</strong>
-              {change.semantic?.summary && <p>{change.semantic.summary}</p>}
-              {change.error && <p className="error-text">{change.error}</p>}
-              {change.status === 'awaiting_author' && (
-                <ul>{undecidedIndexes.map((index) => <li key={index}><b>{consequenceLabel(consequences[index].classification)}</b> · {String(consequences[index].title ?? '未命名后果')} · {String(consequences[index].reason ?? '')}</li>)}</ul>
-              )}
-              <div className="candidate-actions">
-                {(change.status === 'failed' || change.status === 'pending') && <button onClick={() => void c.retrySettlement(change.change_id)}><RefreshCw /> 重试同步</button>}
-                {change.status === 'awaiting_author' && <><button className="primary" onClick={() => void c.confirmConsequences(change.change_id, undecidedIndexes)}>采用这些后果</button><button onClick={() => void c.confirmConsequences(change.change_id, [])}>只保留正文</button></>}
-              </div>
-            </section>
-          )
-        })}
+        <div className="editor-settlement">
+          {state.settlementStatus === 'syncing' && <div className="sync-warning">正文已保存，正在增量同步人物、关系、事件、时间与伏笔状态…</div>}
+          {state.settlementStatus === 'failed' && <div className="sync-warning">同步失败；正文已经保存，可以使用下方同一条变更重试。</div>}
+          {state.pendingChanges.map((change) => {
+            const consequences = change.semantic?.consequences ?? []
+            const undecidedIndexes = consequences
+              .map((item, index) => item.classification !== 'mechanically_certain' ? index : -1)
+              .filter((index) => index >= 0)
+            return (
+              <section className="settlement-card" key={change.change_id}>
+                <strong>{change.status === 'awaiting_author' ? '有语义后果需要你决定' : change.status === 'failed' ? '作品状态同步失败' : '作品状态等待同步'}</strong>
+                {change.semantic?.summary && <p>{change.semantic.summary}</p>}
+                {change.error && <p className="error-text">{change.error}</p>}
+                {change.status === 'awaiting_author' && (
+                  <ul>{undecidedIndexes.map((index) => <li key={index}><b>{consequenceLabel(consequences[index].classification)}</b> · {String(consequences[index].title ?? '未命名后果')} · {String(consequences[index].reason ?? '')}</li>)}</ul>
+                )}
+                <div className="candidate-actions">
+                  {(change.status === 'failed' || change.status === 'pending') && <button onClick={() => void c.retrySettlement(change.change_id)}><RefreshCw /> 重试同步</button>}
+                  {(change.status === 'failed' || change.status === 'pending') && <button onClick={() => void c.cancelSettlement(change.change_id)}><X /> 取消</button>}
+                  {change.status === 'awaiting_author' && <><button className="primary" onClick={() => void c.confirmConsequences(change.change_id, undecidedIndexes)}>采用这些后果</button><button onClick={() => void c.confirmConsequences(change.change_id, [])}>只保留正文</button></>}
+                </div>
+              </section>
+            )
+          })}
+        </div>
       </section>
 
       <aside className="panel ai-collab">

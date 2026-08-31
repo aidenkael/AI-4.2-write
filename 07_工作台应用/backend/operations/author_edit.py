@@ -910,7 +910,7 @@ def update_change(
     settlement_request_id: str | None = None,
     settlement_started: bool | None = None,
 ) -> dict[str, Any]:
-    if status not in {"pending", "failed", "awaiting_author", "synchronized"}:
+    if status not in {"pending", "failed", "awaiting_author", "synchronized", "canceled"}:
         raise AuthorEditError("作者变更状态非法。")
     with project_write_lock(project_id):
         return _update_change_locked(

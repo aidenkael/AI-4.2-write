@@ -854,7 +854,7 @@ export interface StoryBibleProfile {
 export interface SettlementChange {
   change_id: string
   source_kind: string
-  status: 'pending' | 'failed' | 'awaiting_author' | 'synchronized'
+  status: 'pending' | 'failed' | 'awaiting_author' | 'synchronized' | 'canceled'
   delta: Record<string, unknown>
   semantic?: { summary?: string; consequences?: Array<Record<string, unknown>> } | null
   error?: string | null
@@ -880,6 +880,8 @@ export interface SettlementSummary {
   failed_count: number
   /** 存在“需要配置日常 AI”的可恢复失败；配置后可重试，不是故事数据错误。 */
   needs_semantic_ai_config?: boolean
+  /** 本进程结算 worker 是否真实在跑；陈旧 request_id 绝不得呈现为正在同步。 */
+  worker_active?: boolean
   changes: SettlementChange[]
 }
 
@@ -1158,6 +1160,14 @@ export async function getChangeSettlementRequest(requestId: string): Promise<Cha
 
 export async function cancelChangeSettlementRequest(requestId: string): Promise<ChangeSettlementRequest> {
   return call('cancel_change_settlement_request', { request_id: requestId })
+}
+
+/** 作者显式取消一条 pending/failed 语义同步任务（持久编辑保留，仅清除同步任务）。 */
+export async function cancelChangeSettlement(payload: {
+  project_id: string
+  change_id: string
+}): Promise<{ project_id: string; change_id: string; status: string }> {
+  return call('cancel_change_settlement', payload)
 }
 
 export async function confirmChangeConsequences(payload: {

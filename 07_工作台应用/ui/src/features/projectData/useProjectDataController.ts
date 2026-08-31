@@ -7,7 +7,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   createFoundationRecord,
   createRelationship,
-  getChangeSettlementRequest,
   getProjectData,
   prepareChangeSettlement,
   restoreFoundationRecord,
@@ -21,7 +20,6 @@ import {
   type AuthorEditResult,
   type ProjectData,
 } from '../../bridge/client'
-import { isCurrentProjectResult, settlementFollowUp } from './mutationSettlement'
 
 export interface ProjectDataController {
   data: ProjectData | null
@@ -52,10 +50,7 @@ export function useProjectDataController(projectId: string | null): ProjectDataC
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [syncing, setSyncing] = useState(false)
-  const [syncMessage, setSyncMessage] = useState<string | null>(null)
   const projectRef = useRef<string | null>(projectId)
-  const followedRequestsRef = useRef(new Set<string>())
   projectRef.current = projectId
 
   const load = useCallback(async (pid: string) => {
@@ -75,9 +70,6 @@ export function useProjectDataController(projectId: string | null): ProjectDataC
   }, [])
 
   useEffect(() => {
-    setSyncing(false)
-    setSyncMessage(null)
-    followedRequestsRef.current.clear()
     setData(null)
     if (!projectId) {
       setLoading(false)
@@ -91,39 +83,6 @@ export function useProjectDataController(projectId: string | null): ProjectDataC
     if (projectId) await load(projectId)
   }, [load, projectId])
 
-  const followSettlement = useCallback(async (pid: string, result: AuthorEditResult) => {
-    const follow = settlementFollowUp(result)
-    if (!follow) return
-    if (!isCurrentProjectResult(pid, projectRef.current)) return
-    if (followedRequestsRef.current.has(follow.requestId)) return
-    followedRequestsRef.current.add(follow.requestId)
-    setSyncing(true)
-    setSyncMessage(follow.message ?? '正在同步最新作品状态。')
-    try {
-      let status = await getChangeSettlementRequest(follow.requestId)
-      while (isCurrentProjectResult(pid, projectRef.current) && status.status === 'pending') {
-        setSyncMessage(status.message ?? follow.message ?? '正在同步最新作品状态。')
-        await new Promise((resolve) => window.setTimeout(resolve, 1000))
-        status = await getChangeSettlementRequest(follow.requestId)
-      }
-      if (!isCurrentProjectResult(pid, projectRef.current)) return
-      if (status.project_id && status.project_id !== pid) return
-      if (status.status === 'failed') throw new Error(status.error || '同步失败，可稍后重试。')
-      await load(pid)
-      if (!isCurrentProjectResult(pid, projectRef.current)) return
-      setSyncMessage(null)
-    } catch (e) {
-      if (isCurrentProjectResult(pid, projectRef.current)) {
-        setError(toMessage(e))
-        setSyncMessage('同步失败')
-        await load(pid)
-      }
-    } finally {
-      followedRequestsRef.current.delete(follow.requestId)
-      if (isCurrentProjectResult(pid, projectRef.current)) setSyncing(false)
-    }
-  }, [load])
-
   const refreshQuiet = useCallback(async (pid: string) => {
     try {
       const next = await getProjectData(pid)
@@ -134,32 +93,15 @@ export function useProjectDataController(projectId: string | null): ProjectDataC
     }
   }, [])
 
+  // Direct AI 结算是轻量后台维护：只轮询只读投影，不进全局任务条，
+  // 也不触发加载态闪烁。“正在同步”只来自后端 worker 真实存亡事实，
+  // 陈旧的 settlement_request_id 绝不呈现为运行中，也不被跟随。
   useEffect(() => {
     if (!projectId || !data) return
     if (data.settlement.status === 'synchronized') return
-    // Direct AI 结算是轻量后台维护：只轮询只读投影，不进全局任务条，
-    // 也不触发加载态闪烁。
     const timer = window.setInterval(() => { void refreshQuiet(projectId) }, 2000)
     return () => window.clearInterval(timer)
   }, [projectId, data, refreshQuiet])
-
-  useEffect(() => {
-    if (!projectId || !data) return
-    const pending = data.settlement.changes.find((change) => (
-      change.status === 'pending'
-      && change.requires_semantic
-      && change.settlement_started
-      && change.settlement_request_id
-    ))
-    if (!pending?.settlement_request_id) return
-    void followSettlement(projectId, {
-      change: pending,
-      settlement_request: {
-        change_id: pending.change_id, requires_semantic: true, status: pending.status,
-        complete: false, request_started: true, request_id: pending.settlement_request_id,
-      },
-    })
-  }, [data, followSettlement, projectId])
 
   const mutate = useCallback(async (action: (pid: string, rev: number) => Promise<AuthorEditResult>) => {
     const pid = projectRef.current
@@ -171,9 +113,8 @@ export function useProjectDataController(projectId: string | null): ProjectDataC
     setSaving(true)
     setError(null)
     try {
-      const result = await action(pid, rev)
+      await action(pid, rev)
       await load(pid)
-      void followSettlement(pid, result)
       return true
     } catch (e) {
       if (projectRef.current === pid) setError(toMessage(e))
@@ -181,7 +122,7 @@ export function useProjectDataController(projectId: string | null): ProjectDataC
     } finally {
       if (projectRef.current === pid) setSaving(false)
     }
-  }, [data?.model_rev, data?.project_id, followSettlement, load])
+  }, [data?.model_rev, data?.project_id, load])
 
   const createFoundation = useCallback((input: { category: string; title: string; material_state: 'current' | 'future'; data: Record<string, unknown> }) => (
     mutate((pid, rev) => createFoundationRecord({ project_id: pid, base_model_rev: rev, ...input }))
@@ -238,7 +179,10 @@ export function useProjectDataController(projectId: string | null): ProjectDataC
   }, [data?.settlement.changes, load])
 
   return {
-    data, loading, error, saving, syncing, syncMessage, reload,
+    data, loading, error, saving,
+    syncing: !!data?.settlement.worker_active,
+    syncMessage: data?.settlement.worker_active ? '正在同步最新作品状态。' : null,
+    reload,
     createFoundation, updateFoundation, retireFoundation, restoreFoundation,
     createRelationship: createRelationshipAction,
     updateRelationship: updateRelationshipAction,

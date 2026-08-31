@@ -64,6 +64,19 @@ def _err(code: str, message: str) -> dict:
     return {"ok": False, "data": None, "error": {"code": code, "message": message}}
 
 
+def _annotate_settlement_liveness(data: dict, project_id: str) -> dict:
+    """Attach the in-process settlement worker liveness fact to read-only views.
+
+    Stale persisted settlement_request_id values (dead workers / old processes)
+    must never be presented as a running sync; the UI derives its “syncing”
+    state from this fact instead of following request ids.
+    """
+    settlement = data.get("settlement") if isinstance(data, dict) else None
+    if isinstance(settlement, dict):
+        settlement["worker_active"] = change_settlement_ops.has_active_worker(project_id)
+    return data
+
+
 def _start_required_settlement(result: dict, *, enabled: bool = True) -> dict:
     """Start the one existing settlement path after a durable semantic mutation.
 
@@ -407,7 +420,7 @@ class AppApi:
             data = story_writing_ops.get_story_write_surface(
                 project_id=str(payload.get("project_id") or ""),
             )
-            return _ok(data)
+            return _ok(_annotate_settlement_liveness(data, str(payload.get("project_id") or "")))
         except StoryWritingError as exc:
             return _err(CODE_STORY_WRITING_ERROR, str(exc))
         except Exception as exc:  # noqa: BLE001
@@ -656,8 +669,11 @@ class AppApi:
     def get_project_data(self, payload: dict) -> dict:
         """只读正式 Story State 投影（ProjectData / StoryMap 共用；零写回、零模型）。"""
         try:
-            return _ok(project_data_ops.get_project_data(
-                project_id=str(payload.get("project_id") or ""),
+            return _ok(_annotate_settlement_liveness(
+                project_data_ops.get_project_data(
+                    project_id=str(payload.get("project_id") or ""),
+                ),
+                str(payload.get("project_id") or ""),
             ))
         except ProjectDataError as exc:
             return _err(CODE_PROJECT_DATA_ERROR, str(exc))
@@ -849,6 +865,16 @@ class AppApi:
         try:
             return _ok(change_settlement_ops.get_change_settlement_request(str(payload.get("request_id") or "")))
         except ChangeSettlementError as exc:
+            return _err(CODE_CHANGE_SETTLEMENT_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    def cancel_change_settlement(self, payload: dict) -> dict:
+        try:
+            return _ok(change_settlement_ops.cancel_change_settlement(
+                str(payload.get("project_id") or ""), str(payload.get("change_id") or ""),
+            ))
+        except (ChangeSettlementError, AuthorEditError) as exc:
             return _err(CODE_CHANGE_SETTLEMENT_ERROR, str(exc))
         except Exception as exc:  # noqa: BLE001
             return _err(CODE_BRIDGE_INTERNAL, str(exc))

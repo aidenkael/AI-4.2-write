@@ -288,6 +288,67 @@ def test_rapid_edits_serialized_without_agent_or_duplicates(
     assert model["objects"][ref]["data"]["current_state"] == "状态C"
 
 
+def test_cancel_settlement_dismisses_stale_tasks_and_live_request(
+    projects_root, isolated_bridge, monkeypatch,
+):
+    def _needs_config():
+        raise semantic_ai.SemanticAiConfigError("缺少日常 AI 设置")
+
+    monkeypatch.setattr(change_settlement.semantic_ai, "require_semantic_ai", _needs_config)
+
+    project = _create("取消同步")
+    pid = project["project_id"]
+    ref, rev = _character(pid, "主角")
+    edit = _edit(pid, rev, ref, "受伤")
+    edit_change_id = edit["change"]["change_id"]
+
+    with pytest.raises(change_settlement.ChangeSettlementError):
+        change_settlement.prepare_change_settlement(pid, edit_change_id)
+    assert author_edit.get_change(pid, edit_change_id)["status"] == "failed"
+
+    # No worker is running: stale/pending tasks must never read as “syncing”.
+    assert change_settlement.has_active_worker(pid) is False
+
+    # 1) Cancel the failed task: durable author edit preserved, task terminal.
+    change_settlement.cancel_change_settlement(pid, edit_change_id)
+    canceled = author_edit.get_change(pid, edit_change_id)
+    assert canceled["status"] == "canceled" and canceled.get("error") is None
+    model = project_model.read_project_model(pid)
+    assert model["objects"][ref]["data"]["current_state"] == "受伤"
+
+    # 2) Cancel a pending task that carries a live Direct AI request.
+    ledger = author_edit._read_changes(author_edit._load(pid)[2], pid)["changes"]
+    pending = [
+        item for item in ledger
+        if item.get("requires_semantic") and item.get("status") == "pending"
+    ]
+    assert pending, "character creation should leave one pending semantic change"
+    pending_id = pending[0]["change_id"]
+    rid = bridge.create_request(
+        task="t", kind="change_settlement",
+        meta={"project_id": pid, "change_id": pending_id},
+        activate_for_gowrite=False,
+    )
+    author_edit.update_change(
+        pid, pending_id, status="pending", settlement_request_id=rid, settlement_started=True,
+    )
+    change_settlement.cancel_change_settlement(pid, pending_id)
+    assert bridge.get_request(rid)["state"] == "canceled"
+    assert author_edit.get_change(pid, pending_id)["status"] == "canceled"
+
+    # 3) All tasks dismissed: author surface returns to synchronized.
+    snapshot = project_snapshot.get_project_snapshot(pid)
+    assert snapshot["settlement"]["status"] == "synchronized"
+    assert snapshot["settlement"]["pending_count"] == 0
+    assert snapshot["settlement"]["failed_count"] == 0
+
+    # 4) Terminal state cannot be retried or canceled again.
+    with pytest.raises(change_settlement.ChangeSettlementError):
+        change_settlement.prepare_change_settlement(pid, edit_change_id)
+    with pytest.raises(change_settlement.ChangeSettlementError):
+        change_settlement.cancel_change_settlement(pid, edit_change_id)
+
+
 def test_migrated_settlement_has_no_agent_path():
     source = Path(change_settlement.__file__).read_text(encoding="utf-8")
     assert "agent_runner" not in source

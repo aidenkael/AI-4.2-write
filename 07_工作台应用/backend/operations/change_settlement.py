@@ -697,6 +697,36 @@ def get_change_settlement_request(request_id: str) -> dict[str, Any]:
     }
 
 
+def has_active_worker(project_id: str) -> bool:
+    """True while this process is actively draining the project's ledger.
+
+    Read-only liveness fact for the author surface: stale persisted
+    settlement_request_id values (dead workers / old processes) must never be
+    presented as a running sync, and the UI must not follow them.
+    """
+    return _active_worker(project_id) is not None
+
+
+def cancel_change_settlement(project_id: str, change_id: str) -> dict[str, Any]:
+    """Author-visible cancel for one pending/failed sync task.
+
+    The durable author edit stays in the ledger; only the semantic-sync task is
+    dismissed (terminal 'canceled'), so stale cards can always be cleared and
+    never block or loop. An in-flight Direct AI request is marked canceled so
+    the worker aborts before applying anything.
+    """
+    change = author_edit.get_change(project_id, change_id)
+    if change.get("status") not in {"pending", "failed"}:
+        raise ChangeSettlementError("这条变更当前没有可取消的同步任务。")
+    request_id = change.get("settlement_request_id")
+    if change.get("settlement_started") and isinstance(request_id, str) and request_id:
+        request = bridge.get_request(request_id)
+        if isinstance(request, dict) and request.get("kind") == "change_settlement":
+            bridge.mark_canceled(request_id)
+    updated = author_edit.update_change(project_id, change_id, status="canceled", error=None)
+    return {"project_id": project_id, "change_id": change_id, "status": "canceled", "change": updated}
+
+
 def cancel_change_settlement_request(request_id: str) -> dict[str, Any]:
     request = bridge.get_request(request_id)
     if not request or request.get("kind") != "change_settlement":
