@@ -1,65 +1,73 @@
 @echo off
-chcp 65001 >nul 2>&1
 title Go Write
 
 set "ROOT=%~dp0"
+set "APP_DIR="
+for /d %%D in ("%ROOT%07_*") do (
+    if exist "%%~fD\desktop\main.py" set "APP_DIR=%%~fD"
+)
 
 echo ========================================
 echo   Go Write
 echo ========================================
 echo.
 
-REM --- 1. 检查运行环境 ---
 if not exist "%ROOT%.venv\Scripts\python.exe" (
-    echo Go Write 运行环境不存在，请先完成环境安装。
+    echo Go Write runtime is missing.
     echo.
-    echo 需要：%ROOT%.venv\Scripts\python.exe
+    echo Required: %ROOT%.venv\Scripts\python.exe
     pause
     exit /b 1
 )
 
-REM --- 2. 检查前端构建产物（与 desktop/main.py 使用同一套清单规则） ---
-cd /d "%ROOT%07_工作台应用"
+if not defined APP_DIR (
+    echo Go Write application directory was not found below: %ROOT%
+    pause
+    exit /b 1
+)
+
+REM Check the frontend build using desktop/main.py's runtime manifest contract.
+cd /d "%APP_DIR%"
 if errorlevel 1 (
-    echo 无法进入应用目录：%ROOT%07_工作台应用
+    echo Cannot enter application directory: %APP_DIR%
     pause
     exit /b 1
 )
 
 "%ROOT%.venv\Scripts\python.exe" desktop\main.py --check-runtime-build
 if errorlevel 1 (
-    echo 正在构建 Go Write 前端界面...
+    echo Building the Go Write frontend...
     echo.
-    cd /d "%ROOT%07_工作台应用\ui"
+    cd /d "%APP_DIR%\ui"
     if errorlevel 1 (
-        echo 无法进入前端目录：%ROOT%07_工作台应用\ui
+        echo Cannot enter frontend directory: %APP_DIR%\ui
         pause
         exit /b 1
     )
     call npm run build
     if errorlevel 1 (
         echo.
-        echo Go Write 前端构建失败，请检查 Node.js 和 npm 是否已安装。
+        echo Go Write frontend build failed. Check Node.js and npm.
         pause
         exit /b 1
     )
     echo.
-    echo 前端构建完成。
+    echo Frontend build completed.
     echo.
 
-    cd /d "%ROOT%07_工作台应用"
+    cd /d "%APP_DIR%"
     "%ROOT%.venv\Scripts\python.exe" desktop\main.py --check-runtime-build
     if errorlevel 1 (
-        echo 构建完成后运行时清单仍不是最新，已停止启动。
+        echo Runtime manifest is still stale after the build. Startup stopped.
         pause
         exit /b 1
     )
 )
 
-REM --- 3. 启动桌面程序 ---
-cd /d "%ROOT%07_工作台应用"
+REM Start the desktop application. Python owns the detailed startup diagnostics.
+cd /d "%APP_DIR%"
 if errorlevel 1 (
-    echo 无法进入应用目录：%ROOT%07_工作台应用
+    echo Cannot enter application directory: %APP_DIR%
     pause
     exit /b 1
 )
@@ -67,7 +75,13 @@ if errorlevel 1 (
 "%ROOT%.venv\Scripts\python.exe" desktop\main.py
 if errorlevel 1 (
     echo.
-    echo Go Write 启动失败，请查看上方错误信息。
+    echo Go Write failed to start. Detailed startup log:
+    if defined AI_WRITE_CONFIG_DIR (
+        echo %AI_WRITE_CONFIG_DIR%\logs\desktop-startup.log
+    ) else (
+        echo %USERPROFILE%\.ai-write\logs\desktop-startup.log
+    )
+    echo Keep this window open and inspect that log for the exact failure stage.
     pause
     exit /b 1
 )

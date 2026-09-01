@@ -63,9 +63,13 @@ export async function createRuntimeManifest({ uiDir = defaultUiDir, appDir = def
     ))
       .map((entry) => resolve(uiDir, entry.name)),
   ]
+  const desktopFiles = (await readdir(resolve(appDir, 'desktop'), { withFileTypes: true }))
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.py'))
+    .filter((entry) => entry.name !== 'conftest.py' && !entry.name.startsWith('test_') && !entry.name.endsWith('_test.py'))
+    .map((entry) => resolve(appDir, 'desktop', entry.name))
   const backendFiles = [
     ...(await productionBackendPython(resolve(appDir, 'backend'))),
-    resolve(appDir, 'desktop', 'main.py'), resolve(appDir, 'desktop', 'runtime_manifest.py'),
+    ...desktopFiles,
   ]
   return {
     schema_version: 'gowrite_runtime_manifest/v1',

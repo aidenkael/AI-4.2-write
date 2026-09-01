@@ -27,6 +27,7 @@ def _fixture(tmp_path: Path) -> Path:
         app / "backend" / "conftest.py": "CONFIG = 1\n",
         app / "desktop" / "main.py": "MAIN = 1\n",
         app / "desktop" / "runtime_manifest.py": "HELPER = 1\n",
+        app / "desktop" / "startup_diagnostics.py": "DIAGNOSTICS = 1\n",
         app / "ui" / "src" / "App.tsx": "export const App = 1\n",
         app / "ui" / "index.html": "<div id=app></div>\n",
         app / "ui" / "package.json": "{}\n",
@@ -93,6 +94,13 @@ def test_runtime_backend_python_change_invalidates_build(tmp_path: Path):
     app = _fixture(tmp_path)
     _current_build(app)
     (app / "backend" / "runtime.py").write_text("RUNTIME = 2\n", encoding="utf-8")
+    assert runtime_build_status(app) == "stale"
+
+
+def test_runtime_desktop_python_change_invalidates_build(tmp_path: Path):
+    app = _fixture(tmp_path)
+    _current_build(app)
+    (app / "desktop" / "startup_diagnostics.py").write_text("DIAGNOSTICS = 2\n", encoding="utf-8")
     assert runtime_build_status(app) == "stale"
 
 

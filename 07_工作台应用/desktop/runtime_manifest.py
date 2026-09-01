@@ -52,10 +52,14 @@ def _ui_inputs(app_root: Path) -> list[Path]:
 
 
 def _backend_inputs(app_root: Path) -> list[Path]:
+    desktop = app_root / "desktop"
+    desktop_files = [
+        path for path in desktop.glob("*.py")
+        if path.name != "conftest.py" and not path.name.startswith("test_") and not path.name.endswith("_test.py")
+    ]
     return [
         *_production_backend_python(app_root),
-        app_root / "desktop" / "main.py",
-        app_root / "desktop" / "runtime_manifest.py",
+        *desktop_files,
     ]
 
 

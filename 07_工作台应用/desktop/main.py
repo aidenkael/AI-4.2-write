@@ -12,7 +12,9 @@
 from __future__ import annotations
 
 import argparse
+from importlib.metadata import version
 import sys
+import threading
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]          # 07_工作台应用/
@@ -22,6 +24,12 @@ sys.path.insert(0, str(BACKEND_DIR))
 sys.path.insert(0, str(BRIDGE_DIR))
 
 from runtime_manifest import runtime_build_status
+from startup_diagnostics import (
+    STARTUP_FAILURE_EXIT_CODE,
+    StartupDiagnostics,
+    fatal_unshown_window,
+    runtime_facts,
+)
 
 VITE_DEV_URL = "http://127.0.0.1:5173"
 DIST_INDEX = ROOT / "ui" / "dist" / "index.html"
@@ -59,21 +67,57 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[desktop] 运行时构建状态：{status}")
         return 0 if status == "current" else 1
 
-    url = resolve_url(args.dev)
-    import webview  # noqa: PLC0415
-    from app_api import AppApi  # noqa: PLC0415
+    diagnostics = StartupDiagnostics.open_default()
+    diagnostics.record("process.start", app_root=str(ROOT), dev_mode=args.dev, **runtime_facts())
+    try:
+        status = runtime_build_status(ROOT)
+        diagnostics.record("runtime_build.checked", status=status)
+        url = resolve_url(args.dev)
+        diagnostics.record("url.resolved", source="vite" if args.dev else "production_dist")
 
-    api = AppApi()
-    webview.create_window(
-        "Go Write",
-        url,
-        js_api=api,
-        width=1280,
-        height=800,
-        min_size=(960, 600),
-    )
-    webview.start()
-    return 0
+        import webview  # noqa: PLC0415
+        from app_api import AppApi  # noqa: PLC0415
+
+        diagnostics.record("webview.imported", pywebview_version=version("pywebview"))
+        api = AppApi()
+        diagnostics.record("app_api.initialized")
+        window = webview.create_window(
+            "Go Write",
+            url,
+            js_api=api,
+            width=1280,
+            height=800,
+            min_size=(960, 600),
+        )
+        if window is None:
+            raise RuntimeError("pywebview did not create the main window object")
+
+        window.events.shown += lambda: diagnostics.record(
+            "window.shown", renderer=getattr(webview, "renderer", None), title=window.title
+        )
+        window.events.loaded += lambda: diagnostics.record("window.loaded")
+        window.events.closed += lambda: diagnostics.record("window.closed")
+        diagnostics.record("window.created", title=window.title)
+        watchdog = threading.Thread(
+            target=fatal_unshown_window,
+            args=(diagnostics, window.events.shown, window.events.closed),
+            name="gowrite-window-lifecycle-watchdog",
+            daemon=True,
+        )
+        watchdog.start()
+        diagnostics.record("webview.start.enter")
+        webview.start()
+        if not window.events.shown.is_set():
+            diagnostics.record("webview.start.returned_without_window")
+            diagnostics.record("process.exit", reason="no_window_shown", exit_code=STARTUP_FAILURE_EXIT_CODE)
+            return STARTUP_FAILURE_EXIT_CODE
+        diagnostics.record("webview.start.returned", window_loaded=window.events.loaded.is_set())
+        diagnostics.record("process.exit", reason="normal_window_lifecycle", exit_code=0)
+        return 0
+    except BaseException as exc:  # desktop startup must make every failure visible to BAT
+        diagnostics.record_exception("startup.exception", exc)
+        diagnostics.record("process.exit", reason="exception", exit_code=STARTUP_FAILURE_EXIT_CODE)
+        return STARTUP_FAILURE_EXIT_CODE
 
 
 if __name__ == "__main__":
