@@ -176,6 +176,7 @@ def get_project_data(project_id: str) -> dict[str, Any]:
             "chapter_number": item["chapter_number"],
             "title": item["title"],
             "actual_words": item["actual_words"],
+            "formal_prose_exists": bool(item.get("formal_prose_exists")),
             "fine_outline": copy.deepcopy(item.get("fine_outline") or {}),
             "actual_result": copy.deepcopy(item.get("actual_result")),
         } for item in snapshot["chapters"]],

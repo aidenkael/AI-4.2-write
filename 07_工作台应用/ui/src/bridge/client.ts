@@ -568,6 +568,9 @@ export interface StoryWriteChapter {
   content: string
   words: number
   scene_count: number
+  formal_prose_exists: boolean
+  stage_ref?: string | null
+  stage_title?: string | null
   content_sha256?: string
   accepted?: boolean
   fine_outline_ref?: string | null
@@ -915,7 +918,7 @@ export interface LengthPlanView {
   total_target_words: number | null
   actual_total_words: number
   stages: ProjectDataEntry[]
-  chapters: Array<Record<string, unknown> & { chapter_number: number; actual_words: number; ref?: string | null }>
+  chapters: Array<Record<string, unknown> & { chapter_number: number; actual_words: number; formal_prose_exists?: boolean; ref?: string | null }>
 }
 
 export interface ProjectData {
@@ -935,6 +938,7 @@ export interface ProjectData {
     chapter_number: number
     title: string
     actual_words: number
+    formal_prose_exists: boolean
     fine_outline: Record<string, unknown>
     actual_result: Record<string, unknown> | null
   }>
@@ -1019,11 +1023,17 @@ export function validateProjectData(value: unknown): ProjectData {
     const record = requireRecord(chapter, `length_plan.chapters[${index}]`)
     requireNumber(record.chapter_number, `length_plan.chapters[${index}].chapter_number`)
     requireNumber(record.actual_words, `length_plan.chapters[${index}].actual_words`)
+    if (record.formal_prose_exists !== undefined && typeof record.formal_prose_exists !== 'boolean') {
+      projectDataInvalid(`length_plan.chapters[${index}].formal_prose_exists 必须是布尔值`)
+    }
   }
   for (const [index, chapter] of requireArray(data.chapters, 'chapters').entries()) {
     const record = requireRecord(chapter, `chapters[${index}]`)
     requireNumber(record.chapter_number, `chapters[${index}].chapter_number`)
     requireNumber(record.actual_words, `chapters[${index}].actual_words`)
+    if (typeof record.formal_prose_exists !== 'boolean') {
+      projectDataInvalid(`chapters[${index}].formal_prose_exists 必须是布尔值`)
+    }
   }
   requireArray(data.planning_impact_candidates, 'planning_impact_candidates')
   const sections = requireRecord(data.sections, 'sections')

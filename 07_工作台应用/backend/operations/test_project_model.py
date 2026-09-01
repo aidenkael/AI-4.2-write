@@ -132,6 +132,75 @@ def test_length_planning_needs_no_volumes_and_never_infers_actual_counts(project
     assert no_volume["length_plan"]["stage_refs"] == []
 
 
+def test_length_plan_links_new_stage_and_chapter_in_one_save(project):
+    planned = model_ops.set_length_plan(
+        project["project_id"], base_model_rev=0,
+        stages=[{"client_key": "stage-a", "title": "第一卷", "target_words": 50000, "kind": "volume"}],
+        chapter_targets=[
+            {"title": "第1章", "chapter_number": 1, "min_words": 2500, "max_words": 4000, "stage_key": "stage-a"},
+        ],
+    )
+    stage_ref = planned["length_plan"]["stage_refs"][0]
+    chapter_ref = planned["length_plan"]["chapter_target_refs"][0]
+    assert planned["objects"][chapter_ref]["data"]["stage_ref"] == stage_ref
+    assert "client_key" not in planned["objects"][stage_ref]["data"]
+    assert "stage_key" not in planned["objects"][chapter_ref]["data"]
+    assert "stage" not in planned["objects"][chapter_ref]["data"]
+
+
+def test_length_plan_rejects_unknown_stage_key(project):
+    with pytest.raises(model_ops.ProjectModelError, match="未知或非活动阶段"):
+        model_ops.set_length_plan(
+            project["project_id"], base_model_rev=0,
+            stages=[{"client_key": "stage-a", "title": "第一卷", "target_words": 50000}],
+            chapter_targets=[
+                {"title": "第1章", "chapter_number": 1, "min_words": 2500, "max_words": 4000, "stage_key": "missing"},
+            ],
+        )
+
+
+def test_length_plan_preserves_stage_ref_across_stage_rename(project):
+    planned = model_ops.set_length_plan(
+        project["project_id"], base_model_rev=0,
+        stages=[{"client_key": "stage-a", "title": "第一卷", "target_words": 50000}],
+        chapter_targets=[
+            {"title": "第1章", "chapter_number": 1, "min_words": 2500, "max_words": 4000, "stage_key": "stage-a"},
+        ],
+    )
+    stage_ref = planned["length_plan"]["stage_refs"][0]
+    chapter_ref = planned["length_plan"]["chapter_target_refs"][0]
+    renamed = model_ops.set_length_plan(
+        project["project_id"], base_model_rev=planned["model_rev"],
+        stages=[{"ref": stage_ref, "title": "第一部", "target_words": 52000}],
+        chapter_targets=[{"ref": chapter_ref}],
+    )
+    assert renamed["objects"][chapter_ref]["data"]["stage_ref"] == stage_ref
+    assert renamed["objects"][stage_ref]["title"] == "第一部"
+
+
+def test_length_plan_stage_removal_requires_chapter_reassignment(project):
+    planned = model_ops.set_length_plan(
+        project["project_id"], base_model_rev=0,
+        stages=[{"client_key": "stage-a", "title": "第一卷", "target_words": 50000}],
+        chapter_targets=[
+            {"title": "第1章", "chapter_number": 1, "min_words": 2500, "max_words": 4000, "stage_key": "stage-a"},
+        ],
+    )
+    stage_ref = planned["length_plan"]["stage_refs"][0]
+    chapter_ref = planned["length_plan"]["chapter_target_refs"][0]
+    with pytest.raises(model_ops.ProjectModelError, match="不能删除仍被章节规划引用的阶段"):
+        model_ops.set_length_plan(project["project_id"], base_model_rev=planned["model_rev"], stages=[])
+    assert model_ops.load_project_model(project["project_id"])["objects"][stage_ref]["tombstoned"] is False
+
+    reassigned = model_ops.set_length_plan(
+        project["project_id"], base_model_rev=planned["model_rev"],
+        stages=[],
+        chapter_targets=[{"ref": chapter_ref, "stage_key": None}],
+    )
+    assert reassigned["objects"][stage_ref]["tombstoned"] is True
+    assert "stage_ref" not in reassigned["objects"][chapter_ref]["data"]
+
+
 def test_direct_dependency_requires_known_same_project_refs(project, isolated):
     one = _add_character(project, title="人物")
     one_ref = one["change_history"][-1]["detail"]["ref"]

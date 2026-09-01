@@ -59,7 +59,7 @@ export interface WritingController {
   selectChapter(chapterNumber: number): void
   setAuthorInput(input: string): void
   setEditorContent(input: string): void
-  createChapter(): Promise<void>
+  createChapter(chapterNumber?: number): Promise<void>
   save(): Promise<void>
   generate(): Promise<void>
   cancel(): Promise<void>
@@ -217,15 +217,26 @@ export function useWritingController(options: {
   }, [])
 
 
-  const createChapter = useCallback(async () => {
+  const createChapter = useCallback(async (chapterNumber?: number) => {
     const pid = projectRef.current
     if (!pid || !writingSurface || writingSurface.project_id !== pid) return
+    if (chapterNumber != null && (
+      !Number.isInteger(chapterNumber)
+      || chapterNumber < 1
+      || writingSurface.chapters.some((chapter) => (
+        chapter.chapter_number === chapterNumber && chapter.formal_prose_exists
+      ))
+    )) {
+      setLocalError('无法创建这个章节，请刷新后重试。')
+      return
+    }
     const onlyVirtualFirst = writingSurface.chapters.length === 1
       && writingSurface.chapters[0].chapter_number === 1
-      && !writingSurface.chapters[0].content_sha256
-    const next = onlyVirtualFirst
+      && !writingSurface.chapters[0].formal_prose_exists
+      && !writingSurface.chapters[0].fine_outline_ref
+    const next = chapterNumber ?? (onlyVirtualFirst
       ? 1
-      : Math.max(0, ...writingSurface.chapters.map((chapter) => chapter.chapter_number)) + 1
+      : Math.max(0, ...writingSurface.chapters.map((chapter) => chapter.chapter_number)) + 1)
     setSaving(true)
     setLocalError(null)
     try {

@@ -321,6 +321,16 @@ def _validate_model(model: Any, project_id: str) -> dict[str, Any]:
             or model["objects"][ref].get("tombstoned")
         ):
             raise ProjectModelError("项目模型章节目标 ref 非法。")
+        data = model["objects"][ref].get("data") or {}
+        stage_ref = data.get("stage_ref")
+        if stage_ref is not None and (
+            not isinstance(stage_ref, str)
+            or stage_ref not in plan["stage_refs"]
+            or stage_ref not in model["objects"]
+            or model["objects"][stage_ref].get("kind") != "length_stage"
+            or model["objects"][stage_ref].get("tombstoned")
+        ):
+            raise ProjectModelError("章节目标 stage_ref 必须引用同一项目的活动阶段。")
     for ref, count in plan["actual_word_counts"].items():
         if ref not in plan["chapter_target_refs"] or not isinstance(count, int) or count < 0:
             raise ProjectModelError("项目模型实际字数记录非法。")
@@ -910,7 +920,12 @@ def set_length_plan(
         ):
             raise ProjectModelError("actual_word_counts 必须是 ref 到非负整数的映射。")
 
-    def normalize_entry(kind: str, entry: dict[str, Any], current: dict[str, Any] | None) -> tuple[str, dict[str, Any]]:
+    def normalize_entry(
+        kind: str,
+        entry: dict[str, Any],
+        current: dict[str, Any] | None,
+        stage_key_map: dict[str, str] | None = None,
+    ) -> tuple[str, dict[str, Any]]:
         if not isinstance(entry, dict):
             raise ProjectModelError("长度规划条目必须是对象。")
         supplied_title = entry.get("title") or entry.get("name") or entry.get("label")
@@ -921,9 +936,10 @@ def set_length_plan(
         if "data" in entry:
             data = _validate_data(entry["data"])
         for field, value in entry.items():
-            if field not in {"ref", "title", "name", "label", "data"}:
+            if field not in {"ref", "title", "name", "label", "data", "client_key", "stage_key", "stage_ref"}:
                 data[field] = copy.deepcopy(value)
         if kind == "length_stage":
+            data.pop("client_key", None)
             target = data.get("target_words")
             if target is not None and (not isinstance(target, int) or target < 0):
                 raise ProjectModelError("阶段 target_words 必须是非负整数。")
@@ -931,11 +947,22 @@ def set_length_plan(
             minimum, maximum = data.get("min_words"), data.get("max_words")
             if not isinstance(minimum, int) or not isinstance(maximum, int) or minimum < 0 or maximum < minimum:
                 raise ProjectModelError("章节目标必须提供合法 min_words/max_words。")
+            raw_stage_key = entry.get("stage_key", entry.get("stage_ref", data.get("stage_ref")))
+            data.pop("stage", None)
+            data.pop("stage_key", None)
+            if raw_stage_key in (None, ""):
+                data.pop("stage_ref", None)
+            else:
+                if stage_key_map is None:
+                    raise ProjectModelError("章节阶段关联无法解析。")
+                if not isinstance(raw_stage_key, str) or raw_stage_key not in stage_key_map:
+                    raise ProjectModelError("章节阶段关联引用了未知或非活动阶段。")
+                data["stage_ref"] = stage_key_map[raw_stage_key]
         return title.strip(), data
 
     def reconcile_items(
         model: dict[str, Any], plan: dict[str, Any], key: str, kind: str,
-        entries: list[dict[str, Any]], next_rev: int,
+        entries: list[dict[str, Any]], next_rev: int, stage_key_map: dict[str, str] | None = None,
     ) -> tuple[list[str], list[dict[str, Any]]]:
         old_refs = list(plan[key])
         submitted_refs: set[str] = set()
@@ -946,7 +973,7 @@ def set_length_plan(
                 raise ProjectModelError("长度规划条目必须是对象。")
             ref = entry.get("ref")
             if ref is None:
-                title, data = normalize_entry(kind, entry, None)
+                title, data = normalize_entry(kind, entry, None, stage_key_map)
                 ref = _next_ref(model, "obj")
                 model["objects"][ref] = {
                     "ref": ref, "kind": kind, "title": title, "material_state": "future",
@@ -964,7 +991,7 @@ def set_length_plan(
                 item = _active_object(model, ref, expected_kind=kind)
                 if ref not in old_refs:
                     raise ProjectModelError("长度规划 ref 不属于当前项目的活动规划集合。")
-                title, data = normalize_entry(kind, entry, item)
+                title, data = normalize_entry(kind, entry, item, stage_key_map)
                 changes: dict[str, dict[str, Any]] = {}
                 if item.get("title") != title:
                     changes["title"] = {"before": item.get("title"), "after": title}
@@ -992,6 +1019,16 @@ def set_length_plan(
                     object_changes.append({"ref": ref, "action": "updated", "changes": changes})
             submitted_refs.add(ref)
             new_refs.append(ref)
+            if kind == "length_stage":
+                stage_key_map = stage_key_map if stage_key_map is not None else {}
+                stage_key_map[ref] = ref
+                client_key = entry.get("client_key")
+                if client_key is not None:
+                    if not isinstance(client_key, str) or not client_key.strip():
+                        raise ProjectModelError("阶段 client_key 必须是非空字符串。")
+                    if client_key in stage_key_map and stage_key_map[client_key] != ref:
+                        raise ProjectModelError("阶段 client_key 重复。")
+                    stage_key_map[client_key] = ref
         for ref in old_refs:
             if ref not in submitted_refs:
                 _active_object(model, ref, expected_kind=kind)
@@ -1005,6 +1042,11 @@ def set_length_plan(
     def mutate(model: dict[str, Any], next_rev: int) -> dict[str, Any]:
         plan = model["length_plan"]
         changed: dict[str, Any] = {}
+        stage_key_map: dict[str, str] = {
+            ref: ref
+            for ref in plan.get("stage_refs", [])
+            if ref in model.get("objects", {}) and not model["objects"][ref].get("tombstoned")
+        }
         if total_target_words is not _UNSET and plan.get("total_target_words") != total_target_words:
             changed["total_target_words"] = {
                 "before": plan.get("total_target_words"), "after": total_target_words,
@@ -1012,14 +1054,28 @@ def set_length_plan(
             plan["total_target_words"] = total_target_words
         if stages is not None:
             before = list(plan["stage_refs"])
-            refs, object_changes = reconcile_items(model, plan, "stage_refs", "length_stage", stages, next_rev)
+            stage_key_map.clear()
+            refs, object_changes = reconcile_items(model, plan, "stage_refs", "length_stage", stages, next_rev, stage_key_map)
             if before != refs or object_changes:
                 changed["stages"] = {"before_refs": before, "after_refs": refs, "objects": object_changes}
+        else:
+            stage_key_map = {
+                ref: ref
+                for ref in plan.get("stage_refs", [])
+                if ref in model.get("objects", {}) and not model["objects"][ref].get("tombstoned")
+            }
         if chapter_targets is not None:
             before = list(plan["chapter_target_refs"])
-            refs, object_changes = reconcile_items(model, plan, "chapter_target_refs", "chapter_target", chapter_targets, next_rev)
+            refs, object_changes = reconcile_items(model, plan, "chapter_target_refs", "chapter_target", chapter_targets, next_rev, stage_key_map)
             if before != refs or object_changes:
                 changed["chapter_targets"] = {"before_refs": before, "after_refs": refs, "objects": object_changes}
+        active_stage_refs = set(plan["stage_refs"])
+        for ref in plan["chapter_target_refs"]:
+            item = _active_object(model, ref, expected_kind="chapter_target")
+            data = item.get("data") or {}
+            stage_ref = data.get("stage_ref")
+            if stage_ref is not None and stage_ref not in active_stage_refs:
+                raise ProjectModelError("不能删除仍被章节规划引用的阶段；请先重新分配或设为未分卷。")
         active_chapter_refs = set(plan["chapter_target_refs"])
         retained_actuals = {
             ref: count for ref, count in plan["actual_word_counts"].items() if ref in active_chapter_refs

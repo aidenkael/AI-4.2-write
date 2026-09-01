@@ -3,6 +3,7 @@ import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { useWritingController } from '../features/writing/useWritingController'
 import { StatusBadge } from '../components/StatusBadge'
+import type { StoryWriteChapter } from '../bridge/client'
 
 /**
  * 正文管理：三区工作台（左章节导航 / 中正式已采用正文 / 右唯一 AI 协作区）。
@@ -25,6 +26,14 @@ export function WritingPage() {
   const canGenerate = !!selected && state.authorInput.trim().length > 0 && !state.requestId
   const fineOutline = selectedChapter?.fine_outline ?? {}
   const outlineText = (key: string) => typeof fineOutline[key] === 'string' ? String(fineOutline[key]) : ''
+  const chapterGroups = (state.writingSurface?.chapters ?? []).reduce<Array<{ key: string; title: string; chapters: StoryWriteChapter[] }>>((groups, chapter) => {
+    const key = chapter.stage_ref || 'unassigned'
+    const title = chapter.stage_title || '未分卷'
+    const group = groups.find((item) => item.key === key)
+    if (group) group.chapters.push(chapter)
+    else groups.push({ key, title, chapters: [chapter] })
+    return groups
+  }, [])
   const previousActual = selectedChapter?.previous_actual_result
   const previousSummary = previousActual && typeof previousActual.summary === 'string'
     ? previousActual.summary
@@ -63,22 +72,29 @@ export function WritingPage() {
           <h2>章节目录</h2>
           <button aria-label="新建章节" disabled={state.saving || state.editorDirty} onClick={() => void c.createChapter()}><Plus /></button>
         </header>
-        {state.writingSurface?.chapters.map((ch) => (
-          <button
-            key={ch.chapter_number}
-            className={selectedChapter?.chapter_number === ch.chapter_number ? 'active' : ''}
-            onClick={() => c.selectChapter(ch.chapter_number)}
-          >
-            {ch.scene_count > 0 && <CircleCheck />}
-            <span>
-              <span>{ch.title}</span>
-              <small>
-                {ch.words ? `${ch.words.toLocaleString()} 字` : '未开始'}
-                {ch.scene_count > 0 ? ` · ${ch.scene_count} 段` : ''}
-              </small>
-            </span>
-          </button>
-        ))}
+        <div className="chapter-group-list">
+          {chapterGroups.map((group) => (
+            <section className="chapter-group" key={group.key}>
+              <div className="chapter-group-title">{group.title}</div>
+              {group.chapters.map((ch) => (
+                <button
+                  key={ch.chapter_number}
+                  className={selectedChapter?.chapter_number === ch.chapter_number ? 'active' : ''}
+                  onClick={() => c.selectChapter(ch.chapter_number)}
+                >
+                  {ch.scene_count > 0 && <CircleCheck />}
+                  <span>
+                    <span>{ch.title}</span>
+                    <small>
+                      {ch.formal_prose_exists ? `${ch.words.toLocaleString()} 字` : '计划中'}
+                      {ch.scene_count > 0 ? ` · ${ch.scene_count} 段` : ''}
+                    </small>
+                  </span>
+                </button>
+              ))}
+            </section>
+          ))}
+        </div>
       </aside>
 
       <section className="panel editor">
@@ -110,8 +126,8 @@ export function WritingPage() {
           aria-label="正式正文编辑器"
           value={state.editorContent}
           onChange={(event) => c.setEditorContent(event.target.value)}
-          disabled={!selectedChapter?.content_sha256}
-          placeholder={selectedChapter?.content_sha256 ? '开始写这一章…' : '这是尚未创建的章节位置。点击左侧“+”新建正式章节后即可编辑。'}
+          disabled={!selectedChapter?.formal_prose_exists}
+          placeholder={selectedChapter?.formal_prose_exists ? '开始写这一章…' : '这是已规划但尚未创建正文的章节。点击“开始本章”后即可编辑。'}
         />
         <footer>
           <span>
@@ -121,7 +137,13 @@ export function WritingPage() {
               : ''}
           </span>
           <div className="editor-save-actions">
-            {state.editorDirty ? <span className="unsaved-note">未保存</span> : selectedChapter?.content_sha256 ? <span className="muted-note">已保存</span> : null}
+            {state.editorDirty ? <span className="unsaved-note">未保存</span> : selectedChapter?.formal_prose_exists ? <span className="muted-note">已保存</span> : null}
+            {selectedChapter && !selectedChapter.formal_prose_exists && (
+              <button className="primary" disabled={state.saving} onClick={() => void c.createChapter(selectedChapter.chapter_number)}>
+                <Plus />
+                开始本章
+              </button>
+            )}
             <button className="primary" disabled={!state.editorDirty || state.saving} onClick={() => void c.save()}><Save /> 保存</button>
           </div>
         </footer>

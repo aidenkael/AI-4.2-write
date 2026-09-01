@@ -962,9 +962,54 @@ def test_surface_empty_project(isolated, real_project, fake_bridge, monkeypatch)
         "content": "",
         "words": 0,
         "scene_count": 0,
+        "formal_prose_exists": False,
+        "stage_ref": None,
+        "stage_title": None,
     }]
     assert surface["active_chapter_number"] == 1
     assert surface["total_words"] == 0
+
+
+def test_surface_includes_planned_chapter_without_formal_file(isolated, real_project, fake_bridge, monkeypatch):
+    from operations import project_model
+
+    planned = project_model.set_length_plan(
+        real_project["project_id"], base_model_rev=0,
+        stages=[{"client_key": "vol-1", "title": "第一卷", "target_words": 50000}],
+        chapter_targets=[
+            {"title": "第一章", "chapter_number": 1, "min_words": 2000, "max_words": 3000, "stage_key": "vol-1"},
+            {"title": "第二章", "chapter_number": 2, "min_words": 2500, "max_words": 3500, "task": "调查匿名信", "stage_key": "vol-1"},
+        ],
+    )
+    stage_ref = planned["length_plan"]["stage_refs"][0]
+
+    surface = sw_ops.get_story_write_surface(project_id=real_project["project_id"])
+    assert [item["chapter_number"] for item in surface["chapters"]] == [1, 2]
+    second = surface["chapters"][1]
+    assert second["title"] == "第二章"
+    assert second["formal_prose_exists"] is False
+    assert "content_sha256" not in second
+    assert second["fine_outline"]["task"] == "调查匿名信"
+    assert second["stage_ref"] == stage_ref
+    assert second["stage_title"] == "第一卷"
+    assert surface["active_chapter_number"] == 1
+
+
+def test_surface_active_chapter_uses_latest_formal_prose_not_future_plan(isolated, real_project, fake_bridge, monkeypatch):
+    from operations import project_model
+
+    _accept(real_project, chapter_number=1, scene_ref="scene-1", text="第一章正文。")
+    project_model.set_length_plan(
+        real_project["project_id"], base_model_rev=0,
+        chapter_targets=[
+            {"title": "第一章", "chapter_number": 1, "min_words": 2000, "max_words": 3000},
+            {"title": "第二章", "chapter_number": 2, "min_words": 2500, "max_words": 3500},
+        ],
+    )
+    surface = sw_ops.get_story_write_surface(project_id=real_project["project_id"])
+    assert [item["chapter_number"] for item in surface["chapters"]] == [1, 2]
+    assert surface["chapters"][1]["formal_prose_exists"] is False
+    assert surface["active_chapter_number"] == 1
 
 
 def test_surface_reads_formal_accepted_prose(isolated, real_project, fake_bridge, monkeypatch):

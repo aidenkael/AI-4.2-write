@@ -1576,16 +1576,21 @@ def get_story_write_surface(project_id: str) -> dict[str, Any]:
         raise StoryWritingError(str(exc)) from exc
     chapters = []
     for item in snapshot["chapters"]:
+        path = Path(item["path"])
         chapter = {
             "chapter_number": item["chapter_number"],
             "title": item["title"],
             "content": item["content"],
             "words": item["actual_words"],
             "scene_count": item["accepted_scene_count"],
+            "formal_prose_exists": bool(item.get("formal_prose_exists")),
+            "stage_ref": (item.get("fine_outline") or {}).get("stage_ref"),
+            "stage_title": (item.get("fine_outline") or {}).get("stage_title"),
         }
-        if Path(item["path"]).exists() or item.get("fine_outline_ref") is not None:
+        if path.exists():
+            chapter["content_sha256"] = item["content_sha256"]
+        if path.exists() or item.get("fine_outline_ref") is not None:
             chapter.update({
-                "content_sha256": item["content_sha256"],
                 "accepted": item["accepted"],
                 "fine_outline_ref": item.get("fine_outline_ref"),
                 "fine_outline": item.get("fine_outline") or {},
@@ -1597,11 +1602,16 @@ def get_story_write_surface(project_id: str) -> dict[str, Any]:
                 ), None),
             })
         chapters.append(chapter)
+    active_with_prose = [
+        item["chapter_number"]
+        for item in chapters
+        if item.get("formal_prose_exists")
+    ]
     return {
         "project_id": snapshot["project_id"],
         "name": snapshot["name"],
         "chapters": chapters,
-        "active_chapter_number": max(item["chapter_number"] for item in chapters),
+        "active_chapter_number": max(active_with_prose) if active_with_prose else min(item["chapter_number"] for item in chapters),
         "total_words": snapshot["length_plan"]["actual_total_words"],
         "settlement": snapshot["settlement"],
         "open_threads": [

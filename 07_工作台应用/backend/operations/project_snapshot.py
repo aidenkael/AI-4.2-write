@@ -273,6 +273,17 @@ def _validated_chapters(loaded: dict[str, Any], model: dict[str, Any]) -> list[d
                 raise ProjectSnapshotError(f"第{number}章路径与标准章节文件冲突。")
             paths[number] = path
 
+    stage_titles: dict[str, str] = {}
+    stage_refs_by_title: dict[str, list[str]] = {}
+    for ref in model.get("length_plan", {}).get("stage_refs", []):
+        item = model.get("objects", {}).get(ref)
+        if not isinstance(item, dict) or item.get("tombstoned") or item.get("kind") != "length_stage":
+            continue
+        title = str(item.get("title") or "")
+        stage_titles[ref] = title
+        if title:
+            stage_refs_by_title.setdefault(title, []).append(ref)
+
     target_by_number: dict[int, dict[str, Any]] = {}
     for ref in model.get("length_plan", {}).get("chapter_target_refs", []):
         item = model.get("objects", {}).get(ref)
@@ -303,13 +314,37 @@ def _validated_chapters(loaded: dict[str, Any], model: dict[str, Any]) -> list[d
                 raise ProjectSnapshotError(f"第{number}章 accepted index SHA 不匹配。")
         target = target_by_number.get(number)
         target_data = copy.deepcopy((target or {}).get("data") or {})
+        stage_ref = target_data.get("stage_ref")
+        legacy_stage = target_data.get("stage")
+        stage_unresolved = None
+        if isinstance(stage_ref, str) and stage_ref in stage_titles:
+            target_data["stage_ref"] = stage_ref
+            target_data["stage_title"] = stage_titles[stage_ref]
+        elif stage_ref is not None:
+            target_data.pop("stage_ref", None)
+            stage_unresolved = "invalid_stage_ref"
+        elif isinstance(legacy_stage, str) and legacy_stage.strip():
+            matches = stage_refs_by_title.get(legacy_stage.strip(), [])
+            if len(matches) == 1:
+                target_data["stage_ref"] = matches[0]
+                target_data["stage_title"] = stage_titles[matches[0]]
+                target_data["legacy_stage"] = legacy_stage.strip()
+            else:
+                stage_unresolved = "ambiguous_or_unmatched_legacy_stage"
+        else:
+            target_data.pop("stage_ref", None)
+        target_data.pop("stage", None)
+        if stage_unresolved:
+            target_data["stage_unresolved"] = stage_unresolved
         title = target_data.get("chapter_title") or (target or {}).get("title") or f"第{number}章"
+        formal_prose_exists = path.exists()
         chapters.append({
             "chapter_number": number,
             "title": title,
             "path": str(path),
             "content": content,
             "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+            "formal_prose_exists": formal_prose_exists,
             "actual_words": len(content),
             "accepted_scene_count": len(chapter_entries),
             "accepted": bool(chapter_entries),
@@ -321,6 +356,7 @@ def _validated_chapters(loaded: dict[str, Any], model: dict[str, Any]) -> list[d
         chapters.append({
             "chapter_number": 1, "title": "第1章", "path": str(prose_root / "第001章.md"),
             "content": "", "content_sha256": hashlib.sha256(b"").hexdigest(),
+            "formal_prose_exists": False,
             "actual_words": 0, "accepted_scene_count": 0, "accepted": False,
             "fine_outline_ref": None, "fine_outline": {},
             "actual_result": copy.deepcopy(model.get("chapter_actual_results", {}).get("1")),
@@ -475,6 +511,7 @@ def get_project_snapshot(project_id: str) -> dict[str, Any]:
         "chapters": [{
             "ref": chapter.get("fine_outline_ref"), "chapter_number": chapter["chapter_number"],
             "title": chapter["title"], "actual_words": chapter["actual_words"],
+            "formal_prose_exists": chapter["formal_prose_exists"],
             **copy.deepcopy(chapter.get("fine_outline") or {}),
         } for chapter in chapters],
         "actual_total_words": sum(chapter["actual_words"] for chapter in chapters),

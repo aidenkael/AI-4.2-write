@@ -202,12 +202,16 @@ p{line-height:1.65}
 .length-overview input,.stage-row input{border:1px solid var(--line);border-radius:8px;padding:8px;background:#fff}
 .length-overview strong{font-size:20px}
 .length-overview span{font-size:12px;color:var(--muted)}
-.planning-structure-grid{display:grid;grid-template-columns:1fr 1.5fr;gap:16px}
-.stage-planning,.chapter-planning{border:1px solid var(--line);border-radius:10px;padding:14px}
+.planning-structure-grid{display:grid;grid-template-columns:1fr 1.5fr;gap:16px;min-height:420px;max-height:min(620px,calc(100vh - 330px))}
+.stage-planning,.chapter-planning{border:1px solid var(--line);border-radius:10px;padding:14px;display:flex;flex-direction:column;min-height:0}
 .stage-planning>header,.chapter-planning>header{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .stage-planning h3,.chapter-planning h3{display:flex;align-items:center;gap:7px;margin:0;font-size:15px}
+.stage-filter-list{display:grid;gap:6px;margin-top:10px;overflow:auto;min-height:90px;max-height:180px;padding-right:2px}
+.stage-filter-list button{justify-content:space-between;text-align:left}
+.stage-filter-list button.active{background:#eaf2ff;color:var(--blue);border-color:#c9dbff}
+.stage-filter-list small{color:var(--muted)}
 .stage-row{display:grid;grid-template-columns:1.3fr 1fr 1fr auto;gap:8px;margin-top:8px}
-.chapter-plan-list{display:grid;margin-top:8px}
+.chapter-plan-list{display:grid;margin-top:8px;overflow:auto;min-height:0;padding-right:2px}
 .chapter-plan-list>button{display:grid;grid-template-columns:1fr auto auto;gap:12px;text-align:left;border:0;border-top:1px solid var(--line);border-radius:0;background:#fff;padding:10px 4px}
 .chapter-plan-list>button>span{display:grid;gap:3px}
 .chapter-plan-list small{color:var(--muted)}
@@ -234,9 +238,12 @@ p{line-height:1.65}
 .chapters{overflow:hidden;display:flex;flex-direction:column;background:linear-gradient(180deg,#fff 60%,#f2f7ff)}
 .chapters header{display:flex;padding:16px 20px;justify-content:space-between;border-bottom:1px solid var(--line)}
 .chapters header h2{margin:0;font-size:17px}
-.chapters>button{border:0;background:transparent;justify-content:flex-start;border-radius:8px;margin:2px 12px}
-.chapters>button.active{background:#eaf2ff;color:var(--blue)}
-.chapters>button>span{display:flex;flex-direction:column;align-items:flex-start}
+.chapter-group-list{overflow:auto;padding:8px 0}
+.chapter-group{display:grid;gap:2px;margin-bottom:8px}
+.chapter-group-title{padding:8px 16px 4px;color:var(--muted);font-size:12px;font-weight:700}
+.chapter-group button{border:0;background:transparent;justify-content:flex-start;border-radius:8px;margin:2px 12px}
+.chapter-group button.active{background:#eaf2ff;color:var(--blue)}
+.chapter-group button>span{display:flex;flex-direction:column;align-items:flex-start}
 .chapters small{color:var(--muted);margin-top:4px}
 .editor{display:flex;flex-direction:column;overflow:hidden}
 .editor header{height:62px;display:flex;align-items:center;justify-content:space-between;padding:0 26px;border-bottom:1px solid var(--line)}

@@ -60,6 +60,46 @@ def test_current_future_and_confirmed_projection_remain_distinct(project):
     assert projected["objects"][chapter["fine_outline_ref"]]["material_state"] == "future"
 
 
+def test_legacy_stage_text_resolves_only_when_unique(project):
+    planned = project_model.set_length_plan(
+        project["project_id"], base_model_rev=0,
+        stages=[{"title": "第一卷", "target_words": 50000}],
+        chapter_targets=[{"title": "第1章", "chapter_number": 1, "min_words": 2500, "max_words": 3500}],
+    )
+    stage_ref = planned["length_plan"]["stage_refs"][0]
+    chapter_ref = planned["length_plan"]["chapter_target_refs"][0]
+    artifact = Path(project["project_dir"]) / "_工作台状态" / project_model.ARTIFACT_NAME
+    model = json.loads(artifact.read_text(encoding="utf-8"))
+    model["objects"][chapter_ref]["data"]["stage"] = "第一卷"
+    artifact.write_text(json.dumps(model, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    snapshot = project_snapshot.get_project_snapshot(project["project_id"])
+    chapter = snapshot["length_plan"]["chapters"][0]
+    assert chapter["stage_ref"] == stage_ref
+    assert chapter["stage_title"] == "第一卷"
+    assert chapter["legacy_stage"] == "第一卷"
+    assert "stage" not in chapter
+
+
+def test_legacy_stage_text_is_not_guessed_when_ambiguous(project):
+    planned = project_model.set_length_plan(
+        project["project_id"], base_model_rev=0,
+        stages=[{"title": "第一卷", "target_words": 50000}, {"title": "第一卷", "target_words": 60000}],
+        chapter_targets=[{"title": "第1章", "chapter_number": 1, "min_words": 2500, "max_words": 3500}],
+    )
+    chapter_ref = planned["length_plan"]["chapter_target_refs"][0]
+    artifact = Path(project["project_dir"]) / "_工作台状态" / project_model.ARTIFACT_NAME
+    model = json.loads(artifact.read_text(encoding="utf-8"))
+    model["objects"][chapter_ref]["data"]["stage"] = "第一卷"
+    artifact.write_text(json.dumps(model, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    snapshot = project_snapshot.get_project_snapshot(project["project_id"])
+    chapter = snapshot["length_plan"]["chapters"][0]
+    assert "stage_ref" not in chapter
+    assert chapter["stage_unresolved"] == "ambiguous_or_unmatched_legacy_stage"
+    assert "stage" not in chapter
+
+
 def test_overlay_supersedes_raw_story_state_without_deleting_history(project):
     state_path = Path(project["project_dir"]) / "_工作台状态" / "story_state.json"
     state = json.loads(state_path.read_text(encoding="utf-8"))
