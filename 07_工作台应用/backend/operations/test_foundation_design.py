@@ -57,7 +57,11 @@ MIXED_PACKAGE = _package([
 EMPTY_PACKAGE = _package([])
 
 
-def _final_result(rounds, characters=None, relationships=None, core_conflict=None):
+def _final_result(
+    rounds, characters=None, relationships=None, core_conflict=None,
+    world_settings=None, locations=None, organizations=None, systems=None,
+    story_lines=None, promise_foreshadowing=None, mystery_information=None,
+):
     return json.dumps({
         "objective": "基座设计目标。",
         "topics": [r["topic"] for r in rounds],
@@ -65,10 +69,14 @@ def _final_result(rounds, characters=None, relationships=None, core_conflict=Non
         "proposal": {
             "characters": characters or [],
             "relationships": relationships or [],
-            "world_settings": [],
-            "organizations": [],
+            "world_settings": world_settings or [],
+            "locations": locations or [],
+            "organizations": organizations or [],
+            "systems": systems or [],
             "core_conflict": core_conflict,
-            "story_lines": [],
+            "story_lines": story_lines or [],
+            "promise_foreshadowing": promise_foreshadowing or [],
+            "mystery_information": mystery_information or [],
         },
         "knowledge_notes": "参考了检索包；scope 有限。",
         "assumptions": ["假设一"],
@@ -225,6 +233,136 @@ def test_multi_round_retrieval_candidate_no_authority_write_then_confirm(
     # 证明 8 前置：确认后候选失效，重复确认被拒
     with pytest.raises(fd_ops.FoundationDesignError):
         fd_ops.confirm_foundation_design(pid, result["proposal_token"], items, model["model_rev"])
+
+
+def test_dynamic_categories_structured_data_candidate_keys_and_core_conflict_fix(isolated, monkeypatch):
+    calls = []
+
+    def fake_retrieve(query):
+        calls.append(query)
+        return EMPTY_PACKAGE
+
+    monkeypatch.setattr(fd_ops, "_retrieve_package", fake_retrieve)
+    project = _create_project("动态基座")
+    pid = project["project_id"]
+    rev = project_model.read_project_model(pid)["model_rev"]
+
+    def on_run(request):
+        import re
+        rid = re.search(r"--request ([0-9a-f]+)", request.task).group(1)
+        fd_ops.execute_request_scoped_retrieval("初始地基", rid)
+        fp = fd_ops._package_fingerprint(EMPTY_PACKAGE)
+        return AgentResult(status="completed", output=_final_result([
+            {"topic": "初始地基", "query": "初始地基", "package_ref": fp,
+             "selected_knowledge_refs": [], "comparison": "0 命中，按作者意图。"},
+        ], characters=[
+            {"candidate_key": "char-a", "title": "程一", "material_state": "future",
+             "data": {"one_line_intro": "结构工程师", "goal_desire": "找回明天"}},
+            {"candidate_key": "char-b", "title": "苏二", "material_state": "future",
+             "data": {"one_line_intro": "旧物修复师"}},
+        ], relationships=[
+            {"candidate_key": "rel-a", "source_key": "char-a", "target_key": "char-b", "label": "互相试探",
+             "material_state": "future", "data": {"description": "因旧物线索相识", "current_tension": "互不完全信任"}},
+        ], locations=[
+            {"candidate_key": "loc-a", "title": "旧货市场", "material_state": "future",
+             "data": {"type": "地点", "story_social_function": "秘密交换场"}},
+        ], systems=[
+            {"candidate_key": "sys-a", "title": "明日券规则", "material_state": "future",
+             "data": {"type": "交易体系", "levels_stages": "一次性券", "limitations_costs": "透支未来记忆"}},
+        ], promise_foreshadowing=[
+            {"candidate_key": "pf-a", "title": "空白收据", "material_state": "future",
+             "data": {"setup_trigger": "第一章收到", "reader_question_promise": "谁支付了代价"}},
+        ], mystery_information=[
+            {"candidate_key": "myst-a", "title": "付款人", "material_state": "future",
+             "data": {"secret_fact": "付款人不是本人", "who_knows": ["苏二"], "reveal_status": "hidden"}},
+        ], core_conflict={"candidate_key": "conflict-a", "title": "停滞与明天", "material_state": "future",
+                          "data": {"main_conflict": "停滞的人借用未来", "stakes": "未来记忆被抵押"}}), agent=FakeAgent.name)
+
+    adapter = FakeAgent(on_run)
+    _direct(adapter, monkeypatch)
+    prepared = fd_ops.prepare_foundation_design(pid, "完善新书地基", rev)
+    _wait(prepared["request_id"])
+    polled = fd_ops.get_foundation_design_request(prepared["request_id"])
+    assert polled["status"] == "completed", polled.get("error")
+    assert calls == ["初始地基"]
+
+    candidate = polled["result"]["candidate"]["proposal"]
+    assert candidate["locations"][0]["data"]["story_social_function"] == "秘密交换场"
+    assert candidate["systems"][0]["data"]["limitations_costs"] == "透支未来记忆"
+    assert candidate["promise_foreshadowing"][0]["data"]["reader_question_promise"] == "谁支付了代价"
+    assert candidate["mystery_information"][0]["data"]["who_knows"] == ["苏二"]
+
+    # 模拟作者 review 阶段编辑了结构化字段，并排除 location。
+    items = [
+        {**candidate["characters"][0], "kind": "character", "data": {**candidate["characters"][0]["data"], "goal_desire": "查明收据来源"}},
+        {**candidate["characters"][1], "kind": "character"},
+        {**candidate["relationships"][0], "kind": "relationship", "title": candidate["relationships"][0]["label"]},
+        {**candidate["systems"][0], "kind": "system"},
+        {**candidate["promise_foreshadowing"][0], "kind": "promise_foreshadowing"},
+        {**candidate["mystery_information"][0], "kind": "mystery_information"},
+        {**candidate["core_conflict"], "kind": "core_conflict"},
+    ]
+    confirmed = fd_ops.confirm_foundation_design(
+        pid, polled["result"]["proposal_token"], items, project_model.read_project_model(pid)["model_rev"],
+    )
+    assert not confirmed["warnings"]
+    assert calls == ["初始地基"], "finalize/confirm 不得再次检索"
+    model = project_model.read_project_model(pid)
+    by_title = {obj["title"]: obj for obj in model["objects"].values() if not obj.get("tombstoned")}
+    assert by_title["程一"]["data"]["goal_desire"] == "查明收据来源"
+    assert by_title["明日券规则"]["kind"] == "system"
+    assert by_title["空白收据"]["category"] == "promise_foreshadowing"
+    assert by_title["付款人"]["category"] == "mystery_information"
+    assert by_title["停滞与明天"]["category"] == "story_line"
+    assert by_title["停滞与明天"]["data"]["main_conflict"] == "停滞的人借用未来"
+    assert "旧货市场" not in by_title, "未选条目不得写入"
+    assert not any(obj.get("category") == "world_setting" and obj.get("title") == "停滞与明天" for obj in model["objects"].values())
+    edge = next(edge for edge in model["dependencies"].values() if edge.get("title") == "互相试探")
+    assert edge["source_ref"] == by_title["程一"]["ref"]
+    assert edge["target_ref"] == by_title["苏二"]["ref"]
+
+
+def test_ambiguous_relationship_endpoint_is_not_guessed(isolated, monkeypatch):
+    monkeypatch.setattr(fd_ops, "_retrieve_package", lambda query: EMPTY_PACKAGE)
+    project = _create_project("关系歧义")
+    pid = project["project_id"]
+    first = author_edit.create_foundation_record(
+        pid, base_model_rev=0, category="character", title="同名", material_state="future", data={"note": "一"},
+    )
+    second = author_edit.create_foundation_record(
+        pid, base_model_rev=first["model"]["model_rev"], category="character", title="同名", material_state="future", data={"note": "二"},
+    )
+    target = author_edit.create_foundation_record(
+        pid, base_model_rev=second["model"]["model_rev"], category="character", title="唯一", material_state="future", data={"note": "三"},
+    )
+    rev = target["model"]["model_rev"]
+
+    def on_run(request):
+        import re
+        rid = re.search(r"--request ([0-9a-f]+)", request.task).group(1)
+        fd_ops.execute_request_scoped_retrieval("关系", rid)
+        fp = fd_ops._package_fingerprint(EMPTY_PACKAGE)
+        return AgentResult(status="completed", output=_final_result([
+            {"topic": "关系", "query": "关系", "package_ref": fp,
+             "selected_knowledge_refs": [], "comparison": "无。"},
+        ], relationships=[
+            {"source_title": "同名", "target_title": "唯一", "label": "不能猜",
+             "data": {"description": "端点歧义"}},
+        ]), agent=FakeAgent.name)
+
+    adapter = FakeAgent(on_run)
+    _direct(adapter, monkeypatch)
+    prepared = fd_ops.prepare_foundation_design(pid, "补关系", rev)
+    _wait(prepared["request_id"])
+    polled = fd_ops.get_foundation_design_request(prepared["request_id"])
+    item = {**polled["result"]["candidate"]["proposal"]["relationships"][0], "kind": "relationship", "title": "不能猜"}
+    confirmed = fd_ops.confirm_foundation_design(
+        pid, polled["result"]["proposal_token"], [item], project_model.read_project_model(pid)["model_rev"],
+    )
+    assert confirmed["created"] == []
+    assert confirmed["warnings"] == ["关系“不能猜”端点不明确，已跳过。"]
+    model = project_model.read_project_model(pid)
+    assert not any(edge.get("title") == "不能猜" for edge in model["dependencies"].values())
 
 
 def test_zero_hits_valid_and_round_bound(isolated, monkeypatch):

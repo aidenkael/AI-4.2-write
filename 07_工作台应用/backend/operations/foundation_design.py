@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import hashlib
+import copy
 import json
 import shutil
 import uuid
@@ -64,15 +65,20 @@ _RETRIEVAL_SCRIPT = Path(__file__).resolve().parent / "retrieval_snapshot.py"
 _MAX_ROUNDS = 4
 
 _ALLOWED_ITEM_KINDS = {
-    "character", "relationship", "world_setting", "organization",
-    "story_line", "core_conflict",
+    "character", "relationship", "world_setting", "location", "organization",
+    "system", "story_line", "promise_foreshadowing", "mystery_information",
+    "core_conflict",
 }
 _CATEGORY_BY_KIND = {
     "character": "character",
     "world_setting": "world_setting",
+    "location": "location",
     "organization": "organization_force",
+    "system": "system",
     "story_line": "story_line",
-    "core_conflict": "world_setting",
+    "promise_foreshadowing": "promise_foreshadowing",
+    "mystery_information": "mystery_information",
+    "core_conflict": "story_line",
 }
 
 _AGENT_TASK_TEMPLATE = """你是 Go Write 的基座设计执行器（重大新书/基座设计，Agent 主导）。必须严格按下列顺序执行；本任务不是纯文本生成任务，中间的工具调用属于任务执行过程，不属于最终回复。
@@ -91,7 +97,7 @@ _AGENT_TASK_TEMPLATE = """你是 Go Write 的基座设计执行器（重大新�
 - 严禁编造输出中不存在的 selection_ref / package_fingerprint；检索轮数不得超过 {max_rounds}。
 
 第三阶段：综合基座提案
-结合作者请求、当前作品 authority 与全部检索轮，综合人物/关系/世界规则/组织体系/核心冲突/故事线提案。知识仅 advisory：不得让外部知识压过作者明确意图；来源的 scope/boundary 必须在 knowledge_notes 中向作者交代。
+结合作者请求、当前作品 authority 与全部检索轮，动态综合本书真正需要的人物、关系、世界、地点、组织、体系、故事线、伏笔/承诺、悬疑信息提案。不要为了填模板强制生成无关类别；现实题材可没有体系，悬疑题材可重点生成 mystery_information，仙侠/奇幻可生成组织与 system。知识仅 advisory：不得让外部知识压过作者明确意图；来源的 scope/boundary 必须在 knowledge_notes 中向作者交代。
 
 最终回复必须只有合法 JSON 对象（不要任何额外文字、不要 markdown 代码块标记）。结构必须如下：
 
@@ -108,12 +114,16 @@ _AGENT_TASK_TEMPLATE = """你是 Go Write 的基座设计执行器（重大新�
     }}
   ],
   "proposal": {{
-    "characters": [{{"title": "人物名", "summary": "作者可读设定", "material_state": "future"}}],
-    "relationships": [{{"source_title": "人物名", "target_title": "人物名", "label": "关系", "summary": "作者可读关系设定"}}],
-    "world_settings": [{{"title": "规则名", "summary": "作者可读规则", "material_state": "future"}}],
-    "organizations": [{{"title": "组织/体系名", "summary": "作者可读设定", "material_state": "future"}}],
-    "core_conflict": {{"title": "核心冲突", "summary": "作者可读冲突设定"}},
-    "story_lines": [{{"title": "故事线", "summary": "作者可读故事线", "material_state": "future"}}]
+    "characters": [{{"candidate_key": "char_local_1", "title": "人物名", "material_state": "future", "data": {{"one_line_intro": "一句话介绍", "role_identity": "身份", "goal_desire": "目标"}}}}],
+    "relationships": [{{"candidate_key": "rel_local_1", "source_key": "char_local_1", "target_key": "char_local_2", "label": "关系", "material_state": "future", "data": {{"description": "关系描述", "current_tension": "当前张力"}}}}],
+    "world_settings": [{{"candidate_key": "world_local_1", "title": "世界规则", "material_state": "future", "data": {{"social_structure": "社会结构", "hard_rules": "硬规则"}}}}],
+    "locations": [{{"candidate_key": "loc_local_1", "title": "地点", "material_state": "future", "data": {{"type": "地点类型", "story_social_function": "叙事功能"}}}}],
+    "organizations": [{{"candidate_key": "org_local_1", "title": "组织", "material_state": "future", "data": {{"type": "组织类型", "purpose": "目的", "hierarchy": "层级"}}}}],
+    "systems": [{{"candidate_key": "sys_local_1", "title": "体系", "material_state": "future", "data": {{"type": "体系类型", "levels_stages": "等级/阶段", "limitations_costs": "限制/代价"}}}}],
+    "story_lines": [{{"candidate_key": "line_local_1", "title": "故事线", "material_state": "future", "data": {{"goal_purpose": "目标", "stakes": "利害", "main_conflict": "主冲突"}}}}],
+    "promise_foreshadowing": [{{"candidate_key": "pf_local_1", "title": "伏笔/承诺", "material_state": "future", "data": {{"setup_trigger": "触发", "reader_question_promise": "读者问题", "intended_payoff": "预期回收"}}}}],
+    "mystery_information": [{{"candidate_key": "myst_local_1", "title": "秘密信息", "material_state": "future", "data": {{"secret_fact": "秘密事实", "who_knows": "知情者", "reveal_status": "揭示状态"}}}}],
+    "core_conflict": {{"candidate_key": "conflict_local_1", "title": "核心冲突", "material_state": "future", "data": {{"main_conflict": "冲突描述", "stakes": "利害", "goal_purpose": "目标"}}}}
   }},
   "knowledge_notes": "参考了哪些知识、scope/boundary、未采用什么（作者可读）",
   "assumptions": ["AI 解读中的假设，作者尚未确认"]
@@ -123,6 +133,8 @@ _AGENT_TASK_TEMPLATE = """你是 Go Write 的基座设计执行器（重大新�
 {authority_view}
 
 作者基座设计请求：{author_request}
+
+候选条目必须以 title/material_state/data 表达作者可编辑结构化字段；不要只塞进 design_summary。关系端点优先使用同一候选内人物的 candidate_key；既有记录只能使用已经机械确认的 source_ref/target_ref。core_conflict 不是项目类别；它只能作为候选摘要，或在确认时按故事线/主冲突语义写入 story_line。
 
 最终回复必须只有合法 JSON；但在生成最终回复之前，你必须先按主题执行检索命令并读取结果。"""
 
@@ -446,6 +458,35 @@ def _validate_str_list(value: Any, field_name: str) -> None:
             raise FoundationDesignError(f"Agent 输出字段 {field_name}[{i}] 类型错误（应为字符串）。")
 
 
+def _validate_candidate_data(value: Any, *, summary: str = "") -> dict[str, Any]:
+    if value is None:
+        data: dict[str, Any] = {}
+    elif isinstance(value, dict):
+        data = {}
+        for key, item in value.items():
+            if not isinstance(key, str) or not key.strip():
+                raise FoundationDesignError("候选 data 字段名必须是非空字符串。")
+            if isinstance(item, (str, int, float, bool)) or item is None:
+                data[key.strip()] = item
+            elif isinstance(item, list) and all(isinstance(v, (str, int, float, bool)) or v is None for v in item):
+                data[key.strip()] = copy.deepcopy(item)
+            else:
+                raise FoundationDesignError("候选 data 只能包含简单值或简单列表。")
+    else:
+        raise FoundationDesignError("候选 data 必须是对象。")
+    if summary and "design_summary" not in data:
+        data["design_summary"] = summary
+    return data
+
+
+def _validate_candidate_key(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise FoundationDesignError("candidate_key 必须是非空字符串。")
+    return value.strip()
+
+
 def _validate_proposal_items(value: Any, field_name: str, *, require_state: bool) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         raise FoundationDesignError(f"Agent 输出字段 {field_name} 类型错误（应为列表）。")
@@ -455,12 +496,19 @@ def _validate_proposal_items(value: Any, field_name: str, *, require_state: bool
             raise FoundationDesignError(f"{field_name}[{i}] 必须是对象。")
         title = str(item.get("title") or "").strip()
         summary = str(item.get("summary") or "").strip()
-        if not title or not summary:
-            raise FoundationDesignError(f"{field_name}[{i}] 缺少 title/summary。")
+        data = _validate_candidate_data(item.get("data"), summary=summary)
+        if not title or not data:
+            raise FoundationDesignError(f"{field_name}[{i}] 缺少 title/data。")
         state = str(item.get("material_state") or "future")
         if state not in {"current", "future"}:
             raise FoundationDesignError(f"{field_name}[{i}].material_state 非法。")
-        items.append({"title": title, "summary": summary, "material_state": state if require_state else "future"})
+        items.append({
+            "candidate_key": _validate_candidate_key(item.get("candidate_key")),
+            "title": title,
+            "summary": summary or str(data.get("design_summary") or ""),
+            "data": data,
+            "material_state": state if require_state else "future",
+        })
     return items
 
 
@@ -474,18 +522,18 @@ def _parse_agent_result(output: str) -> dict[str, Any]:
             lines = lines[:-1]
         text = "\n".join(lines).strip()
     try:
-        data = json.loads(text)
+        result_data = json.loads(text)
     except json.JSONDecodeError as exc:
         raise FoundationDesignError(f"Agent 输出不是合法 JSON：{exc}") from exc
-    if not isinstance(data, dict):
+    if not isinstance(result_data, dict):
         raise FoundationDesignError("Agent 输出应为 JSON 对象。")
-    if not isinstance(data.get("objective"), str) or not data["objective"].strip():
+    if not isinstance(result_data.get("objective"), str) or not result_data["objective"].strip():
         raise FoundationDesignError("Agent 输出缺少 objective。")
-    topics = data.get("topics")
+    topics = result_data.get("topics")
     _validate_str_list(topics, "topics")
     if not topics or len(topics) > _MAX_ROUNDS:
         raise FoundationDesignError(f"主题数量必须在 1 到 {_MAX_ROUNDS} 之间。")
-    rounds = data.get("rounds")
+    rounds = result_data.get("rounds")
     if not isinstance(rounds, list) or not rounds or len(rounds) > _MAX_ROUNDS:
         raise FoundationDesignError(f"检索轮数必须在 1 到 {_MAX_ROUNDS} 之间。")
     for i, rnd in enumerate(rounds):
@@ -497,15 +545,23 @@ def _parse_agent_result(output: str) -> dict[str, Any]:
         if not isinstance(rnd.get("package_ref"), str):
             raise FoundationDesignError(f"rounds[{i}].package_ref 必须是字符串。")
         _validate_str_list(rnd.get("selected_knowledge_refs") or [], f"rounds[{i}].selected_knowledge_refs")
-    proposal = data.get("proposal")
+    proposal = result_data.get("proposal")
     if not isinstance(proposal, dict):
         raise FoundationDesignError("Agent 输出缺少 proposal。")
     parsed_proposal: dict[str, Any] = {
         "characters": _validate_proposal_items(proposal.get("characters") or [], "proposal.characters", require_state=True),
         "relationships": [],
         "world_settings": _validate_proposal_items(proposal.get("world_settings") or [], "proposal.world_settings", require_state=True),
+        "locations": _validate_proposal_items(proposal.get("locations") or [], "proposal.locations", require_state=True),
         "organizations": _validate_proposal_items(proposal.get("organizations") or [], "proposal.organizations", require_state=True),
+        "systems": _validate_proposal_items(proposal.get("systems") or [], "proposal.systems", require_state=True),
         "story_lines": _validate_proposal_items(proposal.get("story_lines") or [], "proposal.story_lines", require_state=True),
+        "promise_foreshadowing": _validate_proposal_items(
+            proposal.get("promise_foreshadowing") or [], "proposal.promise_foreshadowing", require_state=True,
+        ),
+        "mystery_information": _validate_proposal_items(
+            proposal.get("mystery_information") or [], "proposal.mystery_information", require_state=True,
+        ),
         "core_conflict": None,
     }
     rels = proposal.get("relationships") or []
@@ -518,24 +574,45 @@ def _parse_agent_result(output: str) -> dict[str, Any]:
         target_title = str(rel.get("target_title") or "").strip()
         label = str(rel.get("label") or "").strip()
         summary = str(rel.get("summary") or "").strip()
-        if not source_title or not target_title or not label or not summary:
-            raise FoundationDesignError(f"proposal.relationships[{i}] 缺少 source_title/target_title/label/summary。")
+        source_key = _validate_candidate_key(rel.get("source_key"))
+        target_key = _validate_candidate_key(rel.get("target_key"))
+        source_ref = str(rel.get("source_ref") or "").strip()
+        target_ref = str(rel.get("target_ref") or "").strip()
+        data = _validate_candidate_data(rel.get("data"), summary=summary)
+        if not label or not data or not ((source_key or source_ref or source_title) and (target_key or target_ref or target_title)):
+            raise FoundationDesignError(f"proposal.relationships[{i}] 缺少端点/label/data。")
+        state = str(rel.get("material_state") or "future")
+        if state not in {"current", "future"}:
+            raise FoundationDesignError(f"proposal.relationships[{i}].material_state 非法。")
         parsed_proposal["relationships"].append({
+            "candidate_key": _validate_candidate_key(rel.get("candidate_key")),
+            "source_key": source_key, "target_key": target_key,
+            "source_ref": source_ref, "target_ref": target_ref,
             "source_title": source_title, "target_title": target_title,
-            "label": label, "summary": summary, "material_state": "future",
+            "label": label, "title": label, "summary": summary or str(data.get("design_summary") or ""),
+            "data": data,
+            "material_state": state,
         })
     core = proposal.get("core_conflict")
     if core is not None:
-        if not isinstance(core, dict) or not str(core.get("title") or "").strip() or not str(core.get("summary") or "").strip():
-            raise FoundationDesignError("proposal.core_conflict 缺少 title/summary。")
+        if not isinstance(core, dict) or not str(core.get("title") or "").strip():
+            raise FoundationDesignError("proposal.core_conflict 缺少 title。")
+        summary = str(core.get("summary") or "").strip()
+        data = _validate_candidate_data(core.get("data"), summary=summary)
+        if not data:
+            raise FoundationDesignError("proposal.core_conflict 缺少 data。")
         parsed_proposal["core_conflict"] = {
-            "title": str(core["title"]).strip(), "summary": str(core["summary"]).strip(), "material_state": "future",
+            "candidate_key": _validate_candidate_key(core.get("candidate_key")),
+            "title": str(core["title"]).strip(),
+            "summary": summary or str(data.get("main_conflict") or data.get("design_summary") or ""),
+            "data": data,
+            "material_state": "future",
         }
-    assumptions = data.get("assumptions") or []
+    assumptions = result_data.get("assumptions") or []
     _validate_str_list(assumptions, "assumptions")
-    knowledge_notes = str(data.get("knowledge_notes") or "")
+    knowledge_notes = str(result_data.get("knowledge_notes") or "")
     return {
-        "objective": data["objective"].strip(),
+        "objective": result_data["objective"].strip(),
         "topics": topics,
         "rounds": rounds,
         "proposal": parsed_proposal,
@@ -724,21 +801,56 @@ def _validate_confirm_items(items: Any) -> list[dict[str, Any]]:
             raise FoundationDesignError(f"items[{i}].kind 非法。")
         title = str(item.get("title") or "").strip()
         summary = str(item.get("summary") or "").strip()
-        if not title or not summary:
-            raise FoundationDesignError(f"items[{i}] 缺少 title/summary。")
+        data = _validate_candidate_data(item.get("data"), summary=summary)
+        if not title or not data:
+            raise FoundationDesignError(f"items[{i}] 缺少 title/data。")
         state = str(item.get("material_state") or "future")
         if state not in {"current", "future"}:
             raise FoundationDesignError(f"items[{i}].material_state 非法。")
         entry = {
-            "kind": kind, "title": title, "summary": summary, "material_state": state,
+            "kind": kind, "title": title, "summary": summary or str(data.get("design_summary") or ""), "data": data,
+            "candidate_key": _validate_candidate_key(item.get("candidate_key")),
+            "material_state": state,
+            "source_key": _validate_candidate_key(item.get("source_key")),
+            "target_key": _validate_candidate_key(item.get("target_key")),
+            "source_ref": str(item.get("source_ref") or "").strip(),
+            "target_ref": str(item.get("target_ref") or "").strip(),
             "source_title": str(item.get("source_title") or "").strip(),
             "target_title": str(item.get("target_title") or "").strip(),
             "label": str(item.get("label") or "").strip(),
         }
-        if kind == "relationship" and (not entry["source_title"] or not entry["target_title"] or not entry["label"]):
-            raise FoundationDesignError(f"items[{i}] 关系缺少 source_title/target_title/label。")
+        if kind == "relationship" and (
+            not entry["label"]
+            or not (entry["source_key"] or entry["source_ref"] or entry["source_title"])
+            or not (entry["target_key"] or entry["target_ref"] or entry["target_title"])
+        ):
+            raise FoundationDesignError(f"items[{i}] 关系缺少明确端点或 label。")
         validated.append(entry)
     return validated
+
+
+def _active_character_refs_by_title(model: dict[str, Any]) -> dict[str, list[str]]:
+    refs: dict[str, list[str]] = {}
+    for obj in model.get("objects", {}).values():
+        if not isinstance(obj, dict) or obj.get("tombstoned"):
+            continue
+        if obj.get("kind") == "foundation" and obj.get("category") == "character":
+            title = str(obj.get("title") or "")
+            if title:
+                refs.setdefault(title, []).append(str(obj.get("ref") or ""))
+    return refs
+
+
+def _has_existing_same_title(model: dict[str, Any], kind: str, title: str) -> bool:
+    category = _CATEGORY_BY_KIND[kind]
+    for obj in model.get("objects", {}).values():
+        if not isinstance(obj, dict) or obj.get("tombstoned") or obj.get("title") != title:
+            continue
+        if category == "system" and obj.get("kind") == "system":
+            return True
+        if obj.get("kind") == "foundation" and obj.get("category") == category:
+            return True
+    return False
 
 
 def confirm_foundation_design(
@@ -783,38 +895,72 @@ def confirm_foundation_design(
             raise FoundationDesignError("模型版本已变化，请刷新后重新确认。")
         created: list[dict[str, Any]] = []
         warnings: list[str] = []
-        title_to_ref: dict[str, str] = {}
-        for obj in model.get("objects", {}).values():
-            if isinstance(obj, dict) and not obj.get("tombstoned") and obj.get("category") == "character":
-                title_to_ref.setdefault(str(obj.get("title") or ""), str(obj.get("ref") or ""))
+        candidate_ref_by_key: dict[str, str] = {}
         rev = int(model["model_rev"])
+
         for item in confirmed_items:
             if item["kind"] == "relationship":
-                source_ref = title_to_ref.get(item["source_title"])
-                target_ref = title_to_ref.get(item["target_title"])
-                if not source_ref or not target_ref:
-                    warnings.append(f"关系“{item['source_title']} ↔ {item['target_title']}”端点不明确，已跳过。")
-                    continue
-                result = author_edit.create_relationship(
-                    project_id, base_model_rev=rev, source_ref=source_ref, target_ref=target_ref,
-                    label=item["label"], material_state=item["material_state"],
-                    data={"design_summary": item["summary"]},
-                )
-            else:
-                category = _CATEGORY_BY_KIND[item["kind"]]
-                data: dict[str, Any] = {"design_summary": item["summary"]}
-                if item["kind"] == "core_conflict":
-                    data["design_kind"] = "core_conflict"
-                result = author_edit.create_foundation_record(
-                    project_id, base_model_rev=rev, category=category, title=item["title"],
-                    material_state=item["material_state"], data=data,
-                )
-                if item["kind"] == "character":
-                    title_to_ref[item["title"]] = result["model"]["change_history"][-1]["detail"]["ref"]
+                continue
+            if item["kind"] != "core_conflict" and _has_existing_same_title(model, item["kind"], item["title"]):
+                warnings.append(f"“{item['title']}”已存在，未自动覆盖或合并。")
+                continue
+            category = _CATEGORY_BY_KIND[item["kind"]]
+            data: dict[str, Any] = copy.deepcopy(item["data"])
+            if item["kind"] == "core_conflict":
+                data.setdefault("main_conflict", item["summary"] or item["title"])
+            result = author_edit.create_foundation_record(
+                project_id, base_model_rev=rev, category=category, title=item["title"],
+                material_state=item["material_state"], data=data,
+            )
             rev = int(result["model"]["model_rev"])
-            created.append({"kind": item["kind"], "title": item["title"], "ref": (
-                result["model"]["change_history"][-1]["detail"]["ref"]
-            )})
+            model = result["model"]
+            ref = result["model"]["change_history"][-1]["detail"]["ref"]
+            if item.get("candidate_key"):
+                if item["candidate_key"] in candidate_ref_by_key:
+                    raise FoundationDesignError("候选 candidate_key 重复，已拒绝。")
+                candidate_ref_by_key[item["candidate_key"]] = ref
+            created.append({"kind": item["kind"], "title": item["title"], "ref": ref})
+
+        def resolve_endpoint(item: dict[str, Any], side: str) -> str | None:
+            key = item.get(f"{side}_key")
+            if key:
+                return candidate_ref_by_key.get(key)
+            ref = item.get(f"{side}_ref")
+            if ref:
+                try:
+                    obj = model.get("objects", {}).get(ref)
+                    if isinstance(obj, dict) and not obj.get("tombstoned") and obj.get("category") == "character":
+                        return ref
+                except Exception:  # noqa: BLE001
+                    return None
+                return None
+            title = item.get(f"{side}_title")
+            if title:
+                matches = _active_character_refs_by_title(model).get(title, [])
+                if len(matches) == 1:
+                    return matches[0]
+            return None
+
+        for item in confirmed_items:
+            if item["kind"] != "relationship":
+                continue
+            source_ref = resolve_endpoint(item, "source")
+            target_ref = resolve_endpoint(item, "target")
+            if not source_ref or not target_ref or source_ref == target_ref:
+                endpoint = item.get("label") or item.get("title") or "未命名关系"
+                warnings.append(f"关系“{endpoint}”端点不明确，已跳过。")
+                continue
+            result = author_edit.create_relationship(
+                project_id, base_model_rev=rev, source_ref=source_ref, target_ref=target_ref,
+                label=item["label"], material_state=item["material_state"],
+                data=copy.deepcopy(item["data"]),
+            )
+            rev = int(result["model"]["model_rev"])
+            model = result["model"]
+            created.append({
+                "kind": item["kind"], "title": item["label"],
+                "ref": result["model"]["change_history"][-1]["detail"]["ref"],
+            })
         # Author acceptance makes the selected records durable immediately.
         # Any semantic work is deliberately deferred to the single project
         # action “更新作品状态”; never start Direct AI from acceptance.

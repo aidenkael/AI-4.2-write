@@ -1197,10 +1197,16 @@ export async function confirmProjectStateRefresh(payload: {
 // ---------------- M3 知识驱动重大基座设计（Agent 主导；候选 ≠ authority） ----------------
 
 export interface FoundationDesignItem {
-  kind: 'character' | 'relationship' | 'world_setting' | 'organization' | 'story_line' | 'core_conflict'
+  kind: 'character' | 'relationship' | 'world_setting' | 'location' | 'organization' | 'system' | 'story_line' | 'promise_foreshadowing' | 'mystery_information' | 'core_conflict'
+  candidate_key?: string | null
   title: string
-  summary: string
+  summary?: string
+  data?: Record<string, unknown>
   material_state: 'current' | 'future'
+  source_key?: string | null
+  target_key?: string | null
+  source_ref?: string | null
+  target_ref?: string | null
   source_title?: string
   target_title?: string
   label?: string
@@ -1215,8 +1221,12 @@ export interface FoundationDesignCandidate {
     characters: FoundationDesignItem[]
     relationships: FoundationDesignItem[]
     world_settings: FoundationDesignItem[]
+    locations: FoundationDesignItem[]
     organizations: FoundationDesignItem[]
+    systems: FoundationDesignItem[]
     story_lines: FoundationDesignItem[]
+    promise_foreshadowing: FoundationDesignItem[]
+    mystery_information: FoundationDesignItem[]
     core_conflict: FoundationDesignItem | null
   }
   assumptions: string[]

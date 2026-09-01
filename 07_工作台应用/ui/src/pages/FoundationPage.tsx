@@ -1,6 +1,6 @@
 import { Check, FileCheck2, GitBranch, MapPin, Pencil, Plus, Save, Sparkles, Trash2, UserRound, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import type { FoundationDesignResult, ProjectDataEntry } from '../bridge/client'
+import type { FoundationDesignItem, FoundationDesignResult, ProjectDataEntry } from '../bridge/client'
 import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { useProjectDataController } from '../features/projectData/useProjectDataController'
@@ -120,25 +120,157 @@ const sectionForCategory = (category: string | null | undefined): FoundationTab 
 interface FdEditItem {
   key: string
   include: boolean
-  kind: 'character' | 'relationship' | 'world_setting' | 'organization' | 'story_line' | 'core_conflict'
+  kind: 'character' | 'relationship' | 'world_setting' | 'location' | 'organization' | 'system' | 'story_line' | 'promise_foreshadowing' | 'mystery_information' | 'core_conflict'
+  candidate_key?: string | null
   title: string
   summary: string
+  data: Record<string, string>
+  listFields: string[]
   material_state: 'current' | 'future'
+  source_key?: string | null
+  target_key?: string | null
+  source_ref?: string | null
+  target_ref?: string | null
   source_title?: string
   target_title?: string
   label?: string
 }
 
+const fdKindLabel: Record<FdEditItem['kind'], string> = {
+  character: '人物',
+  relationship: '关系',
+  world_setting: '世界',
+  location: '地点',
+  organization: '组织',
+  system: '体系',
+  story_line: '故事线',
+  promise_foreshadowing: '伏笔与承诺',
+  mystery_information: '悬疑信息',
+  core_conflict: '核心冲突',
+}
+
+const fdFieldLabels: Record<string, string> = {
+  design_summary: '摘要',
+  one_line_intro: '一句话介绍',
+  role_identity: '身份 / 角色',
+  position_title: '职位',
+  faction_org: '阵营 / 组织',
+  visible_traits: '特征',
+  persona_core: '人设',
+  goal_desire: '目标 / 欲望',
+  fear_weakness: '恐惧 / 弱点',
+  inner_conflict: '内在冲突',
+  background_summary: '背景',
+  power_rank: '武力 / 等级',
+  current_level: '当前体系等级',
+  current_objective: '当前目标',
+  speech_style: '说话特点',
+  behavior_anchors: '行为特点',
+  secrets: '秘密',
+  description: '描述',
+  current_state: '当前状态',
+  relationship_phase: '关系阶段',
+  key_history: '关键经历',
+  current_tension: '当前张力',
+  hidden_information: '隐瞒的信息',
+  trust: '信任',
+  closeness: '亲近',
+  era_time_background: '时代背景',
+  geographic_scope: '地理范围',
+  social_structure: '社会结构',
+  political_order: '政治秩序',
+  economy_resources: '经济资源',
+  culture_customs: '文化习俗',
+  technology_level: '技术水平',
+  supernatural_baseline: '超自然基线',
+  important_history: '重要历史',
+  hard_rules: '硬规则',
+  prohibitions_taboos: '禁忌',
+  known_exceptions: '例外',
+  story_constraints: '故事约束',
+  type: '类型',
+  region_parent: '所属区域',
+  physical_features: '物理特征',
+  story_social_function: '叙事功能',
+  controlling_organization: '控制组织',
+  rules_risks: '规则 / 风险',
+  purpose: '目的',
+  hierarchy: '层级',
+  leader_key_members: '关键成员',
+  resources: '资源',
+  territory_scope: '势力范围',
+  rules: '规则',
+  external_relationships: '外部关系',
+  levels_stages: '等级 / 阶段',
+  entry_progression_requirements: '进入 / 晋升要求',
+  abilities_privileges: '能力 / 权限',
+  limitations_costs: '限制 / 代价',
+  visible_markers: '可见标记',
+  exceptions: '例外',
+  important_rules: '重要规则',
+  goal_purpose: '目标',
+  stakes: '利害',
+  main_conflict: '主冲突',
+  participating_characters: '参与人物',
+  related_organizations_locations: '相关组织 / 地点',
+  stage_progress: '阶段进展',
+  dependencies: '依赖',
+  expected_payoff_end_condition: '预期终局',
+  setup_trigger: '埋设触发',
+  reader_question_promise: '读者问题 / 承诺',
+  related_entities: '相关对象',
+  state: '状态',
+  intended_payoff: '预期回收',
+  actual_payoff: '实际回收',
+  secret_fact: '秘密事实',
+  who_knows: '知情者',
+  who_does_not_know: '不知情者',
+  mistaken_beliefs: '误解',
+  reveal_status: '揭示状态',
+  planned_reveal: '计划揭示',
+  actual_reveal_event_chapter: '实际揭示章节',
+  notes: '备注',
+}
+
+function fdDataToStrings(data: unknown, summary: string): { values: Record<string, string>; listFields: string[] } {
+  const values: Record<string, string> = {}
+  const listFields: string[] = []
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    Object.entries(data as Record<string, unknown>).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        values[key] = value.map((item) => String(item ?? '')).filter(Boolean).join('、')
+        listFields.push(key)
+      } else if (value != null) values[key] = String(value)
+    })
+  }
+  if (summary && !values.design_summary) values.design_summary = summary
+  return { values, listFields }
+}
+
+function fdStringsToData(data: Record<string, string>, listFields: string[]): Record<string, unknown> {
+  const lists = new Set(listFields)
+  return Object.fromEntries(Object.entries(data).filter(([, value]) => value.trim()).map(([key, value]) => [
+    key,
+    lists.has(key) ? value.split(/[、,，\n]/).map((item) => item.trim()).filter(Boolean) : value.trim(),
+  ]))
+}
+
 function fdItemsFromResult(result: FoundationDesignResult): FdEditItem[] {
   const p = result.candidate.proposal
   const items: FdEditItem[] = []
-  const push = (kind: FdEditItem['kind'], list: Array<Partial<FdEditItem> | null>) => {
+  const push = (kind: FdEditItem['kind'], list: Array<FoundationDesignItem | null>) => {
     list.forEach((entry, index) => {
       if (!entry) return
+      const data = fdDataToStrings(entry.data, String(entry.summary ?? ''))
       items.push({
         key: `${kind}-${index}`, include: true, kind,
+        candidate_key: entry.candidate_key,
         title: String(entry.title ?? ''), summary: String(entry.summary ?? ''),
+        data: data.values,
+        listFields: data.listFields,
         material_state: entry.material_state === 'current' ? 'current' : 'future',
+        source_key: entry.source_key, target_key: entry.target_key,
+        source_ref: entry.source_ref, target_ref: entry.target_ref,
         source_title: entry.source_title, target_title: entry.target_title, label: entry.label,
       })
     })
@@ -146,8 +278,12 @@ function fdItemsFromResult(result: FoundationDesignResult): FdEditItem[] {
   push('character', p.characters)
   push('relationship', p.relationships)
   push('world_setting', p.world_settings)
+  push('location', p.locations ?? [])
   push('organization', p.organizations)
+  push('system', p.systems ?? [])
   push('story_line', p.story_lines)
+  push('promise_foreshadowing', p.promise_foreshadowing ?? [])
+  push('mystery_information', p.mystery_information ?? [])
   push('core_conflict', [p.core_conflict])
   return items
 }
@@ -187,7 +323,10 @@ function FoundationDesignDrawer(props: {
   const accept = async () => {
     setLocalError(null)
     setBusy(true)
-    const items = edits.filter((item) => item.include).map(({ key, include, ...item }) => item)
+    const items = edits.filter((item) => item.include).map(({ key, include, data, listFields, ...item }) => ({
+      ...item,
+      data: fdStringsToData(data, listFields),
+    }))
     const result = await confirm('foundation_design', { items, base_model_rev: props.modelRev })
     setBusy(false)
     if (result) {
@@ -228,8 +367,11 @@ function FoundationDesignDrawer(props: {
                   <input type="checkbox" checked={item.include} onChange={(e) => setEdits(edits.map((it, i) => i === index ? { ...it, include: e.target.checked } : it))} />
                   采用
                 </label>
+                <span className="material-state future">{fdKindLabel[item.kind]}</span>
                 <input value={item.title} onChange={(e) => setEdits(edits.map((it, i) => i === index ? { ...it, title: e.target.value } : it))} />
-                <textarea rows={2} value={item.summary} onChange={(e) => setEdits(edits.map((it, i) => i === index ? { ...it, summary: e.target.value } : it))} />
+                {Object.entries(item.data).map(([field, value]) => (
+                  <label key={field}>{fdFieldLabels[field] ?? field}<textarea rows={2} value={value} onChange={(e) => setEdits(edits.map((it, i) => i === index ? { ...it, data: { ...it.data, [field]: e.target.value } } : it))} /></label>
+                ))}
               </div>
             ))}
             {candidate.candidate.assumptions.length > 0 && (
