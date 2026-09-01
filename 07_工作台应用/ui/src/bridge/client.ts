@@ -872,17 +872,6 @@ export interface SettlementChange {
   settlement_started?: boolean
 }
 
-export interface SettlementStart {
-  change_id: string
-  requires_semantic: boolean
-  status: string
-  complete: boolean
-  request_started: boolean
-  request_id?: string | null
-  message?: string
-  error?: string | null
-}
-
 export interface ProjectStateRefresh {
   status: 'synchronized' | 'running' | 'awaiting_confirmation' | 'failed'
   pending_change_count: number
@@ -1036,7 +1025,6 @@ export async function getProjectData(projectId: string): Promise<ProjectData> {
 export interface AuthorEditResult {
   model?: { model_rev: number }
   change: SettlementChange
-  settlement_request?: SettlementStart
 }
 
 export async function createFoundationRecord(payload: {

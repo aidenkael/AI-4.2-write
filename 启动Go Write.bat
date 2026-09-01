@@ -18,8 +18,16 @@ if not exist "%ROOT%.venv\Scripts\python.exe" (
     exit /b 1
 )
 
-REM --- 2. 检查前端构建产物 ---
-if not exist "%ROOT%07_工作台应用\ui\dist" (
+REM --- 2. 检查前端构建产物（与 desktop/main.py 使用同一套清单规则） ---
+cd /d "%ROOT%07_工作台应用"
+if errorlevel 1 (
+    echo 无法进入应用目录：%ROOT%07_工作台应用
+    pause
+    exit /b 1
+)
+
+"%ROOT%.venv\Scripts\python.exe" desktop\main.py --check-runtime-build
+if errorlevel 1 (
     echo 正在构建 Go Write 前端界面...
     echo.
     cd /d "%ROOT%07_工作台应用\ui"
@@ -38,6 +46,14 @@ if not exist "%ROOT%07_工作台应用\ui\dist" (
     echo.
     echo 前端构建完成。
     echo.
+
+    cd /d "%ROOT%07_工作台应用"
+    "%ROOT%.venv\Scripts\python.exe" desktop\main.py --check-runtime-build
+    if errorlevel 1 (
+        echo 构建完成后运行时清单仍不是最新，已停止启动。
+        pause
+        exit /b 1
+    )
 )
 
 REM --- 3. 启动桌面程序 ---

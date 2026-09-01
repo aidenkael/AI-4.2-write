@@ -7,10 +7,6 @@ import {
   describeAuthorRecord,
 } from '../.test-build/features/presentation/authorPresentation.js'
 import {
-  isCurrentProjectResult,
-  settlementFollowUp,
-} from '../.test-build/features/projectData/mutationSettlement.js'
-import {
   CHARACTER_EDITOR_FIELDS,
   splitEditorData,
 } from '../.test-build/features/foundation/recordEditors.js'
@@ -60,20 +56,4 @@ test('共享编辑器保留隐藏持久化数据且不把它变成自定义字�
   assert.equal(split.knownListFields.has('behavior_anchors'), true)
   assert.ok(!split.custom.some((field) => field.key === 'planning_source_ref'))
   assert.ok(split.custom.some((field) => field.key === 'custom_lucky_token_name'))
-})
-
-test('mutation follow-up only follows an already-started semantic settlement', () => {
-  assert.deepEqual(settlementFollowUp({
-    change: { change_id: 'c1', requires_semantic: true },
-    settlement_request: { request_started: true, request_id: 'r1', message: '正在同步' },
-  }), { requestId: 'r1', changeId: 'c1', message: '正在同步' })
-  assert.equal(settlementFollowUp({
-    change: { change_id: 'c2', requires_semantic: false },
-    settlement_request: { request_started: false },
-  }), null)
-})
-
-test('项目切换后拒绝旧 settlement 完成结果', () => {
-  assert.equal(isCurrentProjectResult('p1', 'p1'), true)
-  assert.equal(isCurrentProjectResult('p1', 'p2'), false)
 })

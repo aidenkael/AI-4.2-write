@@ -19,7 +19,6 @@
     "src/features/settings/settingsSummary.ts",
     "src/features/storyMap/storyMapModel.ts",
     "src/features/presentation/authorPresentation.ts",
-    "src/features/projectData/mutationSettlement.ts",
     "src/features/foundation/recordEditors.tsx",
     "src/vite-env.d.ts",
     "src/tests/projectPageRuntimeHarness.tsx"
