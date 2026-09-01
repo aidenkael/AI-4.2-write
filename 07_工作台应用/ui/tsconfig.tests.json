@@ -21,6 +21,7 @@
     "src/features/presentation/authorPresentation.ts",
     "src/features/foundation/recordEditors.tsx",
     "src/features/foundation/relationSelectors.ts",
+    "src/features/foundation/foundationDesignRelations.ts",
     "src/features/planning/planningFields.ts",
     "src/vite-env.d.ts",
     "src/tests/projectPageRuntimeHarness.tsx"

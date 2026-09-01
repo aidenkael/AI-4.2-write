@@ -170,11 +170,14 @@ _AGENT_TASK_TEMPLATE = """你是 Go Write 的规划执行器。必须严格按�
     "events": [{{"key": "唯一键", "title": "计划事件", "description": "可选", "time_anchor": "仅显式已知时填写"}}],
     "foreshadowing": [{{"key": "唯一键", "title": "伏笔/承诺", "status": "planned", "description": "可选"}}],
     "mystery_information": [],
+    "domain_relations": [{{"relation_kind": "storyline_involves_character", "source_key": "故事线键", "target_key": "人物键"}}],
     "chapter_changes": [{{"title": "第1章", "chapter_number": 1, "min_words": 2500, "max_words": 4000, "task": "章节任务", "previous_recap": "上一章实际回顾", "synopsis": "章节梗概", "pov": "可选", "planned_location": "可选", "planned_time": "仅显式", "participating_characters": [], "new_characters": [], "key_beats": [], "foreshadowing": [], "conflict": "", "emotional_movement": "", "information_release_gap": "", "end_state_hook": "", "storyline": "", "stage": "", "notes": ""}}]
   }}
 }}
 
 planning_projection 只投影 model_output 中明确出现的结构化事实；未提到的类别必须是空列表，domain_profile 未涉及时为 null。所有投影仍是 future/planned，不是当前 Canon。关系端点可引用本投影 characters 的 key，或上下文给出的明确人物 ref，绝不按姓名猜测。章节变化只有在候选明确给出合法目标字数范围时才填写，否则保持空列表。世界/人物/关系/system/伏笔设计需要外部方法时可声明对应 knowledge_needs；空 needs 不检索。
+
+domain_relations：当投影包含真实跨元素关联时，用显式领域关系表达：每条 {{"relation_kind": "...", "source_key": "...", "target_key": "..."}}，端点为既有记录时可用 source_ref/target_ref（必须是上下文给出的明确同项目 ref）。relation_kind 只允许：character_affiliated_with_organization（人物→组织）、character_uses_system（人物→体系）、storyline_involves_character / storyline_involves_organization / storyline_involves_location（故事线→人物/组织/地点）、foreshadowing_related_to（伏笔→人物/世界/地点/组织/体系/故事线）、mystery_information_related_to（悬疑信息→同前）。绝不按姓名猜测端点；没有明确关联时保持空列表。
 
 作品信息：
 - 作品名：{name}

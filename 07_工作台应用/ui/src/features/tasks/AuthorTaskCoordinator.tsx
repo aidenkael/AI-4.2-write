@@ -63,6 +63,7 @@ import {
   type ProposeStoryWriteResult,
   type FoundationDesignResult,
   type FoundationDesignItem,
+  type FoundationDesignDomainRelation,
   type ReviewReport,
   type ReviewRequestStatus,
   type StoryPlanRequestStatus,
@@ -104,7 +105,7 @@ export interface AuthorTaskController {
   /** 作者明确确认（new_project / story_plan / story_write / foundation_design）；成功后任务清除。 */
   confirm(
     kind: 'new_project' | 'story_plan' | 'story_write' | 'foundation_design',
-    extra?: { items?: unknown[]; base_model_rev?: number },
+    extra?: { items?: unknown[]; relations?: unknown[]; base_model_rev?: number },
   ): Promise<unknown | null>
   /** 页面显式消费结果（review 报告 / 素材计划 / 蒸馏完成 / 失败展示后清理）。 */
   consume(): void
@@ -138,7 +139,7 @@ const cancellers: Record<AuthorTaskKind, (requestId: string) => Promise<unknown>
   foundation_design: cancelFoundationDesignRequest,
 }
 
-const confirmers: Partial<Record<AuthorTaskKind, ((task: AuthorTask, extra?: { items?: unknown[]; base_model_rev?: number }) => Promise<unknown>) | null>> = {
+const confirmers: Partial<Record<AuthorTaskKind, ((task: AuthorTask, extra?: { items?: unknown[]; relations?: unknown[]; base_model_rev?: number }) => Promise<unknown>) | null>> = {
   new_project: (task) =>
     confirmNewProject({ proposal_token: (task.result as ProposeResult).proposal_token }),
   story_plan: (task) =>
@@ -156,6 +157,7 @@ const confirmers: Partial<Record<AuthorTaskKind, ((task: AuthorTask, extra?: { i
       project_id: task.projectId as string,
       proposal_token: (task.result as FoundationDesignResult).proposal_token,
       items: (extra?.items ?? []) as FoundationDesignItem[],
+      relations: (extra?.relations ?? []) as FoundationDesignDomainRelation[],
       base_model_rev: extra?.base_model_rev ?? 0,
     }),
   review: null,
@@ -431,7 +433,7 @@ export function AuthorTaskCoordinatorProvider({ children }: { children: ReactNod
   const confirm = useCallback(
     async (
       kind: 'new_project' | 'story_plan' | 'story_write' | 'foundation_design',
-      extra?: { items?: unknown[]; base_model_rev?: number },
+      extra?: { items?: unknown[]; relations?: unknown[]; base_model_rev?: number },
     ): Promise<unknown | null> => {
       const current = taskRef.current
       if (!current || current.kind !== kind || current.status !== 'candidate') return null

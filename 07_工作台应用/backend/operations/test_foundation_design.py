@@ -61,6 +61,7 @@ def _final_result(
     rounds, characters=None, relationships=None, core_conflict=None,
     world_settings=None, locations=None, organizations=None, systems=None,
     story_lines=None, promise_foreshadowing=None, mystery_information=None,
+    domain_relations=None,
 ):
     return json.dumps({
         "objective": "基座设计目标。",
@@ -77,6 +78,7 @@ def _final_result(
             "story_lines": story_lines or [],
             "promise_foreshadowing": promise_foreshadowing or [],
             "mystery_information": mystery_information or [],
+            "domain_relations": domain_relations or [],
         },
         "knowledge_notes": "参考了检索包；scope 有限。",
         "assumptions": ["假设一"],
@@ -505,3 +507,380 @@ def test_no_parallel_retrieval_or_runtime_infra():
         assert banned not in source
     # 检索仍走 story_planning 的 P0 绑定件（同一 KnowledgeRetrieve 入口）
     assert "_retrieve_package" in source
+
+
+# ---------------------------------------------------------------------------
+# 显式领域关系：候选合同 + 确认后写回（零 AI；绝不按标题猜）
+# ---------------------------------------------------------------------------
+
+def _fd_round_only(request_id, package=EMPTY_PACKAGE):
+    fd_ops.execute_request_scoped_retrieval("地基主题", request_id)
+    return fd_ops._package_fingerprint(package)
+
+
+def _fd_prepare_and_complete(pid, monkeypatch, output_builder, request="完善地基"):
+    """prepare → 假 Agent 输出 → 轮询完成；返回 polled result。"""
+    def on_run(request):
+        import re
+        rid = re.search(r"--request ([0-9a-f]+)", request.task).group(1)
+        fp = _fd_round_only(rid)
+        return AgentResult(status="completed", output=output_builder(fp), agent=FakeAgent.name)
+
+    adapter = FakeAgent(on_run)
+    _direct(adapter, monkeypatch)
+    rev = project_model.read_project_model(pid)["model_rev"]
+    prepared = fd_ops.prepare_foundation_design(pid, request, rev)
+    _wait(prepared["request_id"])
+    polled = fd_ops.get_foundation_design_request(prepared["request_id"])
+    assert polled["status"] == "completed", polled.get("error")
+    return polled
+
+
+def test_fd_domain_relations_written_after_explicit_confirm_only(isolated, monkeypatch):
+    monkeypatch.setattr(fd_ops, "_retrieve_package", lambda query: EMPTY_PACKAGE)
+    project = _create_project("关系写回")
+    pid = project["project_id"]
+
+    def build(fp):
+        return _final_result([
+            {"topic": "地基主题", "query": "地基主题", "package_ref": fp,
+             "selected_knowledge_refs": [], "comparison": "0 命中。"},
+        ], characters=[
+            {"candidate_key": "char-a", "title": "林渊", "material_state": "future",
+             "data": {"one_line_intro": "主角"}},
+        ], organizations=[
+            {"candidate_key": "org-a", "title": "玄天宗", "material_state": "future",
+             "data": {"type": "宗门"}},
+        ], systems=[
+            {"candidate_key": "sys-a", "title": "玄灵境界", "material_state": "future",
+             "data": {"type": "修炼体系"}},
+        ], story_lines=[
+            {"candidate_key": "line-a", "title": "主线一", "material_state": "future",
+             "data": {"goal_purpose": "入门"}},
+        ], locations=[
+            {"candidate_key": "loc-a", "title": "北境", "material_state": "future",
+             "data": {"type": "地域"}},
+        ], promise_foreshadowing=[
+            {"candidate_key": "pf-a", "title": "旧玉佩", "material_state": "future",
+             "data": {"setup_trigger": "开局"}},
+        ], mystery_information=[
+            {"candidate_key": "myst-a", "title": "失踪真相", "material_state": "future",
+             "data": {"secret_fact": "秘密"}},
+        ], domain_relations=[
+            {"relation_kind": "character_affiliated_with_organization", "source_key": "char-a", "target_key": "org-a"},
+            {"relation_kind": "character_uses_system", "source_key": "char-a", "target_key": "sys-a"},
+            {"relation_kind": "storyline_involves_character", "source_key": "line-a", "target_key": "char-a"},
+            {"relation_kind": "storyline_involves_organization", "source_key": "line-a", "target_key": "org-a"},
+            {"relation_kind": "storyline_involves_location", "source_key": "line-a", "target_key": "loc-a"},
+            {"relation_kind": "foreshadowing_related_to", "source_key": "pf-a", "target_key": "char-a"},
+            {"relation_kind": "mystery_information_related_to", "source_key": "myst-a", "target_key": "org-a"},
+        ])
+
+    polled = _fd_prepare_and_complete(pid, monkeypatch, build)
+    candidate = polled["result"]["candidate"]
+    assert len(candidate["proposal"]["domain_relations"]) == 7
+    # 候选阶段零 authority 写：没有任何边被创建
+    assert project_model.read_project_model(pid)["dependencies"] == {}
+
+    items = []
+    for kind, entry in (
+        ("character", candidate["proposal"]["characters"][0]),
+        ("organization", candidate["proposal"]["organizations"][0]),
+        ("system", candidate["proposal"]["systems"][0]),
+        ("story_line", candidate["proposal"]["story_lines"][0]),
+        ("location", candidate["proposal"]["locations"][0]),
+        ("promise_foreshadowing", candidate["proposal"]["promise_foreshadowing"][0]),
+        ("mystery_information", candidate["proposal"]["mystery_information"][0]),
+    ):
+        items.append({**entry, "kind": kind})
+
+    # 未选关系不写：仅采用条目、不带关系 → 零边
+    confirmed = fd_ops.confirm_foundation_design(
+        pid, polled["result"]["proposal_token"], items,
+        project_model.read_project_model(pid)["model_rev"],
+    )
+    assert not confirmed["warnings"]
+    assert project_model.read_project_model(pid)["dependencies"] == {}
+
+
+def test_fd_selected_domain_relations_write_via_author_edit(isolated, monkeypatch):
+    monkeypatch.setattr(fd_ops, "_retrieve_package", lambda query: EMPTY_PACKAGE)
+    project = _create_project("关系选中")
+    pid = project["project_id"]
+
+    def build(fp):
+        return _final_result([
+            {"topic": "地基主题", "query": "地基主题", "package_ref": fp,
+             "selected_knowledge_refs": [], "comparison": "0 命中。"},
+        ], characters=[
+            {"candidate_key": "char-a", "title": "林渊", "material_state": "future",
+             "data": {"one_line_intro": "主角"}},
+        ], organizations=[
+            {"candidate_key": "org-a", "title": "玄天宗", "material_state": "future",
+             "data": {"type": "宗门"}},
+        ], domain_relations=[
+            {"relation_kind": "character_affiliated_with_organization", "source_key": "char-a", "target_key": "org-a"},
+        ])
+
+    polled = _fd_prepare_and_complete(pid, monkeypatch, build)
+    proposal = polled["result"]["candidate"]["proposal"]
+    items = [
+        {**proposal["characters"][0], "kind": "character"},
+        {**proposal["organizations"][0], "kind": "organization"},
+    ]
+    confirmed = fd_ops.confirm_foundation_design(
+        pid, polled["result"]["proposal_token"], items,
+        project_model.read_project_model(pid)["model_rev"],
+        relations=[{"relation_kind": "character_affiliated_with_organization",
+                    "source_key": "char-a", "target_key": "org-a"}],
+    )
+    assert not confirmed["warnings"]
+    model = project_model.read_project_model(pid)
+    edges = [edge for edge in model["dependencies"].values() if not edge.get("tombstoned")]
+    assert len(edges) == 1
+    edge = edges[0]
+    assert edge["relation_kind"] == "character_affiliated_with_organization"
+    assert model["objects"][edge["source_ref"]]["title"] == "林渊"
+    assert model["objects"][edge["target_ref"]]["title"] == "玄天宗"
+    assert edge["title"] == "所属组织"
+    # 写回经统一作者账本（domain_relation_edit）；零 AI 自动启动
+    ledger = author_edit._read_changes(author_edit._load(pid)[2], pid)["changes"]
+    assert any(item.get("source_kind") == "domain_relation_edit" for item in ledger)
+    assert all(not item.get("settlement_started") for item in ledger)
+
+
+def test_fd_excluded_endpoint_skips_relation_with_warning(isolated, monkeypatch):
+    monkeypatch.setattr(fd_ops, "_retrieve_package", lambda query: EMPTY_PACKAGE)
+    project = _create_project("端点排除")
+    pid = project["project_id"]
+
+    def build(fp):
+        return _final_result([
+            {"topic": "地基主题", "query": "地基主题", "package_ref": fp,
+             "selected_knowledge_refs": [], "comparison": "0 命中。"},
+        ], characters=[
+            {"candidate_key": "char-a", "title": "林渊", "material_state": "future",
+             "data": {"one_line_intro": "主角"}},
+        ], organizations=[
+            {"candidate_key": "org-a", "title": "玄天宗", "material_state": "future",
+             "data": {"type": "宗门"}},
+        ], domain_relations=[
+            {"relation_kind": "character_affiliated_with_organization", "source_key": "char-a", "target_key": "org-a"},
+        ])
+
+    polled = _fd_prepare_and_complete(pid, monkeypatch, build)
+    proposal = polled["result"]["candidate"]["proposal"]
+    # 作者只采用人物，排除组织候选 → 关系跳过 + 警告；绝不按同名既有对象猜。
+    confirmed = fd_ops.confirm_foundation_design(
+        pid, polled["result"]["proposal_token"],
+        [{**proposal["characters"][0], "kind": "character"}],
+        project_model.read_project_model(pid)["model_rev"],
+        relations=[{"relation_kind": "character_affiliated_with_organization",
+                    "source_key": "char-a", "target_key": "org-a"}],
+    )
+    assert confirmed["warnings"] == ["领域关系“所属组织”的端点未在本次确认中采用，已跳过。"]
+    assert project_model.read_project_model(pid)["dependencies"] == {}
+
+
+def test_fd_same_title_existing_object_never_silently_bound(isolated, monkeypatch):
+    monkeypatch.setattr(fd_ops, "_retrieve_package", lambda query: EMPTY_PACKAGE)
+    project = _create_project("同名不猜")
+    pid = project["project_id"]
+    # 既有同名组织（作者记录）
+    author_edit.create_foundation_record(
+        pid, base_model_rev=project_model.read_project_model(pid)["model_rev"],
+        category="organization_force", title="玄天宗", material_state="current", data={},
+    )
+
+    def build(fp):
+        return _final_result([
+            {"topic": "地基主题", "query": "地基主题", "package_ref": fp,
+             "selected_knowledge_refs": [], "comparison": "0 命中。"},
+        ], characters=[
+            {"candidate_key": "char-a", "title": "林渊", "material_state": "future",
+             "data": {"one_line_intro": "主角"}},
+        ], organizations=[
+            {"candidate_key": "org-a", "title": "玄天宗", "material_state": "future",
+             "data": {"type": "宗门"}},
+        ], domain_relations=[
+            {"relation_kind": "character_affiliated_with_organization", "source_key": "char-a", "target_key": "org-a"},
+        ])
+
+    polled = _fd_prepare_and_complete(pid, monkeypatch, build)
+    proposal = polled["result"]["candidate"]["proposal"]
+    # 排除候选组织 → 关系跳过；绝不静默绑定到既有同名“玄天宗”。
+    confirmed = fd_ops.confirm_foundation_design(
+        pid, polled["result"]["proposal_token"],
+        [{**proposal["characters"][0], "kind": "character"}],
+        project_model.read_project_model(pid)["model_rev"],
+        relations=[{"relation_kind": "character_affiliated_with_organization",
+                    "source_key": "char-a", "target_key": "org-a"}],
+    )
+    assert confirmed["warnings"]
+    model = project_model.read_project_model(pid)
+    assert model["dependencies"] == {}
+
+
+def test_fd_invalid_domain_relation_candidate_rejected(isolated, monkeypatch):
+    monkeypatch.setattr(fd_ops, "_retrieve_package", lambda query: EMPTY_PACKAGE)
+    project = _create_project("非法关系")
+    pid = project["project_id"]
+
+    def build_bad_kind(fp):
+        return _final_result([
+            {"topic": "地基主题", "query": "地基主题", "package_ref": fp,
+             "selected_knowledge_refs": [], "comparison": "0 命中。"},
+        ], characters=[{"candidate_key": "char-a", "title": "林渊", "data": {"one_line_intro": "x"}}],
+        domain_relations=[{"relation_kind": "freeform_link", "source_key": "char-a", "target_key": "char-a"}])
+
+    def build_missing_endpoint(fp):
+        return _final_result([
+            {"topic": "地基主题", "query": "地基主题", "package_ref": fp,
+             "selected_knowledge_refs": [], "comparison": "0 命中。"},
+        ], characters=[{"candidate_key": "char-a", "title": "林渊", "data": {"one_line_intro": "x"}}],
+        domain_relations=[{"relation_kind": "character_uses_system", "source_key": "char-a"}])
+
+    for builder in (build_bad_kind, build_missing_endpoint):
+        # 直接运行完整流程并断言 failed
+        def on_run(request):
+            import re
+            rid = re.search(r"--request ([0-9a-f]+)", request.task).group(1)
+            fp = _fd_round_only(rid)
+            return AgentResult(status="completed", output=builder(fp), agent=FakeAgent.name)
+
+        adapter = FakeAgent(on_run)
+        _direct(adapter, monkeypatch)
+        rev = project_model.read_project_model(pid)["model_rev"]
+        prep = fd_ops.prepare_foundation_design(pid, "非法关系设计", rev)
+        _wait(prep["request_id"])
+        polled = fd_ops.get_foundation_design_request(prep["request_id"])
+        assert polled["status"] == "failed"
+        assert project_model.read_project_model(pid)["dependencies"] == {}
+
+
+def test_fd_confirm_relation_key_never_in_proposal_rejected(isolated, monkeypatch):
+    monkeypatch.setattr(fd_ops, "_retrieve_package", lambda query: EMPTY_PACKAGE)
+    project = _create_project("幽灵键")
+    pid = project["project_id"]
+
+    def build(fp):
+        return _final_result([
+            {"topic": "地基主题", "query": "地基主题", "package_ref": fp,
+             "selected_knowledge_refs": [], "comparison": "0 命中。"},
+        ], characters=[
+            {"candidate_key": "char-a", "title": "林渊", "material_state": "future",
+             "data": {"one_line_intro": "主角"}},
+        ], organizations=[
+            {"candidate_key": "org-a", "title": "玄天宗", "material_state": "future",
+             "data": {"type": "宗门"}},
+        ], domain_relations=[
+            {"relation_kind": "character_affiliated_with_organization", "source_key": "char-a", "target_key": "org-a"},
+        ])
+
+    polled = _fd_prepare_and_complete(pid, monkeypatch, build)
+    proposal = polled["result"]["candidate"]["proposal"]
+    items = [
+        {**proposal["characters"][0], "kind": "character"},
+        {**proposal["organizations"][0], "kind": "organization"},
+    ]
+    # 端点键从未在候选中出现 → 拒绝（不是跳过）
+    with pytest.raises(fd_ops.FoundationDesignError):
+        fd_ops.confirm_foundation_design(
+            pid, polled["result"]["proposal_token"], items,
+            project_model.read_project_model(pid)["model_rev"],
+            relations=[{"relation_kind": "character_affiliated_with_organization",
+                        "source_key": "ghost-key", "target_key": "org-a"}],
+        )
+    # 确认载荷中的关系不属于本轮候选 → 拒绝
+    with pytest.raises(fd_ops.FoundationDesignError):
+        fd_ops.confirm_foundation_design(
+            pid, polled["result"]["proposal_token"], items,
+            project_model.read_project_model(pid)["model_rev"],
+            relations=[{"relation_kind": "character_uses_system",
+                        "source_key": "char-a", "target_key": "org-a"}],
+        )
+    # 未知/跨项目显式 ref → 拒绝
+    other = _create_project("外部作品")
+    foreign = author_edit.create_foundation_record(
+        other["project_id"], base_model_rev=0, category="character", title="外部人物",
+        material_state="current", data={},
+    )
+    foreign_ref = foreign["model"]["change_history"][-1]["detail"]["ref"]
+    with pytest.raises(fd_ops.FoundationDesignError):
+        fd_ops.confirm_foundation_design(
+            pid, polled["result"]["proposal_token"], items,
+            project_model.read_project_model(pid)["model_rev"],
+            relations=[{"relation_kind": "character_affiliated_with_organization",
+                        "source_ref": foreign_ref, "target_key": "org-a"}],
+        )
+    assert project_model.read_project_model(pid)["dependencies"] == {}
+
+
+def test_fd_duplicate_active_relation_warns_not_duplicated(isolated, monkeypatch):
+    monkeypatch.setattr(fd_ops, "_retrieve_package", lambda query: EMPTY_PACKAGE)
+    project = _create_project("重复防护")
+    pid = project["project_id"]
+    char = author_edit.create_foundation_record(
+        pid, base_model_rev=0, category="character", title="林渊",
+        material_state="current", data={},
+    )
+    char_ref = char["model"]["change_history"][-1]["detail"]["ref"]
+    org = author_edit.create_foundation_record(
+        pid, base_model_rev=char["model"]["model_rev"], category="organization_force",
+        title="玄天宗", material_state="current", data={},
+    )
+    org_ref = org["model"]["change_history"][-1]["detail"]["ref"]
+    author_edit.update_foundation_record(
+        pid, base_model_rev=org["model"]["model_rev"], ref=char_ref,
+        relations=[{"relation_kind": "character_affiliated_with_organization", "target_ref": org_ref}],
+    )
+
+    def build(fp):
+        return _final_result([
+            {"topic": "地基主题", "query": "地基主题", "package_ref": fp,
+             "selected_knowledge_refs": [], "comparison": "0 命中。"},
+        ], characters=[
+            {"candidate_key": "char-a", "title": "新人物", "material_state": "future",
+             "data": {"one_line_intro": "新"}},
+        ], domain_relations=[
+            {"relation_kind": "character_affiliated_with_organization",
+             "source_ref": char_ref, "target_ref": org_ref},
+        ])
+
+    polled = _fd_prepare_and_complete(pid, monkeypatch, build)
+    proposal = polled["result"]["candidate"]["proposal"]
+    confirmed = fd_ops.confirm_foundation_design(
+        pid, polled["result"]["proposal_token"],
+        [{**proposal["characters"][0], "kind": "character"}],
+        project_model.read_project_model(pid)["model_rev"],
+        relations=[{"relation_kind": "character_affiliated_with_organization",
+                    "source_ref": char_ref, "target_ref": org_ref}],
+    )
+    assert any("已存在" in warning for warning in confirmed["warnings"])
+    edges = [e for e in project_model.read_project_model(pid)["dependencies"].values() if not e.get("tombstoned")]
+    assert len(edges) == 1
+
+
+def test_fd_authority_view_includes_bounded_existing_relations(isolated, monkeypatch):
+    monkeypatch.setattr(fd_ops, "_retrieve_package", lambda query: EMPTY_PACKAGE)
+    project = _create_project("视图关系")
+    pid = project["project_id"]
+    char = author_edit.create_foundation_record(
+        pid, base_model_rev=0, category="character", title="林渊",
+        material_state="current", data={},
+    )
+    char_ref = char["model"]["change_history"][-1]["detail"]["ref"]
+    org = author_edit.create_foundation_record(
+        pid, base_model_rev=char["model"]["model_rev"], category="organization_force",
+        title="玄天宗", material_state="current", data={},
+    )
+    org_ref = org["model"]["change_history"][-1]["detail"]["ref"]
+    author_edit.update_foundation_record(
+        pid, base_model_rev=org["model"]["model_rev"], ref=char_ref,
+        relations=[{"relation_kind": "character_affiliated_with_organization", "target_ref": org_ref}],
+    )
+    from operations.project_snapshot import get_project_snapshot
+    view = fd_ops._authority_view(get_project_snapshot(pid))
+    assert view["existing_relations"] == ["林渊 — 所属组织 → 玄天宗"]
+    # 绝不暴露 ref / relation_kind 内部身份给作者面视图行文本（只有标题）
+    assert all("gw2_" not in row for row in view["existing_relations"])

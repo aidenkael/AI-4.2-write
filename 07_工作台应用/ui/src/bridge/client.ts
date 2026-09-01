@@ -420,6 +420,8 @@ export interface PlanningProjection {
   storylines: Array<Record<string, unknown>>
   events: Array<Record<string, unknown>>
   foreshadowing: Array<Record<string, unknown>>
+  /** 显式领域关系投影（future；端点只用 key 或同项目 ref，不按标题猜）。 */
+  domain_relations?: Array<Record<string, unknown>>
   chapter_changes: Array<Record<string, unknown>>
 }
 
@@ -1249,6 +1251,14 @@ export interface FoundationDesignItem {
   label?: string
 }
 
+export interface FoundationDesignDomainRelation {
+  relation_kind: string
+  source_key?: string | null
+  target_key?: string | null
+  source_ref?: string | null
+  target_ref?: string | null
+}
+
 export interface FoundationDesignCandidate {
   status: string
   objective: string
@@ -1265,6 +1275,7 @@ export interface FoundationDesignCandidate {
     promise_foreshadowing: FoundationDesignItem[]
     mystery_information: FoundationDesignItem[]
     core_conflict: FoundationDesignItem | null
+    domain_relations?: FoundationDesignDomainRelation[]
   }
   assumptions: string[]
   knowledge_notes: string
@@ -1307,6 +1318,8 @@ export async function confirmFoundationDesign(payload: {
   project_id: string
   proposal_token: string
   items: FoundationDesignItem[]
+  /** 作者选中采用的显式领域关系（只发送选中的；未选不写）。 */
+  relations?: FoundationDesignDomainRelation[]
   base_model_rev: number
 }): Promise<{ project_id: string; model_rev: number; created: Array<{ kind: string; title: string; ref: string }>; warnings: string[]; settlement_started: boolean; message: string }> {
   return call('confirm_foundation_design', payload)

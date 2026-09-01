@@ -289,6 +289,7 @@ class AppApi:
                 proposal_token=str(payload.get("proposal_token") or ""),
                 items=payload.get("items") if isinstance(payload.get("items"), list) else [],
                 base_model_rev=int(payload.get("base_model_rev") or 0),
+                relations=payload.get("relations") if isinstance(payload.get("relations"), list) else None,
             ))
         except (FoundationDesignError, AuthorEditError) as exc:
             return _err(CODE_FOUNDATION_DESIGN_ERROR, str(exc))

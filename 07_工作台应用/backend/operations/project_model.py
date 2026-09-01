@@ -120,6 +120,14 @@ _DOMAIN_RELATION_SPECS: dict[str, dict[str, Any]] = {
     },
 }
 DOMAIN_RELATION_KINDS = frozenset(_DOMAIN_RELATION_SPECS)
+
+
+def domain_relation_title(relation_kind: str) -> str:
+    """领域关系的作者可读标题（未知类型返回空串）。"""
+    spec = _DOMAIN_RELATION_SPECS.get(relation_kind)
+    return spec["title"] if spec else ""
+
+
 _UNSET = object()
 
 
@@ -1645,7 +1653,7 @@ def validate_planning_projection(value: Any) -> dict[str, Any]:
         "characters", "relationships", "settings", "systems", "locations", "organizations",
         "storylines", "events", "foreshadowing", "mystery_information", "chapter_changes",
     }
-    allowed = collections | {"domain_profile"}
+    allowed = collections | {"domain_profile", "domain_relations"}
     unknown = set(value) - allowed
     if unknown:
         raise ProjectModelError(f"planning_projection 包含未知字段：{', '.join(sorted(unknown))}。")
@@ -1658,6 +1666,36 @@ def validate_planning_projection(value: Any) -> dict[str, Any]:
         if unknown_profile:
             raise ProjectModelError("planning_projection.domain_profile 包含未知字段。")
         normalized["domain_profile"] = copy.deepcopy(profile)
+    normalized["domain_relations"] = []
+    seen_relation_identities: set[tuple[str, str, str]] = set()
+    for index, entry in enumerate(value.get("domain_relations") or []):
+        if not isinstance(entry, dict):
+            raise ProjectModelError(f"planning_projection.domain_relations[{index}] 必须是对象。")
+        item = copy.deepcopy(entry)
+        relation_kind = item.get("relation_kind")
+        if not isinstance(relation_kind, str) or relation_kind not in _DOMAIN_RELATION_SPECS:
+            raise ProjectModelError(f"planning_projection.domain_relations[{index}].relation_kind 不支持。")
+        source_explicit = any(
+            isinstance(item.get(field), str) and item[field].strip()
+            for field in ("source_key", "source_ref")
+        )
+        target_explicit = any(
+            isinstance(item.get(field), str) and item[field].strip()
+            for field in ("target_key", "target_ref")
+        )
+        if not source_explicit or not target_explicit:
+            raise ProjectModelError(
+                f"planning_projection.domain_relations[{index}] 必须为 source/target 分别提供明确的 key 或 ref。"
+            )
+        identity = (
+            relation_kind,
+            (item.get("source_key") or "").strip() or f"ref:{item['source_ref'].strip()}",
+            (item.get("target_key") or "").strip() or f"ref:{item['target_ref'].strip()}",
+        )
+        if identity in seen_relation_identities:
+            raise ProjectModelError(f"planning_projection.domain_relations[{index}] 与前面的领域关系重复。")
+        seen_relation_identities.add(identity)
+        normalized["domain_relations"].append(item)
     for key in sorted(collections):
         entries = value.get(key, [])
         if not isinstance(entries, list):
@@ -1800,6 +1838,36 @@ def apply_planning_projection(
             model["dependencies"][edge_ref] = {
                 "ref": edge_ref, "source_ref": source, "target_ref": target,
                 "relation_kind": "character_relationship", "title": rel["label"].strip(),
+                "material_state": "future", "data": payload,
+                "field_authority": _initial_field_authority(payload, "confirmed_plan", next_rev),
+                "author_fields": [], "tombstoned": False,
+            }
+            created_edges.append(edge_ref)
+        # 通用领域关系：仍是 future 规划，不是 Canon；端点只用投影键或明确同项目
+        # ref（绝不按标题猜测）；非法/重复关系会使整个规划投影失败并回滚。
+        for rel in normalized["domain_relations"]:
+            relation_kind = rel["relation_kind"]
+            source = key_to_ref.get(rel.get("source_key")) or rel.get("source_ref")
+            target = key_to_ref.get(rel.get("target_key")) or rel.get("target_ref")
+            if not source or not target:
+                raise ProjectModelError("规划领域关系端点必须引用本投影键或明确同项目 ref。")
+            _validate_domain_relation(
+                model, relation_kind=relation_kind, source_ref=source, target_ref=target,
+            )
+            duplicate = _find_active_duplicate_edge(
+                model, relation_kind=relation_kind, source_ref=source, target_ref=target,
+            )
+            if duplicate is not None:
+                raise ProjectModelError("规划领域关系与既有活动关系重复，已拒绝。")
+            edge_ref = _next_ref(model, "edge")
+            payload = {k: copy.deepcopy(v) for k, v in rel.items() if k not in {
+                "relation_kind", "source_key", "target_key", "source_ref", "target_ref",
+            }}
+            payload["planning_source_ref"] = source_ref.strip()
+            model["dependencies"][edge_ref] = {
+                "ref": edge_ref, "source_ref": source, "target_ref": target,
+                "relation_kind": relation_kind,
+                "title": _DOMAIN_RELATION_SPECS[relation_kind]["title"],
                 "material_state": "future", "data": payload,
                 "field_authority": _initial_field_authority(payload, "confirmed_plan", next_rev),
                 "author_fields": [], "tombstoned": False,

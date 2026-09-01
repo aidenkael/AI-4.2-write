@@ -377,3 +377,136 @@ def test_total_target_words_can_be_explicitly_cleared(project):
         project["project_id"], base_model_rev=planned["model_rev"], total_target_words=None,
     )
     assert cleared["length_plan"]["total_target_words"] is None
+
+
+# ---------------------------------------------------------------------------
+# 规划投影 domain_relations 合同（future / confirmed_plan；不按标题猜；失败整体回滚）
+# ---------------------------------------------------------------------------
+
+def test_planning_projection_domain_relations_validator_contract(project):
+    valid = model_ops.validate_planning_projection({
+        "domain_relations": [
+            {"relation_kind": "storyline_involves_character", "source_key": "line_1", "target_key": "char_1"},
+            {"relation_kind": "character_uses_system", "source_ref": "gw2_ref_a", "target_ref": "gw2_ref_b"},
+        ],
+    })
+    assert len(valid["domain_relations"]) == 2
+    assert valid["domain_relations"][0]["source_key"] == "line_1"
+    with pytest.raises(model_ops.ProjectModelError, match="不支持"):
+        model_ops.validate_planning_projection({
+            "domain_relations": [
+                {"relation_kind": "freeform_link", "source_key": "a", "target_key": "b"},
+            ],
+        })
+    with pytest.raises(model_ops.ProjectModelError, match="明确的 key 或 ref"):
+        model_ops.validate_planning_projection({
+            "domain_relations": [
+                {"relation_kind": "storyline_involves_character", "source_key": "line_1", "target_title": "人名"},
+            ],
+        })
+    with pytest.raises(model_ops.ProjectModelError, match="重复"):
+        model_ops.validate_planning_projection({
+            "domain_relations": [
+                {"relation_kind": "storyline_involves_character", "source_key": "line_1", "target_key": "char_1"},
+                {"relation_kind": "storyline_involves_character", "source_key": "line_1", "target_key": "char_1"},
+            ],
+        })
+
+
+def test_apply_planning_projection_domain_relations_future_confirmed_plan(project):
+    projected = model_ops.apply_planning_projection(
+        project["project_id"], base_model_rev=0, source_ref="decision:plan-rel",
+        projection={
+            "characters": [{"key": "char_1", "title": "规划人物"}],
+            "organizations": [{"key": "org_1", "title": "规划组织"}],
+            "storylines": [{"key": "line_1", "title": "规划故事线"}],
+            "domain_relations": [
+                {"relation_kind": "character_affiliated_with_organization",
+                 "source_key": "char_1", "target_key": "org_1"},
+                {"relation_kind": "storyline_involves_character",
+                 "source_key": "line_1", "target_key": "char_1"},
+            ],
+        },
+    )
+    edges = [edge for edge in projected["dependencies"].values() if not edge.get("tombstoned")]
+    assert {edge["relation_kind"] for edge in edges} == {
+        "character_affiliated_with_organization", "storyline_involves_character",
+    }
+    for edge in edges:
+        # 规划关系永远是 future，不是当前 Canon；权威 = confirmed_plan；携带规划来源。
+        assert edge["material_state"] == "future"
+        assert edge["data"]["planning_source_ref"] == "decision:plan-rel"
+        assert all(meta["source"] == "confirmed_plan" for meta in edge["field_authority"].values())
+        assert edge["author_fields"] == []
+
+
+def test_apply_planning_projection_invalid_relation_fails_whole_projection(project):
+    base = model_ops.load_project_model(project["project_id"])
+    with pytest.raises(model_ops.ProjectModelError, match="终点类型"):
+        model_ops.apply_planning_projection(
+            project["project_id"], base_model_rev=base["model_rev"], source_ref="decision:plan-bad",
+            projection={
+                "characters": [{"key": "char_1", "title": "规划人物"}],
+                "locations": [{"key": "loc_1", "title": "规划地点"}],
+                "domain_relations": [
+                    {"relation_kind": "character_uses_system",
+                     "source_key": "char_1", "target_key": "loc_1"},
+                ],
+            },
+        )
+    # 整体失败：对象与关系都未部分落盘（同一 _commit 原子写）。
+    assert model_ops.load_project_model(project["project_id"]) == base
+    # 未知投影键 / 外部 ref → 同样整体失败，不按标题猜。
+    with pytest.raises(model_ops.ProjectModelError, match="本投影键或明确同项目 ref"):
+        model_ops.apply_planning_projection(
+            project["project_id"], base_model_rev=base["model_rev"], source_ref="decision:plan-bad2",
+            projection={
+                "characters": [{"key": "char_1", "title": "规划人物"}],
+                "organizations": [{"key": "org_1", "title": "规划组织"}],
+                "domain_relations": [
+                    {"relation_kind": "character_affiliated_with_organization",
+                     "source_key": "char_1", "target_key": "ghost_key"},
+                ],
+            },
+        )
+    with pytest.raises(model_ops.ProjectModelError, match="跨项目"):
+        model_ops.apply_planning_projection(
+            project["project_id"], base_model_rev=base["model_rev"], source_ref="decision:plan-bad3",
+            projection={
+                "characters": [{"key": "char_1", "title": "规划人物"}],
+                "domain_relations": [
+                    {"relation_kind": "character_affiliated_with_organization",
+                     "source_key": "char_1", "target_ref": "gw2_obj_foreign_00000001"},
+                ],
+            },
+        )
+    assert model_ops.load_project_model(project["project_id"]) == base
+
+
+def test_apply_planning_projection_duplicate_relation_fails_closed(project):
+    first = model_ops.apply_planning_projection(
+        project["project_id"], base_model_rev=0, source_ref="decision:plan-dup-1",
+        projection={
+            "characters": [{"key": "char_1", "title": "规划人物"}],
+            "organizations": [{"key": "org_1", "title": "规划组织"}],
+            "domain_relations": [
+                {"relation_kind": "character_affiliated_with_organization",
+                 "source_key": "char_1", "target_key": "org_1"},
+            ],
+        },
+    )
+    char_ref = next(ref for ref, obj in first["objects"].items() if obj["title"] == "规划人物")
+    org_ref = next(ref for ref, obj in first["objects"].items() if obj["title"] == "规划组织")
+    with pytest.raises(model_ops.ProjectModelError, match="重复"):
+        model_ops.apply_planning_projection(
+            project["project_id"], base_model_rev=first["model_rev"], source_ref="decision:plan-dup-2",
+            projection={
+                "domain_relations": [
+                    {"relation_kind": "character_affiliated_with_organization",
+                     "source_ref": char_ref, "target_ref": org_ref},
+                ],
+            },
+        )
+    edges = [e for e in model_ops.load_project_model(project["project_id"])["dependencies"].values()
+             if not e.get("tombstoned")]
+    assert len(edges) == 1

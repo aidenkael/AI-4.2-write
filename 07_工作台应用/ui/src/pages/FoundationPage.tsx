@@ -1,6 +1,6 @@
 import { Check, FileCheck2, GitBranch, MapPin, Pencil, Plus, Save, Sparkles, Trash2, UserRound, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import type { FoundationDesignItem, FoundationDesignResult, ProjectDataEntry } from '../bridge/client'
+import type { FoundationDesignItem, FoundationDesignResult, ProjectData, ProjectDataEntry } from '../bridge/client'
 import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { useProjectDataController } from '../features/projectData/useProjectDataController'
@@ -18,6 +18,14 @@ import {
   RELATION_SPECS_BY_SOURCE_CATEGORY,
   type RelationSpec,
 } from '../features/foundation/relationSelectors'
+import {
+  fdKeyTitles,
+  fdRefTitles,
+  fdRelationRows,
+  fdRelationRowText,
+  fdSelectedRelationPayload,
+  type FdRelationSelection,
+} from '../features/foundation/foundationDesignRelations'
 
 type FoundationTab =
   | 'characters' | 'relationships' | 'canon_facts' | 'locations' | 'organizations'
@@ -303,6 +311,7 @@ function fdItemsFromResult(result: FoundationDesignResult): FdEditItem[] {
 function FoundationDesignDrawer(props: {
   projectId: string
   modelRev: number
+  projectData: ProjectData | null
   initialRequest?: string
   notify: (message: string) => void
   reload: () => Promise<void>
@@ -313,13 +322,22 @@ function FoundationDesignDrawer(props: {
   const [request, setRequest] = useState(props.initialRequest ?? '')
   const [localError, setLocalError] = useState<string | null>(null)
   const [edits, setEdits] = useState<FdEditItem[]>([])
+  const [relationSelections, setRelationSelections] = useState<FdRelationSelection[]>([])
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     if (fdTask?.status === 'candidate' && fdTask.result) {
-      setEdits(fdItemsFromResult(fdTask.result as FoundationDesignResult))
+      const result = fdTask.result as FoundationDesignResult
+      setEdits(fdItemsFromResult(result))
+      const proposal = result.candidate.proposal as unknown as Record<string, unknown>
+      const rows = fdRelationRows(
+        (proposal.domain_relations ?? []) as Parameters<typeof fdRelationRows>[0],
+        fdKeyTitles(proposal),
+        fdRefTitles(props.projectData),
+      )
+      setRelationSelections(rows.map((row) => ({ include: true, row })))
     }
-  }, [fdTask?.status, fdTask?.result])
+  }, [fdTask?.status, fdTask?.result, props.projectData])
 
   const begin = async () => {
     setLocalError(null)
@@ -339,7 +357,9 @@ function FoundationDesignDrawer(props: {
       ...item,
       data: fdStringsToData(data, listFields),
     }))
-    const result = await confirm('foundation_design', { items, base_model_rev: props.modelRev })
+    // 确认载荷只发送作者选中的显式领域关系；未选不写。
+    const relations = fdSelectedRelationPayload(relationSelections)
+    const result = await confirm('foundation_design', { items, relations, base_model_rev: props.modelRev })
     setBusy(false)
     if (result) {
       props.notify('作品地基已更新。')
@@ -386,6 +406,23 @@ function FoundationDesignDrawer(props: {
                 ))}
               </div>
             ))}
+            {relationSelections.length > 0 && (
+              <div className="fd-relations">
+                <p className="muted-note">建议的跨元素关联（只有勾选的会写入；端点按候选身份解析，不按名称猜测）：</p>
+                {relationSelections.map((selection, index) => (
+                  <label className="fd-relation-row" key={`fd-rel-${index}`}>
+                    <input
+                      type="checkbox"
+                      checked={selection.include}
+                      onChange={(event) => setRelationSelections(relationSelections.map((item, i) => (
+                        i === index ? { ...item, include: event.target.checked } : item
+                      )))}
+                    />
+                    {fdRelationRowText(selection.row) ?? '（关联端点不明确，不会写入）'}
+                  </label>
+                ))}
+              </div>
+            )}
             {candidate.candidate.assumptions.length > 0 && (
               <p className="muted-note">假设：{candidate.candidate.assumptions.join('；')}</p>
             )}
@@ -747,6 +784,7 @@ export function FoundationPage() {
         <FoundationDesignDrawer
           projectId={selected.project_id}
           modelRev={controller.data?.model_rev ?? 0}
+          projectData={controller.data}
           initialRequest={designPrefill}
           notify={actions.notify}
           reload={controller.reload}

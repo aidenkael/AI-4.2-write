@@ -123,7 +123,8 @@ _AGENT_TASK_TEMPLATE = """你是 Go Write 的基座设计执行器（重大新�
     "story_lines": [{{"candidate_key": "line_local_1", "title": "故事线", "material_state": "future", "data": {{"goal_purpose": "目标", "stakes": "利害", "main_conflict": "主冲突"}}}}],
     "promise_foreshadowing": [{{"candidate_key": "pf_local_1", "title": "伏笔/承诺", "material_state": "future", "data": {{"setup_trigger": "触发", "reader_question_promise": "读者问题", "intended_payoff": "预期回收"}}}}],
     "mystery_information": [{{"candidate_key": "myst_local_1", "title": "秘密信息", "material_state": "future", "data": {{"secret_fact": "秘密事实", "who_knows": "知情者", "reveal_status": "揭示状态"}}}}],
-    "core_conflict": {{"candidate_key": "conflict_local_1", "title": "核心冲突", "material_state": "future", "data": {{"main_conflict": "冲突描述", "stakes": "利害", "goal_purpose": "目标"}}}}
+    "core_conflict": {{"candidate_key": "conflict_local_1", "title": "核心冲突", "material_state": "future", "data": {{"main_conflict": "冲突描述", "stakes": "利害", "goal_purpose": "目标"}}}},
+    "domain_relations": [{{"relation_kind": "character_affiliated_with_organization", "source_key": "char_local_1", "target_key": "org_local_1"}}]
   }},
   "knowledge_notes": "参考了哪些知识、scope/boundary、未采用什么（作者可读）",
   "assumptions": ["AI 解读中的假设，作者尚未确认"]
@@ -135,6 +136,8 @@ _AGENT_TASK_TEMPLATE = """你是 Go Write 的基座设计执行器（重大新�
 作者基座设计请求：{author_request}
 
 候选条目必须以 title/material_state/data 表达作者可编辑结构化字段；不要只塞进 design_summary。关系端点优先使用同一候选内人物的 candidate_key；既有记录只能使用已经机械确认的 source_ref/target_ref。core_conflict 不是项目类别；它只能作为候选摘要，或在确认时按故事线/主冲突语义写入 story_line。
+
+proposal.domain_relations：当提案已包含真实跨元素关联时，必须用显式关系表达，而不是只依赖 faction_org / participating_characters / related_organizations_locations / related_entities 等文本字段。每条形如 {{"relation_kind": "...", "source_key": "...", "target_key": "..."}}（端点为既有记录时可用 source_ref/target_ref）。relation_kind 只允许：character_affiliated_with_organization（人物→组织）、character_uses_system（人物→体系）、storyline_involves_character / storyline_involves_organization / storyline_involves_location（故事线→人物/组织/地点）、foreshadowing_related_to（伏笔→人物/世界/地点/组织/体系/故事线）、mystery_information_related_to（悬疑信息→同前）。端点不是候选键或机械已知 ref 时不得编造关系；不强制每条候选都有关联，domain_relations 为空列表合法。
 
 最终回复必须只有合法 JSON；但在生成最终回复之前，你必须先按主题执行检索命令并读取结果。"""
 
@@ -266,12 +269,18 @@ def _authority_view(snapshot: dict[str, Any]) -> dict[str, Any]:
         {"title": str(item.get("title") or ""), "label": str((item.get("record") or {}).get("label") or "")}
         for item in (snapshot["current"].get("relationships") or [])
     ][:12]
+    # 既有活动显式领域关系的紧凑作者可读投影（避免提出明显重复的矛盾关联；不暴露 ref）。
+    existing_relations = [
+        f"{item.get('source_title') or ''} — {item.get('title') or ''} → {item.get('target_title') or ''}"
+        for item in (snapshot.get("explicit_dependencies") or [])
+    ][:12]
     return {
         "name": snapshot.get("name") or "",
         "work_direction": snapshot.get("work_direction") or "",
         "reader_promise": snapshot.get("reader_promise") or "",
         "characters": titles("current", "characters", 12),
         "relationships": relationships,
+        "existing_relations": existing_relations,
         "world_settings": titles("current", "settings", 8),
         "organizations": titles("current", "organizations", 8),
         "story_lines": titles("current", "storylines", 8),
@@ -563,6 +572,7 @@ def _parse_agent_result(output: str) -> dict[str, Any]:
             proposal.get("mystery_information") or [], "proposal.mystery_information", require_state=True,
         ),
         "core_conflict": None,
+        "domain_relations": _validate_proposal_domain_relations(proposal.get("domain_relations") or []),
     }
     rels = proposal.get("relationships") or []
     if not isinstance(rels, list):
@@ -619,6 +629,45 @@ def _parse_agent_result(output: str) -> dict[str, Any]:
         "assumptions": assumptions,
         "knowledge_notes": knowledge_notes,
     }
+
+
+def _validate_proposal_domain_relations(value: Any) -> list[dict[str, Any]]:
+    """候选中的显式领域关系：只接受支持的类型与明确的 key/ref 端点；
+    新领域关系不接受仅凭标题的端点身份；重复身份拒绝。"""
+    if not isinstance(value, list):
+        raise FoundationDesignError("proposal.domain_relations 类型错误（应为列表）。")
+    relations: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for index, rel in enumerate(value):
+        if not isinstance(rel, dict):
+            raise FoundationDesignError(f"proposal.domain_relations[{index}] 必须是对象。")
+        relation_kind = str(rel.get("relation_kind") or "").strip()
+        if relation_kind not in project_model.DOMAIN_RELATION_KINDS:
+            raise FoundationDesignError(
+                f"proposal.domain_relations[{index}].relation_kind 不支持。"
+            )
+        source_key = _validate_candidate_key(rel.get("source_key"))
+        target_key = _validate_candidate_key(rel.get("target_key"))
+        source_ref = str(rel.get("source_ref") or "").strip()
+        target_ref = str(rel.get("target_ref") or "").strip()
+        if not (source_key or source_ref) or not (target_key or target_ref):
+            raise FoundationDesignError(
+                f"proposal.domain_relations[{index}] 缺少明确的 source/target key 或 ref。"
+            )
+        identity = (
+            relation_kind,
+            source_key or f"ref:{source_ref}",
+            target_key or f"ref:{target_ref}",
+        )
+        if identity in seen:
+            raise FoundationDesignError(f"proposal.domain_relations[{index}] 与前面的候选关系重复。")
+        seen.add(identity)
+        relations.append({
+            "relation_kind": relation_kind,
+            "source_key": source_key, "target_key": target_key,
+            "source_ref": source_ref, "target_ref": target_ref,
+        })
+    return relations
 
 
 def _finalize_request(request: dict[str, Any], response: dict[str, Any]) -> dict[str, Any]:
@@ -853,18 +902,90 @@ def _has_existing_same_title(model: dict[str, Any], kind: str, title: str) -> bo
     return False
 
 
+def _relation_identity(rel: dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(rel.get("relation_kind") or ""),
+        (rel.get("source_key") or "") or f"ref:{rel.get('source_ref') or ''}",
+        (rel.get("target_key") or "") or f"ref:{rel.get('target_ref') or ''}",
+    )
+
+
+def _validate_confirm_relations(
+    selected: Any, proposed: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """作者确认的领域关系必须来自本轮候选；类型/端点身份机械校验。"""
+    if selected is None:
+        return []
+    if not isinstance(selected, list):
+        raise FoundationDesignError("确认的领域关系必须是列表或省略。")
+    proposed_identities = {_relation_identity(rel) for rel in proposed}
+    confirmed: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for index, rel in enumerate(selected):
+        if not isinstance(rel, dict):
+            raise FoundationDesignError(f"确认领域关系[{index}] 必须是对象。")
+        relation_kind = str(rel.get("relation_kind") or "").strip()
+        if relation_kind not in project_model.DOMAIN_RELATION_KINDS:
+            raise FoundationDesignError(f"确认领域关系[{index}] 的类型不支持。")
+        source_key = _validate_candidate_key(rel.get("source_key"))
+        target_key = _validate_candidate_key(rel.get("target_key"))
+        source_ref = str(rel.get("source_ref") or "").strip()
+        target_ref = str(rel.get("target_ref") or "").strip()
+        if not (source_key or source_ref) or not (target_key or target_ref):
+            raise FoundationDesignError(f"确认领域关系[{index}] 缺少明确的 source/target key 或 ref。")
+        normalized = {
+            "relation_kind": relation_kind,
+            "source_key": source_key, "target_key": target_key,
+            "source_ref": source_ref, "target_ref": target_ref,
+        }
+        identity = _relation_identity(normalized)
+        if identity in seen:
+            raise FoundationDesignError(f"确认领域关系[{index}] 重复。")
+        seen.add(identity)
+        if identity not in proposed_identities:
+            raise FoundationDesignError("确认的领域关系不属于本轮候选，已拒绝。")
+        confirmed.append(normalized)
+    return confirmed
+
+
+def _candidate_keys_in_proposal(candidate_doc: dict[str, Any]) -> set[str]:
+    """候选中出现过的全部 candidate_key / 端点 key（用于“从未存在”拒绝）。"""
+    keys: set[str] = set()
+    proposal = candidate_doc.get("proposal") if isinstance(candidate_doc, dict) else None
+    if not isinstance(proposal, dict):
+        return keys
+    for collection in (
+        "characters", "relationships", "world_settings", "locations", "organizations",
+        "systems", "story_lines", "promise_foreshadowing", "mystery_information",
+    ):
+        for item in proposal.get(collection) or []:
+            if not isinstance(item, dict):
+                continue
+            for key_field in ("candidate_key", "source_key", "target_key"):
+                key = item.get(key_field)
+                if isinstance(key, str) and key.strip():
+                    keys.add(key.strip())
+    core = proposal.get("core_conflict")
+    if isinstance(core, dict) and isinstance(core.get("candidate_key"), str) and core["candidate_key"].strip():
+        keys.add(core["candidate_key"].strip())
+    return keys
+
+
 def confirm_foundation_design(
     project_id: str,
     proposal_token: str,
     items: Any,
     base_model_rev: int,
+    relations: Any = None,
 ) -> dict[str, Any]:
     """作者明确确认：把选择/编辑后的提案条目写回同一项目 authority。
 
     - token 绑定 project_id（跨项目拒绝）；丢弃/失效的候选不可确认；
     - base_model_rev stale 守卫；项目写锁内顺序创建；
     - 作者确认即作者决定：field_authority=author；
-    - 语义需要时进入既有 change_settlement 路径（不新建第二条）。
+    - 选中的显式领域关系只按候选 key / 明确 ref 解析（绝不按标题猜测），
+      经中央规格校验后经 author_edit 写入；语义需要时进入既有
+      change_settlement 路径（不新建第二条）。
     """
     project_id = (project_id or "").strip()
     proposal_token = (proposal_token or "").strip()
@@ -888,6 +1009,16 @@ def confirm_foundation_design(
     meta = json.loads((matched / "proposal_meta.json").read_text(encoding="utf-8"))
     if str(meta.get("project_id") or "") != project_id:
         raise FoundationDesignError("候选不属于当前作品，已拒绝（项目隔离）。")
+    candidate_doc: dict[str, Any] = {}
+    proposal_file = matched / "proposal.json"
+    if proposal_file.exists():
+        try:
+            candidate_doc = json.loads(proposal_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            candidate_doc = {}
+    proposed_relations = (candidate_doc.get("proposal") or {}).get("domain_relations") or []
+    confirmed_relations = _validate_confirm_relations(relations, proposed_relations)
+    proposed_keys = _candidate_keys_in_proposal(candidate_doc)
 
     with author_edit.project_write_lock(project_id):
         model = project_model.load_project_model(project_id)
@@ -959,6 +1090,64 @@ def confirm_foundation_design(
             model = result["model"]
             created.append({
                 "kind": item["kind"], "title": item["label"],
+                "ref": result["model"]["change_history"][-1]["detail"]["ref"],
+            })
+
+        def resolve_relation_endpoint(rel: dict[str, Any], side: str) -> str | None:
+            key = rel.get(f"{side}_key")
+            if key:
+                if key in candidate_ref_by_key:
+                    return candidate_ref_by_key[key]
+                if key in proposed_keys:
+                    # 端点候选被作者排除/跳过 → 跳过关系并警告，绝不按标题猜。
+                    return None
+                raise FoundationDesignError("确认的领域关系引用了本轮候选中不存在的键，已拒绝。")
+            ref = rel.get(f"{side}_ref")
+            if ref:
+                obj = model.get("objects", {}).get(ref)
+                if not isinstance(obj, dict) or obj.get("tombstoned"):
+                    raise FoundationDesignError("确认的领域关系引用了未知或已退役的 ref，已拒绝。")
+                return ref
+            raise FoundationDesignError("确认的领域关系缺少明确端点，已拒绝。")
+
+        for rel in confirmed_relations:
+            source_ref = resolve_relation_endpoint(rel, "source")
+            target_ref = resolve_relation_endpoint(rel, "target")
+            relation_label = project_model.domain_relation_title(rel["relation_kind"])
+            if not source_ref or not target_ref:
+                warnings.append(f"领域关系“{relation_label}”的端点未在本次确认中采用，已跳过。")
+                continue
+            edge_state = (
+                "future"
+                if "future" in {
+                    model["objects"][source_ref].get("material_state", "current"),
+                    model["objects"][target_ref].get("material_state", "current"),
+                }
+                else "current"
+            )
+            try:
+                result = author_edit.create_domain_dependency(
+                    project_id, base_model_rev=rev, source_ref=source_ref,
+                    target_ref=target_ref, relation_kind=rel["relation_kind"],
+                    material_state=edge_state,
+                )
+            except (author_edit.AuthorEditError, project_model.ProjectModelError) as exc:
+                if "已存在" in str(exc):
+                    source_title = model["objects"][source_ref].get("title") or ""
+                    target_title = model["objects"][target_ref].get("title") or ""
+                    warnings.append(
+                        f"领域关系“{source_title} — {relation_label} → {target_title}”已存在，未重复创建。"
+                    )
+                    continue
+                raise FoundationDesignError(str(exc)) from exc
+            rev = int(result["model"]["model_rev"])
+            model = result["model"]
+            created.append({
+                "kind": "domain_relation",
+                "title": (
+                    f"{model['objects'][source_ref].get('title') or ''} — {relation_label} → "
+                    f"{model['objects'][target_ref].get('title') or ''}"
+                ),
                 "ref": result["model"]["change_history"][-1]["detail"]["ref"],
             })
         # Author acceptance makes the selected records durable immediately.

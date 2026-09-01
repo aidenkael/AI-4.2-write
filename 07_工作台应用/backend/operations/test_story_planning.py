@@ -1904,3 +1904,119 @@ def test_confirmed_projection_creates_future_entities_only(isolated, real_projec
     assert [item["title"] for item in snapshot["future"]["characters"]] == ["林砚", "苏晚晴"]
     assert snapshot["future"]["relationships"][0]["title"] == "规划中的同盟"
     assert snapshot["chapters"][0]["fine_outline"]["task"] == "让两人第一次合作"
+
+
+def _projection_agent_json_with_relations(domain_relations):
+    output = json.loads(VALID_AGENT_JSON)
+    output["planning_projection"] = {
+        "characters": [{"key": "lead", "title": "林研", "role": "主角"}],
+        "organizations": [{"key": "org", "title": "旧城商会", "purpose": "控制码头"}],
+        "relationships": [],
+        "settings": [], "storylines": [], "events": [], "foreshadowing": [],
+        "domain_relations": domain_relations,
+        "chapter_changes": [],
+    }
+    return json.dumps(output, ensure_ascii=False)
+
+
+def test_confirmed_projection_domain_relations_future_confirmed_plan(isolated, real_project, fake_agent):
+    from operations.project_model import ARTIFACT_NAME
+
+    output = _projection_agent_json_with_relations([
+        {"relation_kind": "character_affiliated_with_organization",
+         "source_key": "lead", "target_key": "org"},
+    ])
+
+    def write_response(request_id):
+        fake_agent(request_id, output=output)
+
+    result = _propose(real_project["project_id"], "规划组织归属", write_response)
+    assert result["candidate"]["planning_projection"]["domain_relations"][0]["relation_kind"] == (
+        "character_affiliated_with_organization"
+    )
+    model_path = Path(real_project["project_dir"]) / "_工作台状态" / ARTIFACT_NAME
+    assert not model_path.exists(), "候选确认前不得写入任何领域关系"
+    assert result["status"] == "proposal_noncanonical"
+
+    confirmed = sp_ops.confirm_story_plan(
+        project_id=real_project["project_id"], planning_token=result["planning_token"],
+    )
+    assert confirmed["message"] == "规划已确认并写入"
+    from operations import project_model
+    model = project_model.read_project_model(real_project["project_id"])
+    edges = [edge for edge in model["dependencies"].values() if not edge.get("tombstoned")]
+    assert len(edges) == 1
+    edge = edges[0]
+    assert edge["relation_kind"] == "character_affiliated_with_organization"
+    assert edge["material_state"] == "future"
+    assert all(meta["source"] == "confirmed_plan" for meta in edge["field_authority"].values())
+    assert edge["data"]["planning_source_ref"].startswith("decision-plan-")
+    assert model["objects"][edge["source_ref"]]["title"] == "林研"
+    assert model["objects"][edge["target_ref"]]["title"] == "旧城商会"
+
+
+def test_invalid_projection_domain_relation_rolls_back_both_artifacts(isolated, real_project, fake_agent):
+    from operations.project_model import ARTIFACT_NAME
+
+    state_file = real_project["project_dir"] / "_工作台状态" / "story_state.json"
+    state_before = state_file.read_bytes()
+    model_path = Path(real_project["project_dir"]) / "_工作台状态" / ARTIFACT_NAME
+    model_before = model_path.read_bytes() if model_path.exists() else None
+
+    # 非法关系：人物→地点用了体系类型 → 整个确认失败并回滚两个工件。
+    output = _projection_agent_json_with_relations([
+        {"relation_kind": "character_uses_system", "source_key": "lead", "target_key": "org"},
+    ])
+
+    def write_response(request_id):
+        fake_agent(request_id, output=output)
+
+    result = _propose(real_project["project_id"], "规划非法关系", write_response)
+    with pytest.raises(sp_ops.StoryPlanningError, match="写入规划失败"):
+        sp_ops.confirm_story_plan(
+            project_id=real_project["project_id"], planning_token=result["planning_token"],
+        )
+    assert state_file.read_bytes() == state_before, "非法领域关系不得部分写入 Story State"
+    if model_before is None:
+        assert not model_path.exists(), "非法领域关系不得部分写入项目模型"
+    else:
+        assert model_path.read_bytes() == model_before
+
+
+def test_duplicate_projection_domain_relation_fails_closed(isolated, real_project, fake_agent):
+    first_output = _projection_agent_json_with_relations([
+        {"relation_kind": "character_affiliated_with_organization",
+         "source_key": "lead", "target_key": "org"},
+    ])
+    result_a = _propose(
+        real_project["project_id"], "第一轮组织归属",
+        lambda rid: fake_agent(rid, output=first_output),
+    )
+    sp_ops.confirm_story_plan(
+        project_id=real_project["project_id"], planning_token=result_a["planning_token"],
+    )
+    from operations import project_model
+    # 第二轮：同键对象再投影 + 用显式 ref 指向第一轮已活动的同一关系 → 失败关闭。
+    model = project_model.read_project_model(real_project["project_id"])
+    char_ref = next(ref for ref, obj in model["objects"].items() if obj["title"] == "林研" and obj.get("kind") == "foundation")
+    org_ref = next(ref for ref, obj in model["objects"].items() if obj["title"] == "旧城商会")
+    second = json.loads(VALID_AGENT_JSON)
+    second["planning_projection"] = {
+        "characters": [], "relationships": [], "settings": [], "storylines": [],
+        "events": [], "foreshadowing": [], "chapter_changes": [],
+        "domain_relations": [
+            {"relation_kind": "character_affiliated_with_organization",
+             "source_ref": char_ref, "target_ref": org_ref},
+        ],
+    }
+    result_b = _propose(
+        real_project["project_id"], "第二轮重复关系",
+        lambda rid: fake_agent(rid, output=json.dumps(second, ensure_ascii=False)),
+    )
+    with pytest.raises(sp_ops.StoryPlanningError, match="写入规划失败"):
+        sp_ops.confirm_story_plan(
+            project_id=real_project["project_id"], planning_token=result_b["planning_token"],
+        )
+    edges = [edge for edge in project_model.read_project_model(real_project["project_id"])["dependencies"].values()
+             if not edge.get("tombstoned")]
+    assert len(edges) == 1, "重复规划关系绝不静默创建第二条边"
