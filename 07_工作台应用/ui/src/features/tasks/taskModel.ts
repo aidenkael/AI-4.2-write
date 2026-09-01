@@ -56,12 +56,12 @@ export interface TaskTarget {
 
 export const TASK_LABELS: Record<AuthorTaskKind, string> = {
   new_project: '新建作品',
-  story_plan: '故事规划',
+  story_plan: '大纲与规划',
   story_write: '正文写作',
   review: '作品检查',
   material_classify: '素材分类',
   material_distill: '素材蒸馏',
-  foundation_design: '基座设计',
+  foundation_design: '完善作品地基',
 }
 
 export function taskLabel(kind: AuthorTaskKind): string {
@@ -132,7 +132,7 @@ export function candidateReadyMessage(kind: AuthorTaskKind): string {
     case 'material_distill':
       return '蒸馏完成 · 返回查看'
     case 'foundation_design':
-      return '基座设计候选已生成 · 返回查看'
+      return '作品地基候选已生成 · 返回查看'
   }
 }
 

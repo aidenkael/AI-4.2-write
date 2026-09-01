@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "05_Skills与自动
 
 import project_workspace  # noqa: E402
 from operations import author_edit, change_settlement, project_model, project_snapshot  # noqa: E402
+from operations.projects import get_project_overview  # noqa: E402
 from bridge import app_api  # noqa: E402
 
 
@@ -27,6 +28,41 @@ def project(tmp_path, monkeypatch):
 
 def _empty_hash() -> str:
     return hashlib.sha256(b"").hexdigest()
+
+
+def test_existing_project_without_synopsis_loads_as_empty(project):
+    overview = get_project_overview(project["project_id"])
+    assert overview["story_synopsis"] == ""
+    assert overview["intent_rev"] == 1
+
+
+def test_update_story_synopsis_increments_rev_preserves_intent_and_skips_semantic(project):
+    pid = project["project_id"]
+    intent_path = Path(project["project_dir"]) / "_工作台状态" / "author_intent.json"
+    before = json.loads(intent_path.read_text(encoding="utf-8"))
+
+    result = author_edit.update_story_synopsis(
+        pid, base_intent_rev=before["intent_rev"], story_synopsis="新的核心梗概。",
+    )
+
+    after = json.loads(intent_path.read_text(encoding="utf-8"))
+    assert result["intent_rev"] == before["intent_rev"] + 1
+    assert after["intent_rev"] == before["intent_rev"] + 1
+    assert after["story_synopsis"] == "新的核心梗概。"
+    for key, value in before.items():
+        if key in {"intent_rev", "story_synopsis"}:
+            continue
+        assert after[key] == value
+    assert result["change"]["requires_semantic"] is False
+    assert result["change"]["status"] == "synchronized"
+    assert result["change"]["source_kind"] == "author_intent_edit"
+
+
+def test_update_story_synopsis_stale_guard(project):
+    pid = project["project_id"]
+    author_edit.update_story_synopsis(pid, base_intent_rev=1, story_synopsis="第一版。")
+    with pytest.raises(author_edit.AuthorEditError, match="stale"):
+        author_edit.update_story_synopsis(pid, base_intent_rev=1, story_synopsis="过期版。")
 
 
 def test_manual_prose_save_is_atomic_indexed_pending_and_stale_guarded(project):

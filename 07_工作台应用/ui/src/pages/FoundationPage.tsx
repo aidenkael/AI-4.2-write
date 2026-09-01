@@ -32,6 +32,8 @@ const tabGroups: Array<{ label: string; tabs: FoundationTab[] }> = [
   { label: '故事线索', tabs: ['storylines', 'foreshadowing', 'mystery_information'] },
 ]
 
+const groupForTab = (tab: FoundationTab) => tabGroups.find((group) => group.tabs.includes(tab)) ?? tabGroups[0]
+
 const characterFields = [
   ['aliases', '别名'], ['one_line_intro', '一句话介绍'], ['role_identity', '角色 / 身份'],
   ['position_title', '职位'], ['faction_org', '阵营 / 组织'], ['visible_traits', '可见特征'],
@@ -153,13 +155,14 @@ function fdItemsFromResult(result: FoundationDesignResult): FdEditItem[] {
 function FoundationDesignDrawer(props: {
   projectId: string
   modelRev: number
+  initialRequest?: string
   notify: (message: string) => void
   reload: () => Promise<void>
   onClose: () => void
 }) {
   const { task, start, cancel, confirm } = useAuthorTask()
   const fdTask = task && task.kind === 'foundation_design' && task.projectId === props.projectId ? task : null
-  const [request, setRequest] = useState('')
+  const [request, setRequest] = useState(props.initialRequest ?? '')
   const [localError, setLocalError] = useState<string | null>(null)
   const [edits, setEdits] = useState<FdEditItem[]>([])
   const [busy, setBusy] = useState(false)
@@ -188,7 +191,7 @@ function FoundationDesignDrawer(props: {
     const result = await confirm('foundation_design', { items, base_model_rev: props.modelRev })
     setBusy(false)
     if (result) {
-      props.notify('基座设计已写入作品地基。')
+      props.notify('作品地基已更新。')
       await props.reload()
       props.onClose()
     } else if (fdTask?.error) {
@@ -199,12 +202,12 @@ function FoundationDesignDrawer(props: {
   const candidate = fdTask?.status === 'candidate' ? (fdTask.result as FoundationDesignResult | null) : null
   const working = !!fdTask && (fdTask.status === 'running' || fdTask.status === 'waiting_author' || fdTask.status === 'pending')
   return (
-    <aside className="record-drawer panel foundation-design" aria-label="基座设计">
-      <header><h2>基座设计</h2><button onClick={props.onClose}><X /></button></header>
+    <aside className="record-drawer panel foundation-design" aria-label="完善作品地基">
+      <header><h2>完善作品地基</h2><button onClick={props.onClose}><X /></button></header>
       <div className="record-drawer-body">
         {!fdTask && (
           <>
-            <p className="muted-note">写下你想确立的基座问题（人物、关系、世界规则、体系、核心冲突、故事线）。AI 会分解问题并参考相关写作/参考知识，给出候选；采用后才写入作品。</p>
+            <p className="muted-note">写下你想确立的地基问题（人物、关系、世界、地点、组织、体系、故事线、伏笔与悬疑）。AI 会分解问题并参考相关写作/参考知识，给出候选；采用后才写入作品。</p>
             <textarea rows={4} value={request} onChange={(e) => setRequest(e.target.value)} placeholder="例如：为这本书设计主角结构与核心冲突…" />
             {localError && <p className="error-text">{localError}</p>}
           </>
@@ -256,7 +259,9 @@ export function FoundationPage() {
   const { selected } = useFormalProjectShell()
   const controller = useProjectDataController(selected?.project_id ?? null)
   const [designOpen, setDesignOpen] = useState(false)
+  const [designPrefill, setDesignPrefill] = useState<string | undefined>(undefined)
   const [tab, setTab] = useState<FoundationTab>('characters')
+  const [activeGroupLabel, setActiveGroupLabel] = useState(groupForTab('characters').label)
   const [recordForm, setRecordForm] = useState<RecordForm | null>(null)
   const [sharedEditor, setSharedEditor] = useState<{ kind: 'character' | 'relationship'; entry: ProjectDataEntry | null } | null>(null)
   const [detailEntry, setDetailEntry] = useState<ProjectDataEntry | null>(null)
@@ -265,6 +270,7 @@ export function FoundationPage() {
   const handoffRef = useRef<string | null>(null)
 
   const tabMeta = tabs.find((item) => item.key === tab) ?? tabs[0]
+  const activeGroup = tabGroups.find((group) => group.label === activeGroupLabel) ?? groupForTab(tab)
   const entries = useMemo(() => controller.data?.sections[tab] ?? [], [controller.data, tab])
   const fields = fieldsForTab(tab)
   const characters = controller.data?.sections.characters ?? []
@@ -275,7 +281,12 @@ export function FoundationPage() {
     setSharedEditor(null)
     setDetailEntry(null)
     handoffRef.current = null
+    setActiveGroupLabel(groupForTab('characters').label)
   }, [selected?.project_id])
+
+  useEffect(() => {
+    setActiveGroupLabel(groupForTab(tab).label)
+  }, [tab])
 
   useEffect(() => {
     const profile = controller.data?.story_bible_profile
@@ -345,6 +356,14 @@ export function FoundationPage() {
     }
   }, [actions, characters, controller.data, controller.loading, selected])
 
+  useEffect(() => {
+    if (!selected) return
+    const handoff = actions.consumeFoundationDesignHandoff()
+    if (!handoff || handoff.project_id !== selected.project_id) return
+    setDesignPrefill(handoff.prefill)
+    setDesignOpen(true)
+  }, [actions, selected])
+
   if (!selected) return <div className="empty-state">请先选择正式作品。</div>
 
   const saveRecord = async () => {
@@ -411,21 +430,21 @@ export function FoundationPage() {
 
       <section className="panel foundation-main">
         <header className="foundation-toolbar">
-          <div className="foundation-tab-groups">
+          <div className="foundation-nav">
+            <div className="foundation-group-tabs" aria-label="作品地基分组">
             {tabGroups.map((group) => (
-              <div className="foundation-tab-group" key={group.label}>
-                <span>{group.label}</span>
-                <div className="foundation-tabs">
-                  {group.tabs.map((key) => {
-                    const item = tabs.find((candidate) => candidate.key === key) as typeof tabs[number]
-                    const { label, Icon } = item
-                    return <button key={key} className={tab === key ? 'active' : ''} onClick={() => { setTab(key); setRecordForm(null); setSharedEditor(null); setDetailEntry(null) }}><Icon /> {label}</button>
-                  })}
-                </div>
-              </div>
+              <button key={group.label} className={activeGroup.label === group.label ? 'active' : ''} onClick={() => { setActiveGroupLabel(group.label); setTab(group.tabs[0]); setRecordForm(null); setSharedEditor(null); setDetailEntry(null) }}>{group.label}</button>
             ))}
+            </div>
+            <div className="foundation-tabs" aria-label={`${activeGroup.label}分类`}>
+              {activeGroup.tabs.map((key) => {
+                const item = tabs.find((candidate) => candidate.key === key) as typeof tabs[number]
+                const { label, Icon } = item
+                return <button key={key} className={tab === key ? 'active' : ''} onClick={() => { setTab(key); setRecordForm(null); setSharedEditor(null); setDetailEntry(null) }}><Icon /> {label}</button>
+              })}
+            </div>
           </div>
-          <div className="foundation-toolbar-actions"><button onClick={() => setDesignOpen(true)}><Sparkles /> 基座设计</button><button className="primary" onClick={beginCreate}><Plus /> 新增{tabMeta.label}</button></div>
+          <div className="foundation-toolbar-actions"><button onClick={() => { setDesignPrefill(undefined); setDesignOpen(true) }}><Sparkles /> 完善作品地基</button><button className="primary" onClick={beginCreate}><Plus /> 新增</button></div>
         </header>
 
         {controller.loading && <div className="empty-state">正在加载作品地基…</div>}
@@ -541,6 +560,7 @@ export function FoundationPage() {
         <FoundationDesignDrawer
           projectId={selected.project_id}
           modelRev={controller.data?.model_rev ?? 0}
+          initialRequest={designPrefill}
           notify={actions.notify}
           reload={controller.reload}
           onClose={() => setDesignOpen(false)}

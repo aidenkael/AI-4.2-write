@@ -33,6 +33,7 @@ from project_workspace import (  # noqa: E402
     WorkspaceError as PWWorkspaceError,
     load_project,
     resolve_project,
+    validate_author_intent,
 )
 
 
@@ -817,6 +818,69 @@ def set_length_plan(
             stages=stages, chapter_targets=chapter_targets,
         ),
     )
+
+
+def update_story_synopsis(
+    project_id: str,
+    *,
+    base_intent_rev: int,
+    story_synopsis: str,
+) -> dict[str, Any]:
+    """Edit the optional durable work synopsis in Author Intent only.
+
+    This is a narrow Author Intent operation, not a schema editor.  It records a
+    deterministic author-change ledger entry and never starts semantic work.
+    """
+    if not isinstance(base_intent_rev, int) or isinstance(base_intent_rev, bool) or base_intent_rev < 1:
+        raise AuthorEditError("base_intent_rev 必须是正整数。")
+    if not isinstance(story_synopsis, str):
+        raise AuthorEditError("story_synopsis 必须是字符串。")
+    with project_write_lock(project_id):
+        loaded, project_dir, changes_path = _load(project_id)
+        intent_path = (project_dir / "_工作台状态" / "author_intent.json").resolve()
+        if intent_path.parent.parent != project_dir:
+            raise AuthorEditError("Author Intent 路径 containment 校验失败。")
+        intent_before = intent_path.read_bytes()
+        changes_before = changes_path.read_bytes() if changes_path.exists() else None
+        intent = copy.deepcopy(loaded["intent"])
+        if int(intent.get("intent_rev") or 0) != base_intent_rev:
+            raise AuthorEditError(
+                f"作者意图版本已变化（当前 {intent.get('intent_rev')}，提交基线 {base_intent_rev}），已拒绝 stale 写入。"
+            )
+        before_synopsis = intent.get("story_synopsis") or ""
+        intent["story_synopsis"] = story_synopsis
+        intent["intent_rev"] = base_intent_rev + 1
+        try:
+            validate_author_intent(intent)
+            _atomic_write(intent_path, _json_bytes(intent))
+            change = _append_change(
+                changes_path, project_id, source_kind="author_intent_edit",
+                status="synchronized",
+                delta={
+                    "author_intent_change": {
+                        "field": "story_synopsis",
+                        "before": before_synopsis,
+                        "after": story_synopsis,
+                        "base_intent_rev": base_intent_rev,
+                        "intent_rev": intent["intent_rev"],
+                    }
+                },
+                requires_semantic=False,
+                source_model_rev=None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            try:
+                _restore(intent_path, intent_before)
+                _restore(changes_path, changes_before)
+            except OSError as rollback_exc:
+                raise AuthorEditError(f"简介保存失败且回滚未完成，需要人工检查：{rollback_exc}") from exc
+            raise AuthorEditError(str(exc)) from exc
+        return {
+            "project_id": project_id,
+            "intent_rev": intent["intent_rev"],
+            "story_synopsis": story_synopsis,
+            "change": change,
+        }
 
 
 def _chapter_path(project_dir: Path, chapter_number: int) -> Path:

@@ -429,6 +429,7 @@ def test_confirm_intent_passes_frozen_gate(isolated):
     assert intent["intent_rev"] == 1
     for field in ("work_direction", "reader_promise", "hard_constraints", "open_space"):
         assert field in intent
+    assert intent["story_synopsis"] == VALID_AGENT_RESULT["model_output"]["proposal"]
 
 
 def test_new_project_readable_by_existing_chain(isolated):
@@ -445,6 +446,8 @@ def test_new_project_readable_by_existing_chain(isolated):
     overview = get_project_overview(created["project_id"])
     assert overview["project_id"] == created["project_id"]
     assert overview["name"] == "可读作品"
+    assert overview["story_synopsis"] == VALID_AGENT_RESULT["model_output"]["proposal"]
+    assert overview["primary_next_action"] == "foundation"
 
 
 def test_confirm_generates_no_prose(isolated):

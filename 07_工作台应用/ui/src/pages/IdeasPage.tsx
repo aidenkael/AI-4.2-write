@@ -109,7 +109,7 @@ export function IdeasPage() {
             <footer>
               <button
                 disabled={projects.length === 0}
-                title={projects.length === 0 ? '还没有正式作品，先去「作品」新建一部' : '把这条灵感带入故事规划'}
+                title={projects.length === 0 ? '还没有正式作品，先去「作品」新建一部' : '把这条灵感带入大纲与规划'}
                 onClick={() => openDevelop(idea)}
               >
                 <Send /> 帮我发展
@@ -139,8 +139,8 @@ export function IdeasPage() {
       {developing && (
         <div className="dialog-backdrop" role="presentation" onMouseDown={() => setDeveloping(null)}>
           <section className="dialog panel" role="dialog" aria-modal="true" aria-label="帮我发展" onMouseDown={(e) => e.stopPropagation()}>
-            <header><h2>把灵感带入故事规划</h2><button aria-label="关闭" onClick={() => setDeveloping(null)}><X /></button></header>
-            <p>选择一个正式作品，把这条灵感作为故事规划的一次预填（不会自动提交）。</p>
+            <header><h2>把灵感带入大纲与规划</h2><button aria-label="关闭" onClick={() => setDeveloping(null)}><X /></button></header>
+            <p>选择一个正式作品，把这条灵感作为大纲与规划的一次预填（不会自动提交）。</p>
             {projects.length === 0 ? (
               <p className="muted-note">还没有正式作品，请先在「作品」新建一部。</p>
             ) : (
@@ -154,7 +154,7 @@ export function IdeasPage() {
             <footer>
               <button onClick={() => setDeveloping(null)}>取消</button>
               <button className="primary" disabled={!targetProject || opening} onClick={() => void confirmDevelop()}>
-                {opening ? '打开中…' : '进入故事规划'}
+                {opening ? '打开中…' : '进入大纲与规划'}
               </button>
             </footer>
           </section>

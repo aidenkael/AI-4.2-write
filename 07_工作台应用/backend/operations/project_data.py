@@ -168,6 +168,7 @@ def get_project_data(project_id: str) -> dict[str, Any]:
         "last_authority_source": snapshot["story_state"].get("last_authority_source"),
         "work_direction": intent.get("work_direction") or "",
         "reader_promise": intent.get("reader_promise") or "",
+        "story_synopsis": intent.get("story_synopsis") or "",
         "settlement": snapshot["settlement"],
         "story_bible_profile": snapshot["story_bible_profile"],
         "length_plan": snapshot["length_plan"],

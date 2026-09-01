@@ -34,6 +34,8 @@ export interface ProjectItem {
 export interface ProjectOverview {
   project_id: string
   name: string
+  intent_rev?: number
+  story_synopsis?: string
   work_direction?: string
   reader_promise?: string
   current_plans?: Array<{ id: string; description: string }>
@@ -62,6 +64,11 @@ export interface ProjectOverview {
     actual_words: number
     target_words: number | null
   }
+  open_items?: {
+    total: number
+    items: Array<{ id?: string | null; title: string; kind: string; status: string }>
+  }
+  primary_next_action?: 'foundation' | 'writing'
   settlement?: SettlementSummary
 }
 
@@ -76,6 +83,7 @@ const projectMutationMethods = new Set([
   'create_relationship', 'update_relationship', 'retire_relationship', 'restore_relationship',
   'set_length_plan', 'set_story_bible_profile', 'save_formal_prose', 'confirm_story_write',
   'confirm_story_plan', 'confirm_foundation_design', 'confirm_project_state_refresh',
+  'update_story_synopsis',
 ])
 
 /**
@@ -151,6 +159,14 @@ export async function openProject(project: { project_id?: string; name?: string 
 /** 作品最小概览（只读正式状态）。 */
 export async function getProjectOverview(projectId: string): Promise<ProjectOverview> {
   return call<ProjectOverview>('get_project_overview', projectId)
+}
+
+export async function updateStorySynopsis(payload: {
+  project_id: string
+  base_intent_rev: number
+  story_synopsis: string
+}): Promise<{ project_id: string; intent_rev: number; story_synopsis: string; change: SettlementChange }> {
+  return call('update_story_synopsis', payload)
 }
 
 // ---------------- Agent / 模型 / Token 设置 ----------------
@@ -910,6 +926,7 @@ export interface ProjectData {
   last_authority_source: string | null
   work_direction: string
   reader_promise: string
+  story_synopsis?: string
   settlement: SettlementSummary
   state_refresh: ProjectStateRefresh
   story_bible_profile: StoryBibleProfile

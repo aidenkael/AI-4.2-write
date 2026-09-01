@@ -22,7 +22,7 @@ const sections = {
 
 export const minimalProjectData: ProjectData = {
   project_id: projectId, name: '运行时烟测作品', state_rev: 0, model_rev: 0, last_authority_source: null,
-  work_direction: '', reader_promise: '', settlement, state_refresh: stateRefresh,
+  work_direction: '', reader_promise: '', story_synopsis: '', settlement, state_refresh: stateRefresh,
   story_bible_profile: { genre_tags: [], narrative_mode: null, active_modules: ['core', 'characters', 'relationships', 'world', 'locations', 'organizations', 'storylines', 'foreshadowing', 'events', 'time'], field_config: {} },
   length_plan: { total_target_words: null, actual_total_words: 0, stages: [], chapters: [] },
   chapters: [], planning_impact_candidates: [], retired: { foundation: [], relationships: [] }, sections,
@@ -32,8 +32,9 @@ const actions: Actions = {
   navigate: () => {}, setProjectSection: () => {}, setSearch: () => {}, notify: () => {}, openDialog: () => {}, closeDialog: () => {},
   setPreference: () => {}, setIllustration: () => {}, resetIllustration: () => {}, setPlanningPrefill: () => {}, consumePlanningPrefill: () => null,
   setReviewChapterHandoff: () => {}, consumeReviewChapterHandoff: () => null, setFoundationEditHandoff: () => {}, consumeFoundationEditHandoff: () => null,
+  setFoundationDesignHandoff: () => {}, consumeFoundationDesignHandoff: () => null,
 }
-const appState: AppState = { page: 'works', projectSection: 'overview', illustrations: { defaults: { city: '', mountains: '', desk: '' }, custom: {} }, search: '', toast: null, dialog: null, preferences: { sound: false }, planningPrefill: null, reviewChapterHandoff: null, foundationEditHandoff: null }
+const appState: AppState = { page: 'works', projectSection: 'overview', illustrations: { defaults: { city: '', mountains: '', desk: '' }, custom: {} }, search: '', toast: null, dialog: null, preferences: { sound: false }, planningPrefill: null, reviewChapterHandoff: null, foundationEditHandoff: null, foundationDesignHandoff: null }
 const formal: FormalProjectShellValue = {
   projects: [{ project_id: projectId, name: '运行时烟测作品' }], selected: { project_id: projectId, name: '运行时烟测作品' }, loading: false, error: null,
   reload: async () => {}, openProjectById: async () => true, clearSelection: () => {},
@@ -45,7 +46,7 @@ const tasks: AuthorTaskController = {
 function bridgeData(method: string): unknown {
   if (method === 'get_project_data') return minimalProjectData
   if (method === 'get_project_state_refresh' || method === 'prepare_project_state_refresh') return stateRefresh
-  if (method === 'get_project_overview') return { project_id: projectId, name: '运行时烟测作品', state: { state_rev: 0, last_authority_source: '' }, current_plans: [], progress: { current_chapter: 1, actual_words: 0, target_words: null }, settlement }
+  if (method === 'get_project_overview') return { project_id: projectId, name: '运行时烟测作品', state: { state_rev: 0, last_authority_source: '' }, intent_rev: 1, story_synopsis: '', current_plans: [], progress: { current_chapter: 1, actual_words: 0, target_words: null }, open_items: { total: 0, items: [] }, primary_next_action: 'foundation', settlement }
   if (method === 'get_story_write_surface') return { project_id: projectId, name: '运行时烟测作品', chapters: [], active_chapter_number: 1, total_words: 0, settlement, open_threads: [] }
   if (method === 'get_review_surface') return { project_id: projectId, name: '运行时烟测作品', active_plan_count: 0, open_thread_count: 0, chapters: [], latest_chapter_number: null, has_accepted_prose: false, settlement }
   return null

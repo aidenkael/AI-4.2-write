@@ -5,7 +5,7 @@ import { useWritingController } from '../features/writing/useWritingController'
 import { StatusBadge } from '../components/StatusBadge'
 
 /**
- * 正在写：三区工作台（左章节导航 / 中正式已采用正文 / 右唯一 AI 协作区）。
+ * 正文管理：三区工作台（左章节导航 / 中正式已采用正文 / 右唯一 AI 协作区）。
  *
  * - 右侧只有一个协作面板：动作前保持安静，候选只在实际生成后出现；
  *   不再同时存在常驻的“AI 助手”与“AI 候选稿”两个重复面板；
@@ -42,7 +42,7 @@ export function WritingPage() {
         </aside>
         <section className="panel editor">
           <header>
-            <h2>正在写</h2>
+            <h2>正文管理</h2>
           </header>
           <div className="empty-state">
             <p>请先在「作品」中选择一部正式作品。</p>
@@ -232,7 +232,7 @@ export function WritingPage() {
         <footer className="ai-collab-shortcuts">
           <button
             onClick={() => {
-              // 方案讨论属于规划，不属于正文写作：交给故事规划（StoryPlan）
+              // 方案讨论属于规划，不属于正文写作：交给大纲与规划（StoryPlan）
               // 一次性预填（项目绑定、session-only），绝不自动提交，绝不生成正文。
               if (selected) {
                 actions.setPlanningPrefill({

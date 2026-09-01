@@ -13,7 +13,7 @@ import { auditEventKey } from '../../tasks/taskModel'
 const toMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 const operationLabels: Record<string, string> = {
-  new_project: '新建作品', story_plan: '故事规划', story_write: '正文写作',
+  new_project: '新建作品', story_plan: '大纲与规划', story_write: '正文写作',
   review: '作品检查', material_intake: '素材入库', material_classify: '素材智能分类',
   source_prepare: '提纯', book_distill: '蒸馏', method_prepare: '方法提纯',
   method_distill: '方法蒸馏', material_scan: '素材扫描',

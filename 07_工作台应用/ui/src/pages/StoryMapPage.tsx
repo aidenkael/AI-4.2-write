@@ -5,6 +5,8 @@ import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { useApp } from '../features/app/AppStore'
 import { useProjectDataController } from '../features/projectData/useProjectDataController'
 import { authorSourceLabel } from '../features/presentation/authorPresentation'
+import { CharacterEditor, RelationshipEditor } from '../features/foundation/recordEditors'
+import type { ProjectDataEntry } from '../bridge/client'
 import {
   projectOpenThreads,
   projectRelationshipGraph,
@@ -63,6 +65,7 @@ export function StoryMapPage() {
   const controller = useProjectDataController(selected?.project_id ?? null)
   const [tab, setTab] = useState<MapTab>('graph')
   const [detail, setDetail] = useState<SelectedDetail | null>(null)
+  const [sharedEditor, setSharedEditor] = useState<{ kind: 'character' | 'relationship'; entry: ProjectDataEntry | null } | null>(null)
   const [tooltip, setTooltip] = useState<{ x: number; y: number; label: string; avatarText: string; avatarHue: number; intro: string; role: string; fields: RecordField[] } | null>(null)
   const graphHostRef = useRef<HTMLDivElement | null>(null)
   const cyRef = useRef<Core | null>(null)
@@ -71,6 +74,12 @@ export function StoryMapPage() {
   const timeModel = useMemo(() => projectTimeEvents(controller.data), [controller.data])
   const threads = useMemo(() => projectOpenThreads(controller.data), [controller.data])
   const relationshipCount = controller.data?.sections.relationships.length ?? 0
+  const characters = controller.data?.sections.characters ?? []
+  const entryForSourceRef = (sourceRef: string | null, kind: 'character' | 'relationship') => {
+    if (!sourceRef || !controller.data) return null
+    const section = kind === 'character' ? controller.data.sections.characters : controller.data.sections.relationships
+    return section.find((entry) => entry.source_ref === sourceRef) ?? null
+  }
 
   // Cytoscape 只读图：数据或页签变化时重建；离开时销毁，不持有第二套事实。
   useEffect(() => {
@@ -164,14 +173,22 @@ export function StoryMapPage() {
   useEffect(() => {
     setDetail(null)
     setTooltip(null)
+    setSharedEditor(null)
   }, [tab, selected?.project_id])
 
   if (!selected) {
     return <div className="empty-state">请先选择正式作品。</div>
   }
 
-  const editSource = (sourceRef: string | null) => {
+  const editSource = (sourceRef: string | null, kind?: 'character' | 'relationship') => {
     if (!sourceRef) return
+    if (kind) {
+      const entry = entryForSourceRef(sourceRef, kind)
+      if (entry) {
+        setSharedEditor({ kind, entry })
+        return
+      }
+    }
     actions.setFoundationEditHandoff({ project_id: selected.project_id, source_ref: sourceRef })
     actions.setProjectSection('foundation')
   }
@@ -222,7 +239,7 @@ export function StoryMapPage() {
                       <strong>{u.label}</strong>
                       <span className={`material-state ${u.status}`}>{u.status === 'future' ? '规划中' : '当前'}</span>
                       <span className="muted-note">{u.reason}</span>
-                      {u.editable && <button onClick={() => editSource(u.sourceRef)}><Pencil /> 到作品地基编辑</button>}
+                      {u.editable && <button onClick={() => editSource(u.sourceRef, 'relationship')}><Pencil /> 编辑源记录</button>}
                     </li>
                   ))}
                 </ul>
@@ -237,7 +254,7 @@ export function StoryMapPage() {
                 <p><span className={`material-state ${detail.status}`}>{detail.status === 'future' ? '规划中' : '当前'}</span></p>
                 <p className="muted-note">{authorSourceLabel(detail.sourceKind)}</p>
                 <DetailFields fields={detail.fields} />
-                {detail.editable && <button onClick={() => editSource(detail.sourceRef)}><Pencil /> 到作品地基编辑</button>}
+                {detail.editable && <button onClick={() => editSource(detail.sourceRef, detail.kind === '人物' ? 'character' : 'relationship')}><Pencil /> 编辑源记录</button>}
               </>
             ) : (
               <p className="muted-note">点击图中人物或连线，查看其真实记录详情。</p>
@@ -289,8 +306,10 @@ export function StoryMapPage() {
       )}
 
       <footer className="map-note">
-        <p className="muted-note"><RefreshCw size={13} /> 地图只从当前作品真相生成；所有修改都在作品地基完成，本页不保存第二份故事事实。</p>
+        <p className="muted-note"><RefreshCw size={13} /> 地图只从当前作品真相生成；人物与关系会打开同一源记录编辑器，本页不保存第二份故事事实。</p>
       </footer>
+      {sharedEditor?.kind === 'character' && <CharacterEditor key={sharedEditor.entry?.source_ref ?? 'map-character'} entry={sharedEditor.entry} controller={controller} onClose={() => setSharedEditor(null)} />}
+      {sharedEditor?.kind === 'relationship' && <RelationshipEditor key={sharedEditor.entry?.source_ref ?? 'map-relationship'} entry={sharedEditor.entry} characters={characters} controller={controller} onClose={() => setSharedEditor(null)} />}
     </div>
   )
 }

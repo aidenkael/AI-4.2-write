@@ -75,6 +75,8 @@ def get_project_overview(project_id: str) -> dict:
         "name": snapshot["name"],
         "state": snapshot["story_state"],
         "settlement": snapshot["settlement"],
+        "intent_rev": intent.get("intent_rev"),
+        "story_synopsis": intent.get("story_synopsis") or "",
         "progress": {
             "current_chapter": max(item["chapter_number"] for item in snapshot["chapters"]),
             "actual_words": snapshot["length_plan"]["actual_total_words"],
@@ -100,6 +102,35 @@ def get_project_overview(project_id: str) -> dict:
     ]
     if current_plans:
         overview["current_plans"] = current_plans
+
+    open_items = [
+        {"id": item.get("ref") or item.get("id"), "title": item.get("title") or "", "kind": "未解决线索", "status": "current"}
+        for item in snapshot["current"].get("open_threads", [])
+    ] + [
+        {"id": item.get("ref") or item.get("id"), "title": item.get("title") or "", "kind": "伏笔与承诺", "status": "future"}
+        for item in snapshot["future"].get("foreshadowing", [])
+    ] + [
+        {"id": item.get("ref") or item.get("id"), "title": item.get("title") or "", "kind": "悬疑信息", "status": item.get("material_state") or "future"}
+        for item in [
+            *snapshot["current"].get("mystery_information", []),
+            *snapshot["future"].get("mystery_information", []),
+        ]
+    ]
+    overview["open_items"] = {
+        "total": len([item for item in open_items if item.get("title")]),
+        "items": [item for item in open_items if item.get("title")][:5],
+    }
+
+    foundation_sections = (
+        "characters", "relationships", "settings", "locations", "organizations",
+        "systems", "events", "open_threads", "foreshadowing", "storylines", "mystery_information",
+    )
+    has_structured_foundation = any(
+        snapshot[bucket].get(section)
+        for bucket in ("current", "future")
+        for section in foundation_sections
+    )
+    overview["primary_next_action"] = "foundation" if not has_structured_foundation else "writing"
 
     # 最近写作位置：accepted_text_index 最后一条（可靠）
     entries = index.get("entries") or []

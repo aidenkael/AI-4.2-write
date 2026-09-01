@@ -974,6 +974,7 @@ def confirm_new_project(proposal_token: str) -> dict[str, Any]:
     content = candidate.get("content") or {}
 
     author_intent = {
+        "story_synopsis": content.get("proposal") or "",
         "work_direction": content.get("work_direction") or "",
         "reader_promise": content.get("reader_promise") or "",
         "hard_constraints": content.get("hard_constraints") or [],

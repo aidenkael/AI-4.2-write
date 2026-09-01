@@ -13,8 +13,8 @@ import {
 
 // Go Write 2.0 作品内六任务；全部作品内页面已接入正式项目外壳，使用同一正式 project_id，禁止 Mock 身份。
 const items: Array<{ id: ProjectSection; label: string }> = [
-  { id: 'overview', label: '作品概览' }, { id: 'foundation', label: '作品地基' }, { id: 'planning', label: '故事规划' },
-  { id: 'writing', label: '正在写' }, { id: 'map', label: '故事地图' }, { id: 'review', label: '作品检查' },
+  { id: 'overview', label: '作品概览' }, { id: 'foundation', label: '作品地基' }, { id: 'planning', label: '大纲与规划' },
+  { id: 'writing', label: '正文管理' }, { id: 'map', label: '故事地图' }, { id: 'review', label: '作品检查' },
 ]
 
 function ProjectStateRefreshControl({ projectId }: { projectId: string }) {

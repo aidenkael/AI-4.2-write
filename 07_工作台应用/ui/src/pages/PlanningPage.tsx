@@ -1,4 +1,4 @@
-import { Check, Clock3, FolderOpen, RefreshCw, Send, Sparkles, WandSparkles, X } from 'lucide-react'
+import { Check, Clock3, FolderOpen, Send, Sparkles, WandSparkles, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
@@ -7,7 +7,7 @@ import { useProjectDataController } from '../features/projectData/useProjectData
 import { PlanningStructure } from '../features/planning/PlanningStructure'
 
 /**
- * 故事规划：真实 StoryPlan 消费者（唯一自然语言规划入口）。
+ * 大纲与规划：真实 StoryPlan 消费者（唯一自然语言规划入口）。
  *
  * - 正式身份来自 FormalProjectShell（唯一 project_id），不使用 Mock 身份；
  * - 正式事实只来自 getProjectOverview（current_plans / work_direction / reader_promise）；
@@ -63,28 +63,8 @@ export function PlanningPage() {
   return (
     <div className="planning-page">
       <PlanningStructure controller={projectData} />
-      <section className="panel planning-summary">
-        <div>
-          <h3>当前已确认规划</h3>
-          {state.overviewLoading ? (
-            <p className="muted-note">正在加载…</p>
-          ) : state.overviewError ? (
-            <>
-              <p className="error-text">{state.overviewError}</p>
-              <button onClick={() => void c.reloadOverview()}>
-                <RefreshCw />
-                重试
-              </button>
-            </>
-          ) : state.overview?.current_plans && state.overview.current_plans.length > 0 ? (
-            <ul className="planning-list">
-              {state.overview.current_plans.map((plan) => <li key={plan.id}>{plan.description}</li>)
-              }
-            </ul>
-          ) : (
-            <p className="muted-note">还没有已确认规划。</p>
-          )}
-        </div>
+      <section className="panel planning-summary planning-ai-entry">
+        <p className="muted-note">需要重新规划、细化走向或比较几个方向时，从这里发起一次 StoryPlan 候选。</p>
         <button onClick={() => setAiOpen(true)}><Sparkles /> 让 AI 帮我规划</button>
       </section>
 

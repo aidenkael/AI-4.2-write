@@ -834,6 +834,18 @@ class AppApi:
         except Exception as exc:  # noqa: BLE001
             return _err(CODE_BRIDGE_INTERNAL, str(exc))
 
+    def update_story_synopsis(self, payload: dict) -> dict:
+        try:
+            return _ok(author_edit_ops.update_story_synopsis(
+                str(payload.get("project_id") or ""),
+                base_intent_rev=int(payload.get("base_intent_rev")),
+                story_synopsis=str(payload.get("story_synopsis") or ""),
+            ))
+        except (AuthorEditError, TypeError, ValueError) as exc:
+            return _err(CODE_AUTHOR_EDIT_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
     def create_chapter(self, payload: dict) -> dict:
         try:
             return _ok(author_edit_ops.create_chapter(

@@ -34,6 +34,11 @@ interface FoundationEditHandoff {
   source_ref: string
 }
 
+interface FoundationDesignHandoff {
+  project_id: string
+  prefill?: string
+}
+
 export interface AppState {
   page: GlobalPage
   projectSection: ProjectSection | null
@@ -45,6 +50,7 @@ export interface AppState {
   planningPrefill: PlanningPrefill | null
   reviewChapterHandoff: ReviewChapterHandoff | null
   foundationEditHandoff: FoundationEditHandoff | null
+  foundationDesignHandoff: FoundationDesignHandoff | null
 }
 
 export interface Actions {
@@ -63,6 +69,8 @@ export interface Actions {
   consumeReviewChapterHandoff(): ReviewChapterHandoff | null
   setFoundationEditHandoff(handoff: FoundationEditHandoff): void
   consumeFoundationEditHandoff(): FoundationEditHandoff | null
+  setFoundationDesignHandoff(handoff: FoundationDesignHandoff): void
+  consumeFoundationDesignHandoff(): FoundationDesignHandoff | null
 }
 
 const initial: AppState = {
@@ -76,6 +84,7 @@ const initial: AppState = {
   planningPrefill: null,
   reviewChapterHandoff: null,
   foundationEditHandoff: null,
+  foundationDesignHandoff: null,
 }
 
 export const AppContext = createContext<{ state: AppState; actions: Actions } | null>(null)
@@ -110,7 +119,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (value) setState((current) => ({ ...current, foundationEditHandoff: null }))
       return value
     },
-  }), [state.foundationEditHandoff, state.planningPrefill, state.reviewChapterHandoff])
+    setFoundationDesignHandoff(foundationDesignHandoff) { setState((current) => ({ ...current, foundationDesignHandoff })) },
+    consumeFoundationDesignHandoff() {
+      const value = state.foundationDesignHandoff
+      if (value) setState((current) => ({ ...current, foundationDesignHandoff: null }))
+      return value
+    },
+  }), [state.foundationDesignHandoff, state.foundationEditHandoff, state.planningPrefill, state.reviewChapterHandoff])
   return <AppContext.Provider value={{ state, actions }}>{children}</AppContext.Provider>
 }
 

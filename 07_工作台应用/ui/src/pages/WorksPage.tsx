@@ -101,7 +101,7 @@ export function WorksPage() {
                     disabled={openingId === p.project_id}
                     onClick={() => void openAndNavigate(p.project_id, 'writing')}
                   >
-                    <PenLine /> 继续写作
+                    <PenLine /> 继续正文
                   </button>
                   <button
                     disabled={openingId === p.project_id}
