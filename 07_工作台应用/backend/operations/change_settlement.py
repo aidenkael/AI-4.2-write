@@ -382,8 +382,14 @@ def _apply_one(
             field_authority="semantic",
         )
     if isinstance(target_ref, str) and target_ref in model.get("objects", {}):
+        target = model["objects"][target_ref]
+        # Author edits apply tombstones deterministically before semantic
+        # refresh.  The model may faithfully repeat that same retirement;
+        # treating it as idempotent keeps a valid refresh from failing while
+        # preserving all non-idempotent update/retire guards below.
+        if action == "retire" and target.get("tombstoned"):
+            return model
         if action == "update":
-            target = model["objects"][target_ref]
             allow_dynamic = source_kind in {"manual_prose_edit", "accepted_ai_prose"}
             allowed = _allowed_semantic_patch(
                 target, data, protect_author_model_rev=source_model_rev,

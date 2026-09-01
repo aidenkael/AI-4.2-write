@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "05_Skills与自动化" / "01_Skills" / "ProjectWorkspace"))
 
 import project_workspace  # noqa: E402
-from operations import author_edit, change_settlement, project_snapshot  # noqa: E402
+from operations import author_edit, change_settlement, project_model, project_snapshot  # noqa: E402
 from bridge import app_api  # noqa: E402
 
 
@@ -128,6 +128,30 @@ def test_story_state_record_can_be_safely_overlaid_and_retired(project):
         ref=snapshot["current"]["characters"][0]["ref"],
     )
     assert project_snapshot.get_project_snapshot(project["project_id"])["current"]["characters"] == []
+
+
+def test_semantic_refresh_retires_already_tombstoned_author_object_idempotently(project):
+    created = author_edit.create_foundation_record(
+        project["project_id"], base_model_rev=0, category="character", title="林澈",
+        material_state="current", data={"one_line_intro": "调查者"},
+    )
+    ref = created["change"]["delta"]["project_model_change"]["detail"]["ref"]
+    retired = author_edit.retire_foundation_record(
+        project["project_id"], base_model_rev=created["model"]["model_rev"], ref=ref,
+    )
+    before = project_model.read_project_model(project["project_id"])
+    result = change_settlement.apply_semantic_result(project["project_id"], retired["change"]["change_id"], {
+        "summary": "确认作者已执行退役",
+        "consequences": [{
+            "classification": "mechanically_certain", "kind": "character", "action": "retire",
+            "target_ref": ref, "title": "林澈", "source_ref": "", "target_character_ref": "",
+            "data": {}, "reason": "作者变更已明确退役该对象",
+        }],
+    })
+    assert result["status"] == "synchronized"
+    after = project_model.read_project_model(project["project_id"])
+    assert after["model_rev"] == before["model_rev"]
+    assert after["objects"][ref]["tombstoned"] is True
 
 
 def test_legacy_relationship_exact_endpoints_promote_to_editable_contract(project):
