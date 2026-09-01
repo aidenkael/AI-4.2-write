@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { getSemanticAiSettings, saveSemanticAiSettings, type SemanticAiSettings } from '../../../bridge/client'
 
 /**
- * 日常 AI：Direct AI 语义结算的唯一作者配置面。
+ * 日常 AI：作者明确更新作品状态时的 Direct AI 语义整理配置面。
  * 与 Agent 执行设置完全独立；API Key 只写入系统凭据存储，绝不回传明文。
  */
 export function SemanticAiSettingsSection() {
@@ -55,7 +55,7 @@ export function SemanticAiSettingsSection() {
         <Cloud />
         <div>
           <h3>日常 AI</h3>
-          <p>用于人物/关系/事件等日常语义同步（一次模型调用，不占用 Agent 执行槽）。与 Agent 执行设置互相独立。</p>
+          <p>仅在你明确执行「更新作品状态」时，用于有界整理人物、关系、事件等语义后果。保存正文、地基或规划不会自动调用它；它与创作任务的 Agent 执行完全独立。</p>
         </div>
       </div>
       <label>API 地址

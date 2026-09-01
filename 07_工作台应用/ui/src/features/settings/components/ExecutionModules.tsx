@@ -1,4 +1,4 @@
-import { Bot, Check, RefreshCw, Wifi, XCircle } from 'lucide-react'
+import { Bot, Check, Wifi, XCircle } from 'lucide-react'
 import type { ExecutionMode } from '../../../bridge/client'
 import type { SettingsController } from '../useSettingsController'
 
@@ -25,7 +25,7 @@ const EnvironmentEvidence = ({ label, version, status, path }: {
 export function ExecutionModules({ controller }: { controller: SettingsController }) {
   const {
     draft, agents, interactiveAgent, directAgent, connection,
-    testing, saving, directValid, interactiveValid, canSave, update, refresh, save, test, repairInteractive,
+    testing, saving, directValid, interactiveValid, canSave, update, save, test, repairInteractive,
   } = controller
   if (!draft) return null
 
@@ -52,7 +52,7 @@ export function ExecutionModules({ controller }: { controller: SettingsControlle
     </section>
 
     <article className={`execution-card ${draft.default_execution_mode === 'interactive_bridge' ? 'selected' : ''}`}>
-      <header><span className="provider p0"><Bot /></span><div><h3>A. 交互桥模式</h3><p>任务准备好后，在所选 Agent 会话输入 <code>/gowrite</code>，结果返回 Go Write。</p></div><button onClick={refresh}><RefreshCw />重新检测</button></header>
+      <header><span className="provider p0"><Bot /></span><div><h3>A. 交互桥模式</h3><p>任务准备好后，在所选 Agent 会话输入 <code>/gowrite</code>，结果返回 Go Write。</p></div></header>
       <div className="execution-form"><label>执行 Agent<select value={interactiveAgent?.interactive.bridge_ready ? draft.interactive_agent : ''} onChange={(event) => update('interactive_agent', event.target.value)} disabled={!interactiveAgents.length}><option value="">{interactiveAgents.length ? '请选择可用 Agent' : '当前没有可用交互桥'}</option>{interactiveAgents.map((agent) => <option key={agent.agent_id} value={agent.agent_id}>{agent.display_name}</option>)}</select></label>
         <div className="status-grid"><Status ok={Boolean(interactiveAgent?.interactive.available)} yes="Desktop 已检测" no="Desktop 未检测"/><Status ok={Boolean(interactiveAgent?.interactive.bridge_ready)} yes="桥已就绪" no="桥未就绪"/><Status ok={Boolean(interactiveAgent?.interactive.command_ready)} yes="/gowrite 可用" no="/gowrite 不可用"/></div>
       </div>
@@ -68,7 +68,7 @@ export function ExecutionModules({ controller }: { controller: SettingsControlle
     </article>
 
     <article className={`execution-card ${draft.default_execution_mode === 'direct' ? 'selected' : ''}`}>
-      <header><span className="provider p1"><Wifi /></span><div><h3>B. 直接执行模式</h3><p>按 Agent 与其当前已验证模型运行。</p></div><button onClick={refresh}><RefreshCw />重新检测</button></header>
+      <header><span className="provider p1"><Wifi /></span><div><h3>B. 直接执行模式</h3><p>按 Agent 与其当前已验证模型运行。</p></div></header>
       <div className="execution-form direct-fields">
         <label>执行 Agent<select value={draft.direct_agent} onChange={(event) => { update('direct_agent', event.target.value); update('direct_model', null); update('direct_custom_model', null) }}>{agents.map((agent) => <option key={agent.agent_id} value={agent.agent_id}>{agent.display_name}</option>)}</select></label>
         <label>{nativeModelsLabel}<select value={draft.direct_model ?? ''} onChange={(event) => { update('direct_model', event.target.value || null); update('direct_custom_model', null) }}><option value="">{directAgent?.direct.models.length ? '请选择' : '当前未发现可选模型'}</option>{directAgent?.direct.models.filter((model) => model.selectable).map((model) => <option key={model.id} value={model.id}>{model.display_name}</option>)}{draft.direct_model && !selectedModelAvailable ? <option value={draft.direct_model}>已保存但当前未检测到/不可用：{draft.direct_model}</option> : null}</select></label>
