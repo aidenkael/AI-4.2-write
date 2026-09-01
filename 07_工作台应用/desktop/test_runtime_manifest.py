@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -40,7 +42,16 @@ def _fixture(tmp_path: Path) -> Path:
 def _current_build(app: Path) -> None:
     dist = app / "ui" / "dist"
     dist.mkdir(exist_ok=True)
-    (dist / "index.html").write_text("built\n", encoding="utf-8")
+    assets = dist / "assets"
+    assets.mkdir(exist_ok=True)
+    (assets / "index.js").write_text("console.log('fixture')\n", encoding="utf-8")
+    (assets / "index.css").write_text("body { color: black; }\n", encoding="utf-8")
+    (dist / "index.html").write_text(
+        '<link rel="modulepreload" href="./assets/index.js">\n'
+        '<link rel="stylesheet" href="./assets/index.css">\n'
+        '<script type="module" src="./assets/index.js"></script>\n',
+        encoding="utf-8",
+    )
     (dist / "gowrite-runtime.json").write_text(json.dumps({
         "schema_version": SCHEMA_VERSION,
         **runtime_source_digests(app),
@@ -92,16 +103,61 @@ def test_included_ui_build_input_change_invalidates_build(tmp_path: Path):
     assert runtime_build_status(app) == "stale"
 
 
-def test_node_manifest_and_python_checker_agree_on_real_sources():
+def test_complete_build_requires_referenced_javascript_and_stylesheet(tmp_path: Path):
+    app = _fixture(tmp_path)
+    _current_build(app)
+    (app / "ui" / "dist" / "assets" / "index.js").unlink()
+    assert runtime_build_status(app) == "missing"
+    _current_build(app)
+    (app / "ui" / "dist" / "assets" / "index.css").unlink()
+    assert runtime_build_status(app) == "missing"
+
+
+def test_unreferenced_generated_file_is_not_required(tmp_path: Path):
+    app = _fixture(tmp_path)
+    _current_build(app)
+    assert not (app / "ui" / "dist" / "assets" / "unused.js").exists()
+    assert runtime_build_status(app) == "current"
+
+
+def _directory_fingerprint(directory: Path) -> str | None:
+    if not directory.exists():
+        return None
+    digest = hashlib.sha256()
+    for path in sorted(directory.rglob("*"), key=lambda item: item.relative_to(directory).as_posix().lower()):
+        if path.is_file():
+            digest.update(path.relative_to(directory).as_posix().encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def test_node_manifest_and_python_checker_agree_on_tmp_fixture_without_real_dist_mutation(tmp_path: Path):
     node = shutil.which("node")
     if node is None:
         pytest.skip("node is required for the cross-language manifest check")
-    app = Path(__file__).parents[1]
-    ui = app / "ui"
-    dist = ui / "dist"
-    dist.mkdir(exist_ok=True)
-    (dist / "index.html").write_text("test fixture\n", encoding="utf-8")
-    subprocess.run([node, "scripts/write-runtime-manifest.mjs"], cwd=ui, check=True)
-    manifest = json.loads((dist / "gowrite-runtime.json").read_text(encoding="utf-8"))
+    app = _fixture(tmp_path)
+    real_dist = Path(__file__).parents[1] / "ui" / "dist"
+    before = _directory_fingerprint(real_dist)
+    script = (
+        "import { createRuntimeManifest } from './scripts/write-runtime-manifest.mjs';"
+        "const manifest = await createRuntimeManifest({"
+        "uiDir: process.env.GOWRITE_TEST_UI_DIR, "
+        "appDir: process.env.GOWRITE_TEST_APP_DIR, "
+        "repoDir: process.env.GOWRITE_TEST_REPO_DIR});"
+        "process.stdout.write(JSON.stringify(manifest));"
+    )
+    env = {
+        **os.environ,
+        "GOWRITE_TEST_UI_DIR": str(app / "ui"),
+        "GOWRITE_TEST_APP_DIR": str(app),
+        "GOWRITE_TEST_REPO_DIR": str(tmp_path),
+    }
+    result = subprocess.run(
+        [node, "--input-type=module", "-e", script],
+        cwd=Path(__file__).parents[1] / "ui", check=True, capture_output=True, text=True, env=env,
+    )
+    manifest = json.loads(result.stdout)
     assert manifest == {"schema_version": SCHEMA_VERSION, **runtime_source_digests(app)}
-    assert runtime_build_status(app) == "current"
+    assert _directory_fingerprint(real_dist) == before

@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 SCHEMA_VERSION = "gowrite_runtime_manifest/v1"
 APP_ROOT = Path(__file__).resolve().parents[1]
@@ -84,12 +86,52 @@ def runtime_manifest_path(app_root: Path = APP_ROOT) -> Path:
     return Path(app_root).resolve() / "ui" / "dist" / "gowrite-runtime.json"
 
 
+class _RuntimeAssetParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.references: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if tag == "script" and attributes.get("src"):
+            self.references.append(attributes["src"] or "")
+        if tag == "link":
+            rel = set((attributes.get("rel") or "").lower().split())
+            if rel.intersection({"stylesheet", "modulepreload"}) and attributes.get("href"):
+                self.references.append(attributes["href"] or "")
+
+
+def _runtime_assets_complete(index_path: Path) -> bool:
+    try:
+        parser = _RuntimeAssetParser()
+        parser.feed(index_path.read_text(encoding="utf-8"))
+        parser.close()
+    except (OSError, UnicodeError):
+        return False
+    dist = index_path.parent.resolve()
+    for reference in parser.references:
+        parsed = urlsplit(reference)
+        if parsed.scheme or parsed.netloc or not parsed.path:
+            continue
+        asset_path = (dist / unquote(parsed.path)).resolve()
+        try:
+            asset_path.relative_to(dist)
+        except ValueError:
+            return False
+        if not asset_path.is_file():
+            return False
+    return True
+
+
 def runtime_build_status(app_root: Path = APP_ROOT) -> str:
     """Return ``missing``, ``stale`` or ``current`` for the production build."""
     app_root = Path(app_root).resolve()
     dist = app_root / "ui" / "dist"
     manifest_path = runtime_manifest_path(app_root)
-    if not (dist / "index.html").is_file() or not manifest_path.is_file():
+    index_path = dist / "index.html"
+    if not index_path.is_file() or not manifest_path.is_file():
+        return "missing"
+    if not _runtime_assets_complete(index_path):
         return "missing"
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
