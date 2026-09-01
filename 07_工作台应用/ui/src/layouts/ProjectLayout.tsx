@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { ArrowLeft, CircleCheck } from 'lucide-react'
+import { ArrowLeft, X } from 'lucide-react'
 import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import type { ProjectSection } from '../contracts/ui'
@@ -20,6 +20,7 @@ const items: Array<{ id: ProjectSection; label: string }> = [
 function ProjectStateRefreshControl({ projectId }: { projectId: string }) {
   const [state, setState] = useState<ProjectStateRefresh | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [confirmationOpen, setConfirmationOpen] = useState(false)
   const load = async () => {
     try {
       setState(await getProjectStateRefresh(projectId))
@@ -54,18 +55,27 @@ function ProjectStateRefreshControl({ projectId }: { projectId: string }) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }
   }
-  if (state.status === 'running') return <span className="formal-status">正在整理作品状态…</span>
+  if (state.status === 'running') return <span className="project-state-refresh compact">正在整理作品状态…</span>
   if (state.status === 'awaiting_confirmation') return (
-    <details className="project-state-refresh" open>
-      <summary>{state.awaiting_confirmation_count} 项需要确认</summary>
-      <ul>{(state.consequences ?? []).map((item, index) => <li key={index}>{item.title ?? '待确认后果'}：{item.reason ?? '请确认是否采用。'}</li>)}</ul>
-      <button className="primary" onClick={() => void confirm(true)}>采用这些后果</button>
-      <button onClick={() => void confirm(false)}>忽略这些待确认项</button>
-    </details>
+    <>
+      <button className="project-state-refresh compact" onClick={() => setConfirmationOpen(true)}>
+        {state.awaiting_confirmation_count} 项需要确认
+      </button>
+      {confirmationOpen && (
+        <aside className="record-drawer project-state-refresh-drawer panel" aria-label="确认作品状态后果">
+          <header><h2>{state.awaiting_confirmation_count} 项需要确认</h2><button aria-label="关闭" onClick={() => setConfirmationOpen(false)}><X /></button></header>
+          <div className="record-drawer-body">
+            <p className="muted-note">这些是根据已保存修改整理出的后果；采用前不会写入作品。</p>
+            <ul className="project-state-consequences">{(state.consequences ?? []).map((item, index) => <li key={index}><strong>{item.title ?? '待确认后果'}</strong><span>{item.reason ?? '请确认是否采用。'}</span></li>)}</ul>
+          </div>
+          <footer><button onClick={() => void confirm(false)}>忽略这些待确认项</button><button className="primary" onClick={() => void confirm(true)}>采用这些后果</button></footer>
+        </aside>
+      )}
+    </>
   )
-  if (state.status === 'failed') return <span className="project-state-refresh">整理失败 · <button onClick={() => void refresh()}>重试</button>{error ?? state.error ?? ''}</span>
-  if (state.pending_change_count > 0) return <span className="project-state-refresh">{state.pending_change_count} 项修改待整理 <button onClick={() => void refresh()}>更新作品状态</button></span>
-  return <span className="formal-status">作品状态已是最新</span>
+  if (state.status === 'failed') return <button className="project-state-refresh compact failed" title={error ?? state.error ?? '整理失败，请重试。'} onClick={() => void refresh()}>整理失败 · 重试</button>
+  if (state.pending_change_count > 0) return <button className="project-state-refresh compact" onClick={() => void refresh()}>{state.pending_change_count} 项修改待整理 · 更新作品状态</button>
+  return null
 }
 
 export function ProjectLayout({ children }: { children: ReactNode }) {
@@ -81,10 +91,6 @@ export function ProjectLayout({ children }: { children: ReactNode }) {
             <ArrowLeft />
             作品
           </button>
-          <span className="formal-status">
-            <CircleCheck size={15} />
-            正式作品
-          </span>
         </header>
         <div className="project-content">
           <div className="empty-state">请先选择一部正式作品，再进入作品内页面。</div>
@@ -100,10 +106,6 @@ export function ProjectLayout({ children }: { children: ReactNode }) {
           <ArrowLeft />
           {selected.name}
         </button>
-        <span className="formal-status">
-          <CircleCheck size={15} />
-          正式作品
-        </span>
         <ProjectStateRefreshControl projectId={selected.project_id} />
         <nav aria-label="作品内导航">
           {items.map((item) => (

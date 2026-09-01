@@ -26,6 +26,12 @@ const tabs: Array<{ key: FoundationTab; label: string; Icon: typeof UserRound; c
   { key: 'mystery_information', label: '悬疑信息', Icon: Check, category: 'mystery_information' },
 ]
 
+const tabGroups: Array<{ label: string; tabs: FoundationTab[] }> = [
+  { label: '人物与关系', tabs: ['characters', 'relationships'] },
+  { label: '世界与规则', tabs: ['canon_facts', 'locations', 'organizations', 'systems'] },
+  { label: '故事线索', tabs: ['storylines', 'foreshadowing', 'mystery_information'] },
+]
+
 const characterFields = [
   ['aliases', '别名'], ['one_line_intro', '一句话介绍'], ['role_identity', '角色 / 身份'],
   ['position_title', '职位'], ['faction_org', '阵营 / 组织'], ['visible_traits', '可见特征'],
@@ -106,13 +112,6 @@ const sectionForCategory = (category: string | null | undefined): FoundationTab 
   if (category === 'mystery_information') return 'mystery_information'
   return 'canon_facts'
 }
-
-const optionalModules = [
-  ['power_progression', '成长 / 战力'], ['career_rank', '职业 / 职级'],
-  ['economy_resources', '经济 / 资源'], ['politics_factions', '政治 / 阵营'],
-  ['technology', '科技'], ['supernatural_rules', '超自然规则'],
-  ['romance_social', '情感 / 社交'], ['mystery_information', '悬疑信息'], ['custom', '自定义'],
-] as const
 
 // ---------------- M3 基座设计（Agent 主导 + 多轮知识参考；候选 ≠ authority） ----------------
 
@@ -263,8 +262,6 @@ export function FoundationPage() {
   const [detailEntry, setDetailEntry] = useState<ProjectDataEntry | null>(null)
   const [genreTags, setGenreTags] = useState('')
   const [narrativeMode, setNarrativeMode] = useState('')
-  const [activeModules, setActiveModules] = useState<string[]>([])
-  const [characterOptionalFields, setCharacterOptionalFields] = useState('')
   const handoffRef = useRef<string | null>(null)
 
   const tabMeta = tabs.find((item) => item.key === tab) ?? tabs[0]
@@ -285,14 +282,6 @@ export function FoundationPage() {
     if (!profile) return
     setGenreTags(profile.genre_tags.join('、'))
     setNarrativeMode(profile.narrative_mode ?? '')
-    setActiveModules(profile.active_modules)
-    const characterConfig = profile.field_config.character
-    const optionalFields = characterConfig && typeof characterConfig === 'object' && !Array.isArray(characterConfig)
-      ? (characterConfig as Record<string, unknown>).optional_fields
-      : []
-    setCharacterOptionalFields(Array.isArray(optionalFields)
-      ? optionalFields.filter((item): item is string => typeof item === 'string').join('、')
-      : '')
   }, [controller.data?.story_bible_profile])
 
   const beginCreate = () => {
@@ -396,23 +385,13 @@ export function FoundationPage() {
   }
 
   const saveProfile = async () => {
-    const currentConfig = controller.data?.story_bible_profile.field_config ?? {}
-    const currentCharacterConfig = currentConfig.character
-    const optionalFields = characterOptionalFields
-      .split(/[、,，\n]/).map((item) => item.trim()).filter(Boolean)
+    const profile = controller.data?.story_bible_profile
+    if (!profile) return
     await controller.saveProfile({
       genre_tags: genreTags.split(/[、,，\n]/).map((item) => item.trim()).filter(Boolean),
       narrative_mode: narrativeMode.trim() || null,
-      active_modules: activeModules,
-      field_config: {
-        ...currentConfig,
-        character: {
-          ...(currentCharacterConfig && typeof currentCharacterConfig === 'object' && !Array.isArray(currentCharacterConfig)
-            ? currentCharacterConfig as Record<string, unknown>
-            : {}),
-          optional_fields: optionalFields,
-        },
-      },
+      active_modules: profile.active_modules,
+      field_config: profile.field_config,
     })
   }
 
@@ -424,39 +403,29 @@ export function FoundationPage() {
       </div>
 
       <section className="panel foundation-profile">
-        <h3>本书资料结构</h3>
-        <p className="muted-note">控制本书需要显示的可选领域；隐藏模块不会删除已经记录的内容。</p>
+        <h3>作品基础信息</h3>
         <label>题材标签<input value={genreTags} onChange={(event) => setGenreTags(event.target.value)} placeholder="例如：历史、悬疑" /></label>
         <label>叙事方式<input value={narrativeMode} onChange={(event) => setNarrativeMode(event.target.value)} placeholder="明确时填写，例如：第三人称限知" /></label>
-        <label>人物可选字段<input value={characterOptionalFields} onChange={(event) => setCharacterOptionalFields(event.target.value)} placeholder="按本书需要填写，例如：年龄状态、当前地点、声誉" /></label>
-        <div className="profile-modules">
-          {optionalModules.map(([key, label]) => (
-            <label key={key}>
-              <input
-                type="checkbox"
-                checked={activeModules.includes(key)}
-                onChange={(event) => setActiveModules((items) => event.target.checked
-                  ? [...items.filter((item) => item !== key), key]
-                  : items.filter((item) => item !== key))}
-              />
-              {label}
-            </label>
-          ))}
-        </div>
-        <button onClick={() => void saveProfile()} disabled={controller.saving}><Save /> 保存本书结构</button>
+        <button onClick={() => void saveProfile()} disabled={controller.saving}><Save /> 保存基础信息</button>
       </section>
 
       <section className="panel foundation-main">
         <header className="foundation-toolbar">
-          <div className="foundation-tabs">
-            {tabs.map(({ key, label, Icon }) => (
-              <button key={key} className={tab === key ? 'active' : ''} onClick={() => { setTab(key); setRecordForm(null); setSharedEditor(null); setDetailEntry(null) }}>
-                <Icon /> {label}
-              </button>
+          <div className="foundation-tab-groups">
+            {tabGroups.map((group) => (
+              <div className="foundation-tab-group" key={group.label}>
+                <span>{group.label}</span>
+                <div className="foundation-tabs">
+                  {group.tabs.map((key) => {
+                    const item = tabs.find((candidate) => candidate.key === key) as typeof tabs[number]
+                    const { label, Icon } = item
+                    return <button key={key} className={tab === key ? 'active' : ''} onClick={() => { setTab(key); setRecordForm(null); setSharedEditor(null); setDetailEntry(null) }}><Icon /> {label}</button>
+                  })}
+                </div>
+              </div>
             ))}
           </div>
-          <button onClick={() => setDesignOpen(true)}><Sparkles /> 基座设计</button>
-          <button className="primary" onClick={beginCreate}><Plus /> 新增{tabMeta.label}</button>
+          <div className="foundation-toolbar-actions"><button onClick={() => setDesignOpen(true)}><Sparkles /> 基座设计</button><button className="primary" onClick={beginCreate}><Plus /> 新增{tabMeta.label}</button></div>
         </header>
 
         {controller.loading && <div className="empty-state">正在加载作品地基…</div>}

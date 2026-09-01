@@ -103,6 +103,12 @@ p{line-height:1.65}
 .projectbar nav button.active{color:var(--blue)}
 .projectbar nav button.active:after{content:"";position:absolute;left:10px;right:10px;bottom:0;height:4px;background:var(--blue);border-radius:4px}
 .project-content{padding:18px 28px 28px;max-width:1680px;margin:0 auto}
+.project-state-refresh.compact{align-self:center;border:1px solid #cbd9ef;background:#f7faff;color:#315aab;padding:7px 10px;font-size:13px;white-space:nowrap}
+.project-state-refresh.compact.failed{border-color:#efcaca;background:#fff7f7;color:var(--red)}
+.project-state-refresh-drawer{z-index:40}
+.project-state-consequences{display:grid;gap:10px;margin:0;padding:0;list-style:none}
+.project-state-consequences li{display:grid;gap:4px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#fafcff;font-size:14px;line-height:1.55}
+.project-state-consequences span{color:var(--muted)}
 
 /* ============ 作品概览：紧凑状态 + 下一步动作 ============ */
 .overview-page{display:grid;gap:16px;max-width:1280px;margin:0 auto}
@@ -115,12 +121,6 @@ p{line-height:1.65}
 .project-stats span:last-child{border:0}
 .project-stats strong{display:block;color:var(--text);font-size:18px;margin-top:4px}
 .overview-cta{margin-top:6px}
-.overview-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}
-.overview-actions>button{padding:16px 18px;justify-content:flex-start;text-align:left;align-items:center}
-.overview-actions>button>svg{width:28px;height:28px;color:var(--blue)}
-.overview-actions span{display:grid;gap:4px}
-.overview-actions strong{font-size:16px}
-.overview-actions small{color:var(--muted)}
 .overview-footnote{display:flex;align-items:center;gap:6px;margin:0}
 
 /* ============ 作品地基：当前已确定事实的可读投影 ============ */
@@ -129,13 +129,22 @@ p{line-height:1.65}
 .foundation-direction section{padding:16px 20px}
 .foundation-direction h3{margin:0 0 6px;font-size:15px;color:var(--blue)}
 .foundation-direction p{margin:0;line-height:1.65}
+.foundation-profile{display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:end;padding:16px 20px}
+.foundation-profile h3{grid-column:1/-1;margin:0;font-size:15px;color:var(--blue)}
+.foundation-profile label{display:grid;gap:6px;font-size:13px;color:var(--muted)}
+.foundation-profile input{border:1px solid var(--line);border-radius:8px;padding:8px;background:#fff;color:var(--text);font:inherit}
 .foundation-main{padding:0 0 18px}
-.foundation-toolbar{min-height:58px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:14px;padding:0 22px}
+.foundation-toolbar{min-height:58px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 22px}
 .foundation-tabs{height:56px;border-bottom:1px solid var(--line);display:flex;align-items:stretch;padding:0 22px}
-.foundation-toolbar .foundation-tabs{border:0;padding:0;overflow-x:auto}
+.foundation-tab-groups{display:flex;align-items:stretch;gap:14px;min-width:0;overflow-x:auto}
+.foundation-tab-group{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:6px;white-space:nowrap}
+.foundation-tab-group>span{font-size:12px;color:var(--muted);font-weight:600}
+.foundation-toolbar .foundation-tabs{height:36px;border:0;padding:0;overflow:visible}
+.foundation-toolbar .foundation-tabs button{padding:0 8px;font-size:13px}
 .foundation-tabs button{border:0;border-radius:0;background:transparent;position:relative}
 .foundation-tabs button.active{color:var(--blue)}
 .foundation-tabs button.active:after{content:"";position:absolute;bottom:0;left:12px;right:12px;height:3px;background:var(--blue)}
+.foundation-toolbar-actions{display:flex;gap:8px;flex:none}
 .foundation-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;padding:18px 22px}
 .foundation-card{border:1px solid var(--line);border-radius:10px;padding:14px 16px;background:#fafcff}
 .foundation-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
@@ -195,6 +204,12 @@ p{line-height:1.65}
 .chapter-plan-list>button>span{display:grid;gap:3px}
 .chapter-plan-list small{color:var(--muted)}
 .planning-main{padding:20px 24px}
+.planning-summary{grid-column:1/-1;display:flex;align-items:end;justify-content:space-between;gap:16px;padding:16px 18px}
+.planning-summary>div{display:grid;gap:8px;flex:1}
+.planning-summary h3{margin:0;font-size:15px}
+.planning-summary .planning-list{max-height:120px;overflow:auto}
+.planning-ai-drawer{z-index:40}
+.planning-ai-drawer header h2{display:flex;align-items:center;gap:8px}
 .planning-head h2{display:flex;align-items:center;gap:10px;margin:0;font-size:19px}
 .planning-head p{margin:6px 0 12px}
 .planning-entry{border:1px solid #cbd9ef;background:#f7faff;border-radius:10px;padding:14px}

@@ -1,4 +1,4 @@
-import { BookOpen, CircleCheck, Compass, FileText, Layers, PenLine, RefreshCw } from 'lucide-react'
+import { FileText, PenLine, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
@@ -57,14 +57,6 @@ export function ProjectOverviewPage() {
 
   const planCount = overview?.current_plans?.length ?? 0
 
-  const nextActions = [
-    { label: '正在写', desc: '继续写当前章节的正文', Icon: PenLine, section: 'writing' as const },
-    { label: '故事规划', desc: '和 AI 一起决定接下来的方向', Icon: Compass, section: 'planning' as const },
-    { label: '作品地基', desc: '查看已确定的人物、关系与核心事实', Icon: Layers, section: 'foundation' as const },
-    { label: '故事地图', desc: '查看已经发生了什么、线索在哪里', Icon: BookOpen, section: 'map' as const },
-    { label: '作品检查', desc: '对选中章节发起一次检查', Icon: CircleCheck, section: 'review' as const },
-  ]
-
   return (
     <div className="overview-page">
       <section className="panel overview-status">
@@ -117,18 +109,6 @@ export function ProjectOverviewPage() {
           </button>
         </div>
       </section>
-
-      <div className="overview-actions">
-        {nextActions.map(({ label, desc, Icon, section }) => (
-          <button className="panel" key={label} onClick={() => actions.setProjectSection(section)}>
-            <Icon />
-            <span>
-              <strong>{label}</strong>
-              <small>{desc}</small>
-            </span>
-          </button>
-        ))}
-      </div>
 
       <p className="muted-note overview-footnote">
         <FileText size={14} /> 概览只显示决定下一步所需的信息；明细分别在作品地基、故事规划与故事地图中查看。

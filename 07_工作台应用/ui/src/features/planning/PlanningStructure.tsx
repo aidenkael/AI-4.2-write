@@ -1,6 +1,7 @@
 import { BookOpen, ChevronRight, Plus, Save, Target, Trash2, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ProjectDataController } from '../projectData/useProjectDataController'
+import { normalizeChapterForeshadowing } from './planningFields'
 
 interface StageDraft { ref?: string; title: string; target_words: string; kind: string }
 interface ChapterDraft {
@@ -26,7 +27,6 @@ interface ChapterDraft {
   emotional_movement: string
   information_gap: string
   information_release_gap: string
-  foreshadowing_setup_payoff: string
   end_state_hook: string
   stage: string
   actual_words: number
@@ -71,11 +71,10 @@ export function PlanningStructure({ controller }: { controller: ProjectDataContr
       participating_characters: listText(item.participating_characters),
       new_characters: listText(item.new_characters), key_events: listText(item.key_events),
       key_beats: listText(item.key_beats),
-      foreshadowing: listText(item.foreshadowing), notes: text(item.notes), storyline: text(item.storyline),
+      foreshadowing: listText(normalizeChapterForeshadowing(item)), notes: text(item.notes), storyline: text(item.storyline),
       conflict: text(item.conflict), emotional_movement: text(item.emotional_movement),
       information_gap: text(item.information_gap), stage: text(item.stage), actual_words: item.actual_words,
       information_release_gap: text(item.information_release_gap),
-      foreshadowing_setup_payoff: listText(item.foreshadowing_setup_payoff),
       end_state_hook: text(item.end_state_hook),
     }))
     baselineRef.current = { total: nextTotal, stages: nextStages, chapters: nextChapters }
@@ -103,7 +102,7 @@ export function PlanningStructure({ controller }: { controller: ProjectDataContr
       task: '', previous_recap: '', synopsis: '', pov: '', planned_location: '', planned_time: '',
       participating_characters: '', new_characters: '', key_beats: '', key_events: '',
       foreshadowing: '', notes: '', storyline: '', conflict: '', emotional_movement: '',
-      information_gap: '', information_release_gap: '', foreshadowing_setup_payoff: '',
+      information_gap: '', information_release_gap: '',
       end_state_hook: '', stage: '', actual_words: 0,
     }])
     setEditingChapter(next)
@@ -134,7 +133,6 @@ export function PlanningStructure({ controller }: { controller: ProjectDataContr
       foreshadowing: splitList(item.foreshadowing), notes: item.notes.trim(), storyline: item.storyline.trim(),
       conflict: item.conflict.trim(), emotional_movement: item.emotional_movement.trim(),
       information_gap: item.information_gap.trim(), information_release_gap: item.information_release_gap.trim(),
-      foreshadowing_setup_payoff: splitList(item.foreshadowing_setup_payoff),
       end_state_hook: item.end_state_hook.trim(), stage: item.stage.trim(),
     }))
     allowRefreshRef.current = true
@@ -202,7 +200,7 @@ export function PlanningStructure({ controller }: { controller: ProjectDataContr
           <label>关键节拍<input value={activeChapter.key_beats} onChange={(event) => updateChapter({ key_beats: event.target.value })} /></label>
           <label>关键事件<textarea value={activeChapter.key_events} onChange={(event) => updateChapter({ key_events: event.target.value })} /></label>
           <label>伏笔 / 埋设 / 回收<textarea value={activeChapter.foreshadowing} onChange={(event) => updateChapter({ foreshadowing: event.target.value })} /></label>
-          <details><summary>更多可选项</summary><label>冲突<input value={activeChapter.conflict} onChange={(event) => updateChapter({ conflict: event.target.value })} /></label><label>情绪移动<input value={activeChapter.emotional_movement} onChange={(event) => updateChapter({ emotional_movement: event.target.value })} /></label><label>信息释放 / 信息差<input value={activeChapter.information_release_gap} onChange={(event) => updateChapter({ information_release_gap: event.target.value })} /></label><label>伏笔埋设 / 回收<input value={activeChapter.foreshadowing_setup_payoff} onChange={(event) => updateChapter({ foreshadowing_setup_payoff: event.target.value })} /></label><label>结束状态 / 钩子<input value={activeChapter.end_state_hook} onChange={(event) => updateChapter({ end_state_hook: event.target.value })} /></label><label>阶段 / 分卷关联<input value={activeChapter.stage} onChange={(event) => updateChapter({ stage: event.target.value })} /></label></details>
+          <details><summary>更多可选项</summary><label>冲突<input value={activeChapter.conflict} onChange={(event) => updateChapter({ conflict: event.target.value })} /></label><label>情绪移动<input value={activeChapter.emotional_movement} onChange={(event) => updateChapter({ emotional_movement: event.target.value })} /></label><label>信息释放 / 信息差<input value={activeChapter.information_release_gap} onChange={(event) => updateChapter({ information_release_gap: event.target.value })} /></label><label>结束状态 / 钩子<input value={activeChapter.end_state_hook} onChange={(event) => updateChapter({ end_state_hook: event.target.value })} /></label><label>阶段 / 分卷关联<input value={activeChapter.stage} onChange={(event) => updateChapter({ stage: event.target.value })} /></label></details>
           <label>作者备注<textarea rows={3} value={activeChapter.notes} onChange={(event) => updateChapter({ notes: event.target.value })} /></label>
           <footer><button className="danger" onClick={() => { setChapters((items) => items.filter((item) => item.chapter_number !== activeChapter.chapter_number)); setEditingChapter(null) }}><Trash2 /> 删除细纲</button><button onClick={() => setEditingChapter(null)}><X /> 关闭</button><button className="primary" disabled={!dirty || controller.saving} onClick={() => { setEditingChapter(null); void save() }}><Save /> 保存全部规划</button></footer>
         </aside>

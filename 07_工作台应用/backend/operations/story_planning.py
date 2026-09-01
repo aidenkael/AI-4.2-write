@@ -170,7 +170,7 @@ _AGENT_TASK_TEMPLATE = """你是 Go Write 的规划执行器。必须严格按�
     "events": [{{"key": "唯一键", "title": "计划事件", "description": "可选", "time_anchor": "仅显式已知时填写"}}],
     "foreshadowing": [{{"key": "唯一键", "title": "伏笔/承诺", "status": "planned", "description": "可选"}}],
     "mystery_information": [],
-    "chapter_changes": [{{"title": "第1章", "chapter_number": 1, "min_words": 2500, "max_words": 4000, "task": "章节任务", "previous_recap": "上一章实际回顾", "synopsis": "章节梗概", "pov": "可选", "planned_location": "可选", "planned_time": "仅显式", "participating_characters": [], "new_characters": [], "key_beats": [], "conflict": "", "emotional_movement": "", "information_release_gap": "", "foreshadowing_setup_payoff": [], "end_state_hook": "", "storyline": "", "stage": "", "notes": ""}}]
+    "chapter_changes": [{{"title": "第1章", "chapter_number": 1, "min_words": 2500, "max_words": 4000, "task": "章节任务", "previous_recap": "上一章实际回顾", "synopsis": "章节梗概", "pov": "可选", "planned_location": "可选", "planned_time": "仅显式", "participating_characters": [], "new_characters": [], "key_beats": [], "foreshadowing": [], "conflict": "", "emotional_movement": "", "information_release_gap": "", "end_state_hook": "", "storyline": "", "stage": "", "notes": ""}}]
   }}
 }}
 

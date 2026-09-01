@@ -1,4 +1,4 @@
-import { Bot, Check, CircleCheck, FolderOpen, PenLine, Plus, RefreshCw, Save, Sparkles, X } from 'lucide-react'
+import { Bot, Check, CircleCheck, FolderOpen, Plus, RefreshCw, Save, Sparkles, X } from 'lucide-react'
 import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { useWritingController } from '../features/writing/useWritingController'
@@ -163,11 +163,6 @@ export function WritingPage() {
                 <>{state.execution?.execution_mode === 'interactive_bridge' ? '请到 Qoder 执行 /gowrite' : 'AI 正在写作'}</>
               )}
             </div>
-            {state.execution?.execution_mode === 'interactive_bridge' && (
-              <p className="muted-note execution-summary">
-                请到 Qoder 执行 /gowrite
-              </p>
-            )}
             <div className="candidate-actions">
               <button onClick={() => void c.cancel()}>
                 <X />
@@ -235,10 +230,6 @@ export function WritingPage() {
         {state.error && <p className="error-text">{state.error}</p>}
 
         <footer className="ai-collab-shortcuts">
-          <button onClick={() => c.setAuthorInput('顺着上一段继续写下去')}>
-            <PenLine />
-            接下来怎么写
-          </button>
           <button
             onClick={() => {
               // 方案讨论属于规划，不属于正文写作：交给故事规划（StoryPlan）

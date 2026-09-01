@@ -1171,6 +1171,13 @@ def test_task_requires_strict_json_final_response():
     assert '"planning_items"' in task
 
 
+def test_task_uses_one_canonical_chapter_foreshadowing_field():
+    """StoryPlan must no longer introduce the legacy duplicate outline key."""
+    task = _render_task_template()
+    assert '"foreshadowing": []' in task
+    assert "foreshadowing_setup_payoff" not in task
+
+
 def test_task_requires_package_ref_binding():
     """D. package_fingerprint → package_ref 绑定仍被明确要求。"""
     task = _render_task_template()
