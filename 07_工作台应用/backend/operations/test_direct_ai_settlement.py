@@ -88,10 +88,17 @@ def _wait_change(project_id: str, change_id: str, statuses, timeout: float = 10.
     return author_edit.get_change(project_id, change_id)
 
 
+def _join_worker(worker: threading.Thread | None) -> None:
+    if worker is not None:
+        worker.join(timeout=10)
+        assert not worker.is_alive()
+
+
 def _settle_explicit(project_id: str, change_id: str):
     """Prepare and wait for a NEW terminal state (stale failures are ignored)."""
     baseline = author_edit.get_change(project_id, change_id)
     change_settlement.prepare_change_settlement(project_id, change_id)
+    worker = change_settlement._active_worker(project_id)
     deadline = time.time() + 10.0
     final = baseline
     while time.time() < deadline:
@@ -104,6 +111,7 @@ def _settle_explicit(project_id: str, change_id: str):
         ):
             break
         time.sleep(0.05)
+    _join_worker(worker)
     ledger = author_edit._read_changes(author_edit._load(project_id)[2], project_id)["changes"]
     diagnostics = (
         final.get("error"),
@@ -230,6 +238,8 @@ def test_invalid_direct_ai_result_fails_safely(
 
     monkeypatch.setattr(change_settlement.semantic_ai, "run_text", lambda prompt, **kwargs: "这不是 JSON")
     change_settlement.prepare_change_settlement(project["project_id"], change_id)
+    worker = change_settlement._active_worker(project["project_id"])
+    assert worker is not None
     final = _wait_change(project["project_id"], change_id, {"failed", "synchronized"})
     assert final["status"] == "failed", repr(final)
     assert "JSON" in (final.get("error") or "")
@@ -237,6 +247,9 @@ def test_invalid_direct_ai_result_fails_safely(
     model = project_model.read_project_model(project["project_id"])
     assert model["model_rev"] == rev_before
     assert model["objects"][ref]["data"]["current_state"] == "离开城市"
+    # This worker also drains the earlier pending foundation change.  Join the
+    # actual worker before pytest restores mocks and removes this temp project.
+    _join_worker(worker)
 
 
 def test_rapid_edits_serialized_without_agent_or_duplicates(
@@ -281,6 +294,7 @@ def test_rapid_edits_serialized_without_agent_or_duplicates(
     for edit_change_id in ids:
         final = _wait_change(project["project_id"], edit_change_id, {"synchronized", "awaiting_author", "failed"})
         assert final["status"] == "synchronized", final.get("error")
+    _join_worker(change_settlement._active_worker(project["project_id"]))
 
     # No /gowrite activation, no Agent slot, no duplicate failure cards.
     assert bridge.get_active_request_id() is None
@@ -377,8 +391,7 @@ def test_mechanical_retire_or_duplicate_of_author_record_requires_confirmation(
     )
     edit = _edit(pid, rev, ref, "受伤")
     change_id = edit["change"]["change_id"]
-    change_settlement.prepare_change_settlement(pid, change_id)
-    final = _wait_change(pid, change_id, {"awaiting_author", "synchronized", "failed"})
+    final = _settle_explicit(pid, change_id)
     assert final["status"] == "awaiting_author", final.get("error")
 
     model = project_model.read_project_model(pid)
