@@ -18,6 +18,7 @@ import {
   updateRelationship,
   type AuthorEditResult,
   type ProjectData,
+  type RelationSelection,
 } from '../../bridge/client'
 
 export interface ProjectDataController {
@@ -26,8 +27,8 @@ export interface ProjectDataController {
   error: string | null
   saving: boolean
   reload(): Promise<void>
-  createFoundation(input: { category: string; title: string; material_state: 'current' | 'future'; data: Record<string, unknown> }): Promise<boolean>
-  updateFoundation(input: { ref: string; title: string; material_state: 'current' | 'future'; data: Record<string, unknown> }): Promise<boolean>
+  createFoundation(input: { category: string; title: string; material_state: 'current' | 'future'; data: Record<string, unknown>; relations?: RelationSelection[] }): Promise<boolean>
+  updateFoundation(input: { ref: string; title: string; material_state: 'current' | 'future'; data: Record<string, unknown>; relations?: RelationSelection[] }): Promise<boolean>
   retireFoundation(ref: string): Promise<boolean>
   restoreFoundation(ref: string): Promise<boolean>
   createRelationship(input: { source_ref: string; target_ref: string; label: string; material_state: 'current' | 'future'; data: Record<string, unknown> }): Promise<boolean>
@@ -100,11 +101,11 @@ export function useProjectDataController(projectId: string | null): ProjectDataC
     }
   }, [data?.model_rev, data?.project_id, load])
 
-  const createFoundation = useCallback((input: { category: string; title: string; material_state: 'current' | 'future'; data: Record<string, unknown> }) => (
+  const createFoundation = useCallback((input: { category: string; title: string; material_state: 'current' | 'future'; data: Record<string, unknown>; relations?: RelationSelection[] }) => (
     mutate((pid, rev) => createFoundationRecord({ project_id: pid, base_model_rev: rev, ...input }))
   ), [mutate])
 
-  const updateFoundation = useCallback((input: { ref: string; title: string; material_state: 'current' | 'future'; data: Record<string, unknown> }) => (
+  const updateFoundation = useCallback((input: { ref: string; title: string; material_state: 'current' | 'future'; data: Record<string, unknown>; relations?: RelationSelection[] }) => (
     mutate((pid, rev) => updateFoundationRecord({ project_id: pid, base_model_rev: rev, ...input }))
   ), [mutate])
 

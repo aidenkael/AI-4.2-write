@@ -181,6 +181,8 @@ def get_project_data(project_id: str) -> dict[str, Any]:
             "actual_result": copy.deepcopy(item.get("actual_result")),
         } for item in snapshot["chapters"]],
         "planning_impact_candidates": snapshot.get("planning_impact_candidates", []),
+        # 同一 ProjectModel 的活动显式关系事实（只读派生；UI 展示标签不展示 ref）
+        "explicit_dependencies": copy.deepcopy(snapshot.get("explicit_dependencies", [])),
         "retired": {
             "foundation": [retired_entry(item) for item in retired_source.get("foundation", [])],
             "relationships": [retired_entry(item) for item in retired_source.get("relationships", [])],

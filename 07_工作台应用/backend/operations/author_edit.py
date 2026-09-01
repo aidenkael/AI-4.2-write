@@ -471,6 +471,10 @@ def _model_change_requires_semantic(
     """Conservative boundary: only proven display/mechanical edits skip AI."""
     if source_kind in {"profile_edit", "foundation_restore", "relationship_restore"}:
         return False
+    if source_kind == "domain_relation_edit":
+        # 显式领域关系是作者维护的结构化记录；写入立即持久并进入 pending，
+        # 但绝不在这里自动运行语义 AI。
+        return True
     history_detail = detail.get("detail") if isinstance(detail.get("detail"), dict) else {}
     if source_kind in {"relationship_edit", "system_edit"}:
         changes = history_detail.get("changes") if isinstance(history_detail.get("changes"), dict) else {}
@@ -517,8 +521,11 @@ def create_foundation_record(
     material_state: str,
     data: dict[str, Any] | None = None,
     category_name: str | None = None,
+    relations: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if category == "system":
+        if relations is not None:
+            raise AuthorEditError("体系记录不是领域关系起点，无法携带关联选择。")
         return _perform_model_change(
             project_id,
             "system_edit",
@@ -533,6 +540,7 @@ def create_foundation_record(
         lambda: project_model.create_foundation_record(
             project_id, base_model_rev=base_model_rev, category=category, title=title,
             material_state=material_state, data=data, category_name=category_name,
+            relations=relations,
         ),
     )
 
@@ -565,6 +573,7 @@ def update_foundation_record(
     title: str | None = None,
     material_state: str | None = None,
     data: dict[str, Any] | None = None,
+    relations: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     try:
         initial = project_model.load_project_model(project_id)
@@ -572,6 +581,8 @@ def update_foundation_record(
         raise AuthorEditError(str(exc)) from exc
     initial_item = initial.get("objects", {}).get(ref)
     source_kind = "system_edit" if isinstance(initial_item, dict) and initial_item.get("kind") == "system" else "foundation_edit"
+    if relations is not None and source_kind == "system_edit":
+        raise AuthorEditError("体系记录不是领域关系起点，无法携带关联选择。")
 
     def action() -> dict[str, Any]:
         model = project_model.load_project_model(project_id)
@@ -581,7 +592,7 @@ def update_foundation_record(
         if isinstance(item, dict) and not item.get("tombstoned"):
             return project_model.update_object(
                 project_id, base_model_rev=model["model_rev"], ref=ref, title=title,
-                material_state=material_state, data=data,
+                material_state=material_state, data=data, relations=relations,
             )
         snapshot = get_project_snapshot(project_id)
         source = _snapshot_record(snapshot, ref)
@@ -595,6 +606,7 @@ def update_foundation_record(
             title=(title or source.get("title") or "未命名记录"),
             material_state=(material_state or source.get("material_state") or "current"),
             data=_overlay_data(source, data),
+            relations=relations,
         )
 
     return _perform_model_change(
@@ -762,6 +774,34 @@ def retire_relationship(project_id: str, *, base_model_rev: int, ref: str) -> di
         "relationship_edit",
         action,
     )
+
+
+def create_domain_dependency(
+    project_id: str,
+    *,
+    base_model_rev: int,
+    source_ref: str,
+    target_ref: str,
+    relation_kind: str,
+    material_state: str = "current",
+    data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """窄口径作者变更：新增一条经中央规格校验的领域关系。
+
+    仅供 FoundationDesign 等已确认的高层操作使用；写后立即 durable 并进入
+    pending 语义刷新，绝不自动运行 AI/Agent；不新增第二本作者账本。
+    """
+    def action() -> dict[str, Any]:
+        model = project_model.load_project_model(project_id)
+        if model["model_rev"] != base_model_rev:
+            raise AuthorEditError("模型版本已变化，已拒绝 stale 写入。")
+        return project_model.add_domain_dependency(
+            project_id, base_model_rev=model["model_rev"], source_ref=source_ref,
+            target_ref=target_ref, relation_kind=relation_kind,
+            material_state=material_state, data=data,
+        )
+
+    return _perform_model_change(project_id, "domain_relation_edit", action)
 
 
 def restore_foundation_record(project_id: str, *, base_model_rev: int, ref: str) -> dict[str, Any]:

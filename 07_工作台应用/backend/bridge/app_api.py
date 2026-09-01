@@ -705,6 +705,7 @@ class AppApi:
                 material_state=str(payload.get("material_state") or "current"),
                 data=payload.get("data") if isinstance(payload.get("data"), dict) else {},
                 category_name=(str(payload.get("category_name")) if payload.get("category_name") is not None else None),
+                relations=payload.get("relations") if isinstance(payload.get("relations"), list) else None,
             ))
         except (AuthorEditError, TypeError, ValueError) as exc:
             return _err(CODE_AUTHOR_EDIT_ERROR, str(exc))
@@ -735,6 +736,7 @@ class AppApi:
                 title=(str(payload.get("title")) if payload.get("title") is not None else None),
                 material_state=(str(payload.get("material_state")) if payload.get("material_state") is not None else None),
                 data=payload.get("data") if isinstance(payload.get("data"), dict) else None,
+                relations=payload.get("relations") if isinstance(payload.get("relations"), list) else None,
             ))
         except (AuthorEditError, TypeError, ValueError) as exc:
             return _err(CODE_AUTHOR_EDIT_ERROR, str(exc))

@@ -14,7 +14,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from operations.project_model import ProjectModelError, read_project_model
+from operations.project_model import (
+    DOMAIN_RELATION_KINDS,
+    ProjectModelError,
+    read_project_model,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PW = _REPO_ROOT / "05_Skills与自动化" / "01_Skills" / "ProjectWorkspace"
@@ -226,6 +230,47 @@ def _relationship_record(edge: dict[str, Any], objects: dict[str, Any]) -> dict[
         "category": "relationship",
         "kind": "dependency",
     }
+
+
+def _dependency_category(item: dict[str, Any]) -> str | None:
+    """作者可读分类：体系对象统一显示为 system。"""
+    if not isinstance(item, dict):
+        return None
+    return "system" if item.get("kind") == "system" else item.get("category")
+
+
+# 快照可见的显式关系类型：人物关系 + 批准的领域关系类型。
+_VISIBLE_RELATION_KINDS = {"character_relationship", *DOMAIN_RELATION_KINDS}
+
+
+def _explicit_dependencies(model: dict[str, Any]) -> list[dict[str, Any]]:
+    """活动显式依赖的只读投影；不含 tombstoned 边，不改写任何源记录。"""
+    objects = model.get("objects", {})
+    result: list[dict[str, Any]] = []
+    for edge in model.get("dependencies", {}).values():
+        if not isinstance(edge, dict) or edge.get("tombstoned"):
+            continue
+        if edge.get("relation_kind") not in _VISIBLE_RELATION_KINDS:
+            continue
+        source = objects.get(edge["source_ref"])
+        target = objects.get(edge["target_ref"])
+        if not isinstance(source, dict) or not isinstance(target, dict):
+            continue
+        result.append({
+            "ref": edge["ref"],
+            "relation_kind": edge.get("relation_kind"),
+            "title": edge.get("title") or edge.get("relation_kind") or "",
+            "material_state": edge.get("material_state", "current"),
+            "source_ref": edge["source_ref"],
+            "source_title": source.get("title") or "",
+            "source_category": _dependency_category(source),
+            "target_ref": edge["target_ref"],
+            "target_title": target.get("title") or "",
+            "target_category": _dependency_category(target),
+            "data": copy.deepcopy(edge.get("data") or {}),
+        })
+    result.sort(key=lambda item: item["ref"])
+    return result
 
 
 def _chapter_number(value: Any) -> int | None:
@@ -534,6 +579,7 @@ def get_project_snapshot(project_id: str) -> dict[str, Any]:
         "retired": retired,
         "length_plan": length_plan,
         "chapters": chapters,
+        "explicit_dependencies": _explicit_dependencies(model),
         "planning_impact_candidates": copy.deepcopy(model.get("planning_impact_candidates", [])),
         "legacy_diagnostics": {
             "unresolved_character_observations": unresolved_character_observations,

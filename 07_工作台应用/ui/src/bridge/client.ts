@@ -872,6 +872,28 @@ export interface ProjectDataSections {
   approved_plan: ProjectDataEntry[]
 }
 
+/** 同一 ProjectModel 的活动显式关系事实（只读派生；普通可见 UI 只渲染标题不渲染 ref）。 */
+export interface ExplicitDependency {
+  ref: string
+  relation_kind: string
+  title: string
+  material_state: 'current' | 'future'
+  source_ref: string
+  source_title: string
+  source_category: string | null
+  target_ref: string
+  target_title: string
+  target_category: string | null
+  data?: Record<string, unknown>
+}
+
+/** 作者提交的关系选择条目（完整受管集合；source 由被编辑记录自身确定）。 */
+export interface RelationSelection {
+  relation_kind: string
+  target_ref: string
+  data?: Record<string, unknown>
+}
+
 export interface StoryBibleProfile {
   genre_tags: string[]
   narrative_mode: string | null
@@ -943,6 +965,8 @@ export interface ProjectData {
     actual_result: Record<string, unknown> | null
   }>
   planning_impact_candidates: Array<Record<string, unknown>>
+  /** 活动显式关系事实（人物关系 + 批准的领域关系；派生只读）。 */
+  explicit_dependencies: ExplicitDependency[]
   /** 已退役源记录：可见可恢复，但绝不混入 current/future，也不进入故事地图活动视图。 */
   retired: { foundation: ProjectDataEntry[]; relationships: ProjectDataEntry[] }
   sections: ProjectDataSections
@@ -1036,6 +1060,17 @@ export function validateProjectData(value: unknown): ProjectData {
     }
   }
   requireArray(data.planning_impact_candidates, 'planning_impact_candidates')
+  for (const [index, edge] of requireArray(data.explicit_dependencies, 'explicit_dependencies').entries()) {
+    const record = requireRecord(edge, `explicit_dependencies[${index}]`)
+    for (const key of ['ref', 'relation_kind', 'source_ref', 'target_ref'] as const) {
+      if (typeof record[key] !== 'string' || !(record[key] as string)) {
+        projectDataInvalid(`explicit_dependencies[${index}].${key} 非法`)
+      }
+    }
+    if (record.material_state !== 'current' && record.material_state !== 'future') {
+      projectDataInvalid(`explicit_dependencies[${index}].material_state 非法`)
+    }
+  }
   const sections = requireRecord(data.sections, 'sections')
   for (const key of PROJECT_DATA_SECTION_KEYS) requireProjectEntries(sections[key], `sections.${key}`)
   const retired = requireRecord(data.retired, 'retired')
@@ -1062,6 +1097,7 @@ export async function createFoundationRecord(payload: {
   material_state: 'current' | 'future'
   data: Record<string, unknown>
   category_name?: string
+  relations?: RelationSelection[]
 }): Promise<AuthorEditResult> {
   return call<AuthorEditResult>('create_foundation_record', payload)
 }
@@ -1084,6 +1120,7 @@ export async function updateFoundationRecord(payload: {
   title?: string
   material_state?: 'current' | 'future'
   data?: Record<string, unknown>
+  relations?: RelationSelection[]
 }): Promise<AuthorEditResult> {
   return call<AuthorEditResult>('update_foundation_record', payload)
 }

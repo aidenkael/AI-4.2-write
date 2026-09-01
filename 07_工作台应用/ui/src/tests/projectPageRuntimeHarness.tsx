@@ -25,7 +25,7 @@ export const minimalProjectData: ProjectData = {
   work_direction: '', reader_promise: '', story_synopsis: '', settlement, state_refresh: stateRefresh,
   story_bible_profile: { genre_tags: [], narrative_mode: null, active_modules: ['core', 'characters', 'relationships', 'world', 'locations', 'organizations', 'storylines', 'foreshadowing', 'events', 'time'], field_config: {} },
   length_plan: { total_target_words: null, actual_total_words: 0, stages: [], chapters: [] },
-  chapters: [], planning_impact_candidates: [], retired: { foundation: [], relationships: [] }, sections,
+  chapters: [], planning_impact_candidates: [], explicit_dependencies: [], retired: { foundation: [], relationships: [] }, sections,
 }
 
 const actions: Actions = {

@@ -73,6 +73,53 @@ _INTERNAL_DATA_FIELDS = {
     "scene_ref", "authority", "provenance", "planning_source_ref", "source_state_ref",
     "supersedes_state_ref", "settlement_provenance", "content_sha256",
 }
+# 唯一领域关系规格真源：所有校验/写路径都消费它，不建通用 ontology。
+# source/target 形状：(kind, category)；kind=="system" 表示体系对象。
+# 带 target_categories 的类型允许若干种目标分类（含 "system"）。
+_DOMAIN_RELATION_SPECS: dict[str, dict[str, Any]] = {
+    "character_affiliated_with_organization": {
+        "source": ("foundation", "character"),
+        "target": ("foundation", "organization_force"),
+        "title": "所属组织",
+    },
+    "character_uses_system": {
+        "source": ("foundation", "character"),
+        "target": ("system", None),
+        "title": "关联体系",
+    },
+    "storyline_involves_character": {
+        "source": ("foundation", "story_line"),
+        "target": ("foundation", "character"),
+        "title": "涉及人物",
+    },
+    "storyline_involves_organization": {
+        "source": ("foundation", "story_line"),
+        "target": ("foundation", "organization_force"),
+        "title": "涉及组织",
+    },
+    "storyline_involves_location": {
+        "source": ("foundation", "story_line"),
+        "target": ("foundation", "location"),
+        "title": "涉及地点",
+    },
+    "foreshadowing_related_to": {
+        "source": ("foundation", "promise_foreshadowing"),
+        "target_categories": {
+            "character", "world_setting", "location",
+            "organization_force", "system", "story_line",
+        },
+        "title": "相关对象",
+    },
+    "mystery_information_related_to": {
+        "source": ("foundation", "mystery_information"),
+        "target_categories": {
+            "character", "world_setting", "location",
+            "organization_force", "system", "story_line",
+        },
+        "title": "相关对象",
+    },
+}
+DOMAIN_RELATION_KINDS = frozenset(_DOMAIN_RELATION_SPECS)
 _UNSET = object()
 
 
@@ -504,6 +551,148 @@ def _active_object(model: dict[str, Any], ref: str, *, expected_kind: str | None
     return item
 
 
+def _endpoint_matches(item: dict[str, Any], endpoint: tuple[str, str | None]) -> bool:
+    kind, category = endpoint
+    if kind == "system":
+        return item.get("kind") == "system"
+    return item.get("kind") == kind and item.get("category") == category
+
+
+def _relation_target_matches(item: dict[str, Any], spec: dict[str, Any]) -> bool:
+    if "target" in spec:
+        return _endpoint_matches(item, spec["target"])
+    categories = spec.get("target_categories") or set()
+    if item.get("kind") == "system":
+        return "system" in categories
+    return item.get("kind") == "foundation" and item.get("category") in categories
+
+
+def _validate_domain_relation(
+    model: dict[str, Any], *, relation_kind: str, source_ref: str, target_ref: str,
+) -> None:
+    """机械校验一条领域关系；不推断、不模糊匹配端点。"""
+    spec = _DOMAIN_RELATION_SPECS.get(relation_kind)
+    if spec is None:
+        raise ProjectModelError(f"不支持的领域关系类型：{relation_kind}。")
+    if source_ref == target_ref:
+        raise ProjectModelError("关系两端不能指向同一对象。")
+    source = _active_object(model, source_ref)
+    target = _active_object(model, target_ref)
+    if not _endpoint_matches(source, spec["source"]):
+        raise ProjectModelError("领域关系起点类型不符合该关系类型。")
+    if not _relation_target_matches(target, spec):
+        raise ProjectModelError("领域关系终点类型不符合该关系类型。")
+
+
+def _find_active_duplicate_edge(
+    model: dict[str, Any], *, relation_kind: str, source_ref: str, target_ref: str,
+) -> dict[str, Any] | None:
+    for edge in model["dependencies"].values():
+        if (
+            not edge.get("tombstoned")
+            and edge.get("relation_kind") == relation_kind
+            and edge["source_ref"] == source_ref
+            and edge["target_ref"] == target_ref
+        ):
+            return edge
+    return None
+
+
+def _managed_relation_kinds(item: dict[str, Any]) -> set[str]:
+    """该对象作为起点可管理的领域关系类型集合。"""
+    return {
+        kind for kind, spec in _DOMAIN_RELATION_SPECS.items()
+        if _endpoint_matches(item, spec["source"])
+    }
+
+
+def _reconcile_domain_relations(
+    model: dict[str, Any],
+    source_ref: str,
+    requested: list[dict[str, Any]],
+    next_rev: int,
+) -> dict[str, list[str]]:
+    """把作者提交的完整领域关系集合原子地对账到同一 mutation。
+
+    - 只管理 source == source_ref 且 relation_kind 属于该对象可管理类型的边；
+    - 绝不触碰 character_relationship / 未知类型 / 其他对象为起点的依赖；
+    - 先整体校验再动模型；匹配的活动边保留稳定 ref；缺失边创建；
+      移除的受管边 tombstone；未显式提供 data 时保留既有 data。
+    """
+    item = model["objects"][source_ref]
+    managed = _managed_relation_kinds(item)
+    seen: set[tuple[str, str]] = set()
+    normalized: list[tuple[str, str, dict[str, Any] | None]] = []
+    for index, entry in enumerate(requested):
+        if not isinstance(entry, dict):
+            raise ProjectModelError(f"领域关系请求[{index}] 必须是对象。")
+        relation_kind = entry.get("relation_kind")
+        target_ref = entry.get("target_ref")
+        if relation_kind not in managed:
+            raise ProjectModelError("领域关系类型不属于该记录可管理的关联。")
+        if not isinstance(target_ref, str) or not target_ref.strip():
+            raise ProjectModelError("领域关系必须提供明确的 target_ref。")
+        _validate_domain_relation(
+            model, relation_kind=relation_kind, source_ref=source_ref, target_ref=target_ref,
+        )
+        identity = (relation_kind, target_ref)
+        if identity in seen:
+            raise ProjectModelError("领域关系请求包含重复的关系。")
+        seen.add(identity)
+        data = entry.get("data")
+        normalized.append((relation_kind, target_ref, data if data is not None else None))
+    existing = {
+        (edge["relation_kind"], edge["target_ref"]): edge_ref
+        for edge_ref, edge in model["dependencies"].items()
+        if not edge.get("tombstoned")
+        and edge["source_ref"] == source_ref
+        and edge.get("relation_kind") in managed
+    }
+    created: list[str] = []
+    kept: list[str] = []
+    updated: list[str] = []
+    tombstoned: list[str] = []
+    for relation_kind, target_ref, supplied_data in normalized:
+        edge_ref = existing.get((relation_kind, target_ref))
+        if edge_ref is not None:
+            kept.append(edge_ref)
+            if supplied_data is not None:
+                edge = model["dependencies"][edge_ref]
+                next_data = _validate_data(supplied_data)
+                if edge.get("data") != next_data:
+                    edge["data"] = next_data
+                    edge["field_authority"] = _initial_field_authority(next_data, "author", next_rev)
+                    edge["author_fields"] = sorted(
+                        field for field in next_data if not _is_internal_data_field(field)
+                    )
+                    updated.append(edge_ref)
+            continue
+        edge_ref = _next_ref(model, "edge")
+        edge_data = _validate_data(supplied_data)
+        model["dependencies"][edge_ref] = {
+            "ref": edge_ref,
+            "source_ref": source_ref,
+            "target_ref": target_ref,
+            "relation_kind": relation_kind,
+            "title": _DOMAIN_RELATION_SPECS[relation_kind]["title"],
+            "material_state": item.get("material_state", "current"),
+            "data": edge_data,
+            "field_authority": _initial_field_authority(edge_data, "author", next_rev),
+            "author_fields": sorted(
+                field for field in edge_data if not _is_internal_data_field(field)
+            ),
+            "tombstoned": False,
+        }
+        created.append(edge_ref)
+    for identity, edge_ref in existing.items():
+        if identity not in seen:
+            edge = model["dependencies"][edge_ref]
+            edge["tombstoned"] = True
+            edge["tombstoned_at_rev"] = next_rev
+            tombstoned.append(edge_ref)
+    return {"created": created, "kept": kept, "updated": updated, "tombstoned": tombstoned}
+
+
 def _tombstone_object_with_incident_edges(model: dict[str, Any], ref: str, next_rev: int) -> list[str]:
     """Retire one object and every active explicit edge incident to it."""
     item = _active_object(model, ref)
@@ -528,14 +717,21 @@ def create_foundation_record(
     data: dict[str, Any] | None = None,
     category_name: str | None = None,
     field_authority: str = "author",
+    relations: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Create an explicit author workspace record without creating Canon."""
+    """Create an explicit author workspace record without creating Canon.
+
+    ``relations=None`` 保留既有领域关系；``relations=[...]`` 是作者提交的完整
+    受管领域关系集合，与对象创建在同一次 _commit / 同一 model_rev 内对账。
+    """
     if category not in _FOUNDATION_CATEGORIES:
         raise ProjectModelError("不支持的基础记录分类；自定义分类请使用 custom。")
     if not isinstance(title, str) or not title.strip():
         raise ProjectModelError("基础记录 title 不能为空。")
     if category == "custom" and (not isinstance(category_name, str) or not category_name.strip()):
         raise ProjectModelError("custom 基础记录必须提供 category_name。")
+    if relations is not None and not isinstance(relations, list):
+        raise ProjectModelError("relations 必须是列表或省略。")
     material_state = _validate_material_state(material_state)
     record_data = _validate_data(data)
     if category == "event":
@@ -560,7 +756,11 @@ def create_foundation_record(
             ),
             "tombstoned": False,
         }
-        return {"ref": ref, "action": "created", "kind": "foundation"}
+        detail: dict[str, Any] = {"ref": ref, "action": "created", "kind": "foundation"}
+        if relations is not None:
+            reconciled = _reconcile_domain_relations(model, ref, relations, next_rev)
+            detail["relations"] = reconciled
+        return detail
 
     return _commit(project_id, base_model_rev, "foundation.created", mutate)
 
@@ -574,14 +774,22 @@ def update_object(
     material_state: str | None = None,
     data: dict[str, Any] | None = None,
     field_authority: str = "author",
+    relations: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Edit an object in place; its opaque ref remains stable."""
+    """Edit an object in place; its opaque ref remains stable.
+
+    ``relations=None`` 表示调用方未编辑关系集合 → 保留全部既有领域关系；
+    ``relations=[...]`` 表示作者提交的完整受管关系集合，与字段编辑在同一次
+    _commit / 同一 model_rev 内对账。
+    """
     if title is not None and (not isinstance(title, str) or not title.strip()):
         raise ProjectModelError("title 不能为空。")
     if material_state is not None:
         _validate_material_state(material_state)
     if data is not None:
         data = _validate_data(data)
+    if relations is not None and not isinstance(relations, list):
+        raise ProjectModelError("relations 必须是列表或省略。")
     if field_authority not in {"author", "semantic", "confirmed_plan"}:
         raise ProjectModelError("field_authority 非法。")
 
@@ -616,6 +824,10 @@ def update_object(
                 if isinstance(meta, dict) and meta.get("source") == "author"
             )
             changes["data"]["changed_fields"] = sorted(changed_fields)
+        if relations is not None:
+            reconciled = _reconcile_domain_relations(model, ref, relations, next_rev)
+            if reconciled["created"] or reconciled["tombstoned"] or reconciled["updated"]:
+                changes["relations"] = reconciled
         if not changes:
             raise ProjectModelError("编辑未产生任何实际变化。")
         return {"ref": ref, "action": "updated", "changes": changes}
@@ -1142,6 +1354,62 @@ def add_dependency(
             "tombstoned": False,
         }
         return {"ref": edge_ref, "action": "created", "source_ref": source_ref, "target_ref": target_ref}
+
+    return _commit(project_id, base_model_rev, "dependency.created", mutate)
+
+
+def add_domain_dependency(
+    project_id: str,
+    *,
+    base_model_rev: int,
+    source_ref: str,
+    target_ref: str,
+    relation_kind: str,
+    material_state: str = "current",
+    data: dict[str, Any] | None = None,
+    field_authority: str = "author",
+) -> dict[str, Any]:
+    """新增一条经中央领域关系规格校验的显式依赖（窄口径确认写入口）。
+
+    复用既有 dependency ref 格式 / _commit / 重复检测 / field_authority 语义；
+    不支持任意 relation_kind 的作者直写。
+    """
+    if relation_kind not in _DOMAIN_RELATION_SPECS:
+        raise ProjectModelError(f"不支持的领域关系类型：{relation_kind}。")
+    material_state = _validate_material_state(material_state)
+    edge_data = _validate_data(data)
+    if field_authority not in {"author", "semantic", "confirmed_plan"}:
+        raise ProjectModelError("field_authority 非法。")
+
+    def mutate(model: dict[str, Any], next_rev: int) -> dict[str, Any]:
+        _validate_domain_relation(
+            model, relation_kind=relation_kind, source_ref=source_ref, target_ref=target_ref,
+        )
+        duplicate = _find_active_duplicate_edge(
+            model, relation_kind=relation_kind, source_ref=source_ref, target_ref=target_ref,
+        )
+        if duplicate is not None:
+            raise ProjectModelError("相同的领域关系已存在，未重复创建。")
+        edge_ref = _next_ref(model, "edge")
+        model["dependencies"][edge_ref] = {
+            "ref": edge_ref,
+            "source_ref": source_ref,
+            "target_ref": target_ref,
+            "relation_kind": relation_kind,
+            "title": _DOMAIN_RELATION_SPECS[relation_kind]["title"],
+            "material_state": material_state,
+            "data": edge_data,
+            "field_authority": _initial_field_authority(edge_data, field_authority, next_rev),
+            "author_fields": sorted(
+                field for field in edge_data
+                if field_authority == "author" and not _is_internal_data_field(field)
+            ),
+            "tombstoned": False,
+        }
+        return {
+            "ref": edge_ref, "action": "created", "relation_kind": relation_kind,
+            "source_ref": source_ref, "target_ref": target_ref,
+        }
 
     return _commit(project_id, base_model_rev, "dependency.created", mutate)
 

@@ -7,7 +7,17 @@ import { useProjectDataController } from '../features/projectData/useProjectData
 import { useAuthorTask } from '../features/tasks/AuthorTaskCoordinator'
 import { describeRecord } from '../features/storyMap/storyMapModel'
 import { authorSourceLabel, authorStatusLabel, compactCharacter } from '../features/presentation/authorPresentation'
-import { CharacterEditor, RelationshipEditor, splitEditorData } from '../features/foundation/recordEditors'
+import { CharacterEditor, RelationshipEditor, recordObject, splitEditorData } from '../features/foundation/recordEditors'
+import { RelationSelector } from '../features/foundation/RelationSelector'
+import {
+  initializeRelationSelections,
+  legacyFieldsToStrip,
+  relationOptions,
+  relationSelections,
+  stripLegacyRelationFields,
+  RELATION_SPECS_BY_SOURCE_CATEGORY,
+  type RelationSpec,
+} from '../features/foundation/relationSelectors'
 
 type FoundationTab =
   | 'characters' | 'relationships' | 'canon_facts' | 'locations' | 'organizations'
@@ -36,7 +46,7 @@ const groupForTab = (tab: FoundationTab) => tabGroups.find((group) => group.tabs
 
 const characterFields = [
   ['aliases', '别名'], ['one_line_intro', '一句话介绍'], ['role_identity', '角色 / 身份'],
-  ['position_title', '职位'], ['faction_org', '阵营 / 组织'], ['visible_traits', '可见特征'],
+  ['position_title', '职位'], ['visible_traits', '可见特征'],
   ['persona_core', '人设核心'], ['goal_desire', '目标 / 渴望'], ['fear_weakness', '恐惧 / 弱点'],
   ['inner_conflict', '内在冲突'], ['values_beliefs', '价值 / 信念'], ['background_summary', '背景摘要'],
   ['speech_style', '说话特点'], ['behavior_anchors', '行为锚点'], ['secrets', '秘密'],
@@ -70,13 +80,12 @@ const fieldSets = {
   ],
   storylines: [
     ['goal_purpose', '目标 / 用途'], ['stakes', '代价'], ['main_conflict', '主要冲突'],
-    ['participating_characters', '参与人物'], ['related_organizations_locations', '相关组织 / 地点'],
     ['stage_progress', '阶段 / 进度'], ['dependencies', '依赖'],
     ['expected_payoff_end_condition', '预期回收 / 结束条件'], ['notes', '备注'],
   ],
   foreshadowing: [
     ['setup_trigger', '埋设 / 触发'], ['reader_question_promise', '读者问题 / 承诺'],
-    ['related_entities', '相关对象'], ['state', '状态'], ['intended_payoff', '计划回收'],
+    ['state', '状态'], ['intended_payoff', '计划回收'],
     ['actual_payoff', '实际回收'], ['notes', '备注'],
   ],
   mystery_information: [
@@ -101,6 +110,9 @@ interface RecordForm {
   extraFields: Array<{ key: string; value: string; isList: boolean }>
   preservedData: Record<string, unknown>
   knownListFields: string[]
+  /** 受管领域关系选择（仅当该分类有领域关系规格时随保存提交）。 */
+  relationSelections: Record<string, string[]>
+  relationHints: Array<{ field: string; text: string }>
 }
 
 const sectionForCategory = (category: string | null | undefined): FoundationTab => {
@@ -442,10 +454,14 @@ export function FoundationPage() {
       setSharedEditor({ kind: tab === 'characters' ? 'character' : 'relationship', entry: null })
       return
     }
+    const relationInit = initializeRelationSelections({
+      category: tabMeta.category, sourceRef: null, record: {}, data: controller.data,
+    })
     setRecordForm({
       mode: 'create', ref: null, title: '', material_state: tab === 'storylines' ? 'future' : 'current',
       category: tabMeta.category,
       data: Object.fromEntries(fields.map(([key]) => [key, ''])), extraFields: [], preservedData: {}, knownListFields: [],
+      relationSelections: relationInit.selections, relationHints: relationInit.hints,
     })
   }
 
@@ -456,12 +472,17 @@ export function FoundationPage() {
       return
     }
     const flexible = splitEditorData(entry, fields)
+    const relationInit = initializeRelationSelections({
+      category: entry.category || tabMeta.category, sourceRef: entry.source_ref,
+      record: recordObject(entry), data: controller.data,
+    })
     setRecordForm({
       mode: 'edit', ref: entry.source_ref, title: entry.label,
       material_state: entry.status === 'future' ? 'future' : 'current',
       category: entry.category || tabMeta.category,
       data: flexible.values, extraFields: flexible.custom,
       preservedData: flexible.preserved, knownListFields: [...flexible.knownListFields],
+      relationSelections: relationInit.selections, relationHints: relationInit.hints,
     })
   }
 
@@ -485,12 +506,17 @@ export function FoundationPage() {
         } else {
           const entryFields = fieldsForTab(section)
           const flexible = splitEditorData(entry, entryFields)
+          const relationInit = initializeRelationSelections({
+            category: entry.category || 'world_setting', sourceRef: entry.source_ref,
+            record: recordObject(entry), data: controller.data,
+          })
           setRecordForm({
             mode: 'edit', ref: entry.source_ref ?? null, title: entry.label,
             material_state: entry.status === 'future' ? 'future' : 'current',
             category: entry.category || 'world_setting', data: flexible.values,
             extraFields: flexible.custom, preservedData: flexible.preserved,
             knownListFields: [...flexible.knownListFields],
+            relationSelections: relationInit.selections, relationHints: relationInit.hints,
           })
         }
         return
@@ -510,7 +536,7 @@ export function FoundationPage() {
 
   const saveRecord = async () => {
     if (!recordForm || !recordForm.title.trim()) return
-    const data: Record<string, unknown> = {
+    let data: Record<string, unknown> = {
       ...recordForm.preservedData,
     }
     Object.entries(recordForm.data).forEach(([key, value]) => {
@@ -524,14 +550,19 @@ export function FoundationPage() {
       if (!key || !field.value.trim()) continue
       data[key] = field.isList ? field.value.split(/[、,，\n]/).map((item) => item.trim()).filter(Boolean) : field.value.trim()
     }
+    const specs = RELATION_SPECS_BY_SOURCE_CATEGORY[recordForm.category] ?? []
+    const manageRelations = specs.length > 0
+    // 作者已保存规范化选择后，停止写回重复的遗留关系文本字段。
+    data = stripLegacyRelationFields(data, legacyFieldsToStrip(recordForm.category, recordForm.relationSelections))
+    const relations = manageRelations ? relationSelections(recordForm.relationSelections) : undefined
     const ok = recordForm.mode === 'create'
       ? await controller.createFoundation({
           category: recordForm.category, title: recordForm.title.trim(),
-          material_state: recordForm.material_state, data,
+          material_state: recordForm.material_state, data, relations,
         })
       : await controller.updateFoundation({
           ref: recordForm.ref as string, title: recordForm.title.trim(),
-          material_state: recordForm.material_state, data,
+          material_state: recordForm.material_state, data, relations,
         })
     if (ok) setRecordForm(null)
   }
@@ -661,6 +692,20 @@ export function FoundationPage() {
           <div className="record-drawer-body">
           <label>名称<input value={recordForm.title} onChange={(event) => setRecordForm({ ...recordForm, title: event.target.value })} /></label>
           <label>状态<select value={recordForm.material_state} onChange={(event) => setRecordForm({ ...recordForm, material_state: event.target.value as MaterialState })}><option value="current">当前</option><option value="future">规划中</option></select></label>
+          {(RELATION_SPECS_BY_SOURCE_CATEGORY[recordForm.category] ?? []).map((spec: RelationSpec) => (
+            <RelationSelector
+              key={spec.relation_kind}
+              label={spec.label}
+              options={relationOptions(controller.data, spec.targetCategories)}
+              selected={recordForm.relationSelections[spec.relation_kind] ?? []}
+              onChange={(next) => setRecordForm({
+                ...recordForm,
+                relationSelections: { ...recordForm.relationSelections, [spec.relation_kind]: next },
+              })}
+              excludeSelf={recordForm.ref}
+            />
+          ))}
+          {recordForm.relationHints.map((hint) => <p className="muted-note legacy-relation-hint" key={hint.field}>{hint.text}</p>)}
           <div className="record-fields">
             {fields.map(([key, label]) => (
               <label key={key}>{label}<textarea rows={key === 'background_summary' || key === 'notes' ? 3 : 2} value={recordForm.data[key] ?? ''} onChange={(event) => setRecordForm({ ...recordForm, data: { ...recordForm.data, [key]: event.target.value } })} /></label>

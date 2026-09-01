@@ -3,6 +3,16 @@ import { useMemo, useState } from 'react'
 import type { ProjectDataEntry } from '../../bridge/client'
 import type { ProjectDataController } from '../projectData/useProjectDataController'
 import { isInternalAuthorField } from '../presentation/authorPresentation.js'
+import { RelationSelector } from './RelationSelector'
+import {
+  initializeRelationSelections,
+  legacyFieldsToStrip,
+  LEGACY_RELATION_FIELD_KEYS,
+  relationOptions,
+  relationSelections,
+  stripLegacyRelationFields,
+  RELATION_SPECS_BY_SOURCE_CATEGORY,
+} from './relationSelectors'
 
 type MaterialState = 'current' | 'future'
 
@@ -12,7 +22,7 @@ export const CHARACTER_EDITOR_FIELDS = [
   ['background_summary', '背景'], ['power_rank', '武力 / 等级'], ['current_level', '当前体系等级'],
   ['current_state', '当前状态'], ['current_objective', '当前目标'], ['arc_stage', '人物弧阶段'],
   ['speech_style', '说话特点'], ['behavior_anchors', '行为特点'], ['goal_desire', '目标 / 欲望'],
-  ['fear_weakness', '恐惧 / 弱点'], ['inner_conflict', '内在冲突'], ['faction_org', '阵营 / 组织'],
+  ['fear_weakness', '恐惧 / 弱点'], ['inner_conflict', '内在冲突'],
   ['secrets', '秘密'], ['notes', '备注'],
 ] as const
 
@@ -46,6 +56,9 @@ export function splitEditorData(
   for (const [key, value] of Object.entries(record)) {
     if (known.has(key) || injected.has(key)) continue
     if (isInternalAuthorField(key) || (value && typeof value === 'object' && !Array.isArray(value))) {
+      preserved[key] = value
+    } else if (LEGACY_RELATION_FIELD_KEYS.has(key)) {
+      // 遗留关系文本由关联选择器接管：保留原值，但绝不落入“自定义字段”编辑区。
       preserved[key] = value
     } else if (Array.isArray(value) && value.every((item) => typeof item === 'string')) {
       custom.push({ key, value: value.join('、'), isList: true })
@@ -90,9 +103,22 @@ export function CharacterEditor({
   const [materialState, setMaterialState] = useState<MaterialState>(entry?.status === 'future' ? 'future' : 'current')
   const [values, setValues] = useState<Record<string, string>>(split.values)
   const [custom, setCustom] = useState(split.custom)
+  const projectData = controller.data
+  const orgOptions = useMemo(() => relationOptions(projectData, ['organization_force']), [projectData])
+  const systemOptions = useMemo(() => relationOptions(projectData, ['system']), [projectData])
+  const relationInit = useMemo(() => initializeRelationSelections({
+    category: 'character', sourceRef: entry?.source_ref ?? null,
+    record: recordObject(entry), data: projectData,
+  }), [entry, projectData])
+  const [orgSelection, setOrgSelection] = useState<string[]>(
+    relationInit.selections['character_affiliated_with_organization'] ?? [],
+  )
+  const [systemSelection, setSystemSelection] = useState<string[]>(
+    relationInit.selections['character_uses_system'] ?? [],
+  )
   const save = async () => {
     if (!title.trim()) return
-    const data: Record<string, unknown> = {
+    let data: Record<string, unknown> = {
       ...split.preserved,
     }
     Object.entries(values).forEach(([key, value]) => {
@@ -108,21 +134,44 @@ export function CharacterEditor({
         ? field.value.split(/[、,，\n]/).map((item) => item.trim()).filter(Boolean)
         : field.value.trim()
     })
+    const selections = {
+      character_affiliated_with_organization: orgSelection,
+      character_uses_system: systemSelection,
+    }
+    // 作者已保存规范化组织选择后，停止写回重复的遗留文本字段。
+    data = stripLegacyRelationFields(data, legacyFieldsToStrip('character', selections))
+    const relations = relationSelections(selections)
     const ok = entry?.source_ref
-      ? await controller.updateFoundation({ ref: entry.source_ref, title: title.trim(), material_state: materialState, data })
-      : await controller.createFoundation({ category: 'character', title: title.trim(), material_state: materialState, data })
+      ? await controller.updateFoundation({ ref: entry.source_ref, title: title.trim(), material_state: materialState, data, relations })
+      : await controller.createFoundation({ category: 'character', title: title.trim(), material_state: materialState, data, relations })
     if (ok) onClose()
   }
   const retire = async () => {
     if (!entry?.source_ref || !window.confirm(`确认退役人物“${entry.label}”？记录会保留历史，不会直接删除。`)) return
     if (await controller.retireFoundation(entry.source_ref)) onClose()
   }
+  const specs = RELATION_SPECS_BY_SOURCE_CATEGORY.character
   return (
     <aside className="record-drawer panel" aria-label={`${entry ? '编辑' : '新增'}人物`}>
       <header><h2>{entry ? '编辑' : '新增'}人物</h2><button onClick={onClose}><X /></button></header>
       <div className="record-drawer-body">
       <label>姓名<input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
       <label>状态<select value={materialState} onChange={(event) => setMaterialState(event.target.value as MaterialState)}><option value="current">当前</option><option value="future">规划中</option></select></label>
+      <RelationSelector
+        label={specs[0].label}
+        options={orgOptions}
+        selected={orgSelection}
+        onChange={setOrgSelection}
+        excludeSelf={entry?.source_ref ?? null}
+      />
+      <RelationSelector
+        label={specs[1].label}
+        options={systemOptions}
+        selected={systemSelection}
+        onChange={setSystemSelection}
+        excludeSelf={entry?.source_ref ?? null}
+      />
+      {relationInit.hints.map((hint) => <p className="muted-note legacy-relation-hint" key={hint.field}>{hint.text}</p>)}
       <div className="record-fields">
         {CHARACTER_EDITOR_FIELDS.map(([key, label]) => <label key={key}>{label}<textarea rows={['background_summary', 'notes'].includes(key) ? 3 : 2} value={values[key] ?? ''} onChange={(event) => setValues({ ...values, [key]: event.target.value })} /></label>)}
         {custom.map((field, index) => <div className="custom-field-row" key={`${field.key}-${index}`}><input aria-label="自定义字段名" value={field.key} onChange={(event) => setCustom(custom.map((item, i) => i === index ? { ...item, key: event.target.value } : item))} /><textarea aria-label="自定义字段值" value={field.value} onChange={(event) => setCustom(custom.map((item, i) => i === index ? { ...item, value: event.target.value } : item))} /><button onClick={() => setCustom(custom.filter((_, i) => i !== index))}><Trash2 /></button></div>)}
