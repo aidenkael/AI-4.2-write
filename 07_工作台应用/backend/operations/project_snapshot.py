@@ -588,55 +588,212 @@ def get_project_snapshot(project_id: str) -> dict[str, Any]:
     }
 
 
-def _task_relevant_records(
-    snapshot: dict[str, Any],
-    chapter: dict[str, Any] | None,
-) -> tuple[dict[str, list[dict[str, Any]]], dict[str, list[dict[str, Any]]]]:
-    """Select only explicit task-near refs/names; never fallback to full state."""
-    tokens: set[str] = set()
+# 任务近端上下文硬上限：一跳关系边 / 新增关联对象 / 每分区记录。
+_MAX_TASK_RELATION_EDGES = 16
+_MAX_TASK_RELATED_OBJECTS = 12
+_MAX_TASK_RECORDS_PER_SECTION = 12
+
+_OUTLINE_SEED_FIELDS = (
+    "participating_characters", "new_characters", "character_refs", "relationship_refs",
+    "location_ref", "location", "organization_refs", "system_refs", "storyline_ref",
+    "storyline", "foreshadowing_refs", "open_thread_refs", "related_refs",
+)
+
+
+def _outline_seed_tokens(chapter: dict[str, Any] | None) -> list[str]:
+    """章节细纲中的显式种子文本（ref 或名称）；不做任何推断。"""
+    tokens: list[str] = []
     outline = (chapter or {}).get("fine_outline") if isinstance((chapter or {}).get("fine_outline"), dict) else {}
-    for key in (
-        "participating_characters", "new_characters", "character_refs", "relationship_refs",
-        "location_ref", "location", "organization_refs", "system_refs", "storyline_ref",
-        "storyline", "foreshadowing_refs", "open_thread_refs", "related_refs",
-    ):
+    for key in _OUTLINE_SEED_FIELDS:
         value = outline.get(key)
         if isinstance(value, str) and value.strip():
-            tokens.add(value.strip())
+            tokens.append(value.strip())
         elif isinstance(value, list):
-            tokens.update(item.strip() for item in value if isinstance(item, str) and item.strip())
+            tokens.extend(item.strip() for item in value if isinstance(item, str) and item.strip())
+    return tokens
 
-    def selected(bucket: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
-        result: dict[str, list[dict[str, Any]]] = {}
-        for section, values in bucket.items():
-            chosen = []
+
+def _active_record_index(
+    snapshot: dict[str, Any],
+) -> tuple[dict[str, tuple[str, str, dict[str, Any]]], dict[str, list[str]]]:
+    """活动 current/future 记录的 ref 索引与标题 → refs 索引。"""
+    by_ref: dict[str, tuple[str, str, dict[str, Any]]] = {}
+    by_title: dict[str, list[str]] = {}
+    for bucket_name in ("current", "future"):
+        for section, values in snapshot[bucket_name].items():
             for item in values:
-                record = item.get("record") if isinstance(item.get("record"), dict) else {}
-                global_rule = section in {"settings", "systems"} and (
-                    record.get("context_scope") == "global" or bool(record.get("hard_rule"))
-                )
-                if item.get("ref") in tokens or item.get("title") in tokens or global_rule:
-                    chosen.append(item)
-                if len(chosen) >= 12:
-                    break
-            result[section] = chosen
-        return result
+                ref = item.get("ref")
+                if not isinstance(ref, str) or not ref:
+                    continue
+                by_ref[ref] = (bucket_name, section, item)
+                title = item.get("title")
+                if isinstance(title, str) and title.strip():
+                    by_title.setdefault(title.strip(), []).append(ref)
+    return by_ref, by_title
 
+
+def _is_global_rule_record(section: str, item: dict[str, Any]) -> bool:
+    record = item.get("record") if isinstance(item.get("record"), dict) else {}
+    return section in {"settings", "systems"} and (
+        record.get("context_scope") == "global" or bool(record.get("hard_rule"))
+    )
+
+
+def _resolve_direct_seeds(
+    tokens: list[str],
+    by_ref: dict[str, tuple[str, str, dict[str, Any]]],
+    by_title: dict[str, list[str]],
+) -> list[str]:
+    """直接种子解析：精确 ref 直接命中；精确标题只有唯一活动记录时才是种子。
+
+    歧义/重复标题绝不选择多条；无模糊匹配；无语义推断。
+    """
+    seeds: list[str] = []
+    seen: set[str] = set()
+    for token in tokens:
+        if token in by_ref:
+            ref = token
+        else:
+            matches = by_title.get(token, [])
+            if len(matches) != 1:
+                continue
+            ref = matches[0]
+        if ref not in seen:
+            seen.add(ref)
+            seeds.append(ref)
+    return seeds
+
+
+def _focus_text_seeds(focus_text: str, by_title: dict[str, list[str]]) -> list[str]:
+    """规划 focus_text 只按“字面出现且唯一精确匹配”的存储标题产生种子。"""
+    seeds: list[str] = []
+    for title, refs in by_title.items():
+        if len(refs) == 1 and title in focus_text:
+            seeds.append(refs[0])
+    return seeds
+
+
+def _task_relevant_context(
+    snapshot: dict[str, Any],
+    chapter: dict[str, Any] | None,
+    focus_text: str | None,
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
+    """选择任务近端记录 + 有界一跳显式关系；绝不 fallback 全书。
+
+    一跳只在原始直接种子上展开；新加入的关联记录绝不继续递归。
+    """
+    by_ref, by_title = _active_record_index(snapshot)
+    seed_refs = _resolve_direct_seeds(_outline_seed_tokens(chapter), by_ref, by_title)
     if chapter is None:
-        # Planning sees bounded structured summaries, never an unbounded full dump.
-        return (
-            {key: values[:12] for key, values in snapshot["current"].items()},
-            {key: values[:12] for key, values in snapshot["future"].items()},
-        )
-    return selected(snapshot["current"]), selected(snapshot["future"])
+        focus = (focus_text or "").strip()
+        if focus:
+            existing = set(seed_refs)
+            seed_refs.extend(ref for ref in _focus_text_seeds(focus, by_title) if ref not in existing)
+        if not seed_refs:
+            # 无种子时保留既有有界规划摘要行为（不是全书 fallback）。
+            return (
+                {key: values[:_MAX_TASK_RECORDS_PER_SECTION] for key, values in snapshot["current"].items()},
+                {key: values[:_MAX_TASK_RECORDS_PER_SECTION] for key, values in snapshot["future"].items()},
+                [],
+            )
+    seed_set = set(seed_refs)
+
+    # 一跳边选择：只取与原始种子直接相连的活动边；确定性排序后封顶。
+    candidates: list[tuple[int, int, str, dict[str, Any]]] = []
+    for edge in snapshot.get("explicit_dependencies", []):
+        src_seed = edge["source_ref"] in seed_set
+        tgt_seed = edge["target_ref"] in seed_set
+        if not src_seed and not tgt_seed:
+            continue
+        candidates.append((
+            0 if src_seed and tgt_seed else 1,
+            0 if edge.get("material_state", "current") == "current" else 1,
+            edge["ref"],
+            edge,
+        ))
+    candidates.sort(key=lambda entry: (entry[0], entry[1], entry[2]))
+    selected_edges = [entry[3] for entry in candidates[:_MAX_TASK_RELATION_EDGES]]
+
+    selected: dict[str, tuple[str, str, dict[str, Any]]] = {}
+    order: list[str] = []
+
+    def add_record(ref: str) -> bool:
+        if ref in selected or ref not in by_ref:
+            return False
+        selected[ref] = by_ref[ref]
+        order.append(ref)
+        return True
+
+    for ref in seed_refs:
+        add_record(ref)
+    added_related = 0
+    for edge in selected_edges:
+        for endpoint in (edge["source_ref"], edge["target_ref"]):
+            if endpoint in seed_set or endpoint in selected:
+                continue
+            if added_related >= _MAX_TASK_RELATED_OBJECTS:
+                continue
+            if add_record(endpoint):
+                added_related += 1
+
+    relevant_current: dict[str, list[dict[str, Any]]] = {section: [] for section in snapshot["current"]}
+    relevant_future: dict[str, list[dict[str, Any]]] = {section: [] for section in snapshot["future"]}
+    for ref in order:
+        bucket_name, section, item = selected[ref]
+        target = relevant_current if bucket_name == "current" else relevant_future
+        if len(target[section]) < _MAX_TASK_RECORDS_PER_SECTION:
+            target[section].append(item)
+    # 全局设定/硬规则保留既有确定性包含行为。
+    for source, target in ((snapshot["current"], relevant_current), (snapshot["future"], relevant_future)):
+        for section, values in source.items():
+            for item in values:
+                if item.get("ref") in selected:
+                    continue
+                if not _is_global_rule_record(section, item):
+                    continue
+                if len(target[section]) < _MAX_TASK_RECORDS_PER_SECTION:
+                    target[section].append(item)
+    # 选中的 character_relationship 边进入既有 relationships 分区。
+    for edge in selected_edges:
+        if edge.get("relation_kind") != "character_relationship":
+            continue
+        for bucket_name, target in (("current", relevant_current), ("future", relevant_future)):
+            for item in snapshot[bucket_name].get("relationships", []):
+                if item.get("ref") != edge["ref"]:
+                    continue
+                if (
+                    len(target["relationships"]) < _MAX_TASK_RECORDS_PER_SECTION
+                    and all(existing.get("ref") != edge["ref"] for existing in target["relationships"])
+                ):
+                    target["relationships"].append(item)
+    explicit_relations = [
+        {
+            "relation_kind": edge.get("relation_kind"),
+            "title": edge.get("title") or "",
+            "material_state": edge.get("material_state", "current"),
+            "source_ref": edge["source_ref"],
+            "source_title": edge.get("source_title") or "",
+            "source_category": edge.get("source_category"),
+            "target_ref": edge["target_ref"],
+            "target_title": edge.get("target_title") or "",
+            "target_category": edge.get("target_category"),
+        }
+        for edge in selected_edges
+    ]
+    return relevant_current, relevant_future, explicit_relations
 
 
 def focused_task_context(
     project_id: str,
     *,
     chapter_number: int | None = None,
+    focus_text: str | None = None,
 ) -> dict[str, Any]:
-    """Small effective view for Planning/Writing/Review task preparation."""
+    """Small effective view for Planning/Writing/Review task preparation.
+
+    Planning 可传入 ``focus_text``（如作者本轮问题）：只有字面出现且唯一精确匹配
+    的存储标题才会成为直接种子；无匹配时保留既有有界规划摘要行为。
+    """
     snapshot = get_project_snapshot(project_id)
     chapter = next(
         (item for item in snapshot["chapters"] if item["chapter_number"] == chapter_number), None,
@@ -648,7 +805,9 @@ def focused_task_context(
         }
     else:
         settlement_gate = {"status": "synchronized", "message": ""}
-    relevant_current, relevant_future = _task_relevant_records(snapshot, chapter)
+    relevant_current, relevant_future, explicit_relations = _task_relevant_context(
+        snapshot, chapter, focus_text,
+    )
     pending_manifest = []
     pending_chapter_numbers: set[int] = set()
     for item in snapshot["settlement"].get("changes", []):
@@ -701,6 +860,8 @@ def focused_task_context(
             key: [{"ref": item["ref"], "title": item["title"], "record": item["record"]} for item in values]
             for key, values in relevant_future.items()
         },
+        # 派生任务上下文：选中种子一跳内的显式关系事实（非 authority）。
+        "explicit_relations": explicit_relations,
         "chapter": None if chapter is None else {
             "chapter_number": chapter["chapter_number"],
             "title": chapter["title"],

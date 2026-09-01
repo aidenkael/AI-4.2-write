@@ -655,7 +655,9 @@ def prepare_story_plan(project_id: str, author_question: str) -> dict[str, Any]:
 
     # 预生成 request_id（检索命令需要内嵌真实 id；Interactive/Direct 共用）
     request_id = uuid.uuid4().hex
-    effective_context = focused_task_context(project_id)
+    # 规划不绑定章节：把作者本轮问题作为确定性 focus_text，只有字面出现且唯一
+    # 精确匹配的记录才会成为直接种子并触发有界一跳关系扩展。
+    effective_context = focused_task_context(project_id, focus_text=author_question)
 
     task = _AGENT_TASK_TEMPLATE.format(
         name=name,

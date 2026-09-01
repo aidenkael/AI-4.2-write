@@ -669,13 +669,20 @@ def _reconcile_domain_relations(
             continue
         edge_ref = _next_ref(model, "edge")
         edge_data = _validate_data(supplied_data)
+        target_item = model["objects"][target_ref]
+        # 任一端点是未来记录 → 关系也是未来；两端都当前才是当前。
+        edge_state = (
+            "future"
+            if "future" in {item.get("material_state", "current"), target_item.get("material_state", "current")}
+            else "current"
+        )
         model["dependencies"][edge_ref] = {
             "ref": edge_ref,
             "source_ref": source_ref,
             "target_ref": target_ref,
             "relation_kind": relation_kind,
             "title": _DOMAIN_RELATION_SPECS[relation_kind]["title"],
-            "material_state": item.get("material_state", "current"),
+            "material_state": edge_state,
             "data": edge_data,
             "field_authority": _initial_field_authority(edge_data, "author", next_rev),
             "author_fields": sorted(
