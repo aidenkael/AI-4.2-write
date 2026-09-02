@@ -15,16 +15,17 @@
 - Agent 任务不再要求模型在见到检索结果前编造/选择知识 ref。
 - knowledge_needs = []：不调用 KnowledgeRetrieve，不要求快照，选择知识为空，
   规划正常继续，0 条知识是一等合法结果。
-- knowledge_needs 非空：Agent 在本次 /gowrite 执行内运行
-  `retrieval_snapshot.py "<query>"` —— 这是整个流程中**唯一一次**确定性
-  KnowledgeRetrieve 执行（统一多源：参考作品 BKP / 方法知识 / 已验证知识混合在同一个包内，模型不选择存储）。该调用同时：
+- knowledge_needs 非空：Agent 在本次 /gowrite 执行内为每个声明的 need 运行一次
+  `retrieval_snapshot.py "<query>"`。每个 round 都是独立、确定性的
+  KnowledgeRetrieve 执行（统一多源：参考作品 BKP / 方法知识 / 已验证知识混合在同一个包内，模型不选择存储）。每个调用同时：
     a) 把候选（含 selection_ref = source_kind/source_id/source_anchor、
        scope/boundary/provenance 与 package_fingerprint）返回给模型；
     b) 把精确序列化 RetrievalPackage 写入请求级快照
-       （<planning_dir>/retrieval/package.json，非权威、可删除、随临时
+       （<planning_dir>/retrieval/round-<query-hash>.json，非权威、可删除、随临时
        planning 生命周期清理），并绑定 request_id/project_id/
        planning_turn_id/query/指纹。
-  模型只从该显示包中选择 selection_ref，并在最终 JSON 中回显 package_fingerprint。
+  模型只从该 round 显示包中选择 selection_ref，并在最终 JSON 的同一 round 中回显 package_fingerprint。
+- Go Write 在全部 round 验证通过后，才确定性生成 request-local bundle；Context 只消费这个由已验证 round 聚合的有界包。
 - Go Write finalize **绝不再次执行 KnowledgeRetrieve**：只读取已存在的快照，
   校验请求/项目/planning turn/查询/包身份，把反序列化后的包绑定给 Context。
   快照缺失、无法解析、身份或查询不匹配 → 拒绝本次知识选择（整轮 failed）。
@@ -108,15 +109,15 @@ _PLANNING_ROOT = (
     Path(__file__).resolve().parents[3] / "06_工作区" / "应用开发" / ".planning"
 )
 
-# 请求级检索快照 CLI（Agent 在 /gowrite 执行内运行；唯一的确定性检索入口）。
-# 它同时把候选返回给模型，并把精确序列化 RetrievalPackage 写入请求级快照。
+# 请求级检索快照 CLI（Agent 在 /gowrite 执行内运行；每个 declared need 一个独立 round）。
+# 它同时把候选返回给模型，并把精确序列化 RetrievalPackage 写入对应 round 快照。
 _RETRIEVAL_SCRIPT = Path(__file__).resolve().parent / "retrieval_snapshot.py"
 
-# 单次规划允许注入的最大知识条数（与 E1 build_context 默认上限一致）
+# 单 round 允许注入的最大知识条数（与 E1 build_context 默认上限一致）
 _MAX_KNOWLEDGE_HITS = 3
 
 # Agent 任务模板：两阶段。第一阶段语义分析；第二阶段（仅 knowledge_needs
-# 非空）运行确定性检索命令查看真实候选，然后从该候选中选择 selection_ref。
+# 非空）对每个 need 运行独立确定性检索命令查看真实候选，然后逐 round 选择 selection_ref。
 # 模型不得在见到检索结果前编造/选择知识 ref。
 _AGENT_TASK_TEMPLATE = """你是 Go Write 的规划执行器。必须严格按下列顺序执行：先完成语义分析；若 knowledge_needs 非空，必须在生成最终 JSON 之前先用本地命令/工具执行下面给出的检索命令并读取其结果；完成检索与选择后，才输出最终 JSON。本任务不是纯文本生成任务；中间的工具调用属于任务执行过程，不属于最终回复。
 
@@ -128,11 +129,9 @@ _AGENT_TASK_TEMPLATE = """你是 Go Write 的规划执行器。必须严格按�
 第二阶段：知识检索与选择（仅当 knowledge_needs 非空；必须执行）
 若 knowledge_needs 非空，在生成最终 JSON 之前，你必须先用可用的本地命令/工具执行以下确定性只读检索命令：
   python {retrieval_command} "<query>"
-其中 <query> 是把你第一阶段列出的全部 knowledge_needs 用中文分号（；）连接成的单个字符串（直接替换命令中的 <query> 占位符）。
-该命令会把本次检索包（RetrievalPackage，混合参考作品知识/方法知识/已验证知识）写入当前请求的临时快照（不改动任何作品或业务文件），然后向终端输出一个 JSON，其中 package_fingerprint 是本次检索包的身份指纹，package.hits 数组内每个候选项含 selection_ref、source_kind、source_id、source_title、statement、scope、boundary、evidence 等字段；selection_ref 形如 "<source_kind>/<source_id>/<source_anchor>"（例如 reference_bkp/book_a/K001、method_source/book_0138/M0003、validated_knowledge/pkg_opening_hook/V0001）。
-你必须读取该命令实际输出的 package：只从中选择 0 到 {max_knowledge_hits} 个 selection_ref，填入 semantic_interpretation.selected_knowledge_refs；并把命令输出的 package_fingerprint 原样填入 semantic_interpretation.package_ref。
-严禁编造命令输出中不存在的 selection_ref 或 package_fingerprint；若没有合适的候选，selected_knowledge_refs 保持空列表（0 条知识是合法结果）。
-若 knowledge_needs 为空：不要运行检索命令，selected_knowledge_refs 必须为 []，package_ref 必须为空字符串 ""。
+对第一阶段列出的每一个 knowledge_need，分别用该 need 的具体 query 替换 <query> 并独立执行一次命令；严禁把多个 need 用分号、换行或其他方式合并成一个 query。每次命令把该 round 的检索包（RetrievalPackage，混合参考作品知识/方法知识/已验证知识）写入当前请求的临时 round 快照（不改动任何作品或业务文件），然后向终端输出 JSON，其中 package_fingerprint 是该 round 包的身份指纹，package.hits 数组内每个候选项含 selection_ref、source_kind、source_id、source_title、statement、scope、boundary、evidence 等字段；selection_ref 形如 "<source_kind>/<source_id>/<source_anchor>"（例如 reference_bkp/book_a/K001、method_source/book_0138/M0003、validated_knowledge/pkg_opening_hook/V0001）。
+你必须读取每个命令实际输出的 package，并把结果逐项写入 semantic_interpretation.knowledge_rounds：每项有 need、query、package_ref、selected_knowledge_refs；本 round 只能从自己的输出选择 0 到 {max_knowledge_hits} 个 selection_ref。严禁编造不存在的 selection_ref 或 package_fingerprint；无合适候选时本 round selected_knowledge_refs 保持空列表。
+semantic_interpretation.selected_knowledge_refs 必须严格等于全部 round 按声明顺序、round 内顺序首次去重后的聚合；全请求最多 8 个 unique ref。knowledge_needs 非空时顶层 package_ref 必须为空字符串 ""，不得用一个包冒充多个 round。若 knowledge_needs 为空：不要运行检索命令，knowledge_rounds 与 selected_knowledge_refs 都必须为 []，package_ref 必须为空字符串 ""。
 
 最终回复
 最终回复必须只有合法 JSON 对象（不要任何额外文字、不要 markdown 代码块标记）。结构必须如下：
@@ -141,6 +140,7 @@ _AGENT_TASK_TEMPLATE = """你是 Go Write 的规划执行器。必须严格按�
   "semantic_interpretation": {{
     "objective": "本次规划的目标（一句话）",
     "knowledge_needs": [],
+    "knowledge_rounds": [],
     "selected_knowledge_refs": [],
     "package_ref": "",
     "assumptions": ["AI 解读中的假设，作者尚未确认"],
@@ -282,26 +282,34 @@ def _package_fingerprint(package: Any) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _bound_package(package: Any, query: str) -> Callable[[str], Any]:
-    """把"本次 planning turn 使用的精确检索包"绑定为 Context 的 retrieval 闭包。
+def _bound_package(package: Any, context_query: str) -> Callable[[str], Any]:
+    """把已验证 rounds 聚合的包绑定为 frozen Context 的 retrieval 闭包。
 
-    Context（E1 build_context）只消费这个包；任何与绑定查询不一致的调用
-    都视为包不匹配，直接拒绝，绝不触发一次无关的后续检索。
+    Frozen ``build_context`` 仍会由 ``knowledge_needs`` 形成内部 query；这里仅
+    校验那个派生 query，绝不把它交给 KnowledgeRetrieve。包只来自本请求已验证
+    的 round snapshots。
     """
 
     def _retrieval(q: str) -> Any:
-        if q != query:
+        if q != context_query:
             raise SPContractError(
-                f"Context 检索查询与绑定包不一致：{q!r} != {query!r}"
+                f"Context 检索查询与绑定 bundle 不一致：{q!r} != {context_query!r}"
             )
         return package
 
     return _retrieval
 
 
-def _snapshot_path(planning_dir: Path) -> Path:
-    """请求级检索包快照位置（planning turn 内，随临时规划生命周期清理）。"""
-    return planning_dir / "retrieval" / "package.json"
+def _round_key(query: str) -> str:
+    return hashlib.sha256(query.encode("utf-8")).hexdigest()[:16]
+
+
+def _round_path(planning_dir: Path, query: str) -> Path:
+    return planning_dir / "retrieval" / f"round-{_round_key(query)}.json"
+
+
+def _bundle_path(planning_dir: Path) -> Path:
+    return planning_dir / "retrieval" / "bundle.json"
 
 
 def _write_snapshot(
@@ -313,12 +321,7 @@ def _write_snapshot(
     package: Any,
     planning_dir: Path,
 ) -> Path:
-    """把精确序列化 RetrievalPackage 写入请求级快照（非权威、可删除）。
-
-    快照绑定 request_id / project_id / planning_turn_id / 归一化 query /
-    包指纹。由 Agent 侧的"唯一一次检索调用"（execute_request_scoped_retrieval）
-    在模型选择候选之前写入。
-    """
+    """把一个 round 的精确 RetrievalPackage 写入 request-local 快照。"""
     snapshot = {
         "schema": "gowrite_retrieval_snapshot/v2",
         "request_id": request_id,
@@ -329,7 +332,7 @@ def _write_snapshot(
         "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         "package": _package_snapshot_dict(package),
     }
-    path = _snapshot_path(planning_dir)
+    path = _round_path(planning_dir, query)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -338,33 +341,60 @@ def _write_snapshot(
 
 
 def execute_request_scoped_retrieval(query: str, request_id: str) -> Any:
-    """Agent 侧（/gowrite 执行内）的"唯一一次确定性检索调用"。
+    """Agent 侧（/gowrite 执行内）的一个 request-bound retrieval round。
 
     显式 request_id 绑定（与 StoryWrite/Review/NewProject 同一 P0 精确绑定；
     绝不依赖可变 active 指针）：从请求 meta 恢复 project/planning turn →
-    运行现有 KnowledgeRetrieve（唯一一次执行）→ 把精确序列化包写入请求级
-    快照 → 返回包对象（由 CLI 打印给模型查看）。
+    验证 request kind / project / turn 后，最多为四个不同 query 各运行一次
+    现有 KnowledgeRetrieve，并把精确序列化包写入对应 round snapshot。相同
+    query 返回已有快照，不会产生第二身份或第二次检索。
 
     模型看到的候选 == 快照中的包 == finalize 反序列化后 Context 消费的包。
     """
+    query = (query or "").strip()
+    if not query:
+        raise StoryPlanningError("检索 query 不能为空。")
     request_id = (request_id or "").strip()
     if not request_id:
         raise StoryPlanningError("缺少任务标识（request_id），无法生成检索快照。")
     request = bridge.get_request(request_id)
     if request is None:
         raise StoryPlanningError("任务文件不存在或不可读，无法生成检索快照。")
+    if request.get("kind") != "story_plan_propose":
+        raise StoryPlanningError("该请求不是 StoryPlan 任务，无法生成规划检索快照。")
     meta = request.get("meta") or {}
     project_id = str(meta.get("project_id") or "")
     planning_turn_id = str(meta.get("planning_turn_id") or "")
     if not project_id or not planning_turn_id:
         raise StoryPlanningError("任务缺少 project_id / planning_turn_id 元数据。")
     planning_dir = _planning_dir(project_id, planning_turn_id)
+    existing_path = _round_path(planning_dir, query)
+    if existing_path.exists():
+        snapshot, load_error = _load_snapshot(existing_path)
+        if load_error:
+            raise StoryPlanningError(load_error)
+        _validate_snapshot(
+            snapshot,
+            request_id=request_id,
+            project_id=project_id,
+            planning_turn_id=planning_turn_id,
+            query=query,
+            package_ref=str(snapshot.get("package_fingerprint") or ""),
+        )
+        return _package_from_snapshot(snapshot)
+    retrieval_dir = planning_dir / "retrieval"
+    existing_rounds = list(retrieval_dir.glob("round-*.json")) if retrieval_dir.exists() else []
+    if len(existing_rounds) >= _MAX_KNOWLEDGE_NEEDS_DEFAULT:
+        raise StoryPlanningError(
+            f"本次规划最多允许 {_MAX_KNOWLEDGE_NEEDS_DEFAULT} 个独立知识检索 round。"
+        )
+    round_key = _round_key(query)
     audit.append_event(
         request_id, audit.EVENT_RETRIEVAL_REQUESTED, "knowledge_retrieve",
-        details={"query": query[:200]},
+        details={"query": query[:200], "round": round_key},
     )
     try:
-        package = _retrieve_package(query)  # 唯一一次 KnowledgeRetrieve 执行
+        package = _retrieve_package(query)
     except StoryPlanningError:
         raise
     except Exception as exc:  # noqa: BLE001 — 检索失败 → Agent 侧命令失败，无快照可写
@@ -381,6 +411,7 @@ def execute_request_scoped_retrieval(query: str, request_id: str) -> Any:
         request_id, audit.EVENT_RETRIEVAL_PACKAGE_BUILT, "knowledge_retrieve",
         details={
             "query": query[:200],
+            "round": round_key,
             "candidate_count": getattr(package, "candidate_count", len(getattr(package, "hits", []))),
             "refs": [
                 getattr(hit, "selection_ref", "") or (
@@ -396,19 +427,18 @@ def execute_request_scoped_retrieval(query: str, request_id: str) -> Any:
     return package
 
 
-def _load_snapshot(planning_dir: Path) -> tuple[dict[str, Any] | None, str | None]:
-    """读取请求级检索快照；返回 (snapshot, error)。error 非空表示缺失或不可解析。"""
-    path = _snapshot_path(planning_dir)
+def _load_snapshot(path: Path) -> tuple[dict[str, Any] | None, str | None]:
+    """读取一个 round 快照；error 非空表示缺失、损坏或旧 schema。"""
     if not path.exists():
-        return None, "检索包快照缺失：Agent 未在本轮 /gowrite 执行内生成检索快照。"
+        return None, "检索 round 快照缺失：Agent 未在本轮 /gowrite 执行内生成检索快照。"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return None, "检索包快照无法解析（已被篡改或损坏）。"
+        return None, "检索 round 快照无法解析（已被篡改或损坏）。"
     if not isinstance(data, dict) or not isinstance(data.get("package"), dict):
-        return None, "检索包快照结构无效（缺少 package 对象）。"
+        return None, "检索 round 快照结构无效（缺少 package 对象）。"
     if data.get("schema") != "gowrite_retrieval_snapshot/v2":
-        return None, "检索包快照为不兼容的旧版格式，已拒绝（请重新发起本轮任务）。"
+        return None, "检索 round 快照为不兼容的旧版格式，已拒绝（请重新发起本轮任务）。"
     return data, None
 
 
@@ -471,6 +501,153 @@ def _package_from_snapshot(snapshot: dict[str, Any]) -> Any:
     )
 
 
+def _validate_knowledge_rounds(si: dict[str, Any]) -> tuple[list[str], list[dict[str, Any]], list[str]]:
+    """Validate the agent-declared multi-round contract before reading snapshots."""
+    needs = [item.strip() for item in si["knowledge_needs"]]
+    if any(not item for item in needs):
+        raise StoryPlanningError("knowledge_needs 不得包含空字符串。")
+    rounds = si["knowledge_rounds"]
+    selected = list(si["selected_knowledge_refs"])
+    package_ref = si["package_ref"]
+    if not needs:
+        if selected:
+            raise StoryPlanningError("没有知识需求却选择了知识卡，已拒绝。")
+        if rounds or package_ref:
+            raise StoryPlanningError("没有知识需求时 rounds 与 package_ref 必须为空，已拒绝。")
+        return needs, [], []
+    if package_ref:
+        raise StoryPlanningError("多 round 规划不得用顶层 package_ref 冒充请求级身份，已拒绝。")
+    if len(needs) > _MAX_KNOWLEDGE_NEEDS_DEFAULT:
+        raise StoryPlanningError(
+            f"本次规划声明了 {len(needs)} 个知识需求，超过上限 {_MAX_KNOWLEDGE_NEEDS_DEFAULT}；已拒绝。"
+        )
+    if len(set(needs)) != len(needs):
+        raise StoryPlanningError("knowledge_needs 不得重复，已拒绝。")
+    if len(rounds) != len(needs):
+        raise StoryPlanningError("每个 declared knowledge need 必须恰好对应一个 retrieval round，已拒绝。")
+    normalized_rounds: list[dict[str, Any]] = []
+    all_queries: list[str] = []
+    aggregate: list[str] = []
+    for index, (need, round_data) in enumerate(zip(needs, rounds)):
+        round_need = round_data["need"].strip()
+        query = round_data["query"].strip()
+        refs = list(round_data["selected_knowledge_refs"])
+        if round_need != need:
+            raise StoryPlanningError("knowledge_rounds 必须与 knowledge_needs 按声明顺序一一绑定，已拒绝。")
+        if not query or "；" in query or "\n" in query or "\r" in query:
+            raise StoryPlanningError("每个 retrieval round 必须使用一个非空、未合并的独立 query，已拒绝。")
+        if not round_data["package_ref"].strip():
+            raise StoryPlanningError("每个 retrieval round 都必须回显自己的 package_ref，已拒绝。")
+        if len(refs) > _MAX_KNOWLEDGE_HITS:
+            raise StoryPlanningError(
+                f"第 {index + 1} 个 retrieval round 选择超过 {_MAX_KNOWLEDGE_HITS} 条知识，已拒绝。"
+            )
+        if len(set(refs)) != len(refs):
+            raise StoryPlanningError("同一 retrieval round 不得重复选择知识 ref，已拒绝。")
+        all_queries.append(query)
+        for ref in refs:
+            if ref not in aggregate:
+                aggregate.append(ref)
+        normalized_rounds.append({
+            "need": need,
+            "query": query,
+            "package_ref": round_data["package_ref"].strip(),
+            "selected_knowledge_refs": refs,
+        })
+    if len(set(all_queries)) != len(all_queries):
+        raise StoryPlanningError("多个 knowledge need 不得复用 query 绕过独立 round 合同，已拒绝。")
+    if len(aggregate) > _MAX_SELECTED_KNOWLEDGE_REFS:
+        raise StoryPlanningError(
+            f"本次规划选择了 {len(aggregate)} 条唯一知识，超过上限 {_MAX_SELECTED_KNOWLEDGE_REFS}；已拒绝。"
+        )
+    if selected != aggregate:
+        raise StoryPlanningError("顶层 selected_knowledge_refs 必须是各 round 已选 ref 的稳定去重聚合，已拒绝。")
+    return needs, normalized_rounds, aggregate
+
+
+def _validate_round_snapshot(
+    snapshot: dict[str, Any],
+    *,
+    request_id: str,
+    project_id: str,
+    planning_turn_id: str,
+    round_data: dict[str, Any],
+) -> Any:
+    _validate_snapshot(
+        snapshot,
+        request_id=request_id,
+        project_id=project_id,
+        planning_turn_id=planning_turn_id,
+        query=round_data["query"],
+        package_ref=round_data["package_ref"],
+    )
+    package = _package_from_snapshot(snapshot)
+    available = {getattr(hit, "selection_ref", "") for hit in package.hits}
+    invalid = [ref for ref in round_data["selected_knowledge_refs"] if ref not in available]
+    if invalid:
+        raise StoryPlanningError("retrieval round 选择了本 round package 中不存在的知识 ref，已拒绝。")
+    return package
+
+
+def _aggregate_round_packages(round_packages: list[tuple[dict[str, Any], Any]]) -> Any:
+    """Build the bounded, read-only package consumed by frozen StoryPlan/Context."""
+    hits: list[Any] = []
+    seen_refs: set[str] = set()
+    gaps: list[str] = []
+    candidate_count = 0
+    statuses: list[str] = []
+    for _, package in round_packages:
+        statuses.append(getattr(package, "status", "INSUFFICIENT_KNOWLEDGE"))
+        candidate_count += int(getattr(package, "candidate_count", 0) or 0)
+        gaps.extend(list(getattr(package, "gaps", []) or []))
+        for hit in getattr(package, "hits", []):
+            ref = getattr(hit, "selection_ref", "")
+            if ref and ref not in seen_refs:
+                seen_refs.add(ref)
+                hits.append(hit)
+    status = "OK" if hits else (statuses[0] if statuses else "INSUFFICIENT_KNOWLEDGE")
+    return types.SimpleNamespace(
+        status=status,
+        gaps=gaps,
+        candidate_count=candidate_count,
+        hits=hits,
+    )
+
+
+def _write_bundle(
+    planning_dir: Path,
+    *,
+    request_id: str,
+    project_id: str,
+    planning_turn_id: str,
+    rounds: list[dict[str, Any]],
+    selected_refs: list[str],
+) -> dict[str, Any]:
+    """Persist a deterministic request-local binding artifact after all checks pass."""
+    bundle = {
+        "schema": "gowrite_planning_retrieval_bundle/v1",
+        "request_id": request_id,
+        "project_id": project_id,
+        "planning_turn_id": planning_turn_id,
+        "rounds": [
+            {
+                "need": item["need"],
+                "query": item["query"],
+                "package_fingerprint": item["package_ref"],
+                "selected_knowledge_refs": list(item["selected_knowledge_refs"]),
+            }
+            for item in rounds
+        ],
+        "selected_knowledge_refs": list(selected_refs),
+    }
+    canonical = json.dumps(bundle, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    bundle["bundle_fingerprint"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    path = _bundle_path(planning_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(bundle, ensure_ascii=False, indent=2), encoding="utf-8")
+    return bundle
+
+
 # ---------------------------------------------------------------------------
 # 候选解析（Agent 输出必须是合法结构化结果）
 # ---------------------------------------------------------------------------
@@ -517,6 +694,24 @@ def _parse_agent_result(output: str) -> dict[str, Any]:
     if "knowledge_needs" not in si:
         raise StoryPlanningError("Agent 输出缺少 semantic_interpretation.knowledge_needs（应为列表）。")
     _validate_str_list(si["knowledge_needs"], "semantic_interpretation.knowledge_needs")
+    if "knowledge_rounds" not in si or not isinstance(si.get("knowledge_rounds"), list):
+        raise StoryPlanningError("Agent 输出缺少 semantic_interpretation.knowledge_rounds（应为列表）。")
+    for index, round_data in enumerate(si["knowledge_rounds"]):
+        if not isinstance(round_data, dict):
+            raise StoryPlanningError(f"Agent 输出 knowledge_rounds[{index}] 必须是对象。")
+        for field_name in ("need", "query", "package_ref"):
+            if not isinstance(round_data.get(field_name), str):
+                raise StoryPlanningError(
+                    f"Agent 输出 knowledge_rounds[{index}].{field_name} 必须是字符串。"
+                )
+        if "selected_knowledge_refs" not in round_data:
+            raise StoryPlanningError(
+                f"Agent 输出 knowledge_rounds[{index}] 缺少 selected_knowledge_refs。"
+            )
+        _validate_str_list(
+            round_data["selected_knowledge_refs"],
+            f"semantic_interpretation.knowledge_rounds[{index}].selected_knowledge_refs",
+        )
     if "selected_knowledge_refs" not in si:
         raise StoryPlanningError("Agent 输出缺少 semantic_interpretation.selected_knowledge_refs（应为列表）。")
     _validate_str_list(si["selected_knowledge_refs"], "semantic_interpretation.selected_knowledge_refs")
@@ -601,28 +796,10 @@ def _get_active_planning_sources(state: dict[str, Any]) -> list[dict[str, Any]]:
 PLANNING_MODES = frozenset({"free", "book", "stage", "near_term", "impact_replan"})
 
 # 分层长篇规划的知识策略硬上限（确定性、可测试；0 检索/0 选择始终合法）。
-_MODE_MAX_KNOWLEDGE_NEEDS = {"book": 4, "stage": 4}
 _MAX_KNOWLEDGE_NEEDS_DEFAULT = 4
 _MAX_SELECTED_KNOWLEDGE_REFS = 8
 # 近期细化的章节范围硬上限：有界、作者可见。
 _NEAR_TERM_MAX_SPAN = 12
-
-
-def _validate_mode_knowledge(
-    planning_mode: str,
-    knowledge_needs: list[str],
-    selected_refs: list[str],
-) -> None:
-    """book/stage 允许把真实问题分解为少量知识需求；任何模式都不得超限选择。"""
-    limit = _MODE_MAX_KNOWLEDGE_NEEDS.get(planning_mode, _MAX_KNOWLEDGE_NEEDS_DEFAULT)
-    if len(knowledge_needs) > limit:
-        raise StoryPlanningError(
-            f"本次规划声明了 {len(knowledge_needs)} 个知识需求，超过上限 {limit}；请合并或精简后重试。"
-        )
-    if len(selected_refs) > _MAX_SELECTED_KNOWLEDGE_REFS:
-        raise StoryPlanningError(
-            f"本次规划选择了 {len(selected_refs)} 条知识，超过上限 {_MAX_SELECTED_KNOWLEDGE_REFS}；已拒绝。"
-        )
 
 
 def validate_near_term_range(chapter_range: Any) -> tuple[int, int]:
@@ -1253,50 +1430,63 @@ def _finalize_story_plan(
     planning_dir = _planning_dir(project_id, planning_turn_id)
 
     # 5. 知识选择绑定（Knowledge Selection Binding）
-    #    - knowledge_needs 为空：不调用 KnowledgeRetrieve、不要求快照，
-    #      0 BKP 合法；模型不得在无知识需求时选择 BKP 或声明包身份。
-    #    - knowledge_needs 非空：读取 Agent 侧"唯一一次检索调用"写入的
-    #      请求级快照 → 校验请求/项目/planning turn/查询/包指纹 →
-    #      反序列化该包并绑定给 Context。finalize **绝不再次执行检索**。
-    knowledge_needs = list(parsed["semantic_interpretation"].get("knowledge_needs") or [])
-    selected_refs = list(parsed["semantic_interpretation"].get("selected_knowledge_refs") or [])
-    package_ref = str(parsed["semantic_interpretation"].get("package_ref") or "")
-    # 分层规划知识策略硬上限：需求数/选择数 fail closed；0 检索/0 选择始终合法。
+    #    每个 declared need 对应一个 Agent-side round；finalize 只验证现有
+    #    snapshots、构造 request-local bundle，绝不再次执行 KnowledgeRetrieve。
     try:
-        _validate_mode_knowledge(
-            str(meta.get("planning_mode") or "free"), knowledge_needs, selected_refs,
+        knowledge_needs, rounds, selected_refs = _validate_knowledge_rounds(
+            parsed["semantic_interpretation"]
         )
-    except StoryPlanningError:
-        _cleanup_planning(project_id, planning_turn_id)
-        raise
-    retrieval: Callable[[str], Any] | None = None
-    if knowledge_needs:
-        query = "；".join(knowledge_needs)
-        snapshot, load_error = _load_snapshot(planning_dir)
-        if load_error:
-            _cleanup_planning(project_id, planning_turn_id)
-            raise StoryPlanningError(load_error)
-        try:
-            _validate_snapshot(
+        round_packages: list[tuple[dict[str, Any], Any]] = []
+        for round_data in rounds:
+            snapshot, load_error = _load_snapshot(
+                _round_path(planning_dir, round_data["query"])
+            )
+            if load_error:
+                raise StoryPlanningError(load_error)
+            package = _validate_round_snapshot(
                 snapshot,
                 request_id=request["request_id"],
                 project_id=project_id,
                 planning_turn_id=planning_turn_id,
-                query=query,
-                package_ref=package_ref,
+                round_data=round_data,
             )
-        except StoryPlanningError:
-            _cleanup_planning(project_id, planning_turn_id)
-            raise
-        package = _package_from_snapshot(snapshot)
-        retrieval = _bound_package(package, query)
-        audit.append_event(
-            request["request_id"], audit.EVENT_RETRIEVAL_SELECTED, "knowledge_retrieve",
-            details={"query": query, "refs": selected_refs, "package_ref": package_ref},
-        )
-    elif selected_refs or package_ref:
+            round_packages.append((round_data, package))
+            audit.append_event(
+                request["request_id"], audit.EVENT_RETRIEVAL_SELECTED, "knowledge_retrieve",
+                details={
+                    "need": round_data["need"],
+                    "query": round_data["query"],
+                    "round": _round_key(round_data["query"]),
+                    "refs": round_data["selected_knowledge_refs"],
+                    "package_ref": round_data["package_ref"],
+                },
+            )
+        retrieval: Callable[[str], Any] | None = None
+        bundle: dict[str, Any] | None = None
+        if knowledge_needs:
+            aggregate_package = _aggregate_round_packages(round_packages)
+            # Frozen StoryPlan derives this string internally, but the callback only
+            # serves an already-bound aggregate package and never performs retrieval.
+            retrieval = _bound_package(aggregate_package, "；".join(knowledge_needs))
+            bundle = _write_bundle(
+                planning_dir,
+                request_id=request["request_id"],
+                project_id=project_id,
+                planning_turn_id=planning_turn_id,
+                rounds=rounds,
+                selected_refs=selected_refs,
+            )
+            audit.append_event(
+                request["request_id"], audit.EVENT_RETRIEVAL_SELECTED, "knowledge_retrieve",
+                details={
+                    "bundle_fingerprint": bundle["bundle_fingerprint"],
+                    "refs": selected_refs,
+                    "round_count": len(rounds),
+                },
+            )
+    except StoryPlanningError:
         _cleanup_planning(project_id, planning_turn_id)
-        raise StoryPlanningError("没有知识需求却选择了知识卡或检索包身份，已拒绝。")
+        raise
 
     # 6. 构造 planning_target：替换性规划必须沿用被替换条目的同一 target，
     #    才能经冻结 supersedes 合同生效（绝不新建第二个规划状态库）。
@@ -1378,6 +1568,11 @@ def _finalize_story_plan(
             "state_rev": meta.get("state_rev"),
             "model_rev": meta.get("model_rev"),
         },
+        "knowledge_rounds": rounds,
+        "retrieval_bundle": (
+            {"bundle_fingerprint": bundle["bundle_fingerprint"], "round_count": len(rounds)}
+            if bundle else None
+        ),
         "planning_projection": parsed["planning_projection"],
     }
     write_json(planning_dir / "planning_meta.json", planning_meta)
@@ -1401,6 +1596,16 @@ def _finalize_story_plan(
         "retrieved_count": retrieval_info.get("candidate_count", 0),
         "selected_count": len(selected_hits),
         "gaps": retrieval_info.get("gaps", []),
+        "rounds": [
+            {
+                "need": item["need"],
+                "query": item["query"],
+                "package_ref": item["package_ref"],
+                "selected_knowledge_refs": item["selected_knowledge_refs"],
+            }
+            for item in rounds
+        ],
+        "bundle_fingerprint": bundle["bundle_fingerprint"] if bundle else None,
     }
 
     return {

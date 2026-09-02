@@ -32,6 +32,7 @@ def _valid_agent_json(projection=None):
         "semantic_interpretation": {
             "objective": "分层规划测试。",
             "knowledge_needs": [],
+            "knowledge_rounds": [],
             "selected_knowledge_refs": [],
             "package_ref": "",
             "assumptions": [],
@@ -249,15 +250,27 @@ def test_coarse_target_refined_by_detail_leaves_one_effective(isolated, project)
 # ---------- §17 知识策略上限 ----------
 
 def test_mode_knowledge_caps_fail_closed():
+    def _semantic(needs, selected=None):
+        selected = list(selected or [])
+        rounds = [
+            {"need": need, "query": need, "package_ref": f"pkg-{index}", "selected_knowledge_refs": []}
+            for index, need in enumerate(needs)
+        ]
+        return {
+            "knowledge_needs": needs,
+            "knowledge_rounds": rounds,
+            "selected_knowledge_refs": selected,
+            "package_ref": "",
+        }
     with pytest.raises(sp_ops.StoryPlanningError):
-        sp_ops._validate_mode_knowledge("book", ["需求"] * 5, [])
-    sp_ops._validate_mode_knowledge("book", ["需求"] * 4, [])
-    sp_ops._validate_mode_knowledge("stage", ["需求"] * 4, [])
+        sp_ops._validate_knowledge_rounds(_semantic([f"需求{index}" for index in range(5)]))
+    sp_ops._validate_knowledge_rounds(_semantic([f"需求{index}" for index in range(4)]))
+    sp_ops._validate_knowledge_rounds(_semantic([f"阶段需求{index}" for index in range(4)]))
     with pytest.raises(sp_ops.StoryPlanningError):
-        sp_ops._validate_mode_knowledge("free", [], ["ref"] * 9)
-    sp_ops._validate_mode_knowledge("free", [], ["ref"] * 8)
+        sp_ops._validate_knowledge_rounds(_semantic([], ["ref"] * 9))
+    sp_ops._validate_knowledge_rounds(_semantic([], []))
     # 0 检索/0 选择始终合法。
-    sp_ops._validate_mode_knowledge("book", [], [])
+    sp_ops._validate_knowledge_rounds(_semantic([], []))
     # 既有单请求选择上限（提示词与 E1 消费合同）保持 3。
     assert sp_ops._MAX_KNOWLEDGE_HITS == 3
     assert "0 到 3" in sp_ops._AGENT_TASK_TEMPLATE or "{max_knowledge_hits}" in sp_ops._AGENT_TASK_TEMPLATE

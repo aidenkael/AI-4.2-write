@@ -275,7 +275,7 @@ def test_direct_operation_audit_events(isolated, real_project, monkeypatch):
         def run(self, request):
             return AgentResult(status="completed", output=json.dumps({
                 "semantic_interpretation": {
-                    "objective": "规划", "knowledge_needs": [], "selected_knowledge_refs": [],
+                    "objective": "规划", "knowledge_needs": [], "knowledge_rounds": [], "selected_knowledge_refs": [],
                     "package_ref": "", "assumptions": [], "deliberate_open_space": [],
                 },
                 "planning_target": {"description": "继续发展", "scope_kind": "free"},
@@ -324,7 +324,7 @@ def test_audit_no_secret_fields_direct(isolated, real_project, monkeypatch):
     class _FakeAdapter:
         name = "fake_agent"
         def run(self, request):
-            return AgentResult(status="completed", output='{"semantic_interpretation":{"objective":"x","knowledge_needs":[],"selected_knowledge_refs":[],"package_ref":"","assumptions":[]},"planning_target":{"description":"d","scope_kind":"free"},"model_output":{"proposal":"p","planning_items":[{"description":"i"}]}}', agent=self.name)
+            return AgentResult(status="completed", output='{"semantic_interpretation":{"objective":"x","knowledge_needs":[],"knowledge_rounds":[],"selected_knowledge_refs":[],"package_ref":"","assumptions":[]},"planning_target":{"description":"d","scope_kind":"free"},"model_output":{"proposal":"p","planning_items":[{"description":"i"}]}}', agent=self.name)
         def cancel(self):
             return True
 

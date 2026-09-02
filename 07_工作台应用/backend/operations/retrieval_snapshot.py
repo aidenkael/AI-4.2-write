@@ -6,7 +6,9 @@ Agent 在执行内运行（全部任务模板显式内嵌 --request <request_id>
     StoryPlan：  python retrieval_snapshot.py --request <request_id> "<query>"
     StoryWrite： python retrieval_snapshot.py --request <request_id> "<query>"
 
-显式绑定 request_id（P0 精确绑定）：Direct 请求绝不进入 active.json，
+显式绑定 request_id（P0 精确绑定）：StoryPlan 在同一请求内为每个 declared
+knowledge need 执行一个独立、确定性、有界 round；每次 CLI invocation 只执行
+该 query 的一次 KnowledgeRetrieve。Direct 请求绝不进入 active.json，
 检索命令绝不依赖可变的 active 指针（2026-08-27 起 StoryPlan 也改为显式绑定）。
 
 该调用做两件事（同一 invocation）：

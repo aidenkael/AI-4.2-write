@@ -52,6 +52,7 @@ import project_workspace  # noqa: E402
 from operations import story_planning as sp_ops  # noqa: E402
 from operations import qoder_bridge as bridge  # noqa: E402
 from operations import agent_runner  # noqa: E402
+from operations import execution_audit as execution_audit  # noqa: E402
 from agents.base import AgentRequest, AgentResult  # noqa: E402
 from operations.projects import get_project_overview  # noqa: E402
 from operations.projects import (  # noqa: E402
@@ -65,6 +66,7 @@ VALID_AGENT_JSON = json.dumps({
     "semantic_interpretation": {
         "objective": "推进故事前半程。",
         "knowledge_needs": [],
+        "knowledge_rounds": [],
         "selected_knowledge_refs": [],
         "package_ref": "",
         "assumptions": ["前半程事件顺序待作者确认"],
@@ -702,18 +704,26 @@ def test_invalid_agent_output_cleanup(isolated, real_project, tmp_path, monkeypa
 # 模型从该显示包选择 → finalize 读快照 → Context 消费同一反序列化包
 # ---------------------------------------------------------------------------
 
-def _agent_json(knowledge_needs, selected_knowledge_refs, package_ref=""):
+def _agent_json(knowledge_needs, selected_knowledge_refs, package_ref="", knowledge_rounds=None):
     """构造带知识选择的合法 Agent 输出。
 
     selection 为 canonical selection_ref（source_kind/source_id/source_anchor）；
     package_ref 是模型从检索命令输出中原样回显的包身份指纹。
     """
+    if knowledge_rounds is None:
+        knowledge_rounds = ([{
+            "need": knowledge_needs[0],
+            "query": knowledge_needs[0],
+            "package_ref": package_ref,
+            "selected_knowledge_refs": selected_knowledge_refs,
+        }] if len(knowledge_needs) == 1 else [])
     return json.dumps({
         "semantic_interpretation": {
             "objective": "推进故事前半程。",
             "knowledge_needs": knowledge_needs,
+            "knowledge_rounds": knowledge_rounds,
             "selected_knowledge_refs": selected_knowledge_refs,
-            "package_ref": package_ref,
+            "package_ref": "",
             "assumptions": ["AI 解读中的假设，作者尚未确认"],
             "deliberate_open_space": [],
         },
@@ -757,7 +767,9 @@ def _read_context(project_id, planning_root):
 
 def _read_snapshot(project_id, planning_root):
     turn_dir = _latest_turn_dir(project_id, planning_root)
-    return json.loads((turn_dir / "retrieval" / "package.json").read_text(encoding="utf-8"))
+    snapshots = sorted((turn_dir / "retrieval").glob("round-*.json"))
+    assert len(snapshots) == 1
+    return json.loads(snapshots[0].read_text(encoding="utf-8"))
 
 
 def _propose_with_agent(project_id, agent_json, write_response, author_question="往前想"):
@@ -771,8 +783,8 @@ def _propose_with_agent(project_id, agent_json, write_response, author_question=
 def _propose_with_snapshot(project_id, knowledge_needs, selected_knowledge_refs, package,
                            write_response, monkeypatch, package_ref=None,
                            author_question="往前想", planning_mode="free"):
-    """完整知识闭环：prepare → Agent 侧"唯一一次检索调用"（写请求级快照）→
-    Agent 响应（选择 + 回显包指纹）→ finalize（读快照，零检索）。
+    """完整知识闭环：prepare → 每个 need 一个 Agent-side round →
+    Agent 响应（逐 round 选择 + 回显包指纹）→ finalize（读快照，零检索）。
 
     返回 (get_result, retrieval_calls, request_id)。retrieval_calls 记录
     KnowledgeRetrieve 的实际执行次数（模拟 Agent 侧命令；finalize 不得增加）。
@@ -781,7 +793,7 @@ def _propose_with_snapshot(project_id, knowledge_needs, selected_knowledge_refs,
 
     def _retrieve(query):
         calls.append(query)
-        return package
+        return package[query] if isinstance(package, dict) else package
 
     monkeypatch.setattr(sp_ops, "_retrieve_package", _retrieve)
 
@@ -790,13 +802,25 @@ def _propose_with_snapshot(project_id, knowledge_needs, selected_knowledge_refs,
     )
     request_id = prepare_result["request_id"]
 
-    query = "；".join(knowledge_needs)
-    shown_package = sp_ops.execute_request_scoped_retrieval(query, request_id)  # 唯一一次检索调用
-    fingerprint = sp_ops._package_fingerprint(shown_package)
+    rounds = []
+    for index, need in enumerate(knowledge_needs):
+        shown_package = sp_ops.execute_request_scoped_retrieval(need, request_id)
+        round_refs = (
+            selected_knowledge_refs if len(knowledge_needs) == 1
+            else ([selected_knowledge_refs[index]] if index < len(selected_knowledge_refs) else [])
+        )
+        rounds.append({
+            "need": need,
+            "query": need,
+            "package_ref": (
+                package_ref if package_ref is not None else sp_ops._package_fingerprint(shown_package)
+            ),
+            "selected_knowledge_refs": round_refs,
+        })
 
     agent_json = _agent_json(
         knowledge_needs, selected_knowledge_refs,
-        package_ref=fingerprint if package_ref is None else package_ref,
+        knowledge_rounds=rounds,
     )
     write_response(request_id, output=agent_json)
     get_result = sp_ops.get_story_plan_request(request_id=request_id)
@@ -825,7 +849,7 @@ def test_knowledge_needs_empty_skips_retrieval(isolated, real_project, fake_agen
     assert context["selected_knowledge_hits"] == []
     # 无快照被创建
     turn_dir = _latest_turn_dir(real_project["project_id"], isolated.parent / ".planning")
-    assert not (turn_dir / "retrieval" / "package.json").exists(), "无知识需求时不得生成检索快照"
+    assert not (turn_dir / "retrieval").exists(), "无知识需求时不得生成检索快照"
 
 
 # B. knowledge_needs ≠ []：全程恰好 1 次检索；快照由同一调用写入；
@@ -920,7 +944,7 @@ def test_snapshot_unparseable_rejects_knowledge_selection(isolated, real_project
 
     # 篡改快照为不可解析内容
     turn_dir = _latest_turn_dir(real_project["project_id"], isolated.parent / ".planning")
-    snapshot_path = turn_dir / "retrieval" / "package.json"
+    snapshot_path = turn_dir / "retrieval" / f"round-{sp_ops._round_key('信息层次')}.json"
     snapshot_path.write_text("{ 这不是合法 JSON", encoding="utf-8")
 
     fake_agent(request_id, output=_agent_json(["信息层次"], ["reference_bkp/book_a/K001"], package_ref="x"))
@@ -940,7 +964,7 @@ def test_snapshot_identity_mismatch_rejects_knowledge_selection(isolated, real_p
         request_id = prepare_result["request_id"]
         sp_ops.execute_request_scoped_retrieval("信息层次", request_id)
         turn_dir = _latest_turn_dir(real_project["project_id"], planning_root)
-        snapshot_path = turn_dir / "retrieval" / "package.json"
+        snapshot_path = turn_dir / "retrieval" / f"round-{sp_ops._round_key('信息层次')}.json"
         if mutate is not None:
             snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
             mutate(snapshot)
@@ -966,7 +990,7 @@ def test_snapshot_identity_mismatch_rejects_knowledge_selection(isolated, real_p
 
     # query 不匹配（Agent 响应中的 knowledge_needs 与快照查询不一致）
     get_result = _run_one_turn(lambda s: None, needs=["信息层次", "别的"])
-    assert get_result["status"] == "failed" and "查询" in get_result["error"]
+    assert get_result["status"] == "failed" and "round" in get_result["error"]
 
     # 包身份（package_ref）与快照指纹不一致
     get_result = _run_one_turn(lambda s: None, agent_package_ref="deadbeef")
@@ -974,10 +998,10 @@ def test_snapshot_identity_mismatch_rejects_knowledge_selection(isolated, real_p
 
     # 缺少 package_ref（空串）
     get_result = _run_one_turn(lambda s: None, agent_package_ref="")
-    assert get_result["status"] == "failed" and "缺少检索包身份" in get_result["error"]
+    assert get_result["status"] == "failed" and "package_ref" in get_result["error"]
 
 
-# E. 模型选择不存在的 ref → 不注入、稳定 gap、绝不替换成其他候选
+# E. 模型选择不存在的 ref → finalize fail closed，绝不替换成其他候选
 
 def test_nonexistent_ref_no_injection_no_substitution(isolated, real_project, fake_agent, monkeypatch):
     package = _fake_package([
@@ -988,12 +1012,9 @@ def test_nonexistent_ref_no_injection_no_substitution(isolated, real_project, fa
         real_project["project_id"], ["信息层次"], ["reference_bkp/book_a/NOPE", "reference_bkp/book_a/K001"],
         package, fake_agent, monkeypatch,
     )
-    assert get_result["status"] == "completed", get_result.get("error")
+    assert get_result["status"] == "failed"
     assert calls == ["信息层次"]
-    context = _read_context(real_project["project_id"], isolated.parent / ".planning")
-    statements = [h["statement"] for h in context["selected_knowledge_hits"]]
-    assert statements == ["A 卡"], "不存在的 ref 不得注入，也不得被替换成其他候选"
-    assert any("不在本次有效召回" in g for g in get_result["result"]["knowledge"]["gaps"])
+    assert "不存在" in get_result["error"]
 
 
 # F. 两个来源都含 K001：canonical selection_ref 只命中对应来源；
@@ -1020,7 +1041,7 @@ def test_scoped_cross_book_identity(isolated, real_project, fake_agent, monkeypa
     assert [h["statement"] for h in c2["selected_knowledge_hits"]] == ["B 卡"]
     assert {h["source_id"] for h in c2["selected_knowledge_hits"]} == {"book_b"}
 
-    # 同一 canonical ref 在包内重复出现（异常包）→ 一张都不注入 + AMBIGUOUS gap
+    # 同一 canonical ref 在同一 round 包内重复出现 → 聚合包只保留首次身份。
     dup_package = _fake_package([
         _fake_hit("book_a", "K001", "A 卡", rank=1),
         _fake_hit("book_a", "K001", "A 卡重复", rank=2),
@@ -1028,8 +1049,7 @@ def test_scoped_cross_book_identity(isolated, real_project, fake_agent, monkeypa
     r3, _, _ = _propose_with_snapshot(real_project["project_id"], ["信息层次"], ["reference_bkp/book_a/K001"], dup_package, fake_agent, monkeypatch)
     assert r3["status"] == "completed", r3.get("error")
     c3 = _read_context(real_project["project_id"], planning_root)
-    assert c3["selected_knowledge_hits"] == [], "同 ref 碰撞不得双注入"
-    assert any(g.startswith("AMBIGUOUS_KNOWLEDGE_REF") for g in r3["result"]["knowledge"]["gaps"])
+    assert [hit["statement"] for hit in c3["selected_knowledge_hits"]] == ["A 卡"]
 
 
 # 无知识需求却选择知识 / 声明包身份 → 拒绝（selected 与 package_ref 都必须为空）
@@ -1044,9 +1064,11 @@ def test_selection_without_knowledge_needs_rejected(isolated, real_project, fake
     assert calls == [], "无知识需求时不得调用 KnowledgeRetrieve"
 
     # 无知识需求却回显包身份 → 同样拒绝
-    get_result2 = _propose_with_agent(real_project["project_id"], _agent_json([], [], package_ref="deadbeef"), fake_agent)
+    invalid = json.loads(_agent_json([], []))
+    invalid["semantic_interpretation"]["package_ref"] = "deadbeef"
+    get_result2 = _propose_with_agent(real_project["project_id"], json.dumps(invalid), fake_agent)
     assert get_result2["status"] == "failed"
-    assert "没有知识需求却选择了知识卡" in get_result2["error"]
+    assert "package_ref" in get_result2["error"]
 
 
 # G. 检索后模型 0 选择 → 合法 0-BKP 规划路径
@@ -1159,7 +1181,7 @@ def test_task_skips_retrieval_when_knowledge_needs_empty():
     """B. knowledge_needs 为空 → 明确不运行检索、selected 为空、package_ref 为空串。"""
     task = _render_task_template()
     assert "若 knowledge_needs 为空：不要运行检索命令" in task
-    assert "selected_knowledge_refs 必须为 []" in task
+    assert "knowledge_rounds 与 selected_knowledge_refs 都必须为 []" in task
     assert "package_ref 必须为空字符串" in task
 
 
@@ -1183,15 +1205,15 @@ def test_task_uses_one_canonical_chapter_foreshadowing_field():
 def test_task_requires_package_ref_binding():
     """D. package_fingerprint → package_ref 绑定仍被明确要求。"""
     task = _render_task_template()
-    assert "package_fingerprint 原样填入 semantic_interpretation.package_ref" in task
+    assert "package_ref、selected_knowledge_refs" in task
     assert "package_ref" in task
 
 
 def test_task_requires_selection_only_from_returned_package():
     """E. 选择只能来自命令实际输出的 selection_ref，严禁编造。"""
     task = _render_task_template()
-    assert "只从中选择 0 到" in task
-    assert "严禁编造命令输出中不存在的 selection_ref 或 package_fingerprint" in task
+    assert "本 round 只能从自己的输出选择 0 到" in task
+    assert "严禁编造不存在的 selection_ref 或 package_fingerprint" in task
     assert "<source_kind>/<source_id>/<source_anchor>" in task
 
 
@@ -2293,11 +2315,15 @@ def test_trajectory_with_unknown_target_fails_closed(isolated, real_project, fak
 # ---------------------------------------------------------------------------
 
 def test_book_plan_can_combine_cards_from_different_sources(isolated, real_project, fake_agent, monkeypatch):
-    """全书规划可以从同一混合包中组合参考作品与方法知识（仍只一次检索）。"""
-    package = _fake_package([
-        _fake_hit("book_a", "K001", "参考卡：长线结构", rank=1, source_kind="reference_bkp"),
-        _fake_hit("book_0138", "M0003", "方法卡：阶段升级节奏", rank=2, source_kind="method_source"),
-    ])
+    """全书规划可从两个独立 round 聚合不同来源知识。"""
+    package = {
+        "全书结构": _fake_package([
+            _fake_hit("book_a", "K001", "参考卡：长线结构", rank=1, source_kind="reference_bkp"),
+        ]),
+        "人物关系演变": _fake_package([
+            _fake_hit("book_0138", "M0003", "方法卡：阶段升级节奏", rank=1, source_kind="method_source"),
+        ]),
+    }
     get_result, calls, request_id = _propose_with_snapshot(
         real_project["project_id"],
         ["全书结构", "人物关系演变"],
@@ -2306,11 +2332,151 @@ def test_book_plan_can_combine_cards_from_different_sources(isolated, real_proje
         author_question="规划全书", planning_mode="book",
     )
     assert get_result["status"] == "completed", get_result.get("error")
-    assert calls == ["全书结构；人物关系演变"], "多需求仍合并为一次确定性检索"
+    assert calls == ["全书结构", "人物关系演变"], "每个 need 都必须独立检索"
     context = _read_context(real_project["project_id"], isolated.parent / ".planning")
     sources = {h["source_kind"] for h in context["selected_knowledge_hits"]}
     assert sources == {"reference_bkp", "method_source"}, "book 规划可组合不同来源的知识卡"
     assert request_id
+
+
+def test_book_three_needs_use_three_bound_rounds_bundle_context_and_audit(
+    isolated, real_project, fake_agent, monkeypatch,
+):
+    """Three needs must never be joined, and every consumer sees the verified bundle only."""
+    needs = ["全书结构", "人物关系演变", "信息揭示节奏"]
+    refs = [
+        "reference_bkp/book_a/K001",
+        "method_source/book_m/M0001",
+        "validated_knowledge/pkg_v/V0001",
+    ]
+    packages = {
+        needs[0]: _fake_package([_fake_hit("book_a", "K001", "结构", source_kind="reference_bkp")]),
+        needs[1]: _fake_package([_fake_hit("book_m", "M0001", "关系", source_kind="method_source")]),
+        needs[2]: _fake_package([_fake_hit("pkg_v", "V0001", "揭示", source_kind="validated_knowledge")]),
+    }
+    calls = []
+    monkeypatch.setattr(sp_ops, "_retrieve_package", lambda query: (calls.append(query), packages[query])[1])
+    prepared = sp_ops.prepare_story_plan(real_project["project_id"], "规划全书", planning_mode="book")
+    rounds = []
+    for need, ref in zip(needs, refs):
+        package = sp_ops.execute_request_scoped_retrieval(need, prepared["request_id"])
+        rounds.append({
+            "need": need,
+            "query": need,
+            "package_ref": sp_ops._package_fingerprint(package),
+            "selected_knowledge_refs": [ref],
+        })
+    # Same query is idempotent within a request: no second retrieval or identity.
+    repeated = sp_ops.execute_request_scoped_retrieval(needs[0], prepared["request_id"])
+    assert sp_ops._package_fingerprint(repeated) == rounds[0]["package_ref"]
+    fake_agent(prepared["request_id"], output=_agent_json(needs, refs, knowledge_rounds=rounds))
+    result = sp_ops.get_story_plan_request(request_id=prepared["request_id"])
+    assert result["status"] == "completed", result.get("error")
+    assert calls == needs and "；" not in calls
+    turn_dir = _latest_turn_dir(real_project["project_id"], isolated.parent / ".planning")
+    snapshots = sorted((turn_dir / "retrieval").glob("round-*.json"))
+    assert len(snapshots) == 3
+    bundle = json.loads((turn_dir / "retrieval" / "bundle.json").read_text(encoding="utf-8"))
+    assert [round_data["need"] for round_data in bundle["rounds"]] == needs
+    assert bundle["selected_knowledge_refs"] == refs
+    assert bundle["bundle_fingerprint"] == result["result"]["knowledge"]["bundle_fingerprint"]
+    context = _read_context(real_project["project_id"], isolated.parent / ".planning")
+    assert [hit["selection_ref"] for hit in context["selected_knowledge_hits"]] == refs
+    audit_data = execution_audit.get_execution_audit(prepared["request_id"])
+    selected_events = [event for event in audit_data["events"] if event["kind"] == execution_audit.EVENT_RETRIEVAL_SELECTED]
+    assert sum("round" in event["details"] for event in selected_events) == 3
+    assert any(event["details"].get("bundle_fingerprint") == bundle["bundle_fingerprint"] for event in selected_events)
+
+
+def test_multi_round_rejects_cross_round_ref_and_finalize_never_retrieves(
+    isolated, real_project, fake_agent, monkeypatch,
+):
+    needs = ["人物弧光", "世界规则"]
+    packages = {
+        needs[0]: _fake_package([_fake_hit("book_a", "K001", "人物")]),
+        needs[1]: _fake_package([_fake_hit("book_b", "K002", "世界")]),
+    }
+    calls = []
+    monkeypatch.setattr(sp_ops, "_retrieve_package", lambda query: (calls.append(query), packages[query])[1])
+    prepared = sp_ops.prepare_story_plan(real_project["project_id"], "规划", planning_mode="book")
+    first = sp_ops.execute_request_scoped_retrieval(needs[0], prepared["request_id"])
+    second = sp_ops.execute_request_scoped_retrieval(needs[1], prepared["request_id"])
+    rounds = [
+        {"need": needs[0], "query": needs[0], "package_ref": sp_ops._package_fingerprint(first), "selected_knowledge_refs": []},
+        {"need": needs[1], "query": needs[1], "package_ref": sp_ops._package_fingerprint(second), "selected_knowledge_refs": ["reference_bkp/book_a/K001"]},
+    ]
+    fake_agent(prepared["request_id"], output=_agent_json(needs, ["reference_bkp/book_a/K001"], knowledge_rounds=rounds))
+    result = sp_ops.get_story_plan_request(request_id=prepared["request_id"])
+    assert result["status"] == "failed" and "不存在" in result["error"]
+    assert calls == needs, "finalize 不得补做检索"
+
+
+@pytest.mark.parametrize(("rounds", "selected", "error"), [
+    ([], [], "恰好对应"),
+    ([
+        {"need": "A", "query": "A", "package_ref": "a", "selected_knowledge_refs": []},
+        {"need": "B", "query": "B", "package_ref": "b", "selected_knowledge_refs": []},
+        {"need": "额外", "query": "C", "package_ref": "c", "selected_knowledge_refs": []},
+    ], [], "恰好对应"),
+    ([{"need": "A", "query": "A", "package_ref": "a", "selected_knowledge_refs": ["1", "2", "3", "4"]}], ["1", "2", "3", "4"], "超过 3"),
+    ([
+        {"need": "A", "query": "A", "package_ref": "a", "selected_knowledge_refs": ["1", "2", "3"]},
+        {"need": "B", "query": "B", "package_ref": "b", "selected_knowledge_refs": ["4", "5", "6"]},
+        {"need": "C", "query": "C", "package_ref": "c", "selected_knowledge_refs": ["7", "8", "9"]},
+    ], ["1", "2", "3", "4", "5", "6", "7", "8", "9"], "超过上限 8"),
+])
+def test_multi_round_bounds_and_declared_need_contract(rounds, selected, error):
+    si = {
+        "knowledge_needs": (["A", "B", "C"] if len(selected) == 9 else (["A", "B"] if len(rounds) in (0, 3) else ["A"])),
+        "knowledge_rounds": rounds,
+        "selected_knowledge_refs": selected,
+        "package_ref": "",
+    }
+    with pytest.raises(sp_ops.StoryPlanningError, match=error):
+        sp_ops._validate_knowledge_rounds(si)
+
+
+def test_multi_round_rejects_duplicate_need_and_query():
+    duplicate_need = {
+        "knowledge_needs": ["A", "A"],
+        "knowledge_rounds": [
+            {"need": "A", "query": "A", "package_ref": "one", "selected_knowledge_refs": []},
+            {"need": "A", "query": "B", "package_ref": "two", "selected_knowledge_refs": []},
+        ],
+        "selected_knowledge_refs": [],
+        "package_ref": "",
+    }
+    with pytest.raises(sp_ops.StoryPlanningError, match="不得重复"):
+        sp_ops._validate_knowledge_rounds(duplicate_need)
+    duplicate_query = {**duplicate_need, "knowledge_needs": ["A", "B"], "knowledge_rounds": [
+        {"need": "A", "query": "same", "package_ref": "one", "selected_knowledge_refs": []},
+        {"need": "B", "query": "same", "package_ref": "two", "selected_knowledge_refs": []},
+    ]}
+    with pytest.raises(sp_ops.StoryPlanningError, match="复用 query"):
+        sp_ops._validate_knowledge_rounds(duplicate_query)
+
+
+def test_bundle_fingerprint_is_stable_and_sensitive(tmp_path):
+    rounds = [{"need": "结构", "query": "结构", "package_ref": "pkg-a", "selected_knowledge_refs": ["reference_bkp/a/K001"]}]
+    first = sp_ops._write_bundle(tmp_path, request_id="r", project_id="p", planning_turn_id="t", rounds=rounds, selected_refs=["reference_bkp/a/K001"])
+    second = sp_ops._write_bundle(tmp_path, request_id="r", project_id="p", planning_turn_id="t", rounds=rounds, selected_refs=["reference_bkp/a/K001"])
+    changed = sp_ops._write_bundle(tmp_path, request_id="r", project_id="p", planning_turn_id="t", rounds=[{**rounds[0], "query": "节奏"}], selected_refs=["reference_bkp/a/K001"])
+    changed_package = sp_ops._write_bundle(tmp_path, request_id="r", project_id="p", planning_turn_id="t", rounds=[{**rounds[0], "package_ref": "pkg-b"}], selected_refs=["reference_bkp/a/K001"])
+    changed_selection = sp_ops._write_bundle(tmp_path, request_id="r", project_id="p", planning_turn_id="t", rounds=[{**rounds[0], "selected_knowledge_refs": []}], selected_refs=[])
+    assert first["bundle_fingerprint"] == second["bundle_fingerprint"]
+    assert changed["bundle_fingerprint"] != first["bundle_fingerprint"]
+    assert changed_package["bundle_fingerprint"] != first["bundle_fingerprint"]
+    assert changed_selection["bundle_fingerprint"] != first["bundle_fingerprint"]
+
+
+def test_zero_hit_round_is_a_legal_zero_selection_path(isolated, real_project, fake_agent, monkeypatch):
+    result, calls, _ = _propose_with_snapshot(
+        real_project["project_id"], ["冷门问题"], [], _fake_package([], status="INSUFFICIENT_KNOWLEDGE"),
+        fake_agent, monkeypatch,
+    )
+    assert result["status"] == "completed", result.get("error")
+    assert calls == ["冷门问题"]
+    assert result["result"]["knowledge"]["selected_count"] == 0
 
 
 def test_book_mode_rejects_over_knowledge_need_cap(isolated, real_project, fake_agent):
@@ -2319,6 +2485,7 @@ def test_book_mode_rejects_over_knowledge_need_cap(isolated, real_project, fake_
         "semantic_interpretation": {
             "objective": "超限需求。",
             "knowledge_needs": ["需求一", "需求二", "需求三", "需求四", "需求五"],
+            "knowledge_rounds": [],
             "selected_knowledge_refs": [],
             "package_ref": "",
             "assumptions": [],

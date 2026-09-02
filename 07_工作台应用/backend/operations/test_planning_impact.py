@@ -32,6 +32,7 @@ VALID_AGENT_JSON = json.dumps({
     "semantic_interpretation": {
         "objective": "局部重规划。",
         "knowledge_needs": [],
+        "knowledge_rounds": [],
         "selected_knowledge_refs": [],
         "package_ref": "",
         "assumptions": [],
