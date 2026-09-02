@@ -2020,3 +2020,267 @@ def test_duplicate_projection_domain_relation_fails_closed(isolated, real_projec
     edges = [edge for edge in project_model.read_project_model(real_project["project_id"])["dependencies"].values()
              if not edge.get("tombstoned")]
     assert len(edges) == 1, "重复规划关系绝不静默创建第二条边"
+
+
+# ---------------------------------------------------------------------------
+# 规划血缘 / 章目标唯一 / 既有实体未来走向
+# （LONGFORM_AUTHORING_LIFECYCLE_CLOSURE 检查点 1 §3/§4/§5）
+# ---------------------------------------------------------------------------
+
+import hashlib  # noqa: E402
+
+from operations import author_edit, project_model  # noqa: E402
+from operations.project_snapshot import focused_task_context, get_project_snapshot  # noqa: E402
+
+
+def _empty_sha() -> str:
+    return hashlib.sha256(b"").hexdigest()
+
+
+def _all_plan_ids(project_dir):
+    state = json.loads((Path(project_dir) / "_工作台状态" / "story_state.json").read_text(encoding="utf-8"))
+    return {p["id"] for p in state["approved_plan"] if isinstance(p.get("id"), str)}
+
+
+def test_superseding_plan_retires_old_projections_and_keeps_history(isolated, real_project, fake_agent):
+    """确认替换规划：旧投影不再是有效未来（物理存储保留可审计）。"""
+    ids_before = _all_plan_ids(real_project["project_dir"])
+    first_output = json.loads(VALID_AGENT_JSON)
+    first_output["planning_projection"] = {
+        "characters": [{"key": "lead", "title": "初始人物", "role": "主角"}],
+        "relationships": [], "settings": [], "storylines": [], "events": [],
+        "foreshadowing": [], "chapter_changes": [],
+    }
+    first = _propose(
+        real_project["project_id"], "第一轮规划",
+        lambda rid: fake_agent(rid, output=json.dumps(first_output, ensure_ascii=False)),
+    )
+    sp_ops.confirm_story_plan(
+        project_id=real_project["project_id"], planning_token=first["planning_token"],
+    )
+    pid = real_project["project_id"]
+    first_plan_ids = sorted(_all_plan_ids(real_project["project_dir"]) - ids_before)
+    assert first_plan_ids, "第一轮确认必须写入新规划条目"
+    model = project_model.read_project_model(pid)
+    first_projections = [
+        ref for ref, obj in model["objects"].items()
+        if (obj.get("data") or {}).get("planning_source_ref")
+    ]
+    assert first_projections, "第一轮确认必须产生规划派生投影"
+    assert model["objects"][first_projections[0]]["data"].get("planning_plan_ids"), "投影必须持久化 plan id 血缘"
+
+    second_output = json.loads(VALID_AGENT_JSON)
+    second_output["planning_projection"] = {
+        "characters": [{"key": "new_lead", "title": "替换后的人物", "role": "主角"}],
+        "relationships": [], "settings": [], "storylines": [], "events": [],
+        "foreshadowing": [], "chapter_changes": [],
+    }
+    prepare = sp_ops.prepare_story_plan(
+        project_id=pid, author_question="替换第一轮",
+        replaces_plan_ids=first_plan_ids,
+    )
+    fake_agent(prepare["request_id"], output=json.dumps(second_output, ensure_ascii=False))
+    got = sp_ops.get_story_plan_request(request_id=prepare["request_id"])
+    assert got["status"] == "completed", got.get("error")
+    sp_ops.confirm_story_plan(project_id=pid, planning_token=got["result"]["planning_token"])
+
+    state = json.loads((real_project["project_dir"] / "_工作台状态" / "story_state.json").read_text(encoding="utf-8"))
+    activity = sp_ops.resolve_plan_activity(state)
+    assert set(first_plan_ids) <= set(activity["superseded"]), "旧规划必须被冻结 supersedes 合同取代"
+
+    model = project_model.read_project_model(pid)
+    for ref in first_projections:
+        assert model["objects"][ref]["tombstoned"] is True, "旧规划投影必须被退役（历史保留）"
+    snapshot = get_project_snapshot(pid)
+    future_titles = [item["title"] for item in snapshot["future"]["characters"]]
+    assert "替换后的人物" in future_titles
+    assert not any(item["ref"] in first_projections for item in snapshot["future"]["characters"]), \
+        "失效血缘的投影不得继续作为有效未来暴露"
+
+
+def test_replaces_requires_active_same_target(isolated, real_project, fake_agent):
+    with pytest.raises(sp_ops.StoryPlanningError):
+        sp_ops.prepare_story_plan(
+            project_id=real_project["project_id"], author_question="替换不存在条目",
+            replaces_plan_ids=["plan-does-not-exist"],
+        )
+
+
+def test_second_plan_for_same_chapter_leaves_one_effective_target(isolated, real_project, fake_agent):
+    """第20章两次规划：恰好一个有效目标；旧目标可审计；正文绝不被删除。"""
+    pid = real_project["project_id"]
+    author_edit.create_chapter(pid, chapter_number=20)
+    saved = author_edit.save_formal_prose(
+        pid, chapter_number=20, base_content_sha256=_empty_sha(), content="第二十章正式正文。",
+    )
+
+    first_output = json.loads(VALID_AGENT_JSON)
+    first_output["planning_projection"] = {
+        "characters": [], "relationships": [], "settings": [], "storylines": [],
+        "events": [], "foreshadowing": [],
+        "chapter_changes": [{
+            "title": "第20章（旧）", "chapter_number": 20, "min_words": 2000, "max_words": 3000,
+            "task": "旧版章节任务", "synopsis": "旧版",
+        }],
+    }
+    first = _propose(pid, "规划第20章",
+                     lambda rid: fake_agent(rid, output=json.dumps(first_output, ensure_ascii=False)))
+    sp_ops.confirm_story_plan(project_id=pid, planning_token=first["planning_token"])
+    model = project_model.read_project_model(pid)
+    old_ref = next(
+        ref for ref in model["length_plan"]["chapter_target_refs"]
+        if (model["objects"][ref]["data"] or {}).get("chapter_number") == 20
+    )
+
+    second_output = json.loads(VALID_AGENT_JSON)
+    second_output["planning_projection"] = {
+        "characters": [], "relationships": [], "settings": [], "storylines": [],
+        "events": [], "foreshadowing": [],
+        "chapter_changes": [{
+            "title": "第20章（新）", "chapter_number": 20, "min_words": 2200, "max_words": 3200,
+            "task": "新版章节任务", "synopsis": "新版",
+        }],
+    }
+    second = _propose(pid, "重新规划第20章",
+                      lambda rid: fake_agent(rid, output=json.dumps(second_output, ensure_ascii=False)))
+    sp_ops.confirm_story_plan(project_id=pid, planning_token=second["planning_token"])
+
+    model = project_model.read_project_model(pid)
+    active_20 = [
+        ref for ref in model["length_plan"]["chapter_target_refs"]
+        if not model["objects"][ref].get("tombstoned")
+        and (model["objects"][ref]["data"] or {}).get("chapter_number") == 20
+    ]
+    assert len(active_20) == 1, "同一章号绝不允许两个有效章节目标"
+    assert model["objects"][old_ref]["tombstoned"] is True, "被替换目标仍可审计（物理保留）"
+    snapshot = get_project_snapshot(pid)
+    chapter20 = next(item for item in snapshot["chapters"] if item["chapter_number"] == 20)
+    assert chapter20["fine_outline"]["task"] == "新版章节任务"
+    assert chapter20["fine_outline_ref"] == active_20[0]
+    assert chapter20["content"] == "第二十章正式正文。", "规划替换绝不删除正式正文"
+    assert (Path(real_project["project_dir"]) / "03_正文" / "第020章.md").read_text(encoding="utf-8") == "第二十章正式正文。"
+    assert saved["change"]["change_id"]
+
+
+def test_duplicate_chapter_number_rejected_on_author_length_plan(isolated, real_project, fake_agent):
+    from operations.author_edit import AuthorEditError
+    pid = real_project["project_id"]
+    rev = project_model.read_project_model(pid)["model_rev"]
+    with pytest.raises(AuthorEditError):
+        author_edit.set_length_plan(
+            pid, base_model_rev=rev, total_target_words=None, stages=None,
+            chapter_targets=[
+                {"title": "第5章A", "chapter_number": 5, "min_words": 1000, "max_words": 2000},
+                {"title": "第5章B", "chapter_number": 5, "min_words": 1000, "max_words": 2000},
+            ],
+        )
+
+
+def test_snapshot_chapter_target_selection_independent_of_insertion_order(isolated, real_project, fake_agent):
+    """遗留重复目标的快照选择与 dict 插入顺序无关（确定性平手）。"""
+    pid = real_project["project_id"]
+    rev = project_model.read_project_model(pid)["model_rev"]
+    author_edit.set_length_plan(
+        pid, base_model_rev=rev, total_target_words=None, stages=None,
+        chapter_targets=[{"title": "第7章", "chapter_number": 7, "min_words": 1000, "max_words": 2000}],
+    )
+    artifact = Path(real_project["project_dir"]) / "_工作台状态" / project_model.ARTIFACT_NAME
+    model = json.loads(artifact.read_text(encoding="utf-8"))
+    base_ref = model["length_plan"]["chapter_target_refs"][0]
+    dup = json.loads(json.dumps(model["objects"][base_ref]))
+    dup_ref = base_ref[:-2] + "ff"
+    dup["ref"] = dup_ref
+    dup["title"] = "第7章（遗留重复）"
+    model["objects"][dup_ref] = dup
+    model["length_plan"]["chapter_target_refs"].append(dup_ref)
+    model["ref_sequence"] = max(model["ref_sequence"], int(dup_ref.rsplit("_", 1)[1], 16))
+    refs = sorted([base_ref, dup_ref])
+
+    selections = set()
+    for order in (refs, list(reversed(refs))):
+        variant = json.loads(json.dumps(model))
+        objects = {ref: variant["objects"][ref] for ref in order if ref in variant["objects"]}
+        objects.update({k: v for k, v in variant["objects"].items() if k not in objects})
+        variant["objects"] = objects
+        artifact.write_text(json.dumps(variant, ensure_ascii=False, indent=2), encoding="utf-8")
+        snapshot = get_project_snapshot(pid)
+        chapter7 = next(item for item in snapshot["chapters"] if item["chapter_number"] == 7)
+        selections.add(chapter7["fine_outline_ref"])
+    assert len(selections) == 1, "快照章目标选择必须与插入顺序无关"
+    assert selections.pop() == refs[0], "确定性平手必须选择最小 ref"
+
+
+def test_existing_character_future_trajectory_is_not_duplicate_identity(isolated, real_project, fake_agent):
+    """既有人物的未来走向：附在 target_ref 上，不新建第二身份，不成为 current。"""
+    pid = real_project["project_id"]
+    created = author_edit.create_foundation_record(
+        pid, base_model_rev=project_model.read_project_model(pid)["model_rev"],
+        category="character", title="林砊", material_state="current",
+        data={"current_objective": "查明真相"},
+    )
+    char_ref = created["model"]["change_history"][-1]["detail"]["ref"]
+    storyline = author_edit.create_foundation_record(
+        pid, base_model_rev=project_model.read_project_model(pid)["model_rev"],
+        category="story_line", title="追查主线", material_state="current", data={},
+    )
+    line_ref = storyline["model"]["change_history"][-1]["detail"]["ref"]
+
+    output = json.loads(VALID_AGENT_JSON)
+    output["planning_projection"] = {
+        "characters": [{
+            "key": "lead_future", "title": "林砊的后期走向",
+            "target_ref": char_ref,
+            "current_objective": "与反派当面对峳",
+            "phase_window": {"stage_ref": None, "chapter_range": [40, 60]},
+        }],
+        "storylines": [{
+            "key": "line_future", "title": "追查主线的收束",
+            "target_ref": line_ref, "status": "planned",
+        }],
+        "relationships": [], "settings": [], "events": [], "foreshadowing": [],
+        "chapter_changes": [],
+    }
+    result = _propose(pid, "规划既有人物走向",
+                      lambda rid: fake_agent(rid, output=json.dumps(output, ensure_ascii=False)))
+    sp_ops.confirm_story_plan(project_id=pid, planning_token=result["planning_token"])
+
+    snapshot = get_project_snapshot(pid)
+    current_titles = [item["title"] for item in snapshot["current"]["characters"]]
+    future_titles = [item["title"] for item in snapshot["future"]["characters"]]
+    assert current_titles.count("林砊") == 1
+    assert "林砊" not in future_titles and "林砊的后期走向" not in future_titles, "轨迹绝不新建第二身份"
+    trajectories = snapshot["future_trajectories"]
+    char_traj = [item for item in trajectories if item["target_ref"] == char_ref]
+    line_traj = [item for item in trajectories if item["target_ref"] == line_ref]
+    assert len(char_traj) == 1 and char_traj[0]["category"] == "character"
+    assert char_traj[0]["record"]["current_objective"] == "与反派当面对峳"
+    assert len(line_traj) == 1 and line_traj[0]["category"] == "story_line"
+
+    # StoryPlan/StoryWrite 消费链：任务近端上下文能看到相关轨迹，且不覆盖当前状态。
+    context = focused_task_context(pid, focus_text="林砊接下来会怎样")
+    assert context["current"]["characters"][0]["record"]["current_objective"] == "查明真相"
+    ctx_traj = [item for item in context["future_trajectories"] if item["target_ref"] == char_ref]
+    assert len(ctx_traj) == 1
+
+    # 规划的未来绝不因被规划而成为 current：模型中无第二个“林砊”活动身份。
+    model = project_model.read_project_model(pid)
+    identities = [
+        ref for ref, obj in model["objects"].items()
+        if obj.get("kind") == "foundation" and obj.get("category") == "character"
+        and obj.get("title") == "林砊" and not obj.get("tombstoned")
+    ]
+    assert len(identities) == 1
+
+
+def test_trajectory_with_unknown_target_fails_closed(isolated, real_project, fake_agent):
+    output = json.loads(VALID_AGENT_JSON)
+    output["planning_projection"] = {
+        "characters": [{"key": "ghost", "title": "幽灵走向", "target_ref": "gw2_obj_missing"}],
+        "relationships": [], "settings": [], "storylines": [], "events": [],
+        "foreshadowing": [], "chapter_changes": [],
+    }
+    result = _propose(pid := real_project["project_id"], "非法轨迹",
+                      lambda rid: fake_agent(rid, output=json.dumps(output, ensure_ascii=False)))
+    with pytest.raises(sp_ops.StoryPlanningError, match="写入规划失败"):
+        sp_ops.confirm_story_plan(project_id=pid, planning_token=result["planning_token"])
+    assert get_project_snapshot(pid)["future_trajectories"] == []

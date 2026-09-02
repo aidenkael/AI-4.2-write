@@ -86,12 +86,14 @@ _BATCH_TASK_TEMPLATE = """你是 Go Write 的作品状态整理器。作者已�
 {{
   "summary": "给作者的简短整理摘要",
   "consequences": [
-    {{"classification":"mechanically_certain|ambiguous|creative_optional","kind":"character|relationship|event|time|foreshadowing|setting|location|organization|system|storyline|planning|open_thread|mystery_information","action":"create|update|retire","target_ref":"更新或退役的明确 ref；新建可为空","title":"作者可读标题","source_ref":"关系起点 ref；非关系可为空","target_character_ref":"关系终点 ref；非关系可为空","data":{{}},"reason":"短理由"}}
+    {{"classification":"mechanically_certain|ambiguous|creative_optional","kind":"character|relationship|event|time|foreshadowing|setting|location|organization|system|storyline|planning|open_thread|mystery_information","action":"create|update|retire","target_ref":"更新或退役的明确 ref；新建可为空","title":"作者可读标题","source_ref":"关系起点 ref；非关系可为空","target_character_ref":"关系终点 ref；非关系可为空","source_change_ids":["支撑本条后果的账本变更 id"],"data":{{}},"reason":"短理由"}}
   ],
   "chapter_actual_results": [{{"chapter_number": 12, "result": {{"summary":"正文实际结果摘要"}}, "planning_impact_candidate": null}}]
 }}
 
 只有当前输入直接支持且无需创作选择的后果才是 mechanically_certain。关系端点必须使用输入中已有的明确人物 ref。人物更新只允许 one_line_intro、visible_traits、persona_core、background_summary、position_title、power_rank、current_state、current_objective、arc_stage、speech_style、behavior_anchors。正文实际结果只对应输入中列出的正文章节。
+
+每条 consequence 的 source_change_ids 必须非空，且只能从下方受影响目标列出的账本变更 id 中选择：每条后果必须可追溯到真实支撑它的作者变更；没有真实正文变更支撑时，绝不允许以正文名义推进作者拥有的字段。
 
 本轮合并后的受影响目标（每项列出覆盖的账本变更 id）：
 {affected}
@@ -105,7 +107,7 @@ class ChangeSettlementError(Exception):
     """Safe semantic-settlement failure exposed to the author workbench."""
 
 
-def _parse_output(output: str) -> dict[str, Any]:
+def _parse_output(output: str, *, require_source_change_ids: bool = False) -> dict[str, Any]:
     text = (output or "").strip()
     if text.startswith("```"):
         lines = text.splitlines()
@@ -157,6 +159,16 @@ def _parse_output(output: str) -> dict[str, Any]:
                 raise ChangeSettlementError(
                     f"consequences[{index}] 人物摘要补丁包含不允许字段：{', '.join(sorted(unknown_fields))}。"
                 )
+        if require_source_change_ids:
+            source_ids = item.get("source_change_ids")
+            if (
+                not isinstance(source_ids, list) or not source_ids
+                or any(not isinstance(change_id, str) or not change_id.strip() for change_id in source_ids)
+            ):
+                raise ChangeSettlementError(
+                    f"consequences[{index}] 缺少合法的 source_change_ids；每条后果必须可追溯到已捕获的作者变更。"
+                )
+            item["source_change_ids"] = list(dict.fromkeys(source_ids))
         normalized.append(copy.deepcopy(item))
     chapter_result = value.get("chapter_actual_result")
     if chapter_result is not None:
@@ -240,8 +252,9 @@ def _allowed_semantic_patch(
     record: dict[str, Any],
     patch: dict[str, Any],
     *,
-    protect_author_model_rev: int | None,
+    protect_author_model_revs: set[int] | frozenset[int] | None,
     allow_dynamic_author_override: bool,
+    dynamic_override_max_rev: int | None = None,
 ) -> dict[str, Any]:
     """Mirror the project-model authority gate without creating a no-op revision."""
     current = record.get("data") if isinstance(record.get("data"), dict) else {}
@@ -251,14 +264,13 @@ def _allowed_semantic_patch(
     for key, value in patch.items():
         meta = authority.get(key) if isinstance(authority.get(key), dict) else {}
         is_author = key in author_fields or meta.get("source") == "author"
-        if is_author:
-            same_change = (
-                protect_author_model_rev is not None
-                and meta.get("updated_model_rev") == protect_author_model_rev
-            )
-            dynamic = meta.get("scope") == "dynamic"
-            if same_change or not (allow_dynamic_author_override and dynamic):
-                continue
+        if project_model._skip_author_patch_field(
+            meta, is_author=is_author, key=key,
+            protect_author_model_revs=protect_author_model_revs,
+            allow_dynamic_author_override=allow_dynamic_author_override,
+            dynamic_override_max_rev=dynamic_override_max_rev,
+        ):
+            continue
         if key not in current or current.get(key) != value:
             allowed[key] = copy.deepcopy(value)
     return allowed
@@ -305,10 +317,15 @@ def _apply_one(
     *,
     author_confirmed: bool = False,
     source_model_rev: int | None = None,
+    source_model_revs: set[int] | frozenset[int] | None = None,
     source_kind: str | None = None,
+    dynamic_override_max_rev: int | None = None,
 ) -> dict[str, Any]:
     if item["classification"] != "mechanically_certain" and not author_confirmed:
         return model
+    protect_revs = source_model_revs
+    if protect_revs is None and source_model_rev is not None:
+        protect_revs = {source_model_rev}
     data = copy.deepcopy(item.get("data") or {})
     data["settlement_provenance"] = "author_confirmed" if author_confirmed else "semantic_mechanical"
     action = item["action"]
@@ -350,15 +367,17 @@ def _apply_one(
             edge = model["dependencies"][target_ref]
             allow_dynamic = source_kind in {"manual_prose_edit", "accepted_ai_prose"}
             allowed = _allowed_semantic_patch(
-                edge, data, protect_author_model_rev=source_model_rev,
+                edge, data, protect_author_model_revs=protect_revs,
                 allow_dynamic_author_override=allow_dynamic,
+                dynamic_override_max_rev=dynamic_override_max_rev,
             )
             if not allowed:
                 return model
             return project_model.patch_dependency_data(
                 project_id, base_model_rev=model["model_rev"], ref=target_ref, patch=allowed,
-                protect_author_model_rev=source_model_rev,
+                protect_author_model_revs=protect_revs,
                 allow_dynamic_author_override=allow_dynamic,
+                dynamic_override_max_rev=dynamic_override_max_rev,
             )
         return project_model.tombstone_dependency(
             project_id, base_model_rev=model["model_rev"], ref=target_ref,
@@ -392,16 +411,18 @@ def _apply_one(
         if action == "update":
             allow_dynamic = source_kind in {"manual_prose_edit", "accepted_ai_prose"}
             allowed = _allowed_semantic_patch(
-                target, data, protect_author_model_rev=source_model_rev,
+                target, data, protect_author_model_revs=protect_revs,
                 allow_dynamic_author_override=allow_dynamic,
+                dynamic_override_max_rev=dynamic_override_max_rev,
             )
             if not allowed:
                 return model
             return project_model.patch_object_data(
                 project_id, base_model_rev=model["model_rev"], ref=target_ref,
                 patch=allowed, material_state=material_state,
-                protect_author_model_rev=source_model_rev,
+                protect_author_model_revs=protect_revs,
                 allow_dynamic_author_override=allow_dynamic,
+                dynamic_override_max_rev=dynamic_override_max_rev,
             )
         return project_model.tombstone_object(
             project_id, base_model_rev=model["model_rev"], ref=target_ref,
@@ -549,6 +570,8 @@ def _capture_refresh(project_id: str) -> tuple[dict[str, Any], list[dict[str, An
         if state.get("status") == "running" and _refresh_worker_active(project_id):
             return state, []
         cutoff = int(ledger.get("sequence") or 0)
+        # 捕获截止点的模型版本：后续正文推进不得触碰截止点之后的作者字段。
+        cutoff_model_rev = project_model.read_project_model(project_id)["model_rev"]
         eligible = [
             copy.deepcopy(item) for item in ledger.get("changes", [])
             if isinstance(item, dict)
@@ -562,6 +585,7 @@ def _capture_refresh(project_id: str) -> tuple[dict[str, Any], list[dict[str, An
             "status": "running" if eligible else "synchronized",
             "refresh_id": refresh_id,
             "cutoff_sequence": cutoff,
+            "cutoff_model_rev": cutoff_model_rev,
             "change_ids": [str(item["change_id"]) for item in eligible],
             "summary": "正在整理作品状态。" if eligible else "作品状态已是最新。",
             "error": None,
@@ -598,7 +622,7 @@ def _parse_refresh_output(output: str) -> dict[str, Any]:
         "consequences": value.get("consequences"),
         "chapter_actual_result": None,
         "planning_impact_candidate": None,
-    }, ensure_ascii=False))
+    }, ensure_ascii=False), require_source_change_ids=True)
     outcomes = value.get("chapter_actual_results", [])
     if not isinstance(outcomes, list):
         raise ChangeSettlementError("chapter_actual_results 必须是列表。")
@@ -636,6 +660,33 @@ def _apply_refresh_result(
         model = project_model.load_project_model(project_id)
         model_path = _model_artifact(project_id)
         before = model_path.read_bytes() if model_path.exists() else None
+        cutoff_model_rev = refresh.get("cutoff_model_rev")
+        if not isinstance(cutoff_model_rev, int):
+            cutoff_model_rev = None
+
+        def _bound_source_context(item: dict[str, Any]) -> tuple[str, set[int]]:
+            """把一条后果绑定到已验证的已捕获作者变更：未知/跨批/空源一律拒绝。
+
+            返回（权威 source_kind, protect revs）：只有真实正文变更在源中，
+            该后果才可以以正文权威推进作者拥有的 dynamic 字段。
+            """
+            source_ids = item.get("source_change_ids") or []
+            unknown = sorted(set(source_ids) - captured_ids)
+            if unknown:
+                raise ChangeSettlementError(
+                    f"语义后果引用了未知或未被本次捕获的变更 id：{', '.join(unknown)}，已拒绝。"
+                )
+            sources = [entries[change_id] for change_id in dict.fromkeys(source_ids)]
+            prose_supported = any(
+                source.get("source_kind") in {"manual_prose_edit", "accepted_ai_prose"}
+                for source in sources
+            )
+            protect_revs = {
+                int(source["source_model_rev"]) for source in sources
+                if isinstance(source.get("source_model_rev"), int)
+            }
+            return ("manual_prose_edit" if prose_supported else "semantic_refresh"), protect_revs
+
         mechanical: list[dict[str, Any]] = []
         proposals: list[dict[str, Any]] = []
         for item in result["consequences"]:
@@ -653,7 +704,13 @@ def _apply_refresh_result(
         applied_outcomes: list[int] = []
         try:
             for item in mechanical:
-                model = _apply_one(project_id, model, snapshot, item)
+                source_kind, protect_revs = _bound_source_context(item)
+                model = _apply_one(
+                    project_id, model, snapshot, item,
+                    source_kind=source_kind,
+                    source_model_revs=protect_revs,
+                    dynamic_override_max_rev=cutoff_model_rev,
+                )
             for outcome in result["chapter_actual_results"]:
                 number = outcome["chapter_number"]
                 source_change = prose_by_chapter.get(number)

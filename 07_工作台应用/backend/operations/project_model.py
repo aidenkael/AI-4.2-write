@@ -71,7 +71,7 @@ _INTERNAL_DATA_FIELDS = {
     "source_ref", "source_kind", "material_state", "model_rev", "state_rev",
     "schema_version", "project_id", "request_id", "planning_token", "writing_token",
     "scene_ref", "authority", "provenance", "planning_source_ref", "source_state_ref",
-    "supersedes_state_ref", "settlement_provenance", "content_sha256",
+    "supersedes_state_ref", "settlement_provenance", "content_sha256", "planning_plan_ids",
 }
 # 唯一领域关系规格真源：所有校验/写路径都消费它，不建通用 ontology。
 # source/target 形状：(kind, category)；kind=="system" 表示体系对象。
@@ -199,6 +199,38 @@ def _field_scope(field: str) -> str:
 
 def _authority_entry(source: str, field: str, model_rev: int) -> dict[str, Any]:
     return {"source": source, "scope": _field_scope(field), "updated_model_rev": model_rev}
+
+
+def _skip_author_patch_field(
+    meta: dict[str, Any],
+    *,
+    is_author: bool,
+    key: str,
+    protect_author_model_revs: set[int] | frozenset[int] | None,
+    allow_dynamic_author_override: bool,
+    dynamic_override_max_rev: int | None,
+) -> bool:
+    """One authority gate for semantic patches on author-owned fields.
+
+    same_change（本次变更自己写入的字段）永远跳过；非正文权威不得覆盖作者字段；
+    正文权威只允许推进 dynamic 字段，且不得触碰捕获截止点之后的作者编辑。
+    """
+    if not is_author:
+        return False
+    protect_revs = protect_author_model_revs if protect_author_model_revs is not None else set()
+    updated_rev = meta.get("updated_model_rev")
+    if isinstance(updated_rev, int) and updated_rev in protect_revs:
+        return True
+    dynamic = meta.get("scope", _field_scope(key)) == "dynamic"
+    if not (allow_dynamic_author_override and dynamic):
+        return True
+    if (
+        dynamic_override_max_rev is not None
+        and isinstance(updated_rev, int)
+        and updated_rev > dynamic_override_max_rev
+    ):
+        return True
+    return False
 
 
 def _initial_field_authority(
@@ -859,7 +891,9 @@ def patch_object_data(
     title: str | None = None,
     material_state: str | None = None,
     protect_author_model_rev: int | None = None,
+    protect_author_model_revs: set[int] | frozenset[int] | None = None,
     allow_dynamic_author_override: bool = False,
+    dynamic_override_max_rev: int | None = None,
 ) -> dict[str, Any]:
     """Apply an evidence-backed semantic patch without overwriting author fields."""
     patch = _validate_data(patch)
@@ -869,6 +903,8 @@ def patch_object_data(
         raise ProjectModelError("title 不能为空。")
     if material_state is not None:
         _validate_material_state(material_state)
+    if protect_author_model_revs is None and protect_author_model_rev is not None:
+        protect_author_model_revs = {protect_author_model_rev}
 
     def mutate(model: dict[str, Any], next_rev: int) -> dict[str, Any]:
         item = _active_object(model, ref)
@@ -880,15 +916,14 @@ def patch_object_data(
         for key, value in patch.items():
             meta = authority.get(key) if isinstance(authority.get(key), dict) else {}
             is_author = key in author_fields or meta.get("source") == "author"
-            if is_author:
-                same_change = (
-                    protect_author_model_rev is not None
-                    and meta.get("updated_model_rev") == protect_author_model_rev
-                )
-                dynamic = meta.get("scope", _field_scope(key)) == "dynamic"
-                if same_change or not (allow_dynamic_author_override and dynamic):
-                    skipped.append(key)
-                    continue
+            if _skip_author_patch_field(
+                meta, is_author=is_author, key=key,
+                protect_author_model_revs=protect_author_model_revs,
+                allow_dynamic_author_override=allow_dynamic_author_override,
+                dynamic_override_max_rev=dynamic_override_max_rev,
+            ):
+                skipped.append(key)
+                continue
             if current.get(key) != value:
                 current[key] = copy.deepcopy(value)
                 applied[key] = copy.deepcopy(value)
@@ -1297,9 +1332,15 @@ def set_length_plan(
             if before != refs or object_changes:
                 changed["chapter_targets"] = {"before_refs": before, "after_refs": refs, "objects": object_changes}
         active_stage_refs = set(plan["stage_refs"])
+        seen_chapter_numbers: set[int] = set()
         for ref in plan["chapter_target_refs"]:
             item = _active_object(model, ref, expected_kind="chapter_target")
             data = item.get("data") or {}
+            number = data.get("chapter_number")
+            if isinstance(number, int) and not isinstance(number, bool) and number > 0:
+                if number in seen_chapter_numbers:
+                    raise ProjectModelError(f"第{number}章存在多个有效章节目标；请先退役或合并旧目标。")
+                seen_chapter_numbers.add(number)
             stage_ref = data.get("stage_ref")
             if stage_ref is not None and stage_ref not in active_stage_refs:
                 raise ProjectModelError("不能删除仍被章节规划引用的阶段；请先重新分配或设为未分卷。")
@@ -1509,11 +1550,15 @@ def patch_dependency_data(
     patch: dict[str, Any],
     title: str | None = None,
     protect_author_model_rev: int | None = None,
+    protect_author_model_revs: set[int] | frozenset[int] | None = None,
     allow_dynamic_author_override: bool = False,
+    dynamic_override_max_rev: int | None = None,
 ) -> dict[str, Any]:
     patch = _validate_data(patch)
     if not patch:
         raise ProjectModelError("关系语义补丁不能为空。")
+    if protect_author_model_revs is None and protect_author_model_rev is not None:
+        protect_author_model_revs = {protect_author_model_rev}
 
     def mutate(model: dict[str, Any], next_rev: int) -> dict[str, Any]:
         edge = model["dependencies"].get(ref)
@@ -1527,15 +1572,14 @@ def patch_dependency_data(
         for key, value in patch.items():
             meta = authority.get(key) if isinstance(authority.get(key), dict) else {}
             is_author = key in author_fields or meta.get("source") == "author"
-            if is_author:
-                same_change = (
-                    protect_author_model_rev is not None
-                    and meta.get("updated_model_rev") == protect_author_model_rev
-                )
-                dynamic = meta.get("scope", _field_scope(key)) == "dynamic"
-                if same_change or not (allow_dynamic_author_override and dynamic):
-                    skipped.append(key)
-                    continue
+            if _skip_author_patch_field(
+                meta, is_author=is_author, key=key,
+                protect_author_model_revs=protect_author_model_revs,
+                allow_dynamic_author_override=allow_dynamic_author_override,
+                dynamic_override_max_rev=dynamic_override_max_rev,
+            ):
+                skipped.append(key)
+                continue
             if current.get(key) != value:
                 current[key] = copy.deepcopy(value)
                 applied[key] = copy.deepcopy(value)
@@ -1644,7 +1688,11 @@ def create_relationship(
 
 
 def validate_planning_projection(value: Any) -> dict[str, Any]:
-    """Strict, side-effect-free validation for the optional StoryPlan projection."""
+    """Strict, side-effect-free validation for the optional StoryPlan projection.
+
+    实体条目可选 ``target_ref``：存在时表示这是对既有活动实体的未来走向投影，
+    而不是新建第二个身份；关系条目可选 ``target_ref`` 指向既有关系边。
+    """
     if value is None:
         value = {}
     if not isinstance(value, dict):
@@ -1705,6 +1753,9 @@ def validate_planning_projection(value: Any) -> dict[str, Any]:
             if not isinstance(entry, dict):
                 raise ProjectModelError(f"planning_projection.{key}[{index}] 必须是对象。")
             item = copy.deepcopy(entry)
+            target_ref = item.get("target_ref")
+            if target_ref is not None and (not isinstance(target_ref, str) or not target_ref.strip()):
+                raise ProjectModelError(f"planning_projection.{key}[{index}].target_ref 必须是非空字符串或省略。")
             if key == "relationships":
                 if not isinstance(item.get("label"), str) or not item["label"].strip():
                     raise ProjectModelError("规划关系必须提供 label。")
@@ -1716,7 +1767,8 @@ def validate_planning_projection(value: Any) -> dict[str, Any]:
                     isinstance(item.get(field), str) and item[field].strip()
                     for field in ("target_key", "target_ref")
                 )
-                if not source_explicit or not target_explicit:
+                # 既有关系的未来走向：允许用 target_ref 直接指向活动关系边。
+                if not isinstance(target_ref, str) and (not source_explicit or not target_explicit):
                     raise ProjectModelError("规划关系必须为 source/target 分别提供明确的 key 或 ref。")
             else:
                 title = item.get("title") or item.get("name")
@@ -1732,19 +1784,76 @@ def validate_planning_projection(value: Any) -> dict[str, Any]:
     return normalized
 
 
+def mapped_plan_ids_for_planning_source(
+    planning_source_ref: str,
+    stored_plan_ids: Any,
+    all_plan_ids: set[str],
+) -> set[str]:
+    """把一个规划投影来源（decision ref）映射到它产生的 plan id 集合。
+
+    优先消费写入时持久化的 ``planning_plan_ids``；遗留记录回退到确定性前后缀
+    对应（decision-plan-<turn> ↔ plan-<turn>-*）。无法对应时返回空集（保守保留）。
+    """
+    if isinstance(stored_plan_ids, list) and stored_plan_ids:
+        return {pid for pid in stored_plan_ids if isinstance(pid, str) and pid.strip()}
+    if isinstance(planning_source_ref, str) and planning_source_ref.startswith("decision-plan-"):
+        prefix = "plan-" + planning_source_ref[len("decision-plan-"):]
+        return {pid for pid in all_plan_ids if pid == prefix or pid.startswith(prefix + "-")}
+    return set()
+
+
+def inactive_planning_source_refs(model: dict[str, Any], active_plan_ids: set[str]) -> set[str]:
+    """模型中规划来源已整体失效（映射到的 plan 全部非 active）的 ref 集合。
+
+    无法映射到任何已知 plan 的来源保守视为仍有效（历史/外部来源不誤伤）；
+    只要仍有一个映射 plan 处于 active，该来源就仍然有效。
+    """
+    all_plan_ids = set(active_plan_ids)
+    sources: dict[str, set[str]] = {}
+    for item in (*model.get("objects", {}).values(), *model.get("dependencies", {}).values()):
+        if not isinstance(item, dict):
+            continue
+        data = item.get("data") if isinstance(item.get("data"), dict) else {}
+        source_ref = data.get("planning_source_ref")
+        if not isinstance(source_ref, str) or not source_ref.strip():
+            continue
+        mapped = mapped_plan_ids_for_planning_source(source_ref, data.get("planning_plan_ids"), all_plan_ids)
+        if mapped:
+            sources.setdefault(source_ref, set()).update(mapped)
+    return {
+        source_ref for source_ref, plan_ids in sources.items()
+        if not (plan_ids & active_plan_ids)
+    }
+
+
 def apply_planning_projection(
     project_id: str,
     *,
     base_model_rev: int,
     projection: dict[str, Any],
     source_ref: str,
+    plan_ids: list[str] | None = None,
+    retire_planning_source_refs: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Commit one confirmed candidate's explicit fields as future workspace data."""
+    """Commit one confirmed candidate's explicit fields as future workspace data.
+
+    单一 mutation 内完成：退役被取代规划的既有投影（血缘根修）+ 写入替换投影；
+    任一失败整体回滚（既有跨工件回滚保证不变）。带 ``target_ref`` 的条目生成
+    既有实体的未来走向记录（绝不创建第二个身份）；章节变化替换同号既有目标。
+    """
     normalized = validate_planning_projection(projection)
-    if not any(value for value in normalized.values()):
+    if not retire_planning_source_refs and not any(value for value in normalized.values()):
         return load_project_model(project_id)
     if not isinstance(source_ref, str) or not source_ref.strip():
         raise ProjectModelError("规划投影 source_ref 不能为空。")
+    if plan_ids is not None and (
+        not isinstance(plan_ids, list) or any(not isinstance(pid, str) or not pid.strip() for pid in plan_ids)
+    ):
+        raise ProjectModelError("规划投影 plan_ids 非法。")
+    retire_sources = {
+        ref.strip() for ref in (retire_planning_source_refs or [])
+        if isinstance(ref, str) and ref.strip()
+    }
 
     category_for = {
         "characters": "character",
@@ -1756,8 +1865,80 @@ def apply_planning_projection(
         "foreshadowing": "promise_foreshadowing",
         "mystery_information": "mystery_information",
     }
+    trajectory_target_shape = {
+        "characters": ("foundation", "character"),
+        "settings": ("foundation", "world_setting"),
+        "locations": ("foundation", "location"),
+        "organizations": ("foundation", "organization_force"),
+        "storylines": ("foundation", "story_line"),
+        "events": ("foundation", "event"),
+        "foreshadowing": ("foundation", "promise_foreshadowing"),
+        "mystery_information": ("foundation", "mystery_information"),
+        "systems": ("system", None),
+    }
+
+    def _lineage_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        payload["planning_source_ref"] = source_ref.strip()
+        if plan_ids:
+            payload["planning_plan_ids"] = list(plan_ids)
+        return payload
+
+    def _create_trajectory(
+        model: dict[str, Any], *, collection: str, item: dict[str, Any],
+        target_ref: str, category: str, title: str, next_rev: int,
+    ) -> str:
+        shape = trajectory_target_shape.get(collection)
+        if shape is None:
+            raise ProjectModelError(f"规划集合 {collection} 不支持既有实体未来走向。")
+        target = model["objects"].get(target_ref)
+        kind, cat = shape
+        if (
+            not isinstance(target, dict) or target.get("tombstoned")
+            or target.get("kind") != kind
+            or (cat is not None and target.get("category") != cat)
+        ):
+            raise ProjectModelError(f"规划未来走向 target_ref 不是既有活动的{title or '领域'}实体。")
+        payload = {k: copy.deepcopy(v) for k, v in item.items() if k not in {"key", "title", "name", "target_ref"}}
+        payload["target_ref"] = target_ref
+        payload = _lineage_payload(payload)
+        ref = _next_ref(model, "obj")
+        model["objects"][ref] = {
+            "ref": ref, "kind": "future_trajectory", "category": category,
+            "category_name": None, "title": title, "material_state": "future",
+            "data": payload,
+            "field_authority": _initial_field_authority(payload, "confirmed_plan", next_rev),
+            "author_fields": [], "tombstoned": False,
+        }
+        return ref
 
     def mutate(model: dict[str, Any], next_rev: int) -> dict[str, Any]:
+        # --- 血缘退役：被取代规划的投影不再是有效未来（历史仍存储可审计） ---
+        retired_source_refs: list[str] = []
+        if retire_sources:
+            for ref, item in list(model["objects"].items()):
+                if not isinstance(item, dict) or item.get("tombstoned"):
+                    continue
+                data = item.get("data") if isinstance(item.get("data"), dict) else {}
+                if data.get("planning_source_ref") not in retire_sources:
+                    continue
+                if item.get("kind") == "chapter_target":
+                    item["tombstoned"] = True
+                    item["tombstoned_at_rev"] = next_rev
+                    if ref in model["length_plan"]["chapter_target_refs"]:
+                        model["length_plan"]["chapter_target_refs"].remove(ref)
+                    model["length_plan"]["actual_word_counts"].pop(ref, None)
+                else:
+                    _tombstone_object_with_incident_edges(model, ref, next_rev)
+                retired_source_refs.append(ref)
+            for edge_ref, edge in model["dependencies"].items():
+                if not isinstance(edge, dict) or edge.get("tombstoned"):
+                    continue
+                edge_data = edge.get("data") if isinstance(edge.get("data"), dict) else {}
+                if edge_data.get("planning_source_ref") in retire_sources:
+                    edge["tombstoned"] = True
+                    edge["tombstoned_at_rev"] = next_rev
+                    retired_source_refs.append(edge_ref)
+
         key_to_ref: dict[str, str] = {}
         created_objects: list[str] = []
         created_edges: list[str] = []
@@ -1792,9 +1973,19 @@ def apply_planning_projection(
                 key = item["key"]
                 if key in key_to_ref:
                     raise ProjectModelError(f"规划投影实体 key 重复：{key}。")
+                trajectory_target = item.get("target_ref")
+                if isinstance(trajectory_target, str) and trajectory_target.strip():
+                    ref = _create_trajectory(
+                        model, collection=collection, item=item,
+                        target_ref=trajectory_target.strip(), category=category, title=item["title"],
+                        next_rev=next_rev,
+                    )
+                    key_to_ref[key] = ref
+                    created_objects.append(ref)
+                    continue
                 ref = _next_ref(model, "obj")
                 payload = {k: copy.deepcopy(v) for k, v in item.items() if k not in {"key", "title", "name"}}
-                payload["planning_source_ref"] = source_ref.strip()
+                payload = _lineage_payload(payload)
                 if category == "event":
                     payload = apply_deterministic_time_arithmetic(payload)
                 model["objects"][ref] = {
@@ -1810,9 +2001,19 @@ def apply_planning_projection(
             key = item["key"]
             if key in key_to_ref:
                 raise ProjectModelError(f"规划投影实体 key 重复：{key}。")
+            trajectory_target = item.get("target_ref")
+            if isinstance(trajectory_target, str) and trajectory_target.strip():
+                ref = _create_trajectory(
+                    model, collection="systems", item=item,
+                    target_ref=trajectory_target.strip(), category="system", title=item["title"],
+                    next_rev=next_rev,
+                )
+                key_to_ref[key] = ref
+                created_objects.append(ref)
+                continue
             ref = _next_ref(model, "obj")
             payload = {k: copy.deepcopy(v) for k, v in item.items() if k not in {"key", "title", "name"}}
-            payload["planning_source_ref"] = source_ref.strip()
+            payload = _lineage_payload(payload)
             model["objects"][ref] = {
                 "ref": ref, "kind": "system", "title": item["title"], "material_state": "future",
                 "data": payload,
@@ -1822,6 +2023,29 @@ def apply_planning_projection(
             key_to_ref[key] = ref
             created_objects.append(ref)
         for rel in normalized["relationships"]:
+            edge_target = rel.get("target_ref")
+            no_endpoint_keys = not any(
+                isinstance(rel.get(field), str) and rel[field].strip()
+                for field in ("source_key", "source_ref", "target_key")
+            )
+            if no_endpoint_keys and isinstance(edge_target, str) and edge_target.strip():
+                # 既有人物关系的未来走向：不新建第二个关系身份。
+                edge = model["dependencies"].get(edge_target.strip())
+                if not isinstance(edge, dict) or edge.get("tombstoned"):
+                    raise ProjectModelError("规划关系走向 target_ref 不是既有活动关系。")
+                payload = {k: copy.deepcopy(v) for k, v in rel.items() if k not in {"target_ref", "label"}}
+                payload["target_ref"] = edge_target.strip()
+                payload = _lineage_payload(payload)
+                ref = _next_ref(model, "obj")
+                model["objects"][ref] = {
+                    "ref": ref, "kind": "future_trajectory", "category": "relationship",
+                    "category_name": None, "title": rel["label"].strip(), "material_state": "future",
+                    "data": payload,
+                    "field_authority": _initial_field_authority(payload, "confirmed_plan", next_rev),
+                    "author_fields": [], "tombstoned": False,
+                }
+                created_objects.append(ref)
+                continue
             source = key_to_ref.get(rel.get("source_key")) or rel.get("source_ref")
             target = key_to_ref.get(rel.get("target_key")) or rel.get("target_ref")
             if not source or not target:
@@ -1834,7 +2058,7 @@ def apply_planning_projection(
             payload = {k: copy.deepcopy(v) for k, v in rel.items() if k not in {
                 "source_key", "target_key", "source_ref", "target_ref", "label",
             }}
-            payload["planning_source_ref"] = source_ref.strip()
+            payload = _lineage_payload(payload)
             model["dependencies"][edge_ref] = {
                 "ref": edge_ref, "source_ref": source, "target_ref": target,
                 "relation_kind": "character_relationship", "title": rel["label"].strip(),
@@ -1863,7 +2087,7 @@ def apply_planning_projection(
             payload = {k: copy.deepcopy(v) for k, v in rel.items() if k not in {
                 "relation_kind", "source_key", "target_key", "source_ref", "target_ref",
             }}
-            payload["planning_source_ref"] = source_ref.strip()
+            payload = _lineage_payload(payload)
             model["dependencies"][edge_ref] = {
                 "ref": edge_ref, "source_ref": source, "target_ref": target,
                 "relation_kind": relation_kind,
@@ -1878,9 +2102,25 @@ def apply_planning_projection(
             maximum = item.get("max_words")
             if not isinstance(minimum, int) or not isinstance(maximum, int) or minimum < 0 or maximum < minimum:
                 raise ProjectModelError("规划章节变化必须提供合法 min_words/max_words。")
+            chapter_number = item.get("chapter_number")
+            if isinstance(chapter_number, int) and not isinstance(chapter_number, bool) and chapter_number > 0:
+                # 同一章号只允许一个有效活动目标：确定性退役既有目标后再写新目标，
+                # 绝不依赖“先到先得”；正式正文不受任何影响（正文在章节文件中）。
+                for old_ref in list(model["length_plan"]["chapter_target_refs"]):
+                    old = model["objects"].get(old_ref)
+                    if not isinstance(old, dict) or old.get("tombstoned"):
+                        continue
+                    old_data = old.get("data") if isinstance(old.get("data"), dict) else {}
+                    if old_data.get("chapter_number") != chapter_number:
+                        continue
+                    old["tombstoned"] = True
+                    old["tombstoned_at_rev"] = next_rev
+                    model["length_plan"]["chapter_target_refs"].remove(old_ref)
+                    model["length_plan"]["actual_word_counts"].pop(old_ref, None)
+                    retired_source_refs.append(old_ref)
             ref = _next_ref(model, "obj")
             payload = {k: copy.deepcopy(v) for k, v in item.items() if k not in {"title", "name"}}
-            payload["planning_source_ref"] = source_ref.strip()
+            payload = _lineage_payload(payload)
             model["objects"][ref] = {
                 "ref": ref, "kind": "chapter_target", "title": item["title"],
                 "material_state": "future", "data": payload,
@@ -1889,9 +2129,22 @@ def apply_planning_projection(
             }
             model["length_plan"]["chapter_target_refs"].append(ref)
             created_objects.append(ref)
+        # 写入后不变量：活动章节目标每章号唯一（不依赖迭代顺序）。
+        seen_numbers: set[int] = set()
+        for ref in model["length_plan"]["chapter_target_refs"]:
+            target = model["objects"].get(ref)
+            if not isinstance(target, dict) or target.get("tombstoned"):
+                raise ProjectModelError("章节目标活动集非法。")
+            number = (target.get("data") or {}).get("chapter_number")
+            if isinstance(number, bool) or not isinstance(number, int):
+                continue
+            if number in seen_numbers:
+                raise ProjectModelError(f"第{number}章存在多个有效章节目标，已拒绝写入。")
+            seen_numbers.add(number)
         return {
             "action": "planning_projection.applied", "source_ref": source_ref.strip(),
             "created_object_refs": created_objects, "created_dependency_refs": created_edges,
+            "retired_projection_refs": retired_source_refs,
             "profile_change": profile_change,
         }
 

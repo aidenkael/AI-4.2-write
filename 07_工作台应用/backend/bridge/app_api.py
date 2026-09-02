@@ -308,9 +308,15 @@ class AppApi:
         Direct：Go Write 通过配置的 Agent/模型直接执行并写回同一响应信封。
         """
         try:
+            replaces = payload.get("replaces_plan_ids")
             data = story_planning_ops.prepare_story_plan(
                 project_id=str(payload.get("project_id") or ""),
                 author_question=str(payload.get("author_question") or ""),
+                replaces_plan_ids=(
+                    [str(pid) for pid in replaces]
+                    if isinstance(replaces, list) and replaces
+                    else None
+                ),
             )
             # 只有交互模式需要把 Qoder 桌面端切到前台；直连模式由后台执行
             if data.get("execution_mode") != "direct":

@@ -598,7 +598,11 @@ def _get_active_planning_sources(state: dict[str, Any]) -> list[dict[str, Any]]:
 # 提出规划候选
 # ---------------------------------------------------------------------------
 
-def prepare_story_plan(project_id: str, author_question: str) -> dict[str, Any]:
+def prepare_story_plan(
+    project_id: str,
+    author_question: str,
+    replaces_plan_ids: list[str] | None = None,
+) -> dict[str, Any]:
     """'一起往前想'第一步：读取正式作品 → 构造 Agent task → 创建请求，
     并按已保存 Settings 的执行模式准备执行。
 
@@ -607,6 +611,9 @@ def prepare_story_plan(project_id: str, author_question: str) -> dict[str, Any]:
     - Direct（直连）：通过现有 Agent registry/adapter 与精确配置的内置/自定义
       模型直接执行同一任务，结果写回同一请求生命周期，随后由同一
       _finalize_story_plan 严格验收。配置缺失/无效 → 稳定报错，绝不回退。
+    - ``replaces_plan_ids``：作者显式声明本轮规划替换哪些既有 active 规划
+      （局部重规划用）。全部必须存在且 active 且共享同一 target_ref；确认后
+      经冻结 supersedes 合同取代旧条目，并同步退役旧规划的模型投影。
     """
     author_question = (author_question or "").strip()
     if not author_question:
@@ -629,6 +636,30 @@ def prepare_story_plan(project_id: str, author_question: str) -> dict[str, Any]:
         raise StoryPlanningError(
             "故事方向已经保存，但当前还没有可继续展开的已确认规划起点。"
         )
+
+    # 2b. 显式替换声明：只能替换当前 active、共享同一 target 的规划。
+    supersedes_plan_ids: list[str] = []
+    replaces_target_ref = None
+    if replaces_plan_ids is not None:
+        if (
+            not isinstance(replaces_plan_ids, list) or not replaces_plan_ids
+            or any(not isinstance(pid, str) or not pid.strip() for pid in replaces_plan_ids)
+        ):
+            raise StoryPlanningError("replaces_plan_ids 必须是非空字符串列表。")
+        supersedes_plan_ids = list(dict.fromkeys(pid.strip() for pid in replaces_plan_ids))
+        active_sources = {source["ref"] for source in planning_sources}
+        plans_by_id = {
+            plan.get("id"): plan for plan in (state.get("approved_plan") or [])
+            if isinstance(plan, dict)
+        }
+        target_refs = set()
+        for plan_id in supersedes_plan_ids:
+            if plan_id not in active_sources:
+                raise StoryPlanningError("只能替换当前仍然有效的已确认规划。")
+            target_refs.add(plans_by_id[plan_id].get("target_ref"))
+        if len(target_refs) != 1:
+            raise StoryPlanningError("本轮只能替换共享同一规划目标的条目。")
+        replaces_target_ref = next(iter(target_refs))
 
     # 3. 解析保存的执行配置（Settings 契约；agent_runner._build_adapter 负责
     #    直连的 Agent/模型解析与互斥校验，这里不重复实现路由）
@@ -723,6 +754,8 @@ def prepare_story_plan(project_id: str, author_question: str) -> dict[str, Any]:
                 "planning_turn_id": planning_turn_id,
                 "author_question": author_question,
                 "planning_sources": planning_sources,
+                "supersedes_plan_ids": supersedes_plan_ids,
+                "replaces_target_ref": replaces_target_ref,
                 "intent_rev": intent["intent_rev"],
                 "state_rev": state["state_rev"],
                 "model_rev": effective_context["model_rev"],
@@ -937,10 +970,12 @@ def _finalize_story_plan(
         _cleanup_planning(project_id, planning_turn_id)
         raise StoryPlanningError("没有知识需求却选择了知识卡或检索包身份，已拒绝。")
 
-    # 6. 构造 planning_target
+    # 6. 构造 planning_target：替换性规划必须沿用被替换条目的同一 target，
+    #    才能经冻结 supersedes 合同生效（绝不新建第二个规划状态库）。
     agent_target = parsed["planning_target"]
+    replaces_target_ref = meta.get("replaces_target_ref")
     planning_target = {
-        "target_id": f"target-{planning_turn_id}",
+        "target_id": replaces_target_ref or f"target-{planning_turn_id}",
         "description": agent_target["description"],
         "scope_kind": agent_target.get("scope_kind") or "free",
     }
@@ -998,6 +1033,7 @@ def _finalize_story_plan(
         "planning_token": uuid.uuid4().hex,
         "request_id": request["request_id"],
         "author_question": meta.get("author_question") or "",
+        "supersedes_plan_ids": list(meta.get("supersedes_plan_ids") or []),
         "source_versions": {
             "intent_rev": meta.get("intent_rev"),
             "state_rev": meta.get("state_rev"),
@@ -1304,6 +1340,13 @@ def confirm_story_plan(project_id: str, planning_token: str) -> dict[str, Any]:
         _cleanup_planning(project_id, planning_turn_id)
         raise StoryPlanningError("候选缺少有效的规划条目，无法写入。")
 
+    # 作者显式声明的替换：把 supersedes 附在首条新规划上，经冻结 _check_supersedes
+    # 校验（存在/同 target/仍 active/在 Brief planning_sources 中）后取代旧条目。
+    supersedes = [pid for pid in (meta.get("supersedes_plan_ids") or []) if isinstance(pid, str) and pid]
+    if supersedes:
+        planning_items[0]["supersedes"] = list(supersedes)
+    plan_ids = [item["id"] for item in planning_items]
+
     # 8. 使用 StoryPlan 的 make_plan_diff（带完整验证）
     diff_id = f"diff-plan-{planning_turn_id}"
     state_file = project_dir / "_工作台状态" / "story_state.json"
@@ -1326,13 +1369,22 @@ def confirm_story_plan(project_id: str, planning_token: str) -> dict[str, Any]:
             expected_base_state=current_state,
             new_state=new_state,
         )
-        if any(projection.values()):
-            current_model = project_model_ops.read_project_model(project_id)
+        # 血缘根修：Story State 决策活动与 ProjectModel 未来投影活动不得分叉。
+        # 用同一冻结 resolve_plan_activity 结果算出已整体失效的投影来源，与替换投影在
+        # 同一次 ProjectModel mutation 内完成退役+写入；任一失败整体回滚两个工件。
+        current_model = project_model_ops.read_project_model(project_id)
+        active_after = set(resolve_plan_activity(new_state).get("active") or [])
+        retire_sources = sorted(project_model_ops.inactive_planning_source_refs(
+            current_model, active_after,
+        ))
+        if any(projection.values()) or retire_sources:
             projection_model = project_model_ops.apply_planning_projection(
                 project_id,
                 base_model_rev=current_model["model_rev"],
                 projection=projection,
                 source_ref=decision_id,
+                plan_ids=plan_ids,
+                retire_planning_source_refs=retire_sources,
             )
     except (SPContractError, PWContractError, PWWorkspaceError, project_model_ops.ProjectModelError) as exc:
         # Planning authority + future projection are one confirmation outcome.

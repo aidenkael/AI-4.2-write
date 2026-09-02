@@ -4,6 +4,7 @@
 Only fake/monkeypatched HTTP layers are used; zero paid/network inference,
 zero Agent execution, zero /gowrite activation.
 """
+import hashlib
 import json
 import sys
 import threading
@@ -418,3 +419,254 @@ def test_migrated_settlement_has_no_agent_path():
     assert "AgentRunError" not in source
     assert "execution_tasks" not in source
     assert "activate_for_gowrite=True" not in source
+
+
+# ---------------------------------------------------------------------------
+# 批量「更新作品状态」的源变更溯源合同（LONGFORM_AUTHORING_LIFECYCLE_CLOSURE §2）
+# ---------------------------------------------------------------------------
+
+def _wait_batch_refresh(project_id: str, timeout: float = 5.0) -> dict:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        state = change_settlement.get_project_state_refresh(project_id)
+        if state["status"] != "running":
+            return state
+        time.sleep(0.01)
+    raise AssertionError("批量作品状态整理未在时限内结束")
+
+
+def _prose_change_id(project_id: str) -> str:
+    ledger = author_edit.get_change_ledger(project_id)
+    for item in reversed(ledger["changes"]):
+        if item.get("source_kind") == "manual_prose_edit":
+            return item["change_id"]
+    raise AssertionError("未找到正文变更")
+
+
+def test_batch_refresh_prose_advances_author_dynamic_state(projects_root, isolated_bridge, configured_ai, monkeypatch):
+    """作者创建人物的 current_state / current_objective 经已接受正文推进；稳定字段保护。"""
+    project = _create("批量推进")
+    pid = project["project_id"]
+    ref, _rev = _character(pid, "林砊")
+    author_edit.update_foundation_record(
+        pid, base_model_rev=project_model.read_project_model(pid)["model_rev"], ref=ref,
+        data={"current_state": "初始状态", "current_objective": "求生", "persona_core": "冷静克制"},
+    )
+    author_edit.create_chapter(pid, chapter_number=1)
+    author_edit.save_formal_prose(
+        pid, chapter_number=1,
+        base_content_sha256=hashlib.sha256(b"").hexdigest(),
+        content="林砊在爆炸中负伤，决定找出内鬼。",
+    )
+    prose_id = _prose_change_id(pid)
+    payload = {
+        "summary": "正文推进人物状态",
+        "consequences": [{
+            "classification": "mechanically_certain", "kind": "character", "action": "update",
+            "target_ref": ref, "title": "林砊",
+            "source_change_ids": [prose_id],
+            "data": {
+                "current_state": "负伤逃亡",
+                "current_objective": "找出内鬼",
+                "persona_core": "已黑化",
+            },
+            "reason": "正文明确支持",
+        }],
+        "chapter_actual_results": [
+            {"chapter_number": 1, "result": {"summary": "负伤并决定追查"}, "planning_impact_candidate": None},
+        ],
+    }
+    monkeypatch.setattr(
+        change_settlement.semantic_ai, "run_text",
+        lambda prompt, **kwargs: json.dumps(payload, ensure_ascii=False),
+    )
+    change_settlement.prepare_project_state_refresh(pid)
+    state = _wait_batch_refresh(pid)
+    assert state["status"] == "synchronized", state.get("error")
+    model = project_model.read_project_model(pid)
+    data = model["objects"][ref]["data"]
+    assert data["current_state"] == "负伤逃亡"
+    assert data["current_objective"] == "找出内鬼"
+    # 稳定作者字段绝不因正文批量整理被静默改写。
+    assert data["persona_core"] == "冷静克制"
+    assert model["chapter_actual_results"]["1"]["summary"] == "负伤并决定追查"
+    ledger = author_edit.get_change_ledger(pid)
+    assert all(item["status"] == "synchronized" for item in ledger["changes"] if item["requires_semantic"])
+
+
+def test_batch_refresh_non_prose_cannot_override_author_dynamic_state(projects_root, isolated_bridge, configured_ai, monkeypatch):
+    """仅有非正文语义变更在源中时，不得以正文名义推进作者拥有的 dynamic 字段。"""
+    project = _create("非正文源")
+    pid = project["project_id"]
+    ref, rev = _character(pid, "苏晚")
+    edit = _edit(pid, rev, ref, "在城中")
+    edit_id = edit["change"]["change_id"]
+    payload = {
+        "summary": "试图无正文支撑推进",
+        "consequences": [{
+            "classification": "mechanically_certain", "kind": "character", "action": "update",
+            "target_ref": ref, "title": "苏晚",
+            "source_change_ids": [edit_id],
+            "data": {"current_state": "已出城"},
+            "reason": "无正文支撑的推断",
+        }],
+        "chapter_actual_results": [],
+    }
+    monkeypatch.setattr(
+        change_settlement.semantic_ai, "run_text",
+        lambda prompt, **kwargs: json.dumps(payload, ensure_ascii=False),
+    )
+    change_settlement.prepare_project_state_refresh(pid)
+    state = _wait_batch_refresh(pid)
+    assert state["status"] == "synchronized", state.get("error")
+    model = project_model.read_project_model(pid)
+    assert model["objects"][ref]["data"]["current_state"] == "在城中"
+
+
+def test_batch_refresh_mixed_consequences_bind_to_correct_sources(projects_root, isolated_bridge, configured_ai, monkeypatch):
+    """混合批：正文支撑的后果推进；仅地基编辑支撑的同批后果不推进。"""
+    project = _create("混合批")
+    pid = project["project_id"]
+    ref_a, _rev = _character(pid, "甲")
+    ref_b, rev_b = _character(pid, "乙")
+    edit_b = _edit(pid, rev_b, ref_b, "潜伏")
+    author_edit.create_chapter(pid, chapter_number=1)
+    author_edit.save_formal_prose(
+        pid, chapter_number=1,
+        base_content_sha256=hashlib.sha256(b"").hexdigest(),
+        content="甲在码头上船离开。",
+    )
+    prose_id = _prose_change_id(pid)
+    payload = {
+        "summary": "混合源绑定",
+        "consequences": [
+            {
+                "classification": "mechanically_certain", "kind": "character", "action": "update",
+                "target_ref": ref_a, "title": "甲", "source_change_ids": [prose_id],
+                "data": {"current_state": "已离城", "current_objective": "出海寻人"},
+                "reason": "正文明确",
+            },
+            {
+                "classification": "mechanically_certain", "kind": "character", "action": "update",
+                "target_ref": ref_b, "title": "乙", "source_change_ids": [edit_b["change"]["change_id"]],
+                "data": {"current_state": "暴露"},
+                "reason": "仅地基编辑支撑，不得推进作者 dynamic 字段",
+            },
+        ],
+        "chapter_actual_results": [
+            {"chapter_number": 1, "result": {"summary": "甲乘船离城"}, "planning_impact_candidate": None},
+        ],
+    }
+    monkeypatch.setattr(
+        change_settlement.semantic_ai, "run_text",
+        lambda prompt, **kwargs: json.dumps(payload, ensure_ascii=False),
+    )
+    change_settlement.prepare_project_state_refresh(pid)
+    state = _wait_batch_refresh(pid)
+    assert state["status"] == "synchronized", state.get("error")
+    model = project_model.read_project_model(pid)
+    assert model["objects"][ref_a]["data"]["current_state"] == "已离城"
+    assert model["objects"][ref_a]["data"]["current_objective"] == "出海寻人"
+    assert model["objects"][ref_b]["data"]["current_state"] == "潜伏"
+
+
+def test_batch_refresh_rejects_unknown_source_change_ids(projects_root, isolated_bridge, configured_ai, monkeypatch):
+    project = _create("未知源")
+    pid = project["project_id"]
+    ref, rev = _character(pid, "丙")
+    _edit(pid, rev, ref, "初始")
+    payload = {
+        "summary": "未知源",
+        "consequences": [{
+            "classification": "mechanically_certain", "kind": "character", "action": "update",
+            "target_ref": ref, "title": "丙", "source_change_ids": ["change-99999999-fakefake"],
+            "data": {"current_state": "被改写"}, "reason": "跨批伪造源",
+        }],
+        "chapter_actual_results": [],
+    }
+    monkeypatch.setattr(
+        change_settlement.semantic_ai, "run_text",
+        lambda prompt, **kwargs: json.dumps(payload, ensure_ascii=False),
+    )
+    change_settlement.prepare_project_state_refresh(pid)
+    state = _wait_batch_refresh(pid)
+    assert state["status"] == "failed"
+    model = project_model.read_project_model(pid)
+    assert model["objects"][ref]["data"]["current_state"] == "初始"
+    ledger = author_edit.get_change_ledger(pid)
+    assert any(
+        item["status"] in {"pending", "failed"} for item in ledger["changes"] if item["requires_semantic"]
+    )
+
+
+def test_batch_refresh_post_cutoff_author_edit_remains_pending_and_untouched(projects_root, isolated_bridge, configured_ai, monkeypatch):
+    project = _create("截止点保护")
+    pid = project["project_id"]
+    ref, _rev = _character(pid, "丁")
+    author_edit.update_foundation_record(
+        pid, base_model_rev=project_model.read_project_model(pid)["model_rev"], ref=ref,
+        data={"current_state": "截止前"},
+    )
+    author_edit.create_chapter(pid, chapter_number=1)
+    author_edit.save_formal_prose(
+        pid, chapter_number=1,
+        base_content_sha256=hashlib.sha256(b"").hexdigest(),
+        content="丁在雨中等待。",
+    )
+    prose_id = _prose_change_id(pid)
+    entered, release = threading.Event(), threading.Event()
+
+    def run_text(_prompt, **kwargs):
+        entered.set()
+        assert release.wait(3)
+        return json.dumps({
+            "summary": "截止点测试",
+            "consequences": [{
+                "classification": "mechanically_certain", "kind": "character", "action": "update",
+                "target_ref": ref, "title": "丁", "source_change_ids": [prose_id],
+                "data": {"current_state": "AI 想写的值"}, "reason": "正文支撑",
+            }],
+            "chapter_actual_results": [],
+        }, ensure_ascii=False)
+
+    monkeypatch.setattr(change_settlement.semantic_ai, "run_text", run_text)
+    change_settlement.prepare_project_state_refresh(pid)
+    assert entered.wait(2)
+    # 截止点之后的作者编辑：必须保持 pending 且不被本次批量整理触碰。
+    after_cutoff = author_edit.update_foundation_record(
+        pid, base_model_rev=project_model.read_project_model(pid)["model_rev"], ref=ref,
+        data={"current_state": "作者截止点后手写"},
+    )
+    release.set()
+    state = _wait_batch_refresh(pid)
+    assert state["status"] == "synchronized", state.get("error")
+    model = project_model.read_project_model(pid)
+    assert model["objects"][ref]["data"]["current_state"] == "作者截止点后手写"
+    assert author_edit.get_change(pid, after_cutoff["change"]["change_id"])["status"] == "pending"
+
+
+def test_batch_refresh_requires_source_change_ids_contract(projects_root, isolated_bridge, configured_ai, monkeypatch):
+    """缺失/空的 source_change_ids 使整轮整理失败关闭；持久编辑保持可重试。"""
+    project = _create("缺源字段")
+    pid = project["project_id"]
+    ref, rev = _character(pid, "戊")
+    _edit(pid, rev, ref, "初始")
+    payload = {
+        "summary": "缺源",
+        "consequences": [{
+            "classification": "mechanically_certain", "kind": "character", "action": "update",
+            "target_ref": ref, "title": "戊", "data": {"current_state": "被改写"}, "reason": "无溯源",
+        }],
+        "chapter_actual_results": [],
+    }
+    monkeypatch.setattr(
+        change_settlement.semantic_ai, "run_text",
+        lambda prompt, **kwargs: json.dumps(payload, ensure_ascii=False),
+    )
+    change_settlement.prepare_project_state_refresh(pid)
+    state = _wait_batch_refresh(pid)
+    assert state["status"] == "failed"
+    model = project_model.read_project_model(pid)
+    assert model["objects"][ref]["data"]["current_state"] == "初始"
+    # 提示词合同本身强制溯源字段（静态检查）。
+    assert "source_change_ids" in change_settlement._BATCH_TASK_TEMPLATE

@@ -17,6 +17,7 @@ from typing import Any
 from operations.project_model import (
     DOMAIN_RELATION_KINDS,
     ProjectModelError,
+    inactive_planning_source_refs,
     read_project_model,
 )
 
@@ -243,14 +244,23 @@ def _dependency_category(item: dict[str, Any]) -> str | None:
 _VISIBLE_RELATION_KINDS = {"character_relationship", *DOMAIN_RELATION_KINDS}
 
 
-def _explicit_dependencies(model: dict[str, Any]) -> list[dict[str, Any]]:
-    """活动显式依赖的只读投影；不含 tombstoned 边，不改写任何源记录。"""
+def _explicit_dependencies(
+    model: dict[str, Any],
+    inactive_planning_sources: frozenset[str] | set[str] = frozenset(),
+) -> list[dict[str, Any]]:
+    """活动显式依赖的只读投影；不含 tombstoned 边，不改写任何源记录。
+
+    血缘已失效（规划被取代）的规划派生边不作为有效未来事实暴露。
+    """
     objects = model.get("objects", {})
     result: list[dict[str, Any]] = []
     for edge in model.get("dependencies", {}).values():
         if not isinstance(edge, dict) or edge.get("tombstoned"):
             continue
         if edge.get("relation_kind") not in _VISIBLE_RELATION_KINDS:
+            continue
+        edge_data = edge.get("data") if isinstance(edge.get("data"), dict) else {}
+        if edge_data.get("planning_source_ref") in inactive_planning_sources:
             continue
         source = objects.get(edge["source_ref"])
         target = objects.get(edge["target_ref"])
@@ -283,7 +293,11 @@ def _chapter_number(value: Any) -> int | None:
     return number if number > 0 else None
 
 
-def _validated_chapters(loaded: dict[str, Any], model: dict[str, Any]) -> list[dict[str, Any]]:
+def _validated_chapters(
+    loaded: dict[str, Any],
+    model: dict[str, Any],
+    inactive_planning_sources: frozenset[str] | set[str] = frozenset(),
+) -> list[dict[str, Any]]:
     project_dir = Path(loaded["project_dir"]).resolve()
     prose_root = (project_dir / "03_正文").resolve()
     entries = (loaded.get("index") or {}).get("entries") or []
@@ -335,8 +349,22 @@ def _validated_chapters(loaded: dict[str, Any], model: dict[str, Any]) -> list[d
         if not isinstance(item, dict) or item.get("tombstoned"):
             continue
         data = item.get("data") or {}
+        if data.get("planning_source_ref") in inactive_planning_sources:
+            continue
         number = _chapter_number(data.get("chapter_number"))
-        if number is not None and number not in target_by_number:
+        if number is None:
+            continue
+        existing = target_by_number.get(number)
+        if existing is None:
+            target_by_number[number] = item
+            continue
+        # 防御性确定性平手（写入侧已强制唯一）：非规划派生优先，其余取最小 ref，
+        # 结果与 dict 插入顺序无关。
+        existing_derived = bool((existing.get("data") or {}).get("planning_source_ref"))
+        new_derived = bool(data.get("planning_source_ref"))
+        if (existing_derived and not new_derived) or (
+            existing_derived == new_derived and ref < existing["ref"]
+        ):
             target_by_number[number] = item
 
     chapters: list[dict[str, Any]] = []
@@ -459,6 +487,22 @@ def get_project_snapshot(project_id: str) -> dict[str, Any]:
         raise ProjectSnapshotError("项目身份不一致，已拒绝快照。")
 
     state = loaded["state"]
+    # 血缘读不变量：被取代规划（resolve_plan_activity 非 active）的投影不再是有效未来，
+    # 历史记录仍物理存储可审计；作者已提升为 current 的记录不受血缘过滤影响。
+    try:
+        active_plan_ids = set(resolve_plan_activity(state).get("active") or [])
+    except Exception:  # noqa: BLE001 - fail closed：血缘异常不误伤有效投影
+        active_plan_ids = {
+            entry.get("id") for entry in (state.get("approved_plan") or [])
+            if isinstance(entry, dict) and entry.get("id")
+        }
+    inactive_planning_sources = frozenset(inactive_planning_source_refs(model, active_plan_ids))
+
+    def _effective_future(item_data: dict[str, Any], material_state: str | None) -> bool:
+        if material_state != "future":
+            return True
+        return item_data.get("planning_source_ref") not in inactive_planning_sources
+
     character_records, unresolved_character_observations = _character_state_records(state)
     current: dict[str, list[dict[str, Any]]] = {
         "characters": character_records,
@@ -491,18 +535,47 @@ def get_project_snapshot(project_id: str) -> dict[str, Any]:
         section = category_section.get(item.get("category"))
         if not section:
             continue
+        if not _effective_future(item.get("data") or {}, item.get("material_state")):
+            continue
         bucket = current if item.get("material_state") == "current" else future
         bucket[section].append(_model_record(item))
     for item in model.get("objects", {}).values():
         if not isinstance(item, dict) or item.get("tombstoned") or item.get("kind") != "system":
+            continue
+        if not _effective_future(item.get("data") or {}, item.get("material_state")):
             continue
         bucket = current if item.get("material_state") == "current" else future
         bucket["systems"].append(_model_record(item))
     for edge in model.get("dependencies", {}).values():
         if not isinstance(edge, dict) or edge.get("tombstoned") or edge.get("relation_kind") != "character_relationship":
             continue
+        if not _effective_future(edge.get("data") or {}, edge.get("material_state", "current")):
+            continue
         bucket = current if edge.get("material_state", "current") == "current" else future
         bucket["relationships"].append(_relationship_record(edge, model["objects"]))
+
+    # 既有实体的未来走向（规划派生）：不新建第二身份，只附在 target_ref 上；
+    # 血缘失效或目标已退役的轨迹不作为有效未来暴露。
+    future_trajectories: list[dict[str, Any]] = []
+    for ref, item in model.get("objects", {}).items():
+        if not isinstance(item, dict) or item.get("tombstoned") or item.get("kind") != "future_trajectory":
+            continue
+        data = item.get("data") if isinstance(item.get("data"), dict) else {}
+        if data.get("planning_source_ref") in inactive_planning_sources:
+            continue
+        target = model.get("objects", {}).get(data.get("target_ref") or "")
+        if not isinstance(target, dict) or target.get("tombstoned"):
+            continue
+        future_trajectories.append({
+            "ref": ref,
+            "target_ref": data.get("target_ref"),
+            "target_title": target.get("title") or "",
+            "category": item.get("category"),
+            "title": item.get("title") or "",
+            "planning_source_ref": data.get("planning_source_ref"),
+            "record": copy.deepcopy(data),
+        })
+    future_trajectories.sort(key=lambda entry: entry["ref"])
 
     # Soft-retired records stay stored and retrievable, but never mix into
     # current/future projections (Story Map must not render them as active).
@@ -544,7 +617,7 @@ def get_project_snapshot(project_id: str) -> dict[str, Any]:
         for section in current:
             current[section] = [item for item in current[section] if item.get("ref") not in superseded_state_refs]
 
-    chapters = _validated_chapters(loaded, model)
+    chapters = _validated_chapters(loaded, model, inactive_planning_sources)
     stages = [
         _model_record(model["objects"][ref])
         for ref in model.get("length_plan", {}).get("stage_refs", [])
@@ -579,7 +652,8 @@ def get_project_snapshot(project_id: str) -> dict[str, Any]:
         "retired": retired,
         "length_plan": length_plan,
         "chapters": chapters,
-        "explicit_dependencies": _explicit_dependencies(model),
+        "explicit_dependencies": _explicit_dependencies(model, inactive_planning_sources),
+        "future_trajectories": future_trajectories,
         "planning_impact_candidates": copy.deepcopy(model.get("planning_impact_candidates", [])),
         "legacy_diagnostics": {
             "unresolved_character_observations": unresolved_character_observations,
@@ -824,6 +898,23 @@ def focused_task_context(
             if isinstance(delta.get("project_model_change"), dict) else None,
         })
     pending_manifest = pending_manifest[-12:]
+    # 任务近端未来走向：只注入与本次任务选中实体直接相关的规划轨迹，
+    # 不注入全书规划；未来轨迹绝不覆盖当前状态。
+    involved_refs = {
+        item.get("ref")
+        for values in (*relevant_current.values(), *relevant_future.values())
+        for item in values
+        if isinstance(item.get("ref"), str)
+    }
+    task_trajectories = [
+        {
+            "ref": entry["ref"], "target_ref": entry["target_ref"],
+            "target_title": entry["target_title"], "category": entry["category"],
+            "title": entry["title"], "record": entry["record"],
+        }
+        for entry in snapshot.get("future_trajectories", [])
+        if entry.get("target_ref") in involved_refs
+    ][:_MAX_TASK_RELATED_OBJECTS]
     previous_result = None
     previous_content = None
     if chapter_number is not None and chapter_number > 1:
@@ -862,6 +953,8 @@ def focused_task_context(
         },
         # 派生任务上下文：选中种子一跳内的显式关系事实（非 authority）。
         "explicit_relations": explicit_relations,
+        # 任务近端实体的未来走向（规划派生，非 Canon；绝不覆盖 current）。
+        "future_trajectories": task_trajectories,
         "chapter": None if chapter is None else {
             "chapter_number": chapter["chapter_number"],
             "title": chapter["title"],
