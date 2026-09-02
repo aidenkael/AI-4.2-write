@@ -12,6 +12,11 @@ import {
   projectOpenThreads,
   describeRecord,
 } from '../.test-build/features/storyMap/storyMapModel.js'
+import {
+  graphElements,
+  replaceGraphElementData,
+  storyMapStyles,
+} from '../.test-build/features/storyMap/storyMapCytoscape.js'
 
 const AUTH = 'author_decision:test'
 
@@ -72,6 +77,31 @@ test('人物节点只消费精确 source_ref 头像，绝不回退姓名首字',
   assert.equal(withoutAvatar.intro, '雨夜归来的医生')
   const withAvatar = projectRelationshipGraph(data, { 'char:1': 'data:image/png;base64,AA==' }).nodes[0]
   assert.equal(withAvatar.avatarImageSrc, 'data:image/png;base64,AA==')
+})
+
+test('Cytoscape 头像只为真实图像建立数据与样式，并在重置时移除旧值', () => {
+  const graph = projectRelationshipGraph(makeData({ sections: {
+    characters: [{ id: 'c1', label: '林砚', source_ref: 'char:1', record: { name: '林砚' } }],
+    relationships: [], canon_facts: [], occurred_events: [], open_threads: [], foreshadowing: [], storylines: [], approved_plan: [],
+  } }))
+  const withoutAvatar = graphElements(graph)[0].data
+  assert.equal('avatar' in withoutAvatar, false)
+  const withAvatar = graphElements(projectRelationshipGraph(makeData({ sections: {
+    characters: [{ id: 'c1', label: '林砚', source_ref: 'char:1', record: { name: '林砚' } }],
+    relationships: [], canon_facts: [], occurred_events: [], open_threads: [], foreshadowing: [], storylines: [], approved_plan: [],
+  } }), { 'char:1': 'data:image/png;base64,exact' }))[0].data
+  assert.equal(withAvatar.avatar, 'data:image/png;base64,exact')
+  const base = storyMapStyles.find((style) => style.selector === 'node')
+  const avatarOnly = storyMapStyles.find((style) => style.selector === 'node[avatar]')
+  assert.equal('background-image' in base.style, false)
+  assert.equal(avatarOnly.style['background-image'], 'data(avatar)')
+  const current = { avatar: 'old-image' }
+  const element = {
+    data(nextData) { Object.assign(current, nextData) },
+    removeData(key) { delete current[key] },
+  }
+  replaceGraphElementData(element, withoutAvatar)
+  assert.equal('avatar' in current, false)
 })
 
 test('关系端点无法解析 => 不臆造边 + unresolved 条目', () => {

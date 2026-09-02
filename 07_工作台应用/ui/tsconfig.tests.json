@@ -18,6 +18,7 @@
     "src/features/tasks/taskModel.ts",
     "src/features/settings/settingsSummary.ts",
     "src/features/storyMap/storyMapModel.ts",
+    "src/features/storyMap/storyMapCytoscape.ts",
     "src/features/presentation/authorPresentation.ts",
     "src/features/foundation/recordEditors.tsx",
     "src/features/foundation/relationSelectors.ts",

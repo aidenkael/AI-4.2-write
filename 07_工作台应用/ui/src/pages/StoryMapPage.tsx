@@ -15,6 +15,7 @@ import {
   projectTimeEvents,
   type RecordField,
 } from '../features/storyMap/storyMapModel'
+import { graphElements, replaceGraphElementData, storyMapStyles } from '../features/storyMap/storyMapCytoscape'
 
 /**
  * 故事地图：同一正式 Story State 的派生可视化/查询面（只读，零写回、零模型）。
@@ -102,11 +103,6 @@ export function StoryMapPage() {
     return section.find((entry) => entry.source_ref === sourceRef) ?? null
   }
 
-  const graphElements = (model: typeof graph) => [
-    ...model.nodes.map((node) => ({ data: { id: node.id, label: node.short, status: node.status, avatar: node.avatarImageSrc ?? '' } })),
-    ...model.edges.map((edge) => ({ data: { id: edge.id, source: edge.source, target: edge.target, label: edge.label, status: edge.status } })),
-  ]
-
   // The graph instance lives for one Map/project visit.  Later data changes update
   // elements in place, so a saved author edit cannot discard the dragged positions.
   useEffect(() => {
@@ -120,13 +116,7 @@ export function StoryMapPage() {
       cy = cytoscape({
         container: graphHostRef.current,
         elements: graphElements(graph),
-        style: [
-          { selector: 'node', style: { label: 'data(label)', 'background-color': '#dce7f8', 'background-image': 'data(avatar)', 'background-fit': 'cover', 'background-image-opacity': 1, color: '#172545', 'font-size': 12, 'text-wrap': 'ellipsis', 'text-max-width': '136px', 'text-margin-y': 9, 'text-valign': 'bottom', 'text-halign': 'center', width: 60, height: 60, 'border-color': '#7896c8', 'border-width': 2 } },
-          { selector: 'node[status = "future"]', style: { 'border-color': '#6f91df', 'border-width': 3, 'border-style': 'dashed' } },
-          { selector: 'edge', style: { label: 'data(label)', 'line-color': '#8fb1ff', 'curve-style': 'bezier', 'font-size': 11, color: '#64728f', 'text-wrap': 'ellipsis', 'text-max-width': '140px' } },
-          { selector: 'edge[status = "future"]', style: { 'line-style': 'dashed', 'line-color': '#9aa8c5', color: '#7c89a3' } },
-          { selector: ':selected', style: { 'overlay-opacity': 0.15, 'overlay-color': '#2868f7' } },
-        ], wheelSensitivity: 0.6, minZoom: 0.35, maxZoom: 2.2,
+        style: storyMapStyles as never, wheelSensitivity: 0.6, minZoom: 0.35, maxZoom: 2.2,
       })
       cy.layout({ name: graph.edges.length > 0 ? 'cose' : 'grid', animate: false, fit: true, padding: 36 } as never).run()
       cy.nodes().forEach((node) => { sessionPositions.current[node.id()] = node.position() })
@@ -152,7 +142,7 @@ export function StoryMapPage() {
     cy.elements().forEach((element) => { if (!wanted.has(element.id())) element.remove() })
     wanted.forEach((element, id) => {
       const existing = cy?.getElementById(id)
-      if (existing && existing.nonempty()) existing.data(element.data)
+      if (existing && existing.nonempty()) replaceGraphElementData(existing, element.data)
       else cy?.add(element)
     })
     cy.nodes().forEach((node) => {
