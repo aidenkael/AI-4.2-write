@@ -11,10 +11,12 @@ from typing import Any
 
 from ai import runner as semantic_ai
 from operations import author_edit
+from operations import execution_audit as audit
 from operations import project_model
 from operations import qoder_bridge as bridge
 from operations.project_snapshot import (
     ProjectSnapshotError,
+    build_planning_impact_frontier,
     focused_task_context,
     get_project_snapshot,
 )
@@ -88,15 +90,23 @@ _BATCH_TASK_TEMPLATE = """你是 Go Write 的作品状态整理器。作者已�
   "consequences": [
     {{"classification":"mechanically_certain|ambiguous|creative_optional","kind":"character|relationship|event|time|foreshadowing|setting|location|organization|system|storyline|planning|open_thread|mystery_information","action":"create|update|retire","target_ref":"更新或退役的明确 ref；新建可为空","title":"作者可读标题","source_ref":"关系起点 ref；非关系可为空","target_character_ref":"关系终点 ref；非关系可为空","source_change_ids":["支撑本条后果的账本变更 id"],"data":{{}},"reason":"短理由"}}
   ],
-  "chapter_actual_results": [{{"chapter_number": 12, "result": {{"summary":"正文实际结果摘要"}}, "planning_impact_candidate": null}}]
+  "chapter_actual_results": [{{"chapter_number": 12, "result": {{"summary":"正文实际结果摘要"}}, "planning_impact_candidate": null}}],
+  "planning_impact_candidates": [
+    {{"summary":"作者可读的影响描述","source_change_ids":["触发该影响的账本变更 id"],"affected_refs":[],"affected_chapter_numbers":[],"affected_stage_refs":[]}}
+  ]
 }}
 
 只有当前输入直接支持且无需创作选择的后果才是 mechanically_certain。关系端点必须使用输入中已有的明确人物 ref。人物更新只允许 one_line_intro、visible_traits、persona_core、background_summary、position_title、power_rank、current_state、current_objective、arc_stage、speech_style、behavior_anchors。正文实际结果只对应输入中列出的正文章节。
 
 每条 consequence 的 source_change_ids 必须非空，且只能从下方受影响目标列出的账本变更 id 中选择：每条后果必须可追溯到真实支撑它的作者变更；没有真实正文变更支撑时，绝不允许以正文名义推进作者拥有的字段。
 
+planning_impact_candidates：当且仅当本次作者变更实质影响后续规划时才给出；只基于下方给出的确定性影响前沿与当前快照判断，绝不自行遍历全书。每条的 affected_refs / affected_chapter_numbers / affected_stage_refs 只能从输入中真实存在的未来记录、章节号与阶段中选择；不确定的影响不要列出；无影响时给空列表。绝不直接修改任何规划。
+
 本轮合并后的受影响目标（每项列出覆盖的账本变更 id）：
 {affected}
+
+确定性规划影响前沿（代码从显式依赖/轨迹/故事线/伏笔/章节目标/同阶段后续章收集；只作候选输入）：
+{frontier}
 
 当前作品快照（只为校验和理解，不得以旧派生内容覆盖上述作者真相）：
 {snapshot}
@@ -640,11 +650,53 @@ def _parse_refresh_output(output: str) -> dict[str, Any]:
             "result": result["chapter_actual_result"],
             "planning_impact_candidate": result["planning_impact_candidate"],
         })
-    return {"summary": base["summary"], "consequences": base["consequences"], "chapter_actual_results": normalized_outcomes}
+    impacts = value.get("planning_impact_candidates", [])
+    if not isinstance(impacts, list):
+        raise ChangeSettlementError("planning_impact_candidates 必须是列表。")
+    normalized_impacts = []
+    for index, item in enumerate(impacts):
+        if not isinstance(item, dict):
+            raise ChangeSettlementError(f"planning_impact_candidates[{index}] 必须是对象。")
+        summary = item.get("summary")
+        if not isinstance(summary, str) or not summary.strip():
+            raise ChangeSettlementError(f"planning_impact_candidates[{index}].summary 不能为空。")
+        source_ids = item.get("source_change_ids")
+        if (
+            not isinstance(source_ids, list) or not source_ids
+            or any(not isinstance(change_id, str) or not change_id.strip() for change_id in source_ids)
+        ):
+            raise ChangeSettlementError(
+                f"planning_impact_candidates[{index}] 必须绑定非空的 source_change_ids。"
+            )
+        affected_refs = item.get("affected_refs", [])
+        affected_chapters = item.get("affected_chapter_numbers", [])
+        affected_stages = item.get("affected_stage_refs", [])
+        if not isinstance(affected_refs, list) or any(not isinstance(ref, str) for ref in affected_refs):
+            raise ChangeSettlementError(f"planning_impact_candidates[{index}].affected_refs 非法。")
+        if not isinstance(affected_chapters, list) or any(
+            not isinstance(number, int) or isinstance(number, bool) or number < 1
+            for number in affected_chapters
+        ):
+            raise ChangeSettlementError(f"planning_impact_candidates[{index}].affected_chapter_numbers 非法。")
+        if not isinstance(affected_stages, list) or any(not isinstance(ref, str) for ref in affected_stages):
+            raise ChangeSettlementError(f"planning_impact_candidates[{index}].affected_stage_refs 非法。")
+        normalized_impacts.append({
+            "summary": summary.strip(),
+            "source_change_ids": list(dict.fromkeys(source_ids)),
+            "affected_refs": list(dict.fromkeys(ref.strip() for ref in affected_refs if ref.strip())),
+            "affected_chapter_numbers": sorted(set(affected_chapters)),
+            "affected_stage_refs": list(dict.fromkeys(ref.strip() for ref in affected_stages if ref.strip())),
+        })
+    return {
+        "summary": base["summary"], "consequences": base["consequences"],
+        "chapter_actual_results": normalized_outcomes,
+        "planning_impact_candidates": normalized_impacts,
+    }
 
 
 def _apply_refresh_result(
     project_id: str, refresh: dict[str, Any], captured: list[dict[str, Any]], result: dict[str, Any],
+    *, frontier: dict[str, Any] | None = None,
 ) -> None:
     """Apply a fully validated batch atomically, never touching post-cutoff edits."""
     with author_edit.project_write_lock(project_id):
@@ -733,6 +785,86 @@ def _apply_refresh_result(
                         source_change_id=str(source_change["change_id"]),
                     )
                 applied_outcomes.append(number)
+            # 规划影响候选：每条必须绑定真实已捕获源变更；全部 ref/章号/阶段必须解析到
+            # 当前有效项目事实（AI 不得虚构）；任一非法 → 整批失败回滚。
+            created_impact_ids: list[str] = []
+            impacts = result.get("planning_impact_candidates") or []
+            if impacts:
+                valid_refs: set[str] = set()
+                for bucket_name in ("current", "future"):
+                    for values in snapshot[bucket_name].values():
+                        for record in values:
+                            if isinstance(record.get("ref"), str):
+                                valid_refs.add(record["ref"])
+                for edge in snapshot.get("explicit_dependencies", []):
+                    valid_refs.add(edge["ref"])
+                for chapter in snapshot["chapters"]:
+                    if isinstance(chapter.get("fine_outline_ref"), str):
+                        valid_refs.add(chapter["fine_outline_ref"])
+                stage_refs = {stage["ref"] for stage in snapshot["length_plan"]["stages"]}
+                valid_refs |= stage_refs
+                valid_chapters = {chapter["chapter_number"] for chapter in snapshot["chapters"]}
+                facts_by_change: dict[str, tuple[list[str], list[int]]] = {}
+                for group in captured:
+                    latest = group["latest"]
+                    delta = latest.get("delta") if isinstance(latest.get("delta"), dict) else {}
+                    refs: list[str] = []
+                    chapters: list[int] = []
+                    chapter = delta.get("chapter_number")
+                    if latest.get("source_kind") in {"manual_prose_edit", "accepted_ai_prose"} and isinstance(chapter, int):
+                        chapters.append(chapter)
+                    model_change = delta.get("project_model_change") if isinstance(delta.get("project_model_change"), dict) else {}
+                    detail = model_change.get("detail") if isinstance(model_change.get("detail"), dict) else {}
+                    ref = detail.get("ref") if isinstance(detail, dict) else None
+                    if isinstance(ref, str) and ref:
+                        refs.append(ref)
+                    facts_by_change[str(latest.get("change_id"))] = (refs, chapters)
+                for impact in impacts:
+                    unknown = sorted(set(impact["source_change_ids"]) - captured_ids)
+                    if unknown:
+                        raise ChangeSettlementError(
+                            f"影响候选引用了未知或未被本次捕获的变更 id：{', '.join(unknown)}，已拒绝。"
+                        )
+                    bad_refs = [ref for ref in impact["affected_refs"] if ref not in valid_refs]
+                    if bad_refs:
+                        raise ChangeSettlementError("影响候选 affected_refs 包含不存在或非有效的记录，已拒绝。")
+                    bad_chapters = [n for n in impact["affected_chapter_numbers"] if n not in valid_chapters]
+                    if bad_chapters:
+                        raise ChangeSettlementError("影响候选 affected_chapter_numbers 包含不存在的章节，已拒绝。")
+                    bad_stages = [ref for ref in impact["affected_stage_refs"] if ref not in stage_refs]
+                    if bad_stages:
+                        raise ChangeSettlementError("影响候选 affected_stage_refs 包含不存在的阶段，已拒绝。")
+                    source_refs: set[str] = set()
+                    for change_id in impact["source_change_ids"]:
+                        refs_for_change, chapters_for_change = facts_by_change.get(change_id, ([], []))
+                        source_refs.update(refs_for_change)
+                    planning_sources = sorted({
+                        (model["objects"][ref].get("data") or {}).get("planning_source_ref")
+                        for ref in impact["affected_refs"]
+                        if ref in model.get("objects", {})
+                        and isinstance((model["objects"][ref].get("data") or {}).get("planning_source_ref"), str)
+                    })
+                    model = project_model.add_planning_impact_candidate(
+                        project_id, base_model_rev=model["model_rev"],
+                        summary=impact["summary"],
+                        source_change_ids=impact["source_change_ids"],
+                        affected_refs=impact["affected_refs"],
+                        affected_chapter_numbers=impact["affected_chapter_numbers"],
+                        affected_stage_refs=impact["affected_stage_refs"],
+                        affected_planning_source_refs=planning_sources,
+                        source_refs=sorted(source_refs),
+                        created_from_refresh_id=refresh.get("refresh_id"),
+                    )
+                    created_impact_ids.append(model["change_history"][-1]["detail"]["candidate_id"])
+                audit.append_event(
+                    str(refresh.get("refresh_id") or ""), audit.EVENT_IMPACT_CANDIDATES, "change_settlement",
+                    details={
+                        "created": created_impact_ids,
+                        "frontier_candidates": len((frontier or {}).get("affected_future_refs") or []),
+                        "frontier_refs": (frontier or {}).get("affected_future_refs") or [],
+                        "frontier_chapters": (frontier or {}).get("later_same_stage_chapter_numbers") or [],
+                    },
+                )
         except (project_model.ProjectModelError, ChangeSettlementError, OSError) as exc:
             _restore_model(model_path, before)
             raise ChangeSettlementError(str(exc)) from exc
@@ -753,7 +885,10 @@ def _apply_refresh_result(
             "summary": result["summary"],
             "error": None,
             "proposals": copy.deepcopy(proposals),
-            "result": {"applied_outcome_chapters": applied_outcomes},
+            "result": {
+                "applied_outcome_chapters": applied_outcomes,
+                "created_impact_candidates": created_impact_ids,
+            },
         }
         try:
             author_edit.update_changes_and_state_refresh(
@@ -762,6 +897,28 @@ def _apply_refresh_result(
         except (author_edit.AuthorEditError, OSError) as exc:
             _restore_model(model_path, before)
             raise ChangeSettlementError(f"作品状态整理记账失败，项目模型已回滚：{exc}") from exc
+
+
+def _refresh_trigger_facts(captured: list[dict[str, Any]]) -> tuple[list[str], list[str], list[int]]:
+    """从已捕获变更提取影响前沿触发事实（只认显式 ref / 章节号）。"""
+    object_refs: list[str] = []
+    dependency_refs: list[str] = []
+    chapter_numbers: list[int] = []
+    for group in captured:
+        latest = group["latest"]
+        delta = latest.get("delta") if isinstance(latest.get("delta"), dict) else {}
+        chapter = delta.get("chapter_number")
+        if latest.get("source_kind") in {"manual_prose_edit", "accepted_ai_prose"} and isinstance(chapter, int):
+            chapter_numbers.append(chapter)
+        model_change = delta.get("project_model_change") if isinstance(delta.get("project_model_change"), dict) else {}
+        detail = model_change.get("detail") if isinstance(model_change.get("detail"), dict) else {}
+        ref = detail.get("ref") if isinstance(detail, dict) else None
+        if isinstance(ref, str) and ref:
+            if "_edge_" in ref:
+                dependency_refs.append(ref)
+            else:
+                object_refs.append(ref)
+    return object_refs, dependency_refs, chapter_numbers
 
 
 def _refresh_worker(project_id: str, refresh: dict[str, Any], captured: list[dict[str, Any]]) -> None:
@@ -778,14 +935,40 @@ def _refresh_worker(project_id: str, refresh: dict[str, Any], captured: list[dic
                 "latest_delta": delta,
                 "current_chapter": current_chapter if isinstance(chapter, int) else None,
             })
+        object_refs, dependency_refs, chapter_numbers = _refresh_trigger_facts(captured)
+        frontier = build_planning_impact_frontier(
+            project_id,
+            changed_object_refs=object_refs,
+            changed_dependency_refs=dependency_refs,
+            changed_chapter_numbers=chapter_numbers,
+        )
+        audit.append_event(
+            refresh["refresh_id"], audit.EVENT_OPERATION_STARTED, "change_settlement",
+            details={
+                "project_id": project_id,
+                "change_ids": refresh.get("change_ids") or [],
+                "frontier_candidates": len(frontier.get("affected_future_refs") or []),
+                "frontier_chapters": frontier.get("later_same_stage_chapter_numbers") or [],
+            },
+        )
         prompt = _BATCH_TASK_TEMPLATE.format(
             affected=json.dumps(affected, ensure_ascii=False, indent=2),
+            frontier=json.dumps(frontier, ensure_ascii=False, indent=2),
             snapshot=json.dumps(focused_task_context(project_id), ensure_ascii=False, indent=2),
         )
         output = semantic_ai.run_text(prompt)
         parsed = _parse_refresh_output(output)
-        _apply_refresh_result(project_id, refresh, captured, parsed)
+        _apply_refresh_result(project_id, refresh, captured, parsed, frontier=frontier)
+        audit.finish_file(refresh["refresh_id"], audit.STATUS_COMPLETED)
     except Exception as exc:  # durable edits remain pending and retryable
+        try:
+            audit.append_event(
+                refresh["refresh_id"], audit.EVENT_AGENT_FAILED, "change_settlement",
+                details={"error": str(exc)[:200]},
+            )
+            audit.finish_file(refresh["refresh_id"], audit.STATUS_FAILED, error=str(exc)[:200])
+        except Exception:  # noqa: BLE001 — 审计失败绝不影响作者操作
+            pass
         try:
             author_edit.update_changes_and_state_refresh(project_id, state_refresh={
                 **refresh, "status": "failed", "error": str(exc), "summary": "整理失败，可重试。", "proposals": [],

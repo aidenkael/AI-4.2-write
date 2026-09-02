@@ -598,10 +598,157 @@ def _get_active_planning_sources(state: dict[str, Any]) -> list[dict[str, Any]]:
 # 提出规划候选
 # ---------------------------------------------------------------------------
 
+PLANNING_MODES = frozenset({"free", "book", "stage", "near_term", "impact_replan"})
+
+
+def _analyze_impact_candidates(
+    project_id: str,
+    state: dict[str, Any],
+    candidate_ids: list[str],
+) -> dict[str, Any]:
+    """校验 impact_replan 的候选身份，并确定性推导替换范围（绝不猜测）。"""
+    model = project_model_ops.read_project_model(project_id)
+    by_id = {
+        str(item.get("candidate_id")): item
+        for item in model.get("planning_impact_candidates", [])
+        if isinstance(item, dict)
+    }
+    selected = []
+    for candidate_id in candidate_ids:
+        candidate = by_id.get(candidate_id)
+        if candidate is None:
+            raise StoryPlanningError("影响候选不存在或不属于当前作品。")
+        if candidate.get("status", "pending_author") not in {"pending_author", "deferred"}:
+            raise StoryPlanningError("该影响候选已解决或已作废，不能再用于重新规划。")
+        selected.append(candidate)
+    affected_refs = sorted({
+        ref for candidate in selected for ref in (candidate.get("affected_refs") or [])
+    })
+    affected_chapters = sorted({
+        number for candidate in selected
+        for number in (candidate.get("affected_chapter_numbers") or [])
+        if isinstance(number, int)
+    })
+    affected_stages = sorted({
+        ref for candidate in selected for ref in (candidate.get("affected_stage_refs") or [])
+    })
+    planning_sources = sorted({
+        ref for candidate in selected
+        for ref in (candidate.get("affected_planning_source_refs") or [])
+    })
+    # 血缘 → 有效 plan id：优先消费投影持久化的 planning_plan_ids，回退前后缀对应。
+    all_plan_ids = {
+        plan.get("id") for plan in (state.get("approved_plan") or [])
+        if isinstance(plan, dict) and isinstance(plan.get("id"), str)
+    }
+    try:
+        active_ids = set(resolve_plan_activity(state).get("active") or [])
+    except Exception:  # noqa: BLE001
+        active_ids = set(all_plan_ids)
+    stored_ids_by_source: dict[str, list[str]] = {}
+    for item in model.get("objects", {}).values():
+        if not isinstance(item, dict):
+            continue
+        data = item.get("data") if isinstance(item.get("data"), dict) else {}
+        source_ref = data.get("planning_source_ref")
+        stored = data.get("planning_plan_ids")
+        if isinstance(source_ref, str) and isinstance(stored, list):
+            stored_ids_by_source.setdefault(source_ref, []).extend(
+                pid for pid in stored if isinstance(pid, str)
+            )
+    replaced_plan_ids: set[str] = set()
+    for source_ref in planning_sources:
+        mapped = project_model_ops.mapped_plan_ids_for_planning_source(
+            source_ref, stored_ids_by_source.get(source_ref), all_plan_ids,
+        )
+        replaced_plan_ids |= mapped & active_ids
+    plans_by_id = {
+        plan["id"]: plan for plan in (state.get("approved_plan") or [])
+        if isinstance(plan, dict) and isinstance(plan.get("id"), str)
+    }
+    target_refs = {
+        plans_by_id[plan_id].get("target_ref")
+        for plan_id in replaced_plan_ids if plan_id in plans_by_id
+    }
+    single_target = len(target_refs) == 1
+    return {
+        "candidates": selected,
+        "affected_refs": affected_refs,
+        "affected_chapter_numbers": affected_chapters,
+        "affected_stage_refs": affected_stages,
+        "affected_planning_source_refs": planning_sources,
+        "supersedes_plan_ids": sorted(replaced_plan_ids) if single_target else [],
+        "replaces_target_ref": next(iter(target_refs)) if single_target and target_refs else None,
+        "replaced_plan_ids": sorted(replaced_plan_ids),
+    }
+
+
+def _impact_replan_context_block(
+    project_id: str,
+    analysis: dict[str, Any],
+) -> str:
+    """局部重规划的有界权威上下文：只给受影响范围 + 必须保留的锚点。"""
+    snapshot = get_project_snapshot(project_id)
+    records_by_ref: dict[str, dict[str, Any]] = {}
+    for bucket_name in ("current", "future"):
+        for section, values in snapshot[bucket_name].items():
+            for item in values:
+                if isinstance(item.get("ref"), str):
+                    records_by_ref[item["ref"]] = {
+                        "ref": item["ref"], "title": item.get("title"),
+                        "section": section, "material_state": item.get("material_state"),
+                    }
+    chapters_by_number = {chapter["chapter_number"]: chapter for chapter in snapshot["chapters"]}
+    affected_chapter_views = []
+    for number in analysis["affected_chapter_numbers"][:8]:
+        chapter = chapters_by_number.get(number)
+        if chapter is None:
+            continue
+        outline = chapter.get("fine_outline") or {}
+        actual = chapter.get("actual_result") or {}
+        affected_chapter_views.append({
+            "chapter_number": number,
+            "title": chapter.get("title"),
+            "outline_task": outline.get("task"),
+            "outline_synopsis": outline.get("synopsis"),
+            "actual_summary": actual.get("summary"),
+            "formal_prose_excerpt": str(chapter.get("content") or "")[-800:],
+        })
+    active_plans = [
+        {"id": item.get("id"), "description": item.get("title")}
+        for item in snapshot["future"].get("approved_plan", [])
+    ]
+    return json.dumps({
+        "mode": "impact_replan",
+        "instruction": (
+            "这是作者显式发起的局部重规划：只针对下列影响候选与受影响范围产出替换建议；"
+            "未受影响的规划、锚点章节与当前真相必须保留，绝不整书重写。"
+        ),
+        "candidates": [
+            {
+                "candidate_id": candidate.get("candidate_id"),
+                "summary": candidate.get("summary"),
+                "affected_refs": candidate.get("affected_refs") or [],
+                "affected_chapter_numbers": candidate.get("affected_chapter_numbers") or [],
+                "affected_stage_refs": candidate.get("affected_stage_refs") or [],
+            }
+            for candidate in analysis["candidates"]
+        ],
+        "affected_records": [
+            records_by_ref[ref] for ref in analysis["affected_refs"] if ref in records_by_ref
+        ],
+        "affected_chapters": affected_chapter_views,
+        "active_plans": active_plans[:24],
+        "replaced_plan_ids": analysis["replaced_plan_ids"],
+    }, ensure_ascii=False, indent=2)
+
+
 def prepare_story_plan(
     project_id: str,
     author_question: str,
     replaces_plan_ids: list[str] | None = None,
+    planning_mode: str = "free",
+    impact_candidate_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """'一起往前想'第一步：读取正式作品 → 构造 Agent task → 创建请求，
     并按已保存 Settings 的执行模式准备执行。
@@ -616,6 +763,17 @@ def prepare_story_plan(
       经冻结 supersedes 合同取代旧条目，并同步退役旧规划的模型投影。
     """
     author_question = (author_question or "").strip()
+    planning_mode = (planning_mode or "free").strip()
+    if planning_mode not in PLANNING_MODES:
+        raise StoryPlanningError(f"不支持的规划模式：{planning_mode}。")
+    if planning_mode == "impact_replan":
+        if (
+            not isinstance(impact_candidate_ids, list) or not impact_candidate_ids
+            or any(not isinstance(cid, str) or not cid.strip() for cid in impact_candidate_ids)
+        ):
+            raise StoryPlanningError("重新规划受影响内容必须选择至少一个影响候选。")
+        if not author_question:
+            author_question = "重新规划受影响的后续内容；保留未受影响的规划与锚点。"
     if not author_question:
         raise StoryPlanningError("请写下你想一起想的问题。")
 
@@ -640,7 +798,15 @@ def prepare_story_plan(
     # 2b. 显式替换声明：只能替换当前 active、共享同一 target 的规划。
     supersedes_plan_ids: list[str] = []
     replaces_target_ref = None
-    if replaces_plan_ids is not None:
+    impact_analysis: dict[str, Any] | None = None
+    if planning_mode == "impact_replan":
+        impact_analysis = _analyze_impact_candidates(
+            project_id, state,
+            [cid.strip() for cid in (impact_candidate_ids or [])],
+        )
+        supersedes_plan_ids = impact_analysis["supersedes_plan_ids"]
+        replaces_target_ref = impact_analysis["replaces_target_ref"]
+    elif replaces_plan_ids is not None:
         if (
             not isinstance(replaces_plan_ids, list) or not replaces_plan_ids
             or any(not isinstance(pid, str) or not pid.strip() for pid in replaces_plan_ids)
@@ -660,6 +826,23 @@ def prepare_story_plan(
         if len(target_refs) != 1:
             raise StoryPlanningError("本轮只能替换共享同一规划目标的条目。")
         replaces_target_ref = next(iter(target_refs))
+
+    # impact_replan：候选在捕获 source_versions 之前进入 in_replan，
+    # 确认时的 stale 检查才能包含本次状态转换；失败路径负责恢复。
+    impact_previous_status: dict[str, str] = {}
+    if planning_mode == "impact_replan" and impact_analysis is not None:
+        try:
+            model_now = project_model_ops.read_project_model(project_id)
+            for candidate in impact_analysis["candidates"]:
+                candidate_id = str(candidate["candidate_id"])
+                impact_previous_status[candidate_id] = candidate.get("status", "pending_author")
+                project_model_ops.update_planning_impact_candidate(
+                    project_id, base_model_rev=model_now["model_rev"],
+                    candidate_id=candidate_id, status="in_replan",
+                )
+                model_now = project_model_ops.read_project_model(project_id)
+        except project_model_ops.ProjectModelError as exc:
+            raise StoryPlanningError(f"影响候选状态无法进入重规划：{exc}") from exc
 
     # 3. 解析保存的执行配置（Settings 契约；agent_runner._build_adapter 负责
     #    直连的 Agent/模型解析与互斥校验，这里不重复实现路由）
@@ -710,6 +893,11 @@ def prepare_story_plan(
         "\n\n最新有效作者工作区（显式作者编辑优先；current 与 future/planned 严格分开）：\n"
         + json.dumps(effective_context, ensure_ascii=False, indent=2)
     )
+    if planning_mode == "impact_replan" and impact_analysis is not None:
+        task += (
+            "\n\n局部重规划上下文（只替换受影响范围；其余规划与锚点必须保留）：\n"
+            + _impact_replan_context_block(project_id, impact_analysis)
+        )
 
     # 5. Direct 模式：显式配置校验（无有效配置 → 稳定报错，绝不回退）
     direct_adapter = None
@@ -756,6 +944,19 @@ def prepare_story_plan(
                 "planning_sources": planning_sources,
                 "supersedes_plan_ids": supersedes_plan_ids,
                 "replaces_target_ref": replaces_target_ref,
+                "planning_mode": planning_mode,
+                "impact_candidate_ids": (
+                    [cid.strip() for cid in impact_candidate_ids]
+                    if planning_mode == "impact_replan" else []
+                ),
+                "impact_previous_status": (
+                    dict(impact_previous_status)
+                    if planning_mode == "impact_replan" else {}
+                ),
+                "impact_planning_source_refs": (
+                    (impact_analysis or {}).get("affected_planning_source_refs", [])
+                    if planning_mode == "impact_replan" else []
+                ),
                 "intent_rev": intent["intent_rev"],
                 "state_rev": state["state_rev"],
                 "model_rev": effective_context["model_rev"],
@@ -769,8 +970,13 @@ def prepare_story_plan(
             activate_for_gowrite=execution_mode != EXECUTION_MODE_DIRECT,
         )
     except bridge.BridgeBusyError as exc:
-        # 已有等待 /gowrite 的交互任务：绝不清除/覆盖它；回滚本轮临时工作区
+        # 已有等待 /gowrite 的交互任务：绝不清除/覆盖它；回滚本轮临时工作区与候选状态。
         _cleanup_planning(project_id, planning_turn_id)
+        if planning_mode == "impact_replan":
+            _restore_impact_candidate_statuses(project_id, {
+                "impact_candidate_ids": [cid.strip() for cid in (impact_candidate_ids or [])],
+                "impact_previous_status": impact_previous_status,
+            })
         raise StoryPlanningError(str(exc)) from exc
 
     # 9. 验证式审计（operation.started；交互桥只标 waiting，绝不声称 Agent 已启动）
@@ -791,10 +997,18 @@ def prepare_story_plan(
     message = "任务已准备好，请到 Qoder 输入 /gowrite 并回车。"
     if execution_mode == EXECUTION_MODE_DIRECT:
         message = "任务已通过直连模式后台执行，正在校验结果。"
-        _start_direct_execution(
-            direct_adapter, direct_agent_request, task, request_id,
-            project_id=project_id, planning_turn_id=planning_turn_id,
-        )
+        try:
+            _start_direct_execution(
+                direct_adapter, direct_agent_request, task, request_id,
+                project_id=project_id, planning_turn_id=planning_turn_id,
+            )
+        except StoryPlanningError:
+            if planning_mode == "impact_replan":
+                _restore_impact_candidate_statuses(project_id, {
+                    "impact_candidate_ids": [cid.strip() for cid in (impact_candidate_ids or [])],
+                    "impact_previous_status": impact_previous_status,
+                })
+            raise
 
     return {
         "request_id": request_id,
@@ -1034,6 +1248,10 @@ def _finalize_story_plan(
         "request_id": request["request_id"],
         "author_question": meta.get("author_question") or "",
         "supersedes_plan_ids": list(meta.get("supersedes_plan_ids") or []),
+        "planning_mode": str(meta.get("planning_mode") or "free"),
+        "impact_candidate_ids": [str(cid) for cid in (meta.get("impact_candidate_ids") or [])],
+        "impact_previous_status": dict(meta.get("impact_previous_status") or {}),
+        "impact_planning_source_refs": [str(ref) for ref in (meta.get("impact_planning_source_refs") or [])],
         "source_versions": {
             "intent_rev": meta.get("intent_rev"),
             "state_rev": meta.get("state_rev"),
@@ -1195,6 +1413,30 @@ def _cleanup_discarded_planning(request_id: str) -> None:
         return
 
 
+def _restore_impact_candidate_statuses(project_id: str, meta: dict[str, Any]) -> None:
+    """重规划未成功时把候选从 in_replan 恢复到 prepare 前的状态（幂等）。"""
+    candidate_ids = [str(cid) for cid in (meta.get("impact_candidate_ids") or [])]
+    previous = meta.get("impact_previous_status") if isinstance(meta.get("impact_previous_status"), dict) else {}
+    if not candidate_ids:
+        return
+    try:
+        model = project_model_ops.read_project_model(project_id)
+        for candidate_id in candidate_ids:
+            target = str(previous.get(candidate_id) or "pending_author")
+            if target not in {"pending_author", "deferred"}:
+                target = "pending_author"
+            try:
+                project_model_ops.update_planning_impact_candidate(
+                    project_id, base_model_rev=model["model_rev"],
+                    candidate_id=candidate_id, status=target,
+                )
+                model = project_model_ops.read_project_model(project_id)
+            except project_model_ops.ProjectModelError:
+                pass  # 候选已终态（如被作者新编辑作废）：无需恢复。
+    except project_model_ops.ProjectModelError:
+        pass
+
+
 def cancel_story_plan_request(request_id: str) -> dict[str, Any]:
     """取消/丢弃：终止运行中的 Direct adapter（如有）、标记 canceled、
     删除临时 planning 工作区。幂等；交互/直连共用同一取消语义。
@@ -1220,6 +1462,8 @@ def cancel_story_plan_request(request_id: str) -> dict[str, Any]:
         planning_turn_id = str(meta.get("planning_turn_id") or "")
         if project_id and planning_turn_id:
             _cleanup_planning(project_id, planning_turn_id)
+        if project_id and meta.get("impact_candidate_ids"):
+            _restore_impact_candidate_statuses(project_id, meta)
         bridge.clear_active_if(request_id)
         audit.finish_file(request_id, audit.STATUS_CANCELED)
     else:
@@ -1377,6 +1621,12 @@ def confirm_story_plan(project_id: str, planning_token: str) -> dict[str, Any]:
         retire_sources = sorted(project_model_ops.inactive_planning_source_refs(
             current_model, active_after,
         ))
+        # impact_replan：候选声明的受影响规划来源一并退役（只退役被替换部分，
+        # 不影响无关规划）；无法映射的来源不产生任何写副作用。
+        impact_sources = [
+            str(ref) for ref in (meta.get("impact_planning_source_refs") or [])
+        ]
+        retire_sources = sorted(set(retire_sources) | set(impact_sources))
         if any(projection.values()) or retire_sources:
             projection_model = project_model_ops.apply_planning_projection(
                 project_id,
@@ -1385,6 +1635,23 @@ def confirm_story_plan(project_id: str, planning_token: str) -> dict[str, Any]:
                 source_ref=decision_id,
                 plan_ids=plan_ids,
                 retire_planning_source_refs=retire_sources,
+            )
+        # 重规划成功：处理过的影响候选确定性解决；任一失败则整体回滚。
+        impact_candidate_ids = [str(cid) for cid in (meta.get("impact_candidate_ids") or [])]
+        if impact_candidate_ids:
+            latest = project_model_ops.read_project_model(project_id)
+            for candidate_id in impact_candidate_ids:
+                latest = project_model_ops.update_planning_impact_candidate(
+                    project_id, base_model_rev=latest["model_rev"],
+                    candidate_id=candidate_id, status="resolved",
+                )
+            audit.append_event(
+                request_id, audit.EVENT_IMPACT_CANDIDATES, "story_plan",
+                details={
+                    "resolved": impact_candidate_ids,
+                    "retired_planning_source_refs": retire_sources,
+                    "superseded_plan_ids": [pid for pid in supersedes],
+                },
             )
     except (SPContractError, PWContractError, PWWorkspaceError, project_model_ops.ProjectModelError) as exc:
         # Planning authority + future projection are one confirmation outcome.
@@ -1399,8 +1666,10 @@ def confirm_story_plan(project_id: str, planning_token: str) -> dict[str, Any]:
                     model_file, json.loads(model_before.decode("utf-8")),
                 )
         except Exception as rollback_exc:  # noqa: BLE001
+            _restore_impact_candidate_statuses(project_id, meta)
             _cleanup_planning(project_id, planning_turn_id)
             raise StoryPlanningError(f"写入规划失败且回滚未完成：{rollback_exc}") from exc
+        _restore_impact_candidate_statuses(project_id, meta)
         _cleanup_planning(project_id, planning_turn_id)
         raise StoryPlanningError(f"写入规划失败：{exc}") from exc
 

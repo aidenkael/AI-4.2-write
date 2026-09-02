@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { getProjectOverview, getStoryWriteSurface, updateStorySynopsis, type ProjectOverview, type StoryWriteSurface } from '../bridge/client'
+import { impactNoticeText } from '../features/planning/planningImpact'
 
 const toMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
@@ -168,6 +169,19 @@ export function ProjectOverviewPage() {
                 已保存的作者修改尚待整理：{overview.settlement.pending_count} 项待处理，{overview.settlement.failed_count} 项失败。你可以继续创作；需要整理时使用项目栏的「更新作品状态」。
               </div>
             )}
+            {(() => {
+              const impact = overview?.planning_impact
+              const impactTotal = (impact?.pending_count ?? 0) + (impact?.deferred_count ?? 0)
+              const notice = impactTotal > 0 ? impactNoticeText(impactTotal) : null
+              if (!notice) return null
+              return (
+                <div className="sync-warning">
+                  {notice}
+                  <button onClick={() => actions.setProjectSection('planning')}>查看影响</button>
+                  <button onClick={() => actions.setProjectSection('planning')}>前往重新规划</button>
+                </div>
+              )
+            })()}
           </>
         )}
         <div className="overview-cta">

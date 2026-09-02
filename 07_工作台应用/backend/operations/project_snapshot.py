@@ -857,6 +857,133 @@ def _task_relevant_context(
     return relevant_current, relevant_future, explicit_relations
 
 
+def build_planning_impact_frontier(
+    project_id: str,
+    *,
+    changed_object_refs: list[str] | None = None,
+    changed_dependency_refs: list[str] | None = None,
+    changed_chapter_numbers: list[int] | None = None,
+) -> dict[str, Any]:
+    """有界确定性规划影响前沿：只从显式事实收集机械相关的未来候选。
+
+    规则：不递归、不模糊语义图遍历、不全书展开；只读零写回。
+    输出只是候选输入，不代表每一项都真的受影响。
+    """
+    model = read_project_model(project_id)
+    changed_refs = {
+        ref for ref in (changed_object_refs or []) if isinstance(ref, str) and ref
+    }
+    for dep_ref in (changed_dependency_refs or []):
+        if not isinstance(dep_ref, str) or not dep_ref:
+            continue
+        edge = model.get("dependencies", {}).get(dep_ref)
+        if isinstance(edge, dict):
+            changed_refs.add(edge.get("source_ref") or "")
+            changed_refs.add(edge.get("target_ref") or "")
+    changed_refs.discard("")
+    changed_chapters = {
+        number for number in (changed_chapter_numbers or [])
+        if isinstance(number, int) and not isinstance(number, bool) and number > 0
+    }
+    objects = model.get("objects", {})
+    changed_titles = {
+        objects[ref].get("title") for ref in changed_refs
+        if ref in objects and isinstance(objects[ref], dict) and objects[ref].get("title")
+    }
+
+    neighbor_refs: set[str] = set()
+    storyline_refs: set[str] = set()
+    foreshadowing_refs: set[str] = set()
+    if changed_refs:
+        for edge in model.get("dependencies", {}).values():
+            if not isinstance(edge, dict) or edge.get("tombstoned"):
+                continue
+            src, tgt = edge.get("source_ref"), edge.get("target_ref")
+            if src not in changed_refs and tgt not in changed_refs:
+                continue
+            other = tgt if src in changed_refs else src
+            kind = edge.get("relation_kind")
+            if kind in {
+                "storyline_involves_character", "storyline_involves_organization",
+                "storyline_involves_location",
+            }:
+                line = objects.get(src) if isinstance(src, str) else None
+                if isinstance(line, dict) and line.get("category") == "story_line":
+                    storyline_refs.add(src)
+            if kind in {"foreshadowing_related_to", "mystery_information_related_to"}:
+                head = objects.get(src) if isinstance(src, str) else None
+                if isinstance(head, dict) and head.get("category") in {
+                    "promise_foreshadowing", "mystery_information",
+                }:
+                    foreshadowing_refs.add(src)
+            if isinstance(other, str) and other:
+                neighbor_refs.add(other)
+
+    trajectory_refs = {
+        ref for ref, item in objects.items()
+        if isinstance(item, dict) and not item.get("tombstoned")
+        and item.get("kind") == "future_trajectory"
+        and (item.get("data") or {}).get("target_ref") in changed_refs
+    }
+
+    # 章节目标：只认显式引用（精确 ref 或精确标题出现在细纲字段中）。
+    chapter_target_refs: set[str] = set()
+    target_stage_by_number: dict[int, str | None] = {}
+    for ref in model.get("length_plan", {}).get("chapter_target_refs", []):
+        item = objects.get(ref)
+        if not isinstance(item, dict) or item.get("tombstoned"):
+            continue
+        data = item.get("data") if isinstance(item.get("data"), dict) else {}
+        number = _chapter_number(data.get("chapter_number"))
+        if number is not None:
+            target_stage_by_number[number] = data.get("stage_ref")
+        explicit = False
+        for value in data.values():
+            values = value if isinstance(value, list) else [value]
+            for entry in values:
+                if isinstance(entry, str) and entry.strip() and (
+                    entry.strip() in changed_refs or entry.strip() in changed_titles
+                ):
+                    explicit = True
+                    break
+            if explicit:
+                break
+        if explicit:
+            chapter_target_refs.add(ref)
+
+    # 同阶段后续章节骨架：编辑的章本身变化时，只扫同一活动阶段的后续章。
+    later_same_stage: set[int] = set()
+    for number in changed_chapters:
+        stage_ref = target_stage_by_number.get(number)
+        if not isinstance(stage_ref, str) or not stage_ref:
+            continue
+        for other_number, other_stage in target_stage_by_number.items():
+            if other_stage == stage_ref and other_number > number:
+                later_same_stage.add(other_number)
+
+    affected_future_refs = sorted(
+        neighbor_refs | trajectory_refs | storyline_refs | foreshadowing_refs | chapter_target_refs
+    )
+    planning_source_refs = sorted({
+        (objects[ref].get("data") or {}).get("planning_source_ref")
+        for ref in affected_future_refs
+        if ref in objects and isinstance(objects[ref], dict)
+        and isinstance((objects[ref].get("data") or {}).get("planning_source_ref"), str)
+    })
+    return {
+        "changed_object_refs": sorted(changed_refs),
+        "changed_chapter_numbers": sorted(changed_chapters),
+        "neighbor_object_refs": sorted(neighbor_refs),
+        "future_trajectory_refs": sorted(trajectory_refs),
+        "storyline_refs": sorted(storyline_refs),
+        "foreshadowing_refs": sorted(foreshadowing_refs),
+        "chapter_target_refs": sorted(chapter_target_refs),
+        "later_same_stage_chapter_numbers": sorted(later_same_stage),
+        "affected_future_refs": affected_future_refs,
+        "affected_planning_source_refs": planning_source_refs,
+    }
+
+
 def focused_task_context(
     project_id: str,
     *,

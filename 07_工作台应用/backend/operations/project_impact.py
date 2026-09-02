@@ -15,6 +15,7 @@ from typing import Any
 from operations.project_model import (  # existing v1 artifact contract; no writes
     ARTIFACT_NAME,
     ProjectModelError,
+    _read_json_text_retry,
     _validate_model,
 )
 from project_workspace import (  # formal-project resolution/loading only
@@ -52,7 +53,7 @@ def _load_read_only_project_model(project_id: str) -> dict[str, Any]:
     if not artifact.is_file():
         raise ProjectImpactError("项目尚未建立 Go Write project-model 工件。")
     try:
-        model = json.loads(artifact.read_text(encoding="utf-8"))
+        model = json.loads(_read_json_text_retry(artifact))
         return _validate_model(model, project_id)
     except (OSError, json.JSONDecodeError, ProjectModelError) as exc:
         raise ProjectImpactError(f"项目模型读取或校验失败：{exc}") from exc

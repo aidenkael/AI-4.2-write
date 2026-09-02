@@ -5,6 +5,14 @@ import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { useDevelopmentController } from '../features/development/useDevelopmentController'
 import { useProjectDataController } from '../features/projectData/useProjectDataController'
 import { PlanningStructure } from '../features/planning/PlanningStructure'
+import {
+  deferCandidatePayload,
+  impactRowText,
+  restoreCandidatePayload,
+  unresolvedImpactCandidates,
+  type StageTitleSource,
+} from '../features/planning/planningImpact'
+import { setPlanningImpactCandidateStatus } from '../bridge/client'
 
 /**
  * 大纲与规划：真实 StoryPlan 消费者（唯一自然语言规划入口）。
@@ -24,6 +32,39 @@ export function PlanningPage() {
   const c = useDevelopmentController({ projectId: selected?.project_id ?? null, notify: actions.notify })
   const projectData = useProjectDataController(selected?.project_id ?? null)
   const { state } = c
+  const impactViews = unresolvedImpactCandidates(projectData.data?.planning_impact_candidates)
+  const impactStages = (
+    (projectData.data?.length_plan as { stages?: Array<Record<string, unknown>> } | undefined)?.stages ?? []
+  ).map((stage) => ({
+    ref: typeof stage.ref === 'string' ? stage.ref : null,
+    title: typeof stage.title === 'string' ? stage.title : null,
+  })) as StageTitleSource[]
+
+  const deferCandidate = async (candidateId: string) => {
+    if (!selected) return
+    try {
+      await setPlanningImpactCandidateStatus(deferCandidatePayload(selected.project_id, candidateId))
+      await projectData.reload()
+    } catch (e) {
+      actions.notify(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const restoreCandidate = async (candidateId: string) => {
+    if (!selected) return
+    try {
+      await setPlanningImpactCandidateStatus(restoreCandidatePayload(selected.project_id, candidateId))
+      await projectData.reload()
+    } catch (e) {
+      actions.notify(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const replanImpact = (candidateId: string) => {
+    if (!selected || hasActiveTask) return
+    setAiOpen(true)
+    void c.generate({ planningMode: 'impact_replan', impactCandidateIds: [candidateId] })
+  }
   const questionInputRef = useRef<HTMLTextAreaElement>(null)
   const [aiOpen, setAiOpen] = useState(false)
   const hasActiveTask = state.status === 'running' || state.status === 'confirming' || state.status === 'waiting_confirmation'
@@ -63,6 +104,32 @@ export function PlanningPage() {
   return (
     <div className="planning-page">
       <PlanningStructure controller={projectData} />
+      {impactViews.length > 0 && (
+        <section className="panel planning-impact">
+          <h3>受影响的后续规划</h3>
+          <p className="muted-note">
+            这些只是“可能受影响”的提示：是否重新规划由你决定；「暂时保留」不改写任何规划。
+          </p>
+          <ul className="planning-impact-list">
+            {impactViews.map((view) => (
+              <li key={view.candidateId}>
+                <p>{impactRowText(view, impactStages)}</p>
+                {view.status === 'deferred' && <p className="muted-note">已暂缓，可随时恢复或发起重规划。</p>}
+                <div className="planning-entry-actions">
+                  <button className="primary" disabled={hasActiveTask} onClick={() => replanImpact(view.candidateId)}>
+                    <Sparkles /> 重新规划受影响内容
+                  </button>
+                  {view.status === 'deferred' ? (
+                    <button onClick={() => void restoreCandidate(view.candidateId)}><Clock3 /> 恢复待处理</button>
+                  ) : (
+                    <button onClick={() => void deferCandidate(view.candidateId)}><Clock3 /> 暂时保留</button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       <section className="panel planning-summary planning-ai-entry">
         <p className="muted-note">需要重新规划、细化走向或比较几个方向时，从这里发起一次 StoryPlan 候选。</p>
         <button onClick={() => setAiOpen(true)}><Sparkles /> 让 AI 帮我规划</button>

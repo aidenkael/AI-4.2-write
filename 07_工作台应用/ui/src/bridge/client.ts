@@ -68,6 +68,11 @@ export interface ProjectOverview {
     total: number
     items: Array<{ id?: string | null; title: string; kind: string; status: string }>
   }
+  /** 规划影响紧凑状态：只给计数，明细在大纲与规划页处理。 */
+  planning_impact?: {
+    pending_count: number
+    deferred_count: number
+  }
   primary_next_action?: 'foundation' | 'writing'
   settlement?: SettlementSummary
 }
@@ -83,7 +88,7 @@ const projectMutationMethods = new Set([
   'create_relationship', 'update_relationship', 'retire_relationship', 'restore_relationship',
   'set_length_plan', 'set_story_bible_profile', 'save_formal_prose', 'confirm_story_write',
   'confirm_story_plan', 'confirm_foundation_design', 'confirm_project_state_refresh',
-  'update_story_synopsis',
+  'update_story_synopsis', 'set_planning_impact_candidate_status',
 ])
 
 /**
@@ -460,10 +465,17 @@ export interface StoryPlanRequestStatus {
   error?: string | null
 }
 
-/** 一起往前想 → 按已保存 Settings 准备本轮任务（Interactive 等待 /gowrite；Direct 后台执行），返回 request_id。 */
+/** 一起往前想 → 按已保存 Settings 准备本轮任务（Interactive 等待 /gowrite；Direct 后台执行），返回 request_id。
+ *
+ * 结构化模式（可选）：planning_mode 与附带范围；impact_replan 必须携带精确的
+ * 影响候选 id，后端拒绝未知候选。
+ */
 export async function prepareStoryPlan(payload: {
   project_id: string
   author_question: string
+  planning_mode?: string
+  impact_candidate_ids?: string[]
+  replaces_plan_ids?: string[]
 }): Promise<PrepareStoryPlanResult> {
   return call<PrepareStoryPlanResult>('prepare_story_plan', payload)
 }
@@ -484,6 +496,21 @@ export async function confirmStoryPlan(payload: {
   planning_token: string
 }): Promise<ConfirmStoryPlanResult> {
   return call<ConfirmStoryPlanResult>('confirm_story_plan', payload)
+}
+
+export interface PlanningImpactStatusResult {
+  model_rev: number
+  planning_impact_candidates: Array<Record<string, unknown>>
+}
+
+/** 作者显式处置影响候选：暂时保留（deferred）/ 恢复待处理（pending_author）。
+ * 绝不自动重规划；重规划只走 prepareStoryPlan 的 impact_replan 显式路径。 */
+export async function setPlanningImpactCandidateStatus(payload: {
+  project_id: string
+  candidate_id: string
+  status: 'deferred' | 'pending_author'
+}): Promise<PlanningImpactStatusResult> {
+  return call<PlanningImpactStatusResult>('set_planning_impact_candidate_status', payload)
 }
 
 // ---------------- 正文写作（"这一段想写什么"纵切） ----------------

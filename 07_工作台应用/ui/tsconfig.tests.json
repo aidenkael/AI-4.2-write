@@ -23,6 +23,7 @@
     "src/features/foundation/relationSelectors.ts",
     "src/features/foundation/foundationDesignRelations.ts",
     "src/features/planning/planningFields.ts",
+    "src/features/planning/planningImpact.ts",
     "src/vite-env.d.ts",
     "src/tests/projectPageRuntimeHarness.tsx"
   ]

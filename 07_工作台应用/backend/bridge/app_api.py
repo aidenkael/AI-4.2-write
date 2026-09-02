@@ -35,6 +35,8 @@ from operations.project_data import ProjectDataError
 from operations import project_data as project_data_ops
 from operations.author_edit import AuthorEditError
 from operations import author_edit as author_edit_ops
+from operations.project_model import ProjectModelError
+from operations import project_model as project_model_ops
 from operations.change_settlement import ChangeSettlementError
 from operations import change_settlement as change_settlement_ops
 from operations.review import ReviewError
@@ -54,6 +56,7 @@ CODE_IDEAS_ERROR = "IDEAS_ERROR"
 CODE_MATERIALS_ERROR = "MATERIALS_ERROR"
 CODE_PROJECT_DATA_ERROR = "PROJECT_DATA_ERROR"
 CODE_AUTHOR_EDIT_ERROR = "AUTHOR_EDIT_ERROR"
+CODE_PLANNING_IMPACT_ERROR = "PLANNING_IMPACT_ERROR"
 CODE_CHANGE_SETTLEMENT_ERROR = "CHANGE_SETTLEMENT_ERROR"
 CODE_REVIEW_ERROR = "REVIEW_ERROR"
 CODE_BRIDGE_INTERNAL = "BRIDGE_INTERNAL"
@@ -309,12 +312,19 @@ class AppApi:
         """
         try:
             replaces = payload.get("replaces_plan_ids")
+            impact_ids = payload.get("impact_candidate_ids")
             data = story_planning_ops.prepare_story_plan(
                 project_id=str(payload.get("project_id") or ""),
                 author_question=str(payload.get("author_question") or ""),
                 replaces_plan_ids=(
                     [str(pid) for pid in replaces]
                     if isinstance(replaces, list) and replaces
+                    else None
+                ),
+                planning_mode=str(payload.get("planning_mode") or "free"),
+                impact_candidate_ids=(
+                    [str(cid) for cid in impact_ids]
+                    if isinstance(impact_ids, list) and impact_ids
                     else None
                 ),
             )
@@ -361,6 +371,31 @@ class AppApi:
             return _ok(data)
         except StoryPlanningError as exc:
             return _err(CODE_STORY_PLANNING_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
+    # ---------------- 规划影响候选（作者显式处置；绝不自动重规划） ----------------
+
+    def set_planning_impact_candidate_status(self, payload: dict) -> dict:
+        """作者显式处置一条影响候选：暂时保留（deferred）或重新待处理（pending_author）。
+
+        绝不标记旧规划为“正确”，绝不重写任何规划；重规划只走 prepare_story_plan
+        的 impact_replan 显式路径。
+        """
+        try:
+            model = project_model_ops.read_project_model(str(payload.get("project_id") or ""))
+            updated = project_model_ops.update_planning_impact_candidate(
+                str(payload.get("project_id") or ""),
+                base_model_rev=model["model_rev"],
+                candidate_id=str(payload.get("candidate_id") or ""),
+                status=str(payload.get("status") or ""),
+            )
+            return _ok({
+                "model_rev": updated["model_rev"],
+                "planning_impact_candidates": updated["planning_impact_candidates"],
+            })
+        except (ProjectModelError, TypeError, ValueError) as exc:
+            return _err(CODE_PLANNING_IMPACT_ERROR, str(exc))
         except Exception as exc:  # noqa: BLE001
             return _err(CODE_BRIDGE_INTERNAL, str(exc))
 

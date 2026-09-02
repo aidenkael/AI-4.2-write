@@ -15,6 +15,7 @@ import re
 import sys
 import tempfile
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable
@@ -72,13 +73,38 @@ def _atomic_write(path: Path, payload: bytes) -> None:
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(payload)
-        os.replace(tmp_name, path)
+        # Windows 上杀毒/索引可能瞬时占用刚写入的临时文件或目标文件；
+        # 短退避重试不影响原子性，避免并发线程下的偶发 EACCES。
+        last_exc: OSError | None = None
+        for attempt in range(6):
+            try:
+                os.replace(tmp_name, path)
+                last_exc = None
+                break
+            except PermissionError as exc:
+                last_exc = exc
+                time.sleep(0.02 * (attempt + 1))
+        if last_exc is not None:
+            raise last_exc
     except Exception:
         try:
             os.unlink(tmp_name)
         except OSError:
             pass
         raise
+
+
+def _read_json_file_retry(path: Path) -> str:
+    """带短退避重试的 JSON 文本读取：抵抗 Windows 瞬时文件占用。"""
+    last_exc: OSError | None = None
+    for attempt in range(6):
+        try:
+            return path.read_text(encoding="utf-8")
+        except PermissionError as exc:
+            last_exc = exc
+            time.sleep(0.02 * (attempt + 1))
+    assert last_exc is not None
+    raise last_exc
 
 
 def _json_bytes(value: dict[str, Any]) -> bytes:
@@ -107,7 +133,7 @@ def _read_changes(artifact: Path, project_id: str) -> dict[str, Any]:
     if not artifact.exists():
         return {"schema_version": SCHEMA_VERSION, "project_id": project_id, "sequence": 0, "changes": []}
     try:
-        value = json.loads(artifact.read_text(encoding="utf-8"))
+        value = json.loads(_read_json_file_retry(artifact))
     except (OSError, json.JSONDecodeError) as exc:
         raise AuthorEditError(f"作者变更记录读取失败：{exc}") from exc
     if (
@@ -409,6 +435,42 @@ def _perform_model_change(
         return _perform_model_change_locked(project_id, source_kind, action)
 
 
+_DEPENDENCY_HISTORY_KINDS = {
+    "dependency.created", "relationship.created", "dependency.updated",
+    "dependency.tombstoned", "dependency.semantic_patch", "dependency.restored",
+}
+
+
+def _obsolete_impact_candidates_for_change(
+    project_id: str,
+    model: dict[str, Any],
+    detail: dict[str, Any],
+) -> None:
+    """作者新编辑触及既有影响候选的源/受影响对象时确定性作废它们。
+
+    无匹配时静默；绝不因作废失败阻断作者编辑（候选仍是非权威提示）。
+    """
+    inner = detail.get("detail") if isinstance(detail.get("detail"), dict) else {}
+    ref = inner.get("ref")
+    touched: set[str] = set()
+    if detail.get("kind") in _DEPENDENCY_HISTORY_KINDS and isinstance(ref, str):
+        edge = model.get("dependencies", {}).get(ref)
+        if isinstance(edge, dict):
+            for endpoint in (edge.get("source_ref"), edge.get("target_ref")):
+                if isinstance(endpoint, str) and endpoint:
+                    touched.add(endpoint)
+    elif isinstance(ref, str) and ref:
+        touched.add(ref)
+    if not touched:
+        return
+    try:
+        project_model.obsolete_planning_impact_candidates(
+            project_id, base_model_rev=model["model_rev"], object_refs=sorted(touched),
+        )
+    except project_model.ProjectModelError:
+        pass
+
+
 def _perform_model_change_locked(
     project_id: str,
     source_kind: str,
@@ -433,6 +495,8 @@ def _perform_model_change_locked(
             requires_semantic=requires_semantic,
             source_model_rev=model.get("model_rev"),
         )
+        if detail:
+            _obsolete_impact_candidates_for_change(project_id, model, detail)
         return {"model": model, "change": change}
     except (
         project_model.ProjectModelError,
@@ -1062,6 +1126,15 @@ def _save_formal_prose_locked(
             changes_path, project_id, source_kind="manual_prose_edit", status="pending",
             delta=delta, requires_semantic=True,
         )
+        # 正文改写触及既有影响候选的章节时确定性作废（作者已直接处理）。
+        try:
+            project_model.obsolete_planning_impact_candidates(
+                project_id,
+                base_model_rev=project_model.read_project_model(project_id)["model_rev"],
+                chapter_numbers=[chapter_number],
+            )
+        except project_model.ProjectModelError:
+            pass
     except (OSError, AuthorEditError) as exc:
         try:
             _restore(chapter, chapter_before)

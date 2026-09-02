@@ -45,7 +45,7 @@ export interface DevelopmentControllerState {
 export interface DevelopmentController {
   state: DevelopmentControllerState
   setAuthorQuestion(input: string): void
-  generate(): Promise<void>
+  generate(options?: { planningMode?: string; impactCandidateIds?: string[] }): Promise<void>
   cancel(): Promise<void>
   discard(): Promise<void>
   regenerate(): Promise<void>
@@ -162,19 +162,30 @@ export function useDevelopmentController(options: {
     setLocalError(null)
   }, [])
 
-  const generate = useCallback(async () => {
+  const generate = useCallback(async (options?: { planningMode?: string; impactCandidateIds?: string[] }) => {
     const pid = projectRef.current
     const question = authorQuestion.trim()
+    const isImpactReplan = options?.planningMode === 'impact_replan'
     if (!pid) {
       setLocalError('请先选择正式作品。')
       return
     }
-    if (!question) {
+    if (!question && !isImpactReplan) {
       setLocalError('请先写下你想一起想的问题。')
       return
     }
+    if (isImpactReplan && !(options?.impactCandidateIds ?? []).length) {
+      setLocalError('重新规划受影响内容必须选择至少一个影响候选。')
+      return
+    }
     setAcceptedNote(false)
-    const busy = await start({ kind: 'story_plan', project_id: pid, author_question: question })
+    const busy = await start({
+      kind: 'story_plan',
+      project_id: pid,
+      author_question: question,
+      planning_mode: options?.planningMode,
+      impact_candidate_ids: options?.impactCandidateIds,
+    })
     if (busy) setLocalError(busy)
   }, [authorQuestion, start])
 
@@ -196,7 +207,6 @@ export function useDevelopmentController(options: {
     await cancelTask()
     await generate()
   }, [cancelTask, generate])
-
   const confirm = useCallback(async () => {
     const pid = projectRef.current
     if (!pid || !candidate) {

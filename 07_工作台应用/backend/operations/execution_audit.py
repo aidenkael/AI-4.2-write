@@ -68,6 +68,7 @@ EVENT_RETRIEVAL_SELECTED = "retrieval.selected"
 EVENT_CONTEXT_BOUND = "context.bound"
 EVENT_CANDIDATE_CREATED = "candidate.created"
 EVENT_AUTHORITY_CONFIRMED = "authority.confirmed"
+EVENT_IMPACT_CANDIDATES = "impact.candidates"
 
 STATUS_RUNNING = "running"
 STATUS_AWAITING_CONFIRMATION = "awaiting_confirmation"

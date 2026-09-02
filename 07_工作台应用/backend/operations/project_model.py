@@ -15,6 +15,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -286,13 +287,38 @@ def _atomic_write_json(path: Path, value: dict[str, Any]) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(payload)
-        os.replace(tmp_name, path)
+        # Windows 上杀毒/索引可能瞬时占用刚写入的临时文件或目标文件；
+        # 短退避重试不影响原子性，避免并发线程下的偶发 EACCES。
+        last_exc: OSError | None = None
+        for attempt in range(6):
+            try:
+                os.replace(tmp_name, path)
+                last_exc = None
+                break
+            except PermissionError as exc:
+                last_exc = exc
+                time.sleep(0.02 * (attempt + 1))
+        if last_exc is not None:
+            raise last_exc
     except Exception:
         try:
             os.unlink(tmp_name)
         except OSError:
             pass
         raise
+
+
+def _read_json_text_retry(path: Path) -> str:
+    """带短退避重试的文本读取：抵抗 Windows 瞬时文件占用。"""
+    last_exc: OSError | None = None
+    for attempt in range(6):
+        try:
+            return path.read_text(encoding="utf-8")
+        except PermissionError as exc:
+            last_exc = exc
+            time.sleep(0.02 * (attempt + 1))
+    assert last_exc is not None
+    raise last_exc
 
 
 def _validate_model(model: Any, project_id: str) -> dict[str, Any]:
@@ -435,6 +461,9 @@ def _validate_model(model: Any, project_id: str) -> dict[str, Any]:
     for candidate in model["planning_impact_candidates"]:
         if not isinstance(candidate, dict) or not isinstance(candidate.get("summary"), str):
             raise ProjectModelError("规划影响候选结构非法。")
+        status = candidate.get("status", "pending_author")
+        if status not in _IMPACT_CANDIDATE_STATUSES:
+            raise ProjectModelError("规划影响候选状态非法。")
     if model["ref_sequence"] < largest_sequence:
         raise ProjectModelError("项目模型 ref_sequence 落后于已有 ref，已拒绝潜在 ref 重用。")
     return model
@@ -448,7 +477,7 @@ def _load_or_initialize(project_id: str) -> tuple[dict[str, Any], Path]:
         _atomic_write_json(artifact, model)
         return model, artifact
     try:
-        model = json.loads(artifact.read_text(encoding="utf-8"))
+        model = json.loads(_read_json_text_retry(artifact))
     except (OSError, json.JSONDecodeError) as exc:
         raise ProjectModelError(f"项目模型读取失败：{exc}") from exc
     model, migrated = _migrate_model(model)
@@ -476,7 +505,7 @@ def read_project_model(project_id: str) -> dict[str, Any]:
     if not artifact.exists():
         return _initial_model(project_id)
     try:
-        model = json.loads(artifact.read_text(encoding="utf-8"))
+        model = json.loads(_read_json_text_retry(artifact))
     except (OSError, json.JSONDecodeError) as exc:
         raise ProjectModelError(f"项目模型读取失败：{exc}") from exc
     model, _migrated = _migrate_model(model)
@@ -1127,33 +1156,156 @@ def add_planning_impact_candidate(
     project_id: str,
     *,
     base_model_rev: int,
-    chapter_number: int,
     summary: str,
+    chapter_number: int | None = None,
     affected_refs: list[str] | None = None,
-    source_change_id: str,
+    source_change_id: str | None = None,
+    source_change_ids: list[str] | None = None,
+    affected_chapter_numbers: list[int] | None = None,
+    affected_stage_refs: list[str] | None = None,
+    affected_planning_source_refs: list[str] | None = None,
+    source_refs: list[str] | None = None,
+    created_from_refresh_id: str | None = None,
 ) -> dict[str, Any]:
-    """Record a non-authoritative impact candidate without rewriting planning."""
+    """Record a non-authoritative impact candidate without rewriting planning.
+
+    候选只是“可能受影响”的作者可读提示，不是规划权威；生命周期：
+    pending_author → deferred / in_replan → resolved / obsolete。
+    """
     if not isinstance(summary, str) or not summary.strip():
         raise ProjectModelError("规划影响候选 summary 不能为空。")
-    if not isinstance(chapter_number, int) or chapter_number < 1:
+    if chapter_number is not None and (
+        not isinstance(chapter_number, int) or isinstance(chapter_number, bool) or chapter_number < 1
+    ):
         raise ProjectModelError("规划影响候选 chapter_number 非法。")
-    refs = affected_refs or []
-    if not isinstance(refs, list) or any(not isinstance(ref, str) for ref in refs):
-        raise ProjectModelError("规划影响候选 affected_refs 非法。")
+    if source_change_id is None and not source_change_ids:
+        raise ProjectModelError("规划影响候选必须绑定至少一条源变更。")
+    ids = list(dict.fromkeys(
+        [*(source_change_ids or []), *([source_change_id] if source_change_id else [])]
+    ))
+    if any(not isinstance(item, str) or not item.strip() for item in ids):
+        raise ProjectModelError("规划影响候选 source_change_ids 非法。")
+
+    def _int_list(value: Any, name: str) -> list[int]:
+        items = value or []
+        if not isinstance(items, list) or any(
+            not isinstance(item, int) or isinstance(item, bool) or item < 1 for item in items
+        ):
+            raise ProjectModelError(f"规划影响候选 {name} 非法。")
+        return sorted(set(items))
+
+    def _str_list(value: Any, name: str) -> list[str]:
+        items = value or []
+        if not isinstance(items, list) or any(
+            not isinstance(item, str) or not item.strip() for item in items
+        ):
+            raise ProjectModelError(f"规划影响候选 {name} 非法。")
+        return list(dict.fromkeys(item.strip() for item in items))
+
+    refs = _str_list(affected_refs, "affected_refs")
+    chapters = _int_list(affected_chapter_numbers, "affected_chapter_numbers")
+    if chapter_number is not None and chapter_number not in chapters:
+        chapters = sorted(set(chapters) | {chapter_number})
+    stages = _str_list(affected_stage_refs, "affected_stage_refs")
+    planning_sources = _str_list(affected_planning_source_refs, "affected_planning_source_refs")
+    source_refs = _str_list(source_refs, "source_refs")
 
     def mutate(model: dict[str, Any], next_rev: int) -> dict[str, Any]:
         candidate = {
             "candidate_id": f"planning-impact-{next_rev:08d}",
-            "chapter_number": chapter_number,
             "summary": summary.strip(),
-            "affected_refs": list(dict.fromkeys(refs)),
-            "source_change_id": source_change_id,
+            "source_change_ids": ids,
+            "source_refs": source_refs,
+            "affected_refs": refs,
+            "affected_chapter_numbers": chapters,
+            "affected_stage_refs": stages,
+            "affected_planning_source_refs": planning_sources,
             "status": "pending_author",
         }
+        if chapter_number is not None:
+            candidate["chapter_number"] = chapter_number
+        if isinstance(created_from_refresh_id, str) and created_from_refresh_id.strip():
+            candidate["created_from_refresh_id"] = created_from_refresh_id.strip()
         model["planning_impact_candidates"].append(candidate)
         return {"action": "planning_impact_candidate.added", "candidate_id": candidate["candidate_id"]}
 
     return _commit(project_id, base_model_rev, "planning_impact_candidate.added", mutate)
+
+
+_IMPACT_CANDIDATE_STATUSES = frozenset({
+    "pending_author", "deferred", "in_replan", "resolved", "obsolete",
+})
+_IMPACT_TERMINAL_STATUSES = frozenset({"resolved", "obsolete"})
+
+
+def update_planning_impact_candidate(
+    project_id: str,
+    *,
+    base_model_rev: int,
+    candidate_id: str,
+    status: str,
+) -> dict[str, Any]:
+    """作者显式转换一条影响候选的状态；终态不可再变。"""
+    if status not in _IMPACT_CANDIDATE_STATUSES:
+        raise ProjectModelError("规划影响候选目标状态非法。")
+    if not isinstance(candidate_id, str) or not candidate_id.strip():
+        raise ProjectModelError("缺少 candidate_id。")
+
+    def mutate(model: dict[str, Any], _next_rev: int) -> dict[str, Any]:
+        for candidate in model["planning_impact_candidates"]:
+            if candidate.get("candidate_id") != candidate_id.strip():
+                continue
+            current = candidate.get("status", "pending_author")
+            if current in _IMPACT_TERMINAL_STATUSES:
+                raise ProjectModelError("该影响候选已结束，不能再变更状态。")
+            if current == status:
+                raise ProjectModelError("影响候选状态没有实际变化。")
+            before = current
+            candidate["status"] = status
+            return {
+                "action": "planning_impact_candidate.status", "candidate_id": candidate_id,
+                "before": before, "after": status,
+            }
+        raise ProjectModelError("影响候选不存在或不属于当前作品。")
+
+    return _commit(project_id, base_model_rev, "planning_impact_candidate.status", mutate)
+
+
+def obsolete_planning_impact_candidates(
+    project_id: str,
+    *,
+    base_model_rev: int,
+    object_refs: list[str] | None = None,
+    chapter_numbers: list[int] | None = None,
+) -> dict[str, Any]:
+    """确定性作废：作者新编辑已触及候选的源/受影响对象或章节时。
+
+    只处理 pending_author / deferred；无任何匹配时抛错（调用方据此跳过提交）。
+    """
+    touched_refs = {ref for ref in (object_refs or []) if isinstance(ref, str) and ref}
+    touched_chapters = {
+        number for number in (chapter_numbers or [])
+        if isinstance(number, int) and not isinstance(number, bool) and number > 0
+    }
+    if not touched_refs and not touched_chapters:
+        raise ProjectModelError("缺少用于作废影响候选的触发事实。")
+
+    def mutate(model: dict[str, Any], _next_rev: int) -> dict[str, Any]:
+        obsoleted: list[str] = []
+        for candidate in model["planning_impact_candidates"]:
+            if candidate.get("status", "pending_author") not in {"pending_author", "deferred"}:
+                continue
+            hit = bool(touched_refs & (
+                set(candidate.get("source_refs") or []) | set(candidate.get("affected_refs") or [])
+            )) or bool(touched_chapters & set(candidate.get("affected_chapter_numbers") or []))
+            if hit:
+                candidate["status"] = "obsolete"
+                obsoleted.append(candidate.get("candidate_id") or "")
+        if not obsoleted:
+            raise ProjectModelError("没有需要作废的影响候选。")
+        return {"action": "planning_impact_candidate.obsoleted", "candidate_ids": obsoleted}
+
+    return _commit(project_id, base_model_rev, "planning_impact_candidate.status", mutate)
 
 
 def set_length_plan(

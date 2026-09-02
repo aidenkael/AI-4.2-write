@@ -121,6 +121,24 @@ def get_project_overview(project_id: str) -> dict:
         "items": [item for item in open_items if item.get("title")][:5],
     }
 
+    # 规划影响紧凑状态：概览只给计数，明细在大纲与规划页处理。
+    impact_candidates = [
+        candidate for candidate in snapshot.get("planning_impact_candidates", [])
+        if isinstance(candidate, dict)
+    ]
+    pending_impact = sum(
+        1 for candidate in impact_candidates
+        if candidate.get("status", "pending_author") in {"pending_author", "in_replan"}
+    )
+    deferred_impact = sum(
+        1 for candidate in impact_candidates if candidate.get("status") == "deferred"
+    )
+    if pending_impact or deferred_impact:
+        overview["planning_impact"] = {
+            "pending_count": pending_impact,
+            "deferred_count": deferred_impact,
+        }
+
     foundation_sections = (
         "characters", "relationships", "settings", "locations", "organizations",
         "systems", "events", "open_threads", "foreshadowing", "storylines", "mystery_information",
