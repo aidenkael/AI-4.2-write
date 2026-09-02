@@ -87,6 +87,45 @@ def _load_ledger(catalog: Any) -> dict[str, Any]:
         raise MaterialsError(str(exc)) from exc
 
 
+def _bkp_acceptance_view(a: dict[str, Any]) -> str | None:
+    """BKP 全书验收的真实作者面状态（确定性读 identity.json，零模型）。
+
+    返回：None（无 BKP / 旧版 v0.1、v0.2 包，不要求验收）；
+    "ready"（BKP 可检索）/ "review"（需要复核）/ "pending"（未完成全书验收）。
+    """
+    asset_id = str(a.get("id") or "").strip()
+    if not asset_id:
+        return None
+    distill_root = get_repo_root() / "02_素材知识库"
+    if not distill_root.exists():
+        return None
+    asset_dir = next(
+        (entry for entry in sorted(distill_root.iterdir())
+         if entry.is_dir() and entry.name.startswith(f"{asset_id}_")),
+        None,
+    )
+    if asset_dir is None:
+        return None
+    try:
+        identity = json.loads((asset_dir / "bkp" / "identity.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    acceptance = identity.get("acceptance")
+    if not isinstance(acceptance, dict) or not acceptance.get("required"):
+        return None  # 旧协议包：不要求全书验收，保持原有可检索语义。
+    status = acceptance.get("status")
+    if status == "PASS":
+        return "ready"
+    return "review" if status == "REVIEW" else "pending"
+
+
+_BKP_ACCEPTANCE_LABELS = {
+    "ready": "BKP 可检索",
+    "review": "需要复核",
+    "pending": "未完成全书验收",
+}
+
+
 def _classify_author_group(a: dict[str, Any]) -> dict[str, Any]:
     """把后端 catalog/type/status 机器事实映射为作者可读的分类。
 
@@ -103,9 +142,27 @@ def _classify_author_group(a: dict[str, Any]) -> dict[str, Any]:
     pur = (a.get("purification") or {}).get("status") or "未处理"
     know = (a.get("knowledge") or {}).get("status") or "未开始"
     if know == "可用":
+        view = _bkp_acceptance_view(a)
+        if view == "review":
+            return {
+                "author_group": "usable",
+                "writing_callable": False,
+                "bkp_acceptance": _BKP_ACCEPTANCE_LABELS["review"],
+                "why": "BKP 已蒸馏但未通过全书验收（REVIEW），通过复核前不可被写作检索。",
+                "next_step": "离线完成全书综合审计与复核，验收通过后自动恢复可检索。",
+            }
+        if view == "pending":
+            return {
+                "author_group": "usable",
+                "writing_callable": False,
+                "bkp_acceptance": _BKP_ACCEPTANCE_LABELS["pending"],
+                "why": "BKP 已蒸馏但尚未完成全书验收审计，暂不可被写作检索。",
+                "next_step": "离线执行全书综合审计（BKP_ACCEPTANCE_REPORT.md）并通过验收校验。",
+            }
         return {
             "author_group": "usable",
             "writing_callable": True,
+            "bkp_acceptance": _BKP_ACCEPTANCE_LABELS["ready"] if view == "ready" else None,
             "why": "已提炼出可用的写作知识包，写作/规划/检查时可按需检索调用。",
             "next_step": "无需操作；需要时由知识检索按需使用。",
         }
@@ -146,6 +203,7 @@ def list_materials() -> dict[str, Any]:
             "notes": a.get("notes") or "",
             "purification_status": (a.get("purification") or {}).get("status") or "未处理",
             "knowledge_status": (a.get("knowledge") or {}).get("status") or "未开始",
+            "bkp_acceptance": classified.get("bkp_acceptance"),
             "file_count": len(a.get("files") or []),
             **classified,
         })
@@ -1586,6 +1644,7 @@ def get_material_detail(asset_id: str) -> dict[str, Any]:
         "name": asset.get("name") or "",
         "type": asset.get("type") or "",
         "writing_callable": classified["writing_callable"],
+        "bkp_acceptance": classified.get("bkp_acceptance"),
         "why": classified["why"],
         "next_step": classified["next_step"],
         "stage": stage,

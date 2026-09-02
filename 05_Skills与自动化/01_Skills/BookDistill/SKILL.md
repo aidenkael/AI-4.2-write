@@ -151,7 +151,18 @@ Apodictic 式镜头用于诊断和发现，不自动覆盖为普遍写作规则�
     读取 `bkp_prototype/`（人工验证的知识层），校验身份/源指纹、v0.2 cards 的调用字段、
     类型边界、引用可追溯与条目计数后，封装正式 BKP 到 `bkp/`；
     重跑不覆盖被人工修改的 curated 文件（仅告警保留）。
-13. 作者审阅产物。
+13. **全书综合验收（新协议必过门；旧版 v0.1/v0.2 BKP 不追溯）**：在声明 BKP 可检索之前，
+    对全部章节 discovery 证据 + `model.md` + `mechanisms.md` + `book_profile.md` + 实际做过的
+    Deep Dive + `bkp/knowledge/cards.md` 执行一次显式全书综合审计，回答：
+    哪些作品级/弧级/跨尺度机制实质解释了这本书？它们对 story_design / longform_plan /
+    chapter_plan / scene_write / review / revise 哪些调用有用？每条重要的、有证据支持的发现是否成为
+    canonical 卡？若没有，是否因过局部/过弱/冗余/未证实/不可复用而显式排除？
+    不设固定卡数或固定类型维度；实际作品决定相关性。审计结果写入资产根目录的
+    `BKP_ACCEPTANCE_REPORT.md`（含结构化 `acceptance_data` JSON 块，字段合同见 `BKP_protocol.md` §5），
+    然后运行 `python scripts/acceptance_gate.py <asset_dir> --write-identity`：
+    全部机械校验通过且状态为 PASS 时才会把 `acceptance` 块写入 `bkp/identity.json`；
+    REVIEW 或校验失败的包不可被 KnowledgeRetrieve 检索。
+14. 作者审阅产物。
 
 ## 运行方式
 
@@ -162,6 +173,7 @@ python scripts/book_distill.py assemble --input "06_工作区/SourcePrepare/<boo
 python scripts/book_distill.py profile  --output "02_素材知识库/<book_id>_<书名>"
 python scripts/book_distill.py deepdive --output "02_素材知识库/<book_id>_<书名>" --dimension "人物" --input "06_工作区/SourcePrepare/<book_id>_<书名>"
 python scripts/book_distill.py bkp      --output "02_素材知识库/<book_id>_<书名>"  # 默认读取 <output>/bkp_prototype
+python scripts/acceptance_gate.py "02_素材知识库/<book_id>_<书名>" --write-identity  # 全书验收门（新协议必过）
 ```
 
 测试：
@@ -172,10 +184,11 @@ python -m unittest discover -s tests -p "test_*.py"
 
 ## Finalized Settlement（Phase 2B2 / 2B2.1）
 
-**只在 BKP FINALIZED 且全部验证通过后，对当前作品执行一次 settlement**（收尾动作，不重复执行）：
+**只在 BKP FINALIZED、全部验证通过且全书验收门为 PASS 后，对当前作品执行一次 settlement**（收尾动作，不重复执行）：
 
 1. **Mandatory Preflight**（不满足则 STOP，保留现场）：
    - `bkp/identity.json` 的 `schema_status == "FINALIZED"`，且 `bkp/knowledge/cards.md` 存在；
+   - 新协议包必须已有 `acceptance.status == "PASS"`（`acceptance_gate.py` 校验通过后写入）；
    - 本作品全部验证通过（validate / assemble / bkp 校验无未处理告警）；
    - git `precheck`：`fetch` 成功、`branch == main`、`HEAD == origin/main`、porcelain 空（MaterialIntake `post_action.precheck`）。
 2. 执行 settlement：

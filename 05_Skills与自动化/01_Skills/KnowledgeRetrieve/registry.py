@@ -2,6 +2,9 @@
 
 三类来源（确定性发现，无模型、无向量库）：
 - reference provider:  02_素材知识库/*/bkp/identity.json（参考作品 BKP；保持现有布局）
+                       新协议包（identity.acceptance.required=true）必须验收状态为
+                       PASS 才可检索；REVIEW/非法一律排除。旧版 v0.1/v0.2 BKP 没有
+                       acceptance 块，保持原有可检索行为（向后兼容）。
 - method provider:     02_素材知识库/*/method/identity.json
                        仅 schema_version=gowrite_method_knowledge/v1 且
                        schema_status=FINALIZED_RETRIEVAL_READY 的方法知识包可检索
@@ -26,6 +29,10 @@ def _read_identity(path: Path) -> dict | None:
 
 
 def _reference_source(bkp_dir: Path, identity: dict) -> dict | None:
+    acceptance = identity.get("acceptance")
+    if isinstance(acceptance, dict) and acceptance.get("required"):
+        if acceptance.get("status") != "PASS":
+            return None  # 新协议包未完成全书验收（REVIEW/非法）不可检索。
     try:
         return {
             "source_kind": "reference_bkp",

@@ -358,5 +358,74 @@ class KnowledgeRetrieveInsufficientTest(unittest.TestCase):
                 retrieve_run.CATALOG = None
 
 
+class BkpAcceptanceGateTest(unittest.TestCase):
+    """新协议 BKP 全书验收门：required 包必须 PASS 才可检索；旧版兼容不变。"""
+
+    def _build_reference_fixture(self, root: Path, acceptance: dict | None, book_id="book_9101"):
+        bkp = root / "02_素材知识库" / f"{book_id}_验收测试" / "bkp"
+        bkp.mkdir(parents=True)
+        identity = {
+            "bkp_version": "0.2",
+            "book": {"book_id": book_id, "title": "验收测试", "author": "作者",
+                     "category": "", "language": "zh-CN", "chapter_count": 1},
+            "source_snapshot": {"book_id": book_id, "source_sha256": "a" * 64},
+            "schema_status": "FINALIZED",
+            "bkp_contents": {"cards": {"file": "knowledge/cards.md"}},
+        }
+        if acceptance is not None:
+            identity["acceptance"] = acceptance
+        (bkp / "identity.json").write_text(json.dumps(identity, ensure_ascii=False), encoding="utf-8")
+        (bkp / "knowledge").mkdir()
+        (bkp / "knowledge" / "cards.md").write_text(CARD, encoding="utf-8")
+        return root
+
+    def _reference_ids(self, root: Path):
+        return [
+            s["source_id"] for s in discover_sources(str(root))
+            if s["source_kind"] == "reference_bkp"
+        ]
+
+    def test_new_protocol_pass_package_is_searchable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._build_reference_fixture(
+                Path(tmp), {"schema": "gowrite_bkp_acceptance/v1", "required": True, "status": "PASS"},
+            )
+            self.assertEqual(self._reference_ids(root), ["book_9101"])
+
+    def test_new_protocol_review_package_is_excluded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._build_reference_fixture(
+                Path(tmp), {"schema": "gowrite_bkp_acceptance/v1", "required": True, "status": "REVIEW"},
+            )
+            self.assertEqual(self._reference_ids(root), [])
+
+    def test_new_protocol_invalid_status_is_excluded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._build_reference_fixture(
+                Path(tmp), {"schema": "gowrite_bkp_acceptance/v1", "required": True, "status": "PENDING"},
+            )
+            self.assertEqual(self._reference_ids(root), [])
+
+    def test_legacy_v02_package_without_acceptance_stays_searchable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._build_reference_fixture(Path(tmp), None)
+            self.assertEqual(self._reference_ids(root), ["book_9101"])
+
+    def test_acceptance_gate_retrieve_end_to_end(self):
+        """REVIEW 包在完整 retrieve 链路上也不得进入候选（不产生假命中）。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._build_reference_fixture(
+                Path(tmp), {"schema": "gowrite_bkp_acceptance/v1", "required": True, "status": "REVIEW"},
+            )
+            retrieve_run.BASE_DIR = str(root)
+            retrieve_run.CATALOG = None
+            try:
+                pkg = retrieve_run.retrieve("危机后保留新债", top_k=5)
+                self.assertEqual(pkg.status, "INSUFFICIENT_KNOWLEDGE")
+            finally:
+                retrieve_run.BASE_DIR = str(Path(__file__).resolve().parents[3])
+                retrieve_run.CATALOG = None
+
+
 if __name__ == "__main__":
     unittest.main()
