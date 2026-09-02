@@ -476,6 +476,8 @@ export async function prepareStoryPlan(payload: {
   planning_mode?: string
   impact_candidate_ids?: string[]
   replaces_plan_ids?: string[]
+  stage_ref?: string
+  chapter_range?: number[]
 }): Promise<PrepareStoryPlanResult> {
   return call<PrepareStoryPlanResult>('prepare_story_plan', payload)
 }

@@ -94,6 +94,8 @@ export type TaskPayload =
       author_question: string
       planning_mode?: string
       impact_candidate_ids?: string[]
+      stage_ref?: string
+      chapter_range?: number[]
     }
   | { kind: 'story_write'; project_id: string; author_input: string; chapter_number?: number }
   | { kind: 'review'; project_id: string; chapter_number?: number }
@@ -338,6 +340,8 @@ export function AuthorTaskCoordinatorProvider({ children }: { children: ReactNod
               author_question: payload.author_question,
               planning_mode: payload.planning_mode,
               impact_candidate_ids: payload.impact_candidate_ids,
+              stage_ref: payload.stage_ref,
+              chapter_range: payload.chapter_range,
             })
             break
           case 'story_write':

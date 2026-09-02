@@ -770,7 +770,7 @@ def _propose_with_agent(project_id, agent_json, write_response, author_question=
 
 def _propose_with_snapshot(project_id, knowledge_needs, selected_knowledge_refs, package,
                            write_response, monkeypatch, package_ref=None,
-                           author_question="往前想"):
+                           author_question="往前想", planning_mode="free"):
     """完整知识闭环：prepare → Agent 侧"唯一一次检索调用"（写请求级快照）→
     Agent 响应（选择 + 回显包指纹）→ finalize（读快照，零检索）。
 
@@ -785,7 +785,9 @@ def _propose_with_snapshot(project_id, knowledge_needs, selected_knowledge_refs,
 
     monkeypatch.setattr(sp_ops, "_retrieve_package", _retrieve)
 
-    prepare_result = sp_ops.prepare_story_plan(project_id=project_id, author_question=author_question)
+    prepare_result = sp_ops.prepare_story_plan(
+        project_id=project_id, author_question=author_question, planning_mode=planning_mode,
+    )
     request_id = prepare_result["request_id"]
 
     query = "；".join(knowledge_needs)
@@ -2284,3 +2286,61 @@ def test_trajectory_with_unknown_target_fails_closed(isolated, real_project, fak
     with pytest.raises(sp_ops.StoryPlanningError, match="写入规划失败"):
         sp_ops.confirm_story_plan(project_id=pid, planning_token=result["planning_token"])
     assert get_project_snapshot(pid)["future_trajectories"] == []
+
+
+# ---------------------------------------------------------------------------
+# 检查点 3：分层规划知识策略（book 模式多来源组合 + 需求数上限）
+# ---------------------------------------------------------------------------
+
+def test_book_plan_can_combine_cards_from_different_sources(isolated, real_project, fake_agent, monkeypatch):
+    """全书规划可以从同一混合包中组合参考作品与方法知识（仍只一次检索）。"""
+    package = _fake_package([
+        _fake_hit("book_a", "K001", "参考卡：长线结构", rank=1, source_kind="reference_bkp"),
+        _fake_hit("book_0138", "M0003", "方法卡：阶段升级节奏", rank=2, source_kind="method_source"),
+    ])
+    get_result, calls, request_id = _propose_with_snapshot(
+        real_project["project_id"],
+        ["全书结构", "人物关系演变"],
+        ["reference_bkp/book_a/K001", "method_source/book_0138/M0003"],
+        package, fake_agent, monkeypatch,
+        author_question="规划全书", planning_mode="book",
+    )
+    assert get_result["status"] == "completed", get_result.get("error")
+    assert calls == ["全书结构；人物关系演变"], "多需求仍合并为一次确定性检索"
+    context = _read_context(real_project["project_id"], isolated.parent / ".planning")
+    sources = {h["source_kind"] for h in context["selected_knowledge_hits"]}
+    assert sources == {"reference_bkp", "method_source"}, "book 规划可组合不同来源的知识卡"
+    assert request_id
+
+
+def test_book_mode_rejects_over_knowledge_need_cap(isolated, real_project, fake_agent):
+    """book 模式超过 4 个知识需求 → finalize fail closed。"""
+    agent_json = json.dumps({
+        "semantic_interpretation": {
+            "objective": "超限需求。",
+            "knowledge_needs": ["需求一", "需求二", "需求三", "需求四", "需求五"],
+            "selected_knowledge_refs": [],
+            "package_ref": "",
+            "assumptions": [],
+            "deliberate_open_space": [],
+        },
+        "planning_target": {"description": "全书"},
+        "model_output": {"proposal": "候选。", "planning_items": [{"description": "条目"}]},
+    }, ensure_ascii=False)
+    prepare = sp_ops.prepare_story_plan(
+        real_project["project_id"], "规划全书", planning_mode="book",
+    )
+    fake_agent(prepare["request_id"], output=agent_json)
+    got = sp_ops.get_story_plan_request(request_id=prepare["request_id"])
+    assert got["status"] == "failed"
+    assert "知识需求" in got["error"]
+
+
+def test_free_mode_still_works_after_modes_added(isolated, real_project, fake_agent):
+    """既有自由规划路径不受分层模式影响。"""
+    result = _propose(real_project["project_id"], "自由规划一下", fake_agent)
+    assert result["status"] == "proposal_noncanonical"
+    confirmed = sp_ops.confirm_story_plan(
+        project_id=real_project["project_id"], planning_token=result["planning_token"],
+    )
+    assert confirmed["message"] == "规划已确认并写入"

@@ -12,6 +12,13 @@ import {
   unresolvedImpactCandidates,
   type StageTitleSource,
 } from '../features/planning/planningImpact'
+import {
+  defaultNearTermRange,
+  planningActionPayload,
+  stageOptionsFromLengthPlan,
+  validateNearTermRange,
+  type PlanningMode,
+} from '../features/planning/planningModes'
 import { setPlanningImpactCandidateStatus } from '../bridge/client'
 
 /**
@@ -64,6 +71,43 @@ export function PlanningPage() {
     if (!selected || hasActiveTask) return
     setAiOpen(true)
     void c.generate({ planningMode: 'impact_replan', impactCandidateIds: [candidateId] })
+  }
+
+  // 分层规划入口：同一 StoryPlan 操作的结构化范围（全书 / 卷阶段 / 近期细化 / 自由）。
+  const stageOptions = stageOptionsFromLengthPlan(
+    (projectData.data?.length_plan as { stages?: Array<Record<string, unknown>> } | undefined)?.stages,
+  )
+  const currentChapter = Math.max(
+    1,
+    ...(projectData.data?.chapters ?? []).map((chapter) => chapter.chapter_number),
+  )
+  const [selectedStageRef, setSelectedStageRef] = useState('')
+  const [nearRange, setNearRange] = useState<[number, number]>(() => defaultNearTermRange(1))
+  const nearRangeInitializedRef = useRef(false)
+  useEffect(() => {
+    if (nearRangeInitializedRef.current || !projectData.data) return
+    nearRangeInitializedRef.current = true
+    setNearRange(defaultNearTermRange(currentChapter))
+  }, [projectData.data, currentChapter])
+  const nearError = validateNearTermRange(nearRange[0], nearRange[1])
+
+  const startStructured = (mode: PlanningMode) => {
+    if (!selected || hasActiveTask) return
+    const { payload, error } = planningActionPayload(selected.project_id, {
+      mode,
+      stageRef: selectedStageRef || undefined,
+      chapterRange: nearRange,
+    })
+    if (error || !payload) {
+      actions.notify(error || '规划范围非法。')
+      return
+    }
+    setAiOpen(true)
+    void c.generate({
+      planningMode: mode,
+      stageRef: payload.stage_ref,
+      chapterRange: payload.chapter_range,
+    })
   }
   const questionInputRef = useRef<HTMLTextAreaElement>(null)
   const [aiOpen, setAiOpen] = useState(false)
@@ -131,8 +175,33 @@ export function PlanningPage() {
         </section>
       )}
       <section className="panel planning-summary planning-ai-entry">
-        <p className="muted-note">需要重新规划、细化走向或比较几个方向时，从这里发起一次 StoryPlan 候选。</p>
-        <button onClick={() => setAiOpen(true)}><Sparkles /> 让 AI 帮我规划</button>
+        <p className="muted-note">选择一个规划范围；候选未经你确认不会写入正式作品。</p>
+        <div className="planning-entry-actions">
+          <button disabled={hasActiveTask} onClick={() => startStructured('book')}><Sparkles /> 规划全书</button>
+          <label>
+            卷/阶段
+            <select value={selectedStageRef} onChange={(event) => setSelectedStageRef(event.target.value)}>
+              <option value="">{stageOptions.length ? '选择卷/阶段' : '尚未建立卷/阶段'}</option>
+              {stageOptions.map((option) => <option key={option.ref} value={option.ref}>{option.title}</option>)}
+            </select>
+          </label>
+          <button disabled={hasActiveTask || !selectedStageRef} onClick={() => startStructured('stage')}><Sparkles /> 规划本卷 / 阶段</button>
+          <label>
+            近期章节
+            <input
+              type="number" min={1} value={nearRange[0]}
+              onChange={(event) => setNearRange([Number(event.target.value), nearRange[1]])}
+            />
+            –
+            <input
+              type="number" min={1} value={nearRange[1]}
+              onChange={(event) => setNearRange([nearRange[0], Number(event.target.value)])}
+            />
+          </label>
+          <button disabled={hasActiveTask || !!nearError} onClick={() => startStructured('near_term')}><Sparkles /> 细化近期章节</button>
+          <button onClick={() => setAiOpen(true)}><WandSparkles /> 自由规划</button>
+        </div>
+        {nearError && <p className="error-text">{nearError}</p>}
       </section>
 
       {aiDetailVisible && (

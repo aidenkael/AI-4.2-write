@@ -600,6 +600,68 @@ def _get_active_planning_sources(state: dict[str, Any]) -> list[dict[str, Any]]:
 
 PLANNING_MODES = frozenset({"free", "book", "stage", "near_term", "impact_replan"})
 
+# 分层长篇规划的知识策略硬上限（确定性、可测试；0 检索/0 选择始终合法）。
+_MODE_MAX_KNOWLEDGE_NEEDS = {"book": 4, "stage": 4}
+_MAX_KNOWLEDGE_NEEDS_DEFAULT = 4
+_MAX_SELECTED_KNOWLEDGE_REFS = 8
+# 近期细化的章节范围硬上限：有界、作者可见。
+_NEAR_TERM_MAX_SPAN = 12
+
+
+def _validate_mode_knowledge(
+    planning_mode: str,
+    knowledge_needs: list[str],
+    selected_refs: list[str],
+) -> None:
+    """book/stage 允许把真实问题分解为少量知识需求；任何模式都不得超限选择。"""
+    limit = _MODE_MAX_KNOWLEDGE_NEEDS.get(planning_mode, _MAX_KNOWLEDGE_NEEDS_DEFAULT)
+    if len(knowledge_needs) > limit:
+        raise StoryPlanningError(
+            f"本次规划声明了 {len(knowledge_needs)} 个知识需求，超过上限 {limit}；请合并或精简后重试。"
+        )
+    if len(selected_refs) > _MAX_SELECTED_KNOWLEDGE_REFS:
+        raise StoryPlanningError(
+            f"本次规划选择了 {len(selected_refs)} 条知识，超过上限 {_MAX_SELECTED_KNOWLEDGE_REFS}；已拒绝。"
+        )
+
+
+def validate_near_term_range(chapter_range: Any) -> tuple[int, int]:
+    """近期细化范围必须显式、有界、作者可见。"""
+    if (
+        not isinstance(chapter_range, list) or len(chapter_range) != 2
+        or any(not isinstance(n, int) or isinstance(n, bool) or n < 1 for n in chapter_range)
+    ):
+        raise StoryPlanningError("细化近期章节必须提供 [起始章, 结束章]（正整数）。")
+    start, end = int(chapter_range[0]), int(chapter_range[1])
+    if end < start:
+        raise StoryPlanningError("细化范围的结束章不能早于起始章。")
+    if end - start + 1 > _NEAR_TERM_MAX_SPAN:
+        raise StoryPlanningError(f"单次细化范围不得超过 {_NEAR_TERM_MAX_SPAN} 章；请缩小范围后重试。")
+    return start, end
+
+
+def resolve_stage_binding(project_id: str, stage_ref: str) -> dict[str, Any]:
+    """把规划范围绑定到真实存在的活动卷/阶段（绝不按标题推断）。"""
+    stage_ref = (stage_ref or "").strip()
+    if not stage_ref:
+        raise StoryPlanningError("规划本卷/阶段必须选择一个真实阶段。")
+    model = project_model_ops.read_project_model(project_id)
+    plan = model.get("length_plan", {})
+    if stage_ref not in (plan.get("stage_refs") or []):
+        raise StoryPlanningError("所选阶段不存在或已退役；请刷新后重试。")
+    stage = model.get("objects", {}).get(stage_ref)
+    if not isinstance(stage, dict) or stage.get("tombstoned") or stage.get("kind") != "length_stage":
+        raise StoryPlanningError("所选阶段不是有效的活动阶段。")
+    chapter_numbers = sorted(
+        (obj.get("data") or {}).get("chapter_number")
+        for ref in (plan.get("chapter_target_refs") or [])
+        if isinstance((obj := model.get("objects", {}).get(ref)), dict)
+        and not obj.get("tombstoned")
+        and (obj.get("data") or {}).get("stage_ref") == stage_ref
+        and isinstance((obj.get("data") or {}).get("chapter_number"), int)
+    )
+    return {"stage_ref": stage_ref, "stage_title": stage.get("title") or "", "chapter_numbers": chapter_numbers}
+
 
 def _analyze_impact_candidates(
     project_id: str,
@@ -749,6 +811,8 @@ def prepare_story_plan(
     replaces_plan_ids: list[str] | None = None,
     planning_mode: str = "free",
     impact_candidate_ids: list[str] | None = None,
+    stage_ref: str | None = None,
+    chapter_range: list[int] | None = None,
 ) -> dict[str, Any]:
     """'一起往前想'第一步：读取正式作品 → 构造 Agent task → 创建请求，
     并按已保存 Settings 的执行模式准备执行。
@@ -766,6 +830,18 @@ def prepare_story_plan(
     planning_mode = (planning_mode or "free").strip()
     if planning_mode not in PLANNING_MODES:
         raise StoryPlanningError(f"不支持的规划模式：{planning_mode}。")
+    stage_binding: dict[str, Any] | None = None
+    near_term_span: tuple[int, int] | None = None
+    if planning_mode == "stage":
+        stage_binding = resolve_stage_binding(project_id, stage_ref or "")
+        if not author_question:
+            author_question = f"规划本卷/阶段：{stage_binding['stage_title'] or '所选阶段'}。"
+    if planning_mode == "near_term":
+        near_term_span = validate_near_term_range(chapter_range)
+        if not author_question:
+            author_question = f"细化第 {near_term_span[0]}–{near_term_span[1]} 章的近期章节细纲。"
+    if planning_mode == "book" and not author_question:
+        author_question = "规划全书的整体架构与主要阶段。"
     if planning_mode == "impact_replan":
         if (
             not isinstance(impact_candidate_ids, list) or not impact_candidate_ids
@@ -898,6 +974,32 @@ def prepare_story_plan(
             "\n\n局部重规划上下文（只替换受影响范围；其余规划与锚点必须保留）：\n"
             + _impact_replan_context_block(project_id, impact_analysis)
         )
+    if planning_mode == "book":
+        task += (
+            "\n\n本次是全书规划（planning_mode=book）：规划故事引擎/整体走向与结局回报方向、主要阶段或卷、"
+            "主要人物弧光与关系走向、相关的世界/体系推进、主要故事线、重大伏笔/承诺与揭示，"
+            "必要时给粗粒度的章节骨架。远期章节保持粗粒度，绝不一次生成数百章场景级细纲。"
+            "推理时按需覆盖：情节推进、人物弧光、次要人物的后续走向（他们不因不在场而冻结，但仍是未来规划）、"
+            "关系、时间/因果、世界/体系规则与推进、组织/势力、故事线、冲突升级、信息/揭示、"
+            "伏笔/承诺/回报、情绪节奏、读者期待、POV/结构。与本书无关的维度直接省略。"
+            "需要外部方法时，先把真实问题分解为 2–4 个具体知识需求（例如结构、人物/关系演变、体系推进、揭示/伏笔；"
+            "这些不是固定分类），每个需求单独检索并只选择真实命中的少量条目。"
+            "既有实体的未来变化用 target_ref 投影，绝不新建第二个身份。"
+        )
+    if planning_mode == "stage" and stage_binding is not None:
+        task += (
+            "\n\n本次是卷/阶段规划（planning_mode=stage）：已绑定真实阶段（必须使用该 stage_ref，绝不按标题推断）：\n"
+            + json.dumps(stage_binding, ensure_ascii=False, indent=2)
+            + "\n规划该阶段的目标、升级节奏、人物/关系变化、体系推进、故事线、承诺/回报与该阶段章节骨架；"
+            "推理维度同全书规划，但只覆盖该阶段范围；阶段外内容保持不动。既有实体的未来变化用 target_ref 投影。"
+        )
+    if planning_mode == "near_term" and near_term_span is not None:
+        task += (
+            f"\n\n本次是近期章节细化（planning_mode=near_term）：只细化第 {near_term_span[0]}–{near_term_span[1]} 章，"
+            "范围由作者显式给出，绝不静默改写范围之外的远期骨架。每章可包含：章节任务、pov、参与人物、"
+            "关键节拍、冲突、情绪移动、信息释放、伏笔、结束状态/钩子；地点/时间只在显式已知时填写。"
+            "规划章节变化时必须携带合法 chapter_number 与 min_words/max_words。"
+        )
 
     # 5. Direct 模式：显式配置校验（无有效配置 → 稳定报错，绝不回退）
     direct_adapter = None
@@ -945,6 +1047,10 @@ def prepare_story_plan(
                 "supersedes_plan_ids": supersedes_plan_ids,
                 "replaces_target_ref": replaces_target_ref,
                 "planning_mode": planning_mode,
+                "stage_binding": stage_binding,
+                "near_term_range": (
+                    [near_term_span[0], near_term_span[1]] if near_term_span else None
+                ),
                 "impact_candidate_ids": (
                     [cid.strip() for cid in impact_candidate_ids]
                     if planning_mode == "impact_replan" else []
@@ -1155,6 +1261,14 @@ def _finalize_story_plan(
     knowledge_needs = list(parsed["semantic_interpretation"].get("knowledge_needs") or [])
     selected_refs = list(parsed["semantic_interpretation"].get("selected_knowledge_refs") or [])
     package_ref = str(parsed["semantic_interpretation"].get("package_ref") or "")
+    # 分层规划知识策略硬上限：需求数/选择数 fail closed；0 检索/0 选择始终合法。
+    try:
+        _validate_mode_knowledge(
+            str(meta.get("planning_mode") or "free"), knowledge_needs, selected_refs,
+        )
+    except StoryPlanningError:
+        _cleanup_planning(project_id, planning_turn_id)
+        raise
     retrieval: Callable[[str], Any] | None = None
     if knowledge_needs:
         query = "；".join(knowledge_needs)
@@ -1191,10 +1305,15 @@ def _finalize_story_plan(
     planning_target = {
         "target_id": replaces_target_ref or f"target-{planning_turn_id}",
         "description": agent_target["description"],
-        "scope_kind": agent_target.get("scope_kind") or "free",
+        "scope_kind": agent_target.get("scope_kind") or str(meta.get("planning_mode") or "free"),
     }
     if "scope" in agent_target:
         planning_target["scope"] = agent_target["scope"]
+    elif meta.get("planning_mode") == "stage" and isinstance(meta.get("stage_binding"), dict):
+        planning_target["scope"] = f"stage:{meta['stage_binding'].get('stage_ref')}"
+    elif meta.get("planning_mode") == "near_term" and isinstance(meta.get("near_term_range"), list):
+        near_range = meta["near_term_range"]
+        planning_target["scope"] = f"chapters:{near_range[0]}-{near_range[1]}"
 
     # 7. 调用 frozen StoryPlan（Context 消费与模型所见完全相同的绑定包）
     brief_id = f"plan-brief-{planning_turn_id}"
@@ -1249,6 +1368,8 @@ def _finalize_story_plan(
         "author_question": meta.get("author_question") or "",
         "supersedes_plan_ids": list(meta.get("supersedes_plan_ids") or []),
         "planning_mode": str(meta.get("planning_mode") or "free"),
+        "stage_binding": meta.get("stage_binding"),
+        "near_term_range": meta.get("near_term_range"),
         "impact_candidate_ids": [str(cid) for cid in (meta.get("impact_candidate_ids") or [])],
         "impact_previous_status": dict(meta.get("impact_previous_status") or {}),
         "impact_planning_source_refs": [str(ref) for ref in (meta.get("impact_planning_source_refs") or [])],

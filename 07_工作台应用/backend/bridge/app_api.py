@@ -313,6 +313,7 @@ class AppApi:
         try:
             replaces = payload.get("replaces_plan_ids")
             impact_ids = payload.get("impact_candidate_ids")
+            chapter_range = payload.get("chapter_range")
             data = story_planning_ops.prepare_story_plan(
                 project_id=str(payload.get("project_id") or ""),
                 author_question=str(payload.get("author_question") or ""),
@@ -325,6 +326,12 @@ class AppApi:
                 impact_candidate_ids=(
                     [str(cid) for cid in impact_ids]
                     if isinstance(impact_ids, list) and impact_ids
+                    else None
+                ),
+                stage_ref=(str(payload["stage_ref"]) if payload.get("stage_ref") is not None else None),
+                chapter_range=(
+                    list(chapter_range)
+                    if isinstance(chapter_range, list) and chapter_range
                     else None
                 ),
             )

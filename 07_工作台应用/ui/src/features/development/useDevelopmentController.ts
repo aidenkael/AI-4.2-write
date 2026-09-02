@@ -45,7 +45,12 @@ export interface DevelopmentControllerState {
 export interface DevelopmentController {
   state: DevelopmentControllerState
   setAuthorQuestion(input: string): void
-  generate(options?: { planningMode?: string; impactCandidateIds?: string[] }): Promise<void>
+  generate(options?: {
+    planningMode?: string
+    impactCandidateIds?: string[]
+    stageRef?: string
+    chapterRange?: number[]
+  }): Promise<void>
   cancel(): Promise<void>
   discard(): Promise<void>
   regenerate(): Promise<void>
@@ -162,20 +167,34 @@ export function useDevelopmentController(options: {
     setLocalError(null)
   }, [])
 
-  const generate = useCallback(async (options?: { planningMode?: string; impactCandidateIds?: string[] }) => {
+  const generate = useCallback(async (options?: {
+    planningMode?: string
+    impactCandidateIds?: string[]
+    stageRef?: string
+    chapterRange?: number[]
+  }) => {
     const pid = projectRef.current
     const question = authorQuestion.trim()
     const isImpactReplan = options?.planningMode === 'impact_replan'
+    const structuredMode = options?.planningMode && options.planningMode !== 'free'
     if (!pid) {
       setLocalError('请先选择正式作品。')
       return
     }
-    if (!question && !isImpactReplan) {
+    if (!question && !structuredMode) {
       setLocalError('请先写下你想一起想的问题。')
       return
     }
     if (isImpactReplan && !(options?.impactCandidateIds ?? []).length) {
       setLocalError('重新规划受影响内容必须选择至少一个影响候选。')
+      return
+    }
+    if (options?.planningMode === 'stage' && !options.stageRef) {
+      setLocalError('请先选择一个真实的卷/阶段。')
+      return
+    }
+    if (options?.planningMode === 'near_term' && !(options.chapterRange ?? []).length) {
+      setLocalError('请先给出近期细化的章节范围。')
       return
     }
     setAcceptedNote(false)
@@ -185,6 +204,8 @@ export function useDevelopmentController(options: {
       author_question: question,
       planning_mode: options?.planningMode,
       impact_candidate_ids: options?.impactCandidateIds,
+      stage_ref: options?.stageRef,
+      chapter_range: options?.chapterRange,
     })
     if (busy) setLocalError(busy)
   }, [authorQuestion, start])
