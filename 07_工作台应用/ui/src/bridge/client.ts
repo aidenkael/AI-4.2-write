@@ -90,6 +90,10 @@ const projectMutationMethods = new Set([
   'confirm_story_plan', 'confirm_foundation_design', 'confirm_project_state_refresh',
   'update_story_synopsis', 'set_planning_impact_candidate_status',
 ])
+const presentationMutationMethods = new Set([
+  'set_global_illustration', 'reset_global_illustration', 'set_project_cover', 'reset_project_cover',
+  'set_character_avatar', 'reset_character_avatar', 'pick_and_set_presentation',
+])
 
 /**
  * 等待 pywebview Bridge 就绪。
@@ -142,6 +146,7 @@ async function call<T>(method: string, ...args: unknown[]): Promise<T> {
     )
   }
   if (projectMutationMethods.has(method)) window.dispatchEvent?.(new Event('gowrite-project-mutated'))
+  if (presentationMutationMethods.has(method)) window.dispatchEvent?.(new Event('gowrite-presentation-mutated'))
   return result.data
 }
 
@@ -164,6 +169,42 @@ export async function openProject(project: { project_id?: string; name?: string 
 /** 作品最小概览（只读正式状态）。 */
 export async function getProjectOverview(projectId: string): Promise<ProjectOverview> {
   return call<ProjectOverview>('get_project_overview', projectId)
+}
+
+// ---------------- Persistent presentation assets (never story authority) ----------------
+
+export type PresentationImage = { has_custom: boolean; image_src: string | null }
+export interface GlobalPresentation {
+  illustrations: Record<'city' | 'mountains' | 'desk', PresentationImage & { slot: string }>
+}
+export interface ProjectPresentation {
+  project_id: string
+  project_cover: PresentationImage
+  character_avatars: Record<string, PresentationImage & { source_ref: string }>
+}
+
+export async function getGlobalPresentation(): Promise<GlobalPresentation> {
+  return call<GlobalPresentation>('get_global_presentation')
+}
+export async function resetGlobalIllustration(slot: 'city' | 'mountains' | 'desk'): Promise<GlobalPresentation> {
+  return call<GlobalPresentation>('reset_global_illustration', { slot })
+}
+export async function getProjectPresentation(projectId: string): Promise<ProjectPresentation> {
+  return call<ProjectPresentation>('get_project_presentation', { project_id: projectId })
+}
+export async function resetProjectCover(projectId: string): Promise<ProjectPresentation> {
+  return call<ProjectPresentation>('reset_project_cover', { project_id: projectId })
+}
+export async function resetCharacterAvatar(projectId: string, sourceRef: string): Promise<ProjectPresentation> {
+  return call<ProjectPresentation>('reset_character_avatar', { project_id: projectId, source_ref: sourceRef })
+}
+export async function pickAndSetPresentation(payload: {
+  target: 'global' | 'cover' | 'avatar'
+  slot?: 'city' | 'mountains' | 'desk'
+  project_id?: string
+  source_ref?: string
+}): Promise<GlobalPresentation | ProjectPresentation> {
+  return call<GlobalPresentation | ProjectPresentation>('pick_and_set_presentation', payload)
 }
 
 export async function updateStorySynopsis(payload: {

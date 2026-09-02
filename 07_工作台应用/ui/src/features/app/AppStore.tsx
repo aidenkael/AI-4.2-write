@@ -1,6 +1,7 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { GlobalPage, IllustrationKey, IllustrationState, ProjectSection } from '../../contracts/ui'
 import { defaultIllustrations } from '../../assets/illustrations'
+import { getGlobalPresentation, pickAndSetPresentation, resetGlobalIllustration } from '../../bridge/client'
 
 /**
  * 收缩后的 AppStore：只保留 UI / 会话关注点。
@@ -61,8 +62,8 @@ export interface Actions {
   openDialog(title: string, content: string): void
   closeDialog(): void
   setPreference(key: string, value: boolean): void
-  setIllustration(key: IllustrationKey, url: string): void
-  resetIllustration(key: IllustrationKey): void
+  setIllustration(key: IllustrationKey): Promise<void>
+  resetIllustration(key: IllustrationKey): Promise<void>
   setPlanningPrefill(prefill: PlanningPrefill): void
   consumePlanningPrefill(): PlanningPrefill | null
   setReviewChapterHandoff(handoff: ReviewChapterHandoff): void
@@ -91,6 +92,21 @@ export const AppContext = createContext<{ state: AppState; actions: Actions } | 
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState(initial)
+  useEffect(() => {
+    let alive = true
+    void getGlobalPresentation().then((presentation) => {
+      if (!alive) return
+      const custom: Partial<Record<IllustrationKey, string>> = {}
+      ;(Object.keys(presentation.illustrations) as IllustrationKey[]).forEach((key) => {
+        const src = presentation.illustrations[key]?.image_src
+        if (src) custom[key] = src
+      })
+      setState((current) => ({ ...current, illustrations: { ...current.illustrations, custom } }))
+    }).catch(() => {
+      // Built-in illustrations remain available if the desktop bridge is not ready.
+    })
+    return () => { alive = false }
+  }, [])
   const actions = useMemo<Actions>(() => ({
     navigate(page) { setState((current) => ({ ...current, page, projectSection: null })) },
     setProjectSection(projectSection) { setState((current) => ({ ...current, projectSection })) },
@@ -99,8 +115,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     openDialog(title, content) { setState((current) => ({ ...current, dialog: { title, content } })) },
     closeDialog() { setState((current) => ({ ...current, dialog: null })) },
     setPreference(key, value) { setState((current) => ({ ...current, preferences: { ...current.preferences, [key]: value } })) },
-    setIllustration(key, url) { setState((current) => ({ ...current, illustrations: { ...current.illustrations, custom: { ...current.illustrations.custom, [key]: url } } })) },
-    resetIllustration(key) { setState((current) => { const custom = { ...current.illustrations.custom }; delete custom[key]; return { ...current, illustrations: { ...current.illustrations, custom } } }) },
+    async setIllustration(key) {
+      const presentation = await pickAndSetPresentation({ target: 'global', slot: key }) as Awaited<ReturnType<typeof getGlobalPresentation>>
+      const src = presentation.illustrations[key]?.image_src
+      if (src) setState((current) => ({ ...current, illustrations: { ...current.illustrations, custom: { ...current.illustrations.custom, [key]: src } } }))
+    },
+    async resetIllustration(key) {
+      await resetGlobalIllustration(key)
+      setState((current) => { const custom = { ...current.illustrations.custom }; delete custom[key]; return { ...current, illustrations: { ...current.illustrations, custom } } })
+    },
     setPlanningPrefill(planningPrefill) { setState((current) => ({ ...current, planningPrefill })) },
     consumePlanningPrefill() {
       const value = state.planningPrefill

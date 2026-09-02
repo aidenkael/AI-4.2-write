@@ -43,6 +43,7 @@ from operations.review import ReviewError
 from operations import review as review_ops
 from operations import author_operation as author_operation_ops
 from operations import execution_audit as audit_ops
+from infra import presentation_assets as presentation_ops
 from views import project as project_views
 
 # 稳定错误码（client.ts 依赖 code 字段）
@@ -59,6 +60,7 @@ CODE_AUTHOR_EDIT_ERROR = "AUTHOR_EDIT_ERROR"
 CODE_PLANNING_IMPACT_ERROR = "PLANNING_IMPACT_ERROR"
 CODE_CHANGE_SETTLEMENT_ERROR = "CHANGE_SETTLEMENT_ERROR"
 CODE_REVIEW_ERROR = "REVIEW_ERROR"
+CODE_PRESENTATION_ERROR = "PRESENTATION_ERROR"
 CODE_BRIDGE_INTERNAL = "BRIDGE_INTERNAL"
 
 
@@ -91,6 +93,98 @@ class AppApi:
             "status": "ready",
             "message": "工作台连接正常",
         })
+
+    # ---------------- 本地展示资产（非作品语义、零 AI） ----------------
+
+    @staticmethod
+    def _pick_local_image() -> str:
+        """The one shared native picker.  Paths never leave this bridge method."""
+        try:
+            import webview  # noqa: PLC0415
+            window = webview.windows[0]
+            selected = window.create_file_dialog(
+                webview.OPEN_DIALOG,
+                allow_multiple=False,
+                file_types=("Image files (*.png;*.jpg;*.jpeg;*.webp)",),
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise presentation_ops.PresentationAssetError("无法打开本地图片选择窗口。") from exc
+        if not selected:
+            raise presentation_ops.PresentationAssetError("未选择图片。")
+        return str(selected[0])
+
+    def get_global_presentation(self) -> dict:
+        try:
+            return _ok(presentation_ops.get_global_presentation())
+        except presentation_ops.PresentationAssetError as exc:
+            return _err(CODE_PRESENTATION_ERROR, str(exc))
+
+    def set_global_illustration(self, payload: dict) -> dict:
+        try:
+            return _ok(presentation_ops.set_global_illustration(
+                str(payload.get("slot") or ""), str(payload.get("local_path") or ""),
+            ))
+        except presentation_ops.PresentationAssetError as exc:
+            return _err(CODE_PRESENTATION_ERROR, str(exc))
+
+    def reset_global_illustration(self, payload: dict) -> dict:
+        try:
+            return _ok(presentation_ops.reset_global_illustration(str(payload.get("slot") or "")))
+        except presentation_ops.PresentationAssetError as exc:
+            return _err(CODE_PRESENTATION_ERROR, str(exc))
+
+    def get_project_presentation(self, payload: dict) -> dict:
+        try:
+            return _ok(presentation_ops.get_project_presentation(str(payload.get("project_id") or "")))
+        except presentation_ops.PresentationAssetError as exc:
+            return _err(CODE_PRESENTATION_ERROR, str(exc))
+
+    def set_project_cover(self, payload: dict) -> dict:
+        try:
+            return _ok(presentation_ops.set_project_cover(
+                str(payload.get("project_id") or ""), str(payload.get("local_path") or ""),
+            ))
+        except presentation_ops.PresentationAssetError as exc:
+            return _err(CODE_PRESENTATION_ERROR, str(exc))
+
+    def reset_project_cover(self, payload: dict) -> dict:
+        try:
+            return _ok(presentation_ops.reset_project_cover(str(payload.get("project_id") or "")))
+        except presentation_ops.PresentationAssetError as exc:
+            return _err(CODE_PRESENTATION_ERROR, str(exc))
+
+    def set_character_avatar(self, payload: dict) -> dict:
+        try:
+            return _ok(presentation_ops.set_character_avatar(
+                str(payload.get("project_id") or ""), str(payload.get("source_ref") or ""),
+                str(payload.get("local_path") or ""),
+            ))
+        except presentation_ops.PresentationAssetError as exc:
+            return _err(CODE_PRESENTATION_ERROR, str(exc))
+
+    def reset_character_avatar(self, payload: dict) -> dict:
+        try:
+            return _ok(presentation_ops.reset_character_avatar(
+                str(payload.get("project_id") or ""), str(payload.get("source_ref") or ""),
+            ))
+        except presentation_ops.PresentationAssetError as exc:
+            return _err(CODE_PRESENTATION_ERROR, str(exc))
+
+    def pick_and_set_presentation(self, payload: dict) -> dict:
+        """Choose a local image and bind it without returning its source path."""
+        try:
+            path = self._pick_local_image()
+            target = str(payload.get("target") or "")
+            project_id = str(payload.get("project_id") or "")
+            if target == "global":
+                return _ok(presentation_ops.set_global_illustration(str(payload.get("slot") or ""), path))
+            if target == "cover":
+                return _ok(presentation_ops.set_project_cover(project_id, path))
+            if target == "avatar":
+                return _ok(presentation_ops.set_character_avatar(project_id, str(payload.get("source_ref") or ""), path))
+            raise presentation_ops.PresentationAssetError("未知的展示图片目标。")
+        except presentation_ops.PresentationAssetError as exc:
+            return _err(CODE_PRESENTATION_ERROR, str(exc))
 
     # ---------------- 真实作品浏览（只读） ----------------
 

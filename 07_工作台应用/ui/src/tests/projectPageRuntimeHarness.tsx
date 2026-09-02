@@ -30,7 +30,7 @@ export const minimalProjectData: ProjectData = {
 
 const actions: Actions = {
   navigate: () => {}, setProjectSection: () => {}, setSearch: () => {}, notify: () => {}, openDialog: () => {}, closeDialog: () => {},
-  setPreference: () => {}, setIllustration: () => {}, resetIllustration: () => {}, setPlanningPrefill: () => {}, consumePlanningPrefill: () => null,
+  setPreference: () => {}, setIllustration: async () => {}, resetIllustration: async () => {}, setPlanningPrefill: () => {}, consumePlanningPrefill: () => null,
   setReviewChapterHandoff: () => {}, consumeReviewChapterHandoff: () => null, setFoundationEditHandoff: () => {}, consumeFoundationEditHandoff: () => null,
   setFoundationDesignHandoff: () => {}, consumeFoundationDesignHandoff: () => null,
 }
