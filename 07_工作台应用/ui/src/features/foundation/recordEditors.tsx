@@ -1,8 +1,10 @@
-import { Plus, Save, Trash2, X } from 'lucide-react'
+import { Image, Plus, RotateCcw, Save, Trash2, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import type { ProjectDataEntry } from '../../bridge/client'
+import { pickAndSetPresentation, resetCharacterAvatar, type ProjectDataEntry } from '../../bridge/client'
 import type { ProjectDataController } from '../projectData/useProjectDataController'
 import { isInternalAuthorField } from '../presentation/authorPresentation.js'
+import { AvatarImage } from '../presentation/AvatarImage'
+import { useProjectPresentation } from '../presentation/useProjectPresentation'
 import { RelationSelector } from './RelationSelector'
 import {
   initializeRelationSelections,
@@ -104,6 +106,7 @@ export function CharacterEditor({
   const [values, setValues] = useState<Record<string, string>>(split.values)
   const [custom, setCustom] = useState(split.custom)
   const projectData = controller.data
+  const { presentation, reload: reloadPresentation } = useProjectPresentation(projectData?.project_id ?? null)
   const orgOptions = useMemo(() => relationOptions(projectData, ['organization_force']), [projectData])
   const systemOptions = useMemo(() => relationOptions(projectData, ['system']), [projectData])
   const relationInit = useMemo(() => initializeRelationSelections({
@@ -151,10 +154,22 @@ export function CharacterEditor({
     if (await controller.retireFoundation(entry.source_ref)) onClose()
   }
   const specs = RELATION_SPECS_BY_SOURCE_CATEGORY.character
+  const avatar = entry?.source_ref ? presentation?.character_avatars[entry.source_ref] : null
+  const updateAvatar = async () => {
+    if (!entry?.source_ref || !projectData?.project_id) return
+    await pickAndSetPresentation({ target: 'avatar', project_id: projectData.project_id, source_ref: entry.source_ref })
+    await reloadPresentation()
+  }
+  const resetAvatar = async () => {
+    if (!entry?.source_ref || !projectData?.project_id) return
+    await resetCharacterAvatar(projectData.project_id, entry.source_ref)
+    await reloadPresentation()
+  }
   return (
     <aside className="record-drawer panel" aria-label={`${entry ? '编辑' : '新增'}人物`}>
       <header><h2>{entry ? '编辑' : '新增'}人物</h2><button onClick={onClose}><X /></button></header>
       <div className="record-drawer-body">
+      {entry?.source_ref && <section className="presentation-control"><AvatarImage src={avatar?.image_src} alt="人物头像"/><div><strong>人物头像</strong><p className="muted-note">仅用于展示，不会修改人物资料或触发 AI。</p><button onClick={() => void updateAvatar()}><Image /> 上传 / 更换头像</button><button onClick={() => void resetAvatar()}><RotateCcw /> 恢复默认头像</button></div></section>}
       <label>姓名<input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
       <label>状态<select value={materialState} onChange={(event) => setMaterialState(event.target.value as MaterialState)}><option value="current">当前</option><option value="future">规划中</option></select></label>
       <RelationSelector

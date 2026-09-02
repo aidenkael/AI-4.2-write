@@ -6,6 +6,7 @@ import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { useNewProjectController } from '../features/projects/useNewProjectController'
 import { useIdeasController } from '../features/ideas/useIdeasController'
 import { useAuthorTask } from '../features/tasks/AuthorTaskCoordinator'
+import { ProjectCoverControl } from '../features/presentation/ProjectCoverControl'
 
 /**
  * 作品：唯一的作者落地页（原首页 + 我的作品合并，不再保留两套重复入口）。
@@ -94,6 +95,7 @@ export function WorksPage() {
             <ul>
               {projects.map((p) => (
                 <li key={p.project_id}>
+                  <ProjectCoverControl projectId={p.project_id} name={p.name} compact/>
                   <span className="project-name">{p.name}</span>
                   <span className="soft-tag">正式作品</span>
                   <button

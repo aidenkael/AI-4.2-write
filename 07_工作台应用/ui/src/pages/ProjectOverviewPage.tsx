@@ -4,6 +4,7 @@ import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { getProjectOverview, getStoryWriteSurface, updateStorySynopsis, type ProjectOverview, type StoryWriteSurface } from '../bridge/client'
 import { impactNoticeText } from '../features/planning/planningImpact'
+import { ProjectCoverControl } from '../features/presentation/ProjectCoverControl'
 
 const toMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
@@ -112,6 +113,7 @@ export function ProjectOverviewPage() {
         )}
         {!loading && !error && (
           <>
+            <ProjectCoverControl projectId={selected.project_id} name={selected.name}/>
             <div className="overview-grid">
               <section className="overview-card overview-position">
                 <header>

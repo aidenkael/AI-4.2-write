@@ -1,5 +1,5 @@
 import { Check, FileCheck2, GitBranch, MapPin, Pencil, Plus, Save, Sparkles, Trash2, UserRound, X } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FoundationDesignItem, FoundationDesignResult, ProjectData, ProjectDataEntry } from '../bridge/client'
 import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
@@ -7,6 +7,8 @@ import { useProjectDataController } from '../features/projectData/useProjectData
 import { useAuthorTask } from '../features/tasks/AuthorTaskCoordinator'
 import { describeRecord } from '../features/storyMap/storyMapModel'
 import { authorSourceLabel, authorStatusLabel, compactCharacter } from '../features/presentation/authorPresentation'
+import { AvatarImage } from '../features/presentation/AvatarImage'
+import { useProjectPresentation } from '../features/presentation/useProjectPresentation'
 import { CharacterEditor, RelationshipEditor, recordObject, splitEditorData } from '../features/foundation/recordEditors'
 import { RelationSelector } from '../features/foundation/RelationSelector'
 import {
@@ -449,6 +451,7 @@ export function FoundationPage() {
   const { actions } = useApp()
   const { selected } = useFormalProjectShell()
   const controller = useProjectDataController(selected?.project_id ?? null)
+  const { presentation } = useProjectPresentation(selected?.project_id ?? null)
   const [designOpen, setDesignOpen] = useState(false)
   const [designPrefill, setDesignPrefill] = useState<string | undefined>(undefined)
   const [tab, setTab] = useState<FoundationTab>('characters')
@@ -704,7 +707,7 @@ export function FoundationPage() {
             return (
               <article className="foundation-card" key={`${tab}-${entry.id ?? entry.label}`}>
                 <div className="foundation-card-head">
-                  {character && <span className="character-avatar" style={{ '--avatar-hue': character.avatar.hue } as CSSProperties} aria-hidden="true">{character.avatar.text}</span>}
+                  {character && <AvatarImage src={entry.source_ref ? presentation?.character_avatars[entry.source_ref]?.image_src : null} alt=""/>}
                   <h3>{entry.label || '（未命名条目）'}</h3>
                   <span className={`material-state ${entry.status === 'future' ? 'future' : 'current'}`}>
                     {entry.status === 'future' ? '规划中' : '当前'}

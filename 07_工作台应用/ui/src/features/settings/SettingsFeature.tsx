@@ -47,7 +47,7 @@ export function SettingsFeature() {
           {controller.data ? <ExecutionModules controller={controller}/> : null}
         </div>
       </> : null}
-      {section === '界面与通知' ? <><div className="section-title"><div><h2>界面与通知</h2><p>以下界面偏好仅在本次 Go Write 会话中生效，重新启动后恢复默认。</p></div></div><div className="settings-group"><div className="settings-group-title"><h3>插图与视觉</h3><p>为当前会话替换页面插图，随重启恢复默认。</p></div><VisualSettings/></div><div className="settings-group session-preferences"><div className="settings-group-title"><h3>通知</h3><p>任务完成或失败时显示全局通知；提示音使用本机音量。</p></div><label><input type="checkbox" checked={state.preferences.sound} onChange={(event) => actions.setPreference('sound', event.target.checked)}/> 在执行完成/失败时播放提示音</label></div></> : null}
+      {section === '界面与通知' ? <><div className="section-title"><div><h2>界面与通知</h2><p>界面图片会保存在本机；通知偏好只在本次 Go Write 会话中生效。</p></div></div><div className="settings-group"><div className="settings-group-title"><h3>界面图片</h3><p>替换城市主视觉、山水与灯塔、书桌与绿植；重启后仍会保留。</p></div><VisualSettings/></div><div className="settings-group session-preferences"><div className="settings-group-title"><h3>通知</h3><p>任务完成或失败时显示全局通知；提示音使用本机音量。</p></div><label><input type="checkbox" checked={state.preferences.sound} onChange={(event) => actions.setPreference('sound', event.target.checked)}/> 在执行完成/失败时播放提示音</label></div></> : null}
       {section === '执行记录' ? <><div className="section-title"><div><h2>执行记录</h2><p>本地只读诊断信息，不影响 AI 或执行配置。</p></div></div><ExecutionAudits/></> : null}
     </section></div></div>
 }
