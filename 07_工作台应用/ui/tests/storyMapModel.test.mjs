@@ -62,6 +62,18 @@ test('显式人物 + 显式有效关系 => 节点 + 边', () => {
   assert.equal(graph.unresolved.length, 0)
 })
 
+test('人物节点只消费精确 source_ref 头像，绝不回退姓名首字', () => {
+  const data = makeData({ sections: { characters: [
+    { id: 'c1', label: '林砚', source_ref: 'char:1', record: { name: '林砚', one_line_intro: '雨夜归来的医生' } },
+  ], relationships: [], canon_facts: [], occurred_events: [], open_threads: [], approved_plan: [] } })
+  const withoutAvatar = projectRelationshipGraph(data).nodes[0]
+  assert.equal(withoutAvatar.avatarImageSrc, null)
+  assert.equal('avatarText' in withoutAvatar, false)
+  assert.equal(withoutAvatar.intro, '雨夜归来的医生')
+  const withAvatar = projectRelationshipGraph(data, { 'char:1': 'data:image/png;base64,AA==' }).nodes[0]
+  assert.equal(withAvatar.avatarImageSrc, 'data:image/png;base64,AA==')
+})
+
 test('关系端点无法解析 => 不臆造边 + unresolved 条目', () => {
   const data = makeData({
     sections: {

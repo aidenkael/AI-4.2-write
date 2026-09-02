@@ -93,14 +93,6 @@ function recordOf(entry: ProjectDataEntry): Record<string, unknown> {
     : {}
 }
 
-export function deterministicAvatar(entry: ProjectDataEntry): { text: string; hue: number } {
-  const identity = String(entry.source_ref || entry.id || entry.label || '？')
-  let hash = 0
-  for (let index = 0; index < identity.length; index += 1) hash = ((hash * 31) + identity.charCodeAt(index)) >>> 0
-  const label = entry.label.trim()
-  return { text: label ? label.slice(0, 1).toUpperCase() : '？', hue: hash % 360 }
-}
-
 export function compactCharacter(entry: ProjectDataEntry) {
   const record = recordOf(entry)
   const text = (key: string) => typeof record[key] === 'string' ? String(record[key]).trim() : ''
@@ -108,7 +100,6 @@ export function compactCharacter(entry: ProjectDataEntry) {
   const details = describeAuthorRecord(entry)
   const hoverKeys = new Set(['visible_traits', 'current_state', 'current_objective', 'arc_stage'])
   return {
-    avatar: deterministicAvatar(entry),
     name: entry.label || '（未命名人物）',
     intro: text('one_line_intro') || text('description') || '',
     role,

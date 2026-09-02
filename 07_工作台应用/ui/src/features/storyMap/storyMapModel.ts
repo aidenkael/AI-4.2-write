@@ -39,8 +39,7 @@ export interface GraphNode {
   label: string
   /** 图内短标签：name 优先，否则 label 截断（完整文本在详情面板查看，不臆造） */
   short: string
-  avatarText: string
-  avatarHue: number
+  avatarImageSrc: string | null
   intro: string
   role: string
   hoverFields: RecordField[]
@@ -129,7 +128,7 @@ function extractRawEndpoints(record: unknown): unknown[] | null {
 }
 
 /** 权威 ProjectData → 只读关系图视图模型；绝不臆造节点或边。 */
-export function projectRelationshipGraph(data: ProjectData | null): RelationshipGraph {
+export function projectRelationshipGraph(data: ProjectData | null, avatars: Record<string, string | null> = {}): RelationshipGraph {
   const empty: RelationshipGraph = { nodes: [], edges: [], unresolved: [] }
   if (!data) return empty
 
@@ -146,15 +145,12 @@ export function projectRelationshipGraph(data: ProjectData | null): Relationship
     }
     const displayName = name ?? (label.length > 12 ? `${label.slice(0, 12)}…` : label)
     const compact = compactCharacter(entry)
-    const short = compact.role
-      ? `${compact.avatar.text}  ${displayName}\n${compact.role.slice(0, 10)}`
-      : `${compact.avatar.text}  ${displayName}`
+    const short = compact.intro ? `${displayName}\n${compact.intro}` : displayName
     nodes.push({
       id: nodeId,
       label,
       short,
-      avatarText: compact.avatar.text,
-      avatarHue: compact.avatar.hue,
+      avatarImageSrc: entry.source_ref ? avatars[entry.source_ref] ?? null : null,
       intro: compact.intro,
       role: compact.role,
       hoverFields: compact.hoverFields,

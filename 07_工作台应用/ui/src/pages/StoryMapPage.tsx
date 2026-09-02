@@ -1,10 +1,12 @@
-import { GitBranch, Hourglass, ListTree, Maximize2, Pencil, RefreshCw } from 'lucide-react'
+import { GitBranch, Hourglass, ListTree, Maximize2, Minus, Pencil, RefreshCw, RotateCcw, Plus } from 'lucide-react'
 import cytoscape, { type Core } from 'cytoscape'
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { useApp } from '../features/app/AppStore'
 import { useProjectDataController } from '../features/projectData/useProjectDataController'
 import { authorSourceLabel } from '../features/presentation/authorPresentation'
+import { AvatarImage } from '../features/presentation/AvatarImage'
+import { useProjectPresentation } from '../features/presentation/useProjectPresentation'
 import { CharacterEditor, RelationshipEditor } from '../features/foundation/recordEditors'
 import type { ProjectDataEntry } from '../bridge/client'
 import {
@@ -42,8 +44,7 @@ interface SelectedDetail {
   sourceRef: string | null
   sourceKind: string | null
   editable: boolean
-  avatarText?: string
-  avatarHue?: number
+  avatarImageSrc?: string | null
   intro?: string
   role?: string
 }
@@ -59,18 +60,38 @@ function DetailFields({ fields }: { fields: RecordField[] }) {
   )
 }
 
+function GroupedCharacterFields({ fields }: { fields: RecordField[] }) {
+  const groups = [
+    ['当前状态', new Set(['current_state', 'current_objective', 'arc_stage', 'current_location', 'power_rank', 'profession_rank', 'current_level', 'system_level'])],
+    ['人物核心', new Set(['persona_core', 'goal_desire', 'fear_weakness', 'inner_conflict', 'values_beliefs', 'visible_traits', 'behavior_anchors', 'speech_style'])],
+  ] as const
+  const used = new Set<string>()
+  const display: Array<{ label: string; values: RecordField[] }> = groups.map(([label, keys]) => {
+    const values = fields.filter((field) => keys.has(field.key)); values.forEach((field) => used.add(field.key))
+    return { label, values }
+  })
+  const other = fields.filter((field) => !used.has(field.key) && !['one_line_intro', 'role_identity', 'position_title'].includes(field.key))
+  if (other.length) display.push({ label: '背景与其他', values: other })
+  return <>{display.filter((group) => group.values.length).map((group) => <section className="map-tooltip-group" key={group.label}><strong>{group.label}</strong>{group.values.map((field) => <small key={field.key}>{field.label}：{field.value}</small>)}</section>)}</>
+}
+
 export function StoryMapPage() {
   const { actions } = useApp()
   const { selected } = useFormalProjectShell()
   const controller = useProjectDataController(selected?.project_id ?? null)
+  const { presentation } = useProjectPresentation(selected?.project_id ?? null)
   const [tab, setTab] = useState<MapTab>('graph')
   const [detail, setDetail] = useState<SelectedDetail | null>(null)
   const [sharedEditor, setSharedEditor] = useState<{ kind: 'character' | 'relationship'; entry: ProjectDataEntry | null } | null>(null)
-  const [tooltip, setTooltip] = useState<{ x: number; y: number; label: string; avatarText: string; avatarHue: number; intro: string; role: string; fields: RecordField[] } | null>(null)
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; label: string; avatarImageSrc: string | null; intro: string; role: string; fields: RecordField[] } | null>(null)
   const graphHostRef = useRef<HTMLDivElement | null>(null)
   const cyRef = useRef<Core | null>(null)
+  const graphRef = useRef<ReturnType<typeof projectRelationshipGraph>>({ nodes: [], edges: [], unresolved: [] })
+  const sessionPositions = useRef<Record<string, { x: number; y: number }>>({})
 
-  const graph = useMemo(() => projectRelationshipGraph(controller.data), [controller.data])
+  const avatarSources = useMemo(() => Object.fromEntries(Object.entries(presentation?.character_avatars ?? {}).map(([ref, asset]) => [ref, asset.image_src])), [presentation])
+  const graph = useMemo(() => projectRelationshipGraph(controller.data, avatarSources), [controller.data, avatarSources])
+  graphRef.current = graph
   const timeModel = useMemo(() => projectTimeEvents(controller.data), [controller.data])
   const threads = useMemo(() => projectOpenThreads(controller.data), [controller.data])
   const relationshipCount = controller.data?.sections.relationships.length ?? 0
@@ -81,93 +102,64 @@ export function StoryMapPage() {
     return section.find((entry) => entry.source_ref === sourceRef) ?? null
   }
 
-  // Cytoscape 只读图：数据或页签变化时重建；离开时销毁，不持有第二套事实。
+  const graphElements = (model: typeof graph) => [
+    ...model.nodes.map((node) => ({ data: { id: node.id, label: node.short, status: node.status, avatar: node.avatarImageSrc ?? '' } })),
+    ...model.edges.map((edge) => ({ data: { id: edge.id, source: edge.source, target: edge.target, label: edge.label, status: edge.status } })),
+  ]
+
+  // The graph instance lives for one Map/project visit.  Later data changes update
+  // elements in place, so a saved author edit cannot discard the dragged positions.
+  useEffect(() => {
+    return () => { cyRef.current?.destroy(); cyRef.current = null; sessionPositions.current = {} }
+  }, [tab, selected?.project_id])
+
   useEffect(() => {
     if (tab !== 'graph' || graph.nodes.length === 0 || !graphHostRef.current) return
-    const cy = cytoscape({
-      container: graphHostRef.current,
-      elements: [
-        ...graph.nodes.map((n) => ({ data: { id: n.id, label: n.short, status: n.status, avatarColor: `hsl(${n.avatarHue} 72% 72%)` } })),
-        ...graph.edges.map((e) => ({ data: { id: e.id, source: e.source, target: e.target, label: e.label, status: e.status } })),
-      ],
-      style: [
-        {
-          selector: 'node',
-          style: {
-            label: 'data(label)',
-            'background-color': 'data(avatarColor)',
-            'background-opacity': 0.9,
-            color: '#172545',
-            'font-size': 12,
-            'text-wrap': 'ellipsis',
-            'text-max-width': '120px',
-            'text-margin-y': 4,
-            'text-valign': 'bottom',
-            width: 26,
-            height: 26,
-          },
-        },
-        {
-          selector: 'node[status = "future"]',
-          style: {
-            'background-color': '#ffffff',
-            'border-color': '#6f91df',
-            'border-width': 3,
-            'border-style': 'dashed',
-          },
-        },
-        {
-          selector: 'edge',
-          style: {
-            label: 'data(label)',
-            'line-color': '#8fb1ff',
-            'target-arrow-color': '#8fb1ff',
-            'target-arrow-shape': 'none',
-            'curve-style': 'bezier',
-            'font-size': 11,
-            color: '#64728f',
-            'text-wrap': 'ellipsis',
-            'text-max-width': '140px',
-          },
-        },
-        {
-          selector: 'edge[status = "future"]',
-          style: { 'line-style': 'dashed', 'line-color': '#9aa8c5', color: '#7c89a3' },
-        },
-        { selector: ':selected', style: { 'overlay-opacity': 0.15, 'overlay-color': '#2868f7' } },
-      ],
-      wheelSensitivity: 0.2,
-      minZoom: 0.4,
-      maxZoom: 1.6,
-    })
-    cy.layout({ name: graph.edges.length > 0 ? 'cose' : 'grid', animate: false, fit: true, padding: 24 } as never).run()
-    cy.on('tap', 'node', (event) => {
-      const node = graph.nodes.find((n) => n.id === event.target.id())
-      if (node) setDetail({
-        kind: '人物', label: node.label, fields: node.fields, status: node.status,
-        sourceRef: node.sourceRef, sourceKind: node.sourceKind, editable: node.editable,
-        avatarText: node.avatarText, avatarHue: node.avatarHue, intro: node.intro, role: node.role,
+    let cy = cyRef.current
+    if (!cy) {
+      cy = cytoscape({
+        container: graphHostRef.current,
+        elements: graphElements(graph),
+        style: [
+          { selector: 'node', style: { label: 'data(label)', 'background-color': '#dce7f8', 'background-image': 'data(avatar)', 'background-fit': 'cover', 'background-image-opacity': 1, color: '#172545', 'font-size': 12, 'text-wrap': 'ellipsis', 'text-max-width': '136px', 'text-margin-y': 9, 'text-valign': 'bottom', 'text-halign': 'center', width: 60, height: 60, 'border-color': '#7896c8', 'border-width': 2 } },
+          { selector: 'node[status = "future"]', style: { 'border-color': '#6f91df', 'border-width': 3, 'border-style': 'dashed' } },
+          { selector: 'edge', style: { label: 'data(label)', 'line-color': '#8fb1ff', 'curve-style': 'bezier', 'font-size': 11, color: '#64728f', 'text-wrap': 'ellipsis', 'text-max-width': '140px' } },
+          { selector: 'edge[status = "future"]', style: { 'line-style': 'dashed', 'line-color': '#9aa8c5', color: '#7c89a3' } },
+          { selector: ':selected', style: { 'overlay-opacity': 0.15, 'overlay-color': '#2868f7' } },
+        ], wheelSensitivity: 0.6, minZoom: 0.35, maxZoom: 2.2,
       })
-    })
-    cy.on('mouseover', 'node', (event) => {
-      const node = graph.nodes.find((item) => item.id === event.target.id())
-      const position = event.renderedPosition
-      if (node) setTooltip({ x: position.x, y: position.y, label: node.label, avatarText: node.avatarText, avatarHue: node.avatarHue, intro: node.intro, role: node.role, fields: node.hoverFields })
-    })
-    cy.on('mousemove', 'node', (event) => setTooltip((current) => current ? { ...current, x: event.renderedPosition.x, y: event.renderedPosition.y } : null))
-    cy.on('mouseout', 'node', () => setTooltip(null))
-    cy.on('tap', 'edge', (event) => {
-      const edge = graph.edges.find((e) => e.id === event.target.id())
-      if (edge) setDetail({
-        kind: '关系', label: edge.label, fields: edge.fields, status: edge.status,
-        sourceRef: edge.sourceRef, sourceKind: edge.sourceKind, editable: edge.editable,
+      cy.layout({ name: graph.edges.length > 0 ? 'cose' : 'grid', animate: false, fit: true, padding: 36 } as never).run()
+      cy.nodes().forEach((node) => { sessionPositions.current[node.id()] = node.position() })
+      cy.on('dragfree', 'node', (event) => { sessionPositions.current[event.target.id()] = event.target.position() })
+      cy.on('tap', 'node', (event) => {
+        const node = graphRef.current.nodes.find((item) => item.id === event.target.id())
+        if (node) setDetail({ kind: '人物', label: node.label, fields: node.fields, status: node.status, sourceRef: node.sourceRef, sourceKind: node.sourceKind, editable: node.editable, avatarImageSrc: node.avatarImageSrc, intro: node.intro, role: node.role })
       })
-    })
-    cyRef.current = cy
-    return () => {
-      cy.destroy()
-      cyRef.current = null
+      cy.on('mouseover', 'node', (event) => {
+        const node = graphRef.current.nodes.find((item) => item.id === event.target.id())
+        if (node) setTooltip({ x: event.renderedPosition.x, y: event.renderedPosition.y, label: node.label, avatarImageSrc: node.avatarImageSrc, intro: node.intro, role: node.role, fields: node.fields })
+      })
+      cy.on('mousemove', 'node', (event) => setTooltip((current) => current ? { ...current, x: event.renderedPosition.x, y: event.renderedPosition.y } : null))
+      cy.on('mouseout', 'node', () => setTooltip(null))
+      cy.on('tap', 'edge', (event) => {
+        const edge = graphRef.current.edges.find((item) => item.id === event.target.id())
+        if (edge) setDetail({ kind: '关系', label: edge.label, fields: edge.fields, status: edge.status, sourceRef: edge.sourceRef, sourceKind: edge.sourceKind, editable: edge.editable })
+      })
+      cyRef.current = cy
+      return
     }
+    const wanted = new Map(graphElements(graph).map((element: any) => [element.data.id, element]))
+    cy.elements().forEach((element) => { if (!wanted.has(element.id())) element.remove() })
+    wanted.forEach((element, id) => {
+      const existing = cy?.getElementById(id)
+      if (existing && existing.nonempty()) existing.data(element.data)
+      else cy?.add(element)
+    })
+    cy.nodes().forEach((node) => {
+      const position = sessionPositions.current[node.id()]
+      if (position) node.position(position)
+      else sessionPositions.current[node.id()] = node.position()
+    })
   }, [graph, tab])
 
   useEffect(() => {
@@ -220,11 +212,14 @@ export function StoryMapPage() {
             )}
             <div className="map-graph-stage">
               <div ref={graphHostRef} className="map-graph" style={{ display: graph.nodes.length > 0 ? 'block' : 'none' }} />
-              {tooltip && <div className="map-tooltip" style={{ left: tooltip.x + 18, top: tooltip.y + 18 }}><span className="character-avatar" style={{ '--avatar-hue': tooltip.avatarHue } as CSSProperties}>{tooltip.avatarText}</span><strong>{tooltip.label}</strong>{tooltip.intro && <p>{tooltip.intro}</p>}{tooltip.role && <small>{tooltip.role}</small>}{tooltip.fields.map((field) => <small key={field.key}>{field.label}：{field.value}</small>)}</div>}
+              {tooltip && <div className="map-tooltip" style={{ left: tooltip.x + 18, top: tooltip.y + 18 }}><AvatarImage src={tooltip.avatarImageSrc} alt=""/><div><strong>{tooltip.label}</strong>{tooltip.intro && <p>{tooltip.intro}</p>}{tooltip.role && <small>{tooltip.role}</small>}<GroupedCharacterFields fields={tooltip.fields}/></div></div>}
             </div>
             {graph.nodes.length > 0 && (
               <div className="map-graph-tools">
+                <button onClick={() => cyRef.current?.zoom({ level: Math.min(cyRef.current.zoom() * 1.2, cyRef.current.maxZoom()), renderedPosition: { x: cyRef.current.width() / 2, y: cyRef.current.height() / 2 } })}><Plus /> 放大</button>
+                <button onClick={() => cyRef.current?.zoom({ level: Math.max(cyRef.current.zoom() / 1.2, cyRef.current.minZoom()), renderedPosition: { x: cyRef.current.width() / 2, y: cyRef.current.height() / 2 } })}><Minus /> 缩小</button>
                 <button onClick={() => cyRef.current?.fit(undefined, 24)}><Maximize2 /> 适应视图</button>
+                <button onClick={() => { const cy = cyRef.current; if (!cy) return; sessionPositions.current = {}; cy.layout({ name: graph.edges.length > 0 ? 'cose' : 'grid', animate: false, fit: true, padding: 36 } as never).run(); cy.nodes().forEach((node) => { sessionPositions.current[node.id()] = node.position() }) }}><RotateCcw /> 恢复默认布局</button>
                 <span className="muted-note">
                   {graph.nodes.length} 人物 · {graph.edges.length} 连线 · 实心为当前、虚线为规划中
                 </span>
@@ -250,7 +245,7 @@ export function StoryMapPage() {
             {detail ? (
               <>
                 <h3>{detail.kind} · {detail.label}</h3>
-                {detail.kind === '人物' && <div className="map-character-identity">{detail.avatarText && <span className="character-avatar" style={{ '--avatar-hue': detail.avatarHue ?? 0 } as CSSProperties}>{detail.avatarText}</span>}<div>{detail.intro && <p>{detail.intro}</p>}{detail.role && <small>{detail.role}</small>}</div></div>}
+                {detail.kind === '人物' && <div className="map-character-identity"><AvatarImage src={detail.avatarImageSrc} alt=""/><div>{detail.intro && <p>{detail.intro}</p>}{detail.role && <small>{detail.role}</small>}</div></div>}
                 <p><span className={`material-state ${detail.status}`}>{detail.status === 'future' ? '规划中' : '当前'}</span></p>
                 <p className="muted-note">{authorSourceLabel(detail.sourceKind)}</p>
                 <DetailFields fields={detail.fields} />
