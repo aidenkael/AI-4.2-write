@@ -40,7 +40,7 @@ def _write_bkp(root: Path, acceptance: dict | None):
     bkp.mkdir(parents=True)
     identity = {
         "bkp_version": "0.2",
-        "book": {"book_id": "book_0001", "title": "样例作品"},
+        "book": {"book_id": "book_0001", "title": "样例作品", "author": "作者"},
         "schema_status": "FINALIZED",
     }
     if acceptance is not None:
@@ -48,8 +48,7 @@ def _write_bkp(root: Path, acceptance: dict | None):
     (bkp / "identity.json").write_text(json.dumps(identity, ensure_ascii=False), encoding="utf-8")
 
 
-def test_acceptance_pass_shows_bkp_searchable(isolated, monkeypatch):
-    monkeypatch.setattr(materials, "_knowledge_is_discoverable", lambda asset: True)
+def test_acceptance_pass_shows_bkp_searchable(isolated):
     _write_bkp(isolated, {"schema": "gowrite_bkp_acceptance/v1", "required": True, "status": "PASS"})
     classified = materials._classify_author_group(_asset())
     assert classified["writing_callable"] is True
@@ -70,8 +69,7 @@ def test_acceptance_pending_shows_not_completed(isolated):
     assert classified["state"] == "needs_attention"
 
 
-def test_legacy_package_without_acceptance_keeps_old_semantics(isolated, monkeypatch):
-    monkeypatch.setattr(materials, "_knowledge_is_discoverable", lambda asset: True)
+def test_legacy_package_without_acceptance_keeps_old_semantics(isolated):
     _write_bkp(isolated, None)
     classified = materials._classify_author_group(_asset())
     assert classified["writing_callable"] is True

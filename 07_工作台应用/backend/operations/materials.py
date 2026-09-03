@@ -202,7 +202,7 @@ def _learning_projection(asset: dict[str, Any]) -> tuple[str | None, list[dict[s
 def _knowledge_is_discoverable(asset: dict[str, Any]) -> bool:
     """使用唯一 KnowledgeRetrieve loader 验证来源真实可加载。"""
     root = get_repo_root()
-    kr_dir = root / "05_Skills与自动化" / "01_Skills" / "KnowledgeRetrieve"
+    kr_dir = _REPO_ROOT / "05_Skills与自动化" / "01_Skills" / "KnowledgeRetrieve"
     if str(kr_dir) not in sys.path:
         sys.path.insert(0, str(kr_dir))
     try:
@@ -210,7 +210,7 @@ def _knowledge_is_discoverable(asset: dict[str, Any]) -> bool:
         expected_kind = "method_source" if asset.get("type") == "METHOD_SOURCE" else "reference_bkp"
         return any(
             source.get("source_kind") == expected_kind and source.get("source_id") == asset.get("id")
-            for source in registry.discover_sources(str(root / "02_素材知识库"))
+            for source in registry.discover_sources(str(root))
         )
     except Exception:
         return False
@@ -948,6 +948,7 @@ def run_source_prepare(asset_id: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 _BD_SCRIPT = _REPO_ROOT / "05_Skills与自动化" / "01_Skills" / "BookDistill" / "scripts" / "book_distill.py"
+_ACCEPTANCE_GATE_SCRIPT = _REPO_ROOT / "05_Skills与自动化" / "01_Skills" / "BookDistill" / "scripts" / "acceptance_gate.py"
 
 _DISTILL_TASK_TEMPLATE = """你是 Go Write 的原著蒸馏执行器（BookDistill Base Scan + 收敛阶段）。
 
@@ -967,6 +968,13 @@ _DISTILL_TASK_TEMPLATE = """你是 Go Write 的原著蒸馏执行器（BookDisti
 5. 生成 {bd_dir}/evidence.md（精选支撑最终结论的证据）与 {bd_dir}/model.md
    （作者第一阅读入口）。
 6. 完成 {bd_dir}/bd_report.md：来源身份 + 覆盖范围与置信度 + 边界与不确定性。
+7. 运行 BookDistill 的 assemble 与 profile 命令后，依据 {bd_dir}/book_profile.md、全部
+   evidence、model.md、mechanisms.md 和 BKP_protocol.md，创建完整 {bd_dir}/bkp_prototype/：
+   identity.json、README.md、profile.md、work_map.md、author_view.md、knowledge/cards.md 以及
+   协议要求的 curated 文件。cards 必须是可追溯的 canonical 知识卡，author_view 必须是可读投影。
+8. 在 {bd_dir}/BKP_ACCEPTANCE_REPORT.md 写入全书综合验收报告，必须含
+   BKP_protocol.md §5 所要求的 acceptance_data JSON 块。只针对当前冻结来源范围下结论；
+   连载、节选或未完结不是 blocking gap，不能假称尚未出现的终局或完整人物弧。
 
 纪律：
 - 原著始终是最高事实源；不经过二手摘要逐层压缩；
@@ -996,6 +1004,55 @@ def _run_bd_cli(args: list[str], request_id: str, *, timeout: int = 10 * 60) -> 
     return subprocess.run(
         cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
     )
+
+
+def _mark_reference_acceptance_pending(bd_dir: Path) -> None:
+    """新工作台包在刷新 catalog 前先 fail closed，旧 BKP 一律不追溯修改。"""
+    identity_path = bd_dir / "bkp" / "identity.json"
+    try:
+        identity = json.loads(identity_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise MaterialsError("BKP 身份文件缺失，无法完成蒸馏。") from exc
+    identity["acceptance"] = {
+        "schema": "gowrite_bkp_acceptance/v1", "required": True, "status": "PENDING",
+        "report": "BKP_ACCEPTANCE_REPORT.md",
+    }
+    identity["bkp_protocol_version"] = "0.3"
+    identity_path.write_text(json.dumps(identity, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _run_reference_acceptance(request_id: str, asset: dict[str, Any], bd_dir: Path) -> None:
+    """验收与统一 loader discovery 是原著蒸馏的完成门，不是作者动作。"""
+    _mark_reference_acceptance_pending(bd_dir)
+    if not _ACCEPTANCE_GATE_SCRIPT.is_file():
+        raise MaterialsError("原著学习检查工具缺失。")
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(_ACCEPTANCE_GATE_SCRIPT), str(bd_dir), "--repo-root", str(get_repo_root()), "--write-identity"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10 * 60,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise MaterialsError("原著学习检查超时，请重试。") from exc
+    if proc.returncode != 0:
+        raise MaterialsError("原著学习检查未通过，请检查蒸馏结果。")
+    if not _knowledge_is_discoverable(asset):
+        raise MaterialsError("原著学习结果暂不能用于写作，请检查资料状态。")
+
+
+def _finalize_reference_distill(request_id: str, asset: dict[str, Any], sp_dir: Path, bd_dir: Path) -> None:
+    """重新执行所有确定性边界；Agent 输出从不直接构成完成信任。"""
+    for sub_args, label in (
+        (["assemble", "--input", str(sp_dir), "--output", str(bd_dir)], "蒸馏校验"),
+        (["profile", "--output", str(bd_dir)], "资料整理"),
+        (["bkp", "--output", str(bd_dir)], "学习资料整理"),
+    ):
+        try:
+            proc = _run_bd_cli(sub_args, request_id)
+        except subprocess.TimeoutExpired as exc:
+            raise MaterialsError(f"{label}超时，请重试。") from exc
+        if proc.returncode != 0:
+            raise MaterialsError(f"{label}失败。")
+    _run_reference_acceptance(request_id, asset, bd_dir)
 
 
 def run_book_distill(asset_id: str) -> dict[str, Any]:
@@ -1056,22 +1113,13 @@ def run_book_distill(asset_id: str) -> dict[str, Any]:
             "message": "等待 Qoder /gowrite：正在蒸馏（Base Scan + 收敛），完成后将自动封装 BKP",
         }
 
-    # 4) 确定性 finalize：assemble → profile → bkp
-    for sub_args, label in (
-        (["assemble", "--input", str(sp_dir), "--output", str(bd_dir)], "蒸馏校验"),
-        (["profile", "--output", str(bd_dir)], "BookProfile"),
-        (["bkp", "--output", str(bd_dir)], "BKP 封装"),
-    ):
-        try:
-            proc = _run_bd_cli(sub_args, request_id)
-        except subprocess.TimeoutExpired:
-            audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "book_distill", details={"skill": "BookDistill"})
-            audit.finish_file(request_id, audit.STATUS_FAILED, error=f"{label}超时")
-            raise MaterialsError(f"{label}超时，请重试。")
-        if proc.returncode != 0:
-            audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "book_distill", details={"skill": "BookDistill"})
-            audit.finish_file(request_id, audit.STATUS_FAILED, error=f"{label}失败")
-            raise MaterialsError(f"{label}失败。\n{(proc.stderr or proc.stdout or '')[:400]}")
+    # 4) 确定性完成门：BKP → acceptance PASS → KnowledgeRetrieve discovery。
+    try:
+        _finalize_reference_distill(request_id, asset, sp_dir, bd_dir)
+    except MaterialsError as exc:
+        audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "book_distill", details={"skill": "BookDistill"})
+        audit.finish_file(request_id, audit.STATUS_FAILED, error=str(exc))
+        raise
 
     # 5) 刷新素材状态（knowledge 只可能由 FINALIZED BKP 证据推导为可用）
     catalog, _, _ = _load_materialintake()
@@ -1164,25 +1212,16 @@ class _PendingDistill(Exception):
 
 
 def _finalize_distill(request_id: str, sp_dir: Path, bd_dir: Path) -> dict[str, Any]:
-    """Interactive 蒸馏的确定性 finalize：assemble → profile → bkp → 刷新。"""
+    """Interactive 蒸馏的确定性完成门；与 Direct 路径严格一致。"""
     from operations import qoder_bridge as bridge
-    for sub_args, label in (
-        (["assemble", "--input", str(sp_dir), "--output", str(bd_dir)], "蒸馏校验"),
-        (["profile", "--output", str(bd_dir)], "BookProfile"),
-        (["bkp", "--output", str(bd_dir)], "BKP 封装"),
-    ):
-        try:
-            proc = _run_bd_cli(sub_args, request_id)
-        except subprocess.TimeoutExpired:
-            audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "book_distill", details={"skill": "BookDistill"})
-            audit.finish_file(request_id, audit.STATUS_FAILED, error=f"{label}超时")
-            bridge.cleanup_request(request_id)
-            raise MaterialsError(f"{label}超时，请重试。")
-        if proc.returncode != 0:
-            audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "book_distill", details={"skill": "BookDistill"})
-            audit.finish_file(request_id, audit.STATUS_FAILED, error=f"{label}失败")
-            bridge.cleanup_request(request_id)
-            raise MaterialsError(f"{label}失败。\n{(proc.stderr or proc.stdout or '')[:400]}")
+    asset_id = bd_dir.name.split("_", 1)[0]
+    try:
+        _finalize_reference_distill(request_id, _ledger_asset(asset_id), sp_dir, bd_dir)
+    except MaterialsError as exc:
+        audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "book_distill", details={"skill": "BookDistill"})
+        audit.finish_file(request_id, audit.STATUS_FAILED, error=str(exc))
+        bridge.cleanup_request(request_id)
+        raise
     catalog, _, _ = _load_materialintake()
     rc = catalog.refresh_and_render(get_repo_root(), check_only=False)
     bridge.cleanup_request(request_id)

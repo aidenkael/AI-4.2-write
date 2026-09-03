@@ -332,6 +332,9 @@ def test_run_book_distill_requires_pass_input(isolated, monkeypatch):
     bd_script = materials._REPO_ROOT / "05_Skills与自动化" / "01_Skills" / "BookDistill" / "scripts" / "book_distill.py"
     bd_script.parent.mkdir(parents=True)
     bd_script.write_text("", encoding="utf-8")
+    gate_script = bd_script.with_name("acceptance_gate.py")
+    gate_script.write_text("", encoding="utf-8")
+    monkeypatch.setattr(materials, "_ACCEPTANCE_GATE_SCRIPT", gate_script)
 
     # 没有 SP 输出目录 → 拒绝（必须先生成 PASS 提纯产物）
     with pytest.raises(materials.MaterialsError, match="还没有任何提纯产物"):
@@ -346,6 +349,9 @@ def test_run_book_distill_deterministic_stages(isolated, monkeypatch):
     bd_script = materials._REPO_ROOT / "05_Skills与自动化" / "01_Skills" / "BookDistill" / "scripts" / "book_distill.py"
     bd_script.parent.mkdir(parents=True)
     bd_script.write_text("", encoding="utf-8")
+    gate_script = bd_script.with_name("acceptance_gate.py")
+    gate_script.write_text("", encoding="utf-8")
+    monkeypatch.setattr(materials, "_ACCEPTANCE_GATE_SCRIPT", gate_script)
     sp_dir = isolated / "06_工作区" / "SourcePrepare" / "book_0001_样例作品"
     sp_dir.mkdir(parents=True)
 
@@ -364,9 +370,22 @@ def test_run_book_distill_deterministic_stages(isolated, monkeypatch):
     def fake_run(cmd, **kw):
         if any("book_distill.py" in str(c) for c in cmd):
             calls.append(cmd[2])  # 子命令：validate/prepare/assemble/profile/bkp
+            if cmd[2] == "bkp":
+                bkp = isolated / "02_素材知识库" / "book_0001_样例作品" / "bkp"
+                (bkp / "knowledge").mkdir(parents=True, exist_ok=True)
+                (bkp / "identity.json").write_text(json.dumps({"book": {"book_id": "book_0001", "title": "样例作品"}}, ensure_ascii=False), encoding="utf-8")
+                (bkp / "knowledge" / "cards.md").write_text("## K001\n", encoding="utf-8")
+                (bkp / "author_view.md").write_text("## 总览\n可学习。\n", encoding="utf-8")
+        if any("acceptance_gate.py" in str(c) for c in cmd):
+            calls.append("acceptance")
+            identity_path = isolated / "02_素材知识库" / "book_0001_样例作品" / "bkp" / "identity.json"
+            identity = json.loads(identity_path.read_text(encoding="utf-8"))
+            identity["acceptance"] = {"required": True, "status": "PASS"}
+            identity_path.write_text(json.dumps(identity, ensure_ascii=False), encoding="utf-8")
         return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
 
     monkeypatch.setattr(materials.subprocess, "run", fake_run)
+    monkeypatch.setattr(materials, "_knowledge_is_discoverable", lambda asset: True)
     monkeypatch.setattr(catalog, "refresh_and_render", lambda root, check_only: 0)
 
     result = materials.run_book_distill("book_0001")
@@ -374,7 +393,30 @@ def test_run_book_distill_deterministic_stages(isolated, monkeypatch):
     # validate + prepare 后进入 Agent 阶段，再 assemble/profile/bkp
     assert "validate" in calls and "prepare" in calls
     assert calls.count("assemble") >= 1 and calls.count("profile") >= 1 and calls.count("bkp") >= 1
+    assert "acceptance" in calls
     assert adapter is not None
+
+
+def test_new_reference_distill_does_not_skip_missing_bkp_prototype(isolated, monkeypatch):
+    """新书 Agent 未产出 curated 原型时，绝不能跳过 BKP/验收假装完成。"""
+    _use_direct("fake_distill_agent")
+    _write_ledger(isolated, _fake_asset_ledger(pur="可用"))
+    monkeypatch.setattr(materials, "_REPO_ROOT", isolated.parent)
+    monkeypatch.setattr(materials.sys, "executable", "python")
+    script = materials._REPO_ROOT / "05_Skills与自动化" / "01_Skills" / "BookDistill" / "scripts" / "book_distill.py"
+    script.parent.mkdir(parents=True)
+    script.write_text("", encoding="utf-8")
+    (isolated / "06_工作区" / "SourcePrepare" / "book_0001_样例作品").mkdir(parents=True)
+    monkeypatch.setattr(agent_runner, "_build_adapter", lambda: (type("A", (), {"name": "fake", "run": lambda self, req: AgentResult(status="completed", output="{}", agent="fake")})(), AgentRequest(task="")))
+
+    def fake_run(cmd, **kw):
+        code = 1 if any("book_distill.py" in str(part) for part in cmd) and cmd[2] == "bkp" else 0
+        return subprocess.CompletedProcess(cmd, code, stdout="missing bkp_prototype", stderr="")
+
+    monkeypatch.setattr(materials.subprocess, "run", fake_run)
+    with pytest.raises(materials.MaterialsError, match="学习资料整理失败"):
+        materials.run_book_distill("book_0001")
+    assert not (isolated / "02_素材知识库" / "book_0001_样例作品" / "bkp" / "identity.json").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -392,4 +434,4 @@ def test_list_materials_zero_model_calls(isolated, monkeypatch):
     # 详情也只读
     detail = materials.get_material_detail("book_0001")
     assert detail["writing_callable"] is False
-    assert detail["stage"] == "提纯完成，待蒸馏"
+    assert detail["state"] == "pending_distill"
