@@ -28,6 +28,7 @@ import {
   type MaterialInboxFile,
   type MaterialIntakeResult,
   type MaterialItem,
+  type MaterialPlanItem,
 } from '../../bridge/client'
 import { useAuthorTask } from '../tasks/AuthorTaskCoordinator'
 
@@ -54,6 +55,7 @@ export interface MaterialsController {
   pickAndImport(): Promise<ImportMaterialResult | null>
   classify(): Promise<void>
   cancelClassify(): Promise<void>
+  updateClassifyItem(index: number, patch: Pick<MaterialPlanItem, 'name' | 'type'>): void
   confirmApply(): Promise<boolean>
   selectDetail(assetId: string): Promise<void>
   runPrepare(assetId: string): Promise<boolean>
@@ -247,6 +249,22 @@ export function useMaterialsController(options?: { notify?: (message: string) =>
     await cancelTask()
   }, [cancelTask])
 
+  const updateClassifyItem = useCallback((index: number, patch: Pick<MaterialPlanItem, 'name' | 'type'>) => {
+    setClassifyResult((current) => {
+      if (!current || !current.plan.items[index]) return current
+      const items = current.plan.items.map((item, itemIndex) => {
+        if (itemIndex !== index) return item
+        const updated = { ...item, ...patch }
+        // 作者已补齐名称与类型时，把「需要确认」收敛成 MaterialIntake 可执行的新资料。
+        if (updated.action === 'REVIEW' && updated.name?.trim() && updated.type) {
+          return { ...updated, action: 'NEW_ASSET' as const, reason: undefined }
+        }
+        return updated
+      })
+      return { ...current, plan: { ...current.plan, items } }
+    })
+  }, [])
+
   // ---------------- 入库确认（MaterialIntake 机械事务，非 AI 任务） ----------------
 
   const confirmApply = useCallback(async () => {
@@ -317,7 +335,7 @@ export function useMaterialsController(options?: { notify?: (message: string) =>
     inbox, inboxLoading, inboxError, applying,
     classifyState, classifyResult, importResult, importing,
     busyAssetId, busyKind, detail, detailLoading,
-    reload, refresh, scanInbox, pickAndImport, classify, cancelClassify, confirmApply,
+    reload, refresh, scanInbox, pickAndImport, classify, cancelClassify, updateClassifyItem, confirmApply,
     selectDetail, runPrepare, runDistill,
   }
 }

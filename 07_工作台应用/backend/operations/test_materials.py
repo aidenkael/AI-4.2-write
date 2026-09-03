@@ -41,7 +41,8 @@ def _write_ledger(root):
     return ledger_path
 
 
-def test_list_materials_reads_real_ledger(isolated):
+def test_list_materials_reads_real_ledger(isolated, monkeypatch):
+    monkeypatch.setattr(materials, "_knowledge_is_discoverable", lambda asset: True)
     _write_ledger(isolated)
     result = materials.list_materials()
     assert len(result["materials"]) == 1
@@ -50,8 +51,9 @@ def test_list_materials_reads_real_ledger(isolated):
     assert m["name"] == "样例作品"
     assert m["type"] == "REFERENCE_WORK"
     assert m["author"] == "作者甲"
-    assert m["purification_status"] == "可用"
-    assert m["knowledge_status"] == "可用"
+    assert m["type_label"] == "原著"
+    assert m["source_formats"] == ["EPUB"]
+    assert m["state"] == "ready"
 
 
 def test_list_materials_missing_ledger_rejected(isolated):
@@ -59,27 +61,26 @@ def test_list_materials_missing_ledger_rejected(isolated):
         materials.list_materials()
 
 
-def test_author_group_classification_mapping():
-    """作者面分组映射：只回答“能否被调用 / 为什么 / 下一步”。"""
+def test_author_group_classification_mapping(monkeypatch):
+    """作者面状态只来自真实生命周期投影。"""
+    monkeypatch.setattr(materials, "_knowledge_is_discoverable", lambda asset: True)
     cases = [
         # (purification, knowledge, expected_group, callable)
         ("可用", "可用", "usable", True),
-        ("可用", "未开始", "needs_organization", False),
-        ("需复核", "未开始", "needs_update", False),
-        ("未处理", "未开始", "needs_update", False),
+        ("可用", "未开始", "pending", False),
+        ("需复核", "未开始", "needs_attention", False),
+        ("未处理", "未开始", "pending", False),
     ]
     for pur, know, group, callable_ok in cases:
         item = {"purification": {"status": pur}, "knowledge": {"status": know}}
         classified = materials._classify_author_group(item)
         assert classified["author_group"] == group, (pur, know)
         assert classified["writing_callable"] is callable_ok, (pur, know)
-        assert classified["why"] and classified["next_step"]
-        # 可用于写作必须意味着 KnowledgeRetrieve 可用的知识包已就绪
-        if group == "usable":
-            assert know == "可用"
+        assert classified["state"] in {"ready", "pending_distill", "needs_attention", "pending_prepare"}
 
 
-def test_list_materials_includes_author_facing_fields(isolated):
+def test_list_materials_includes_author_facing_fields(isolated, monkeypatch):
+    monkeypatch.setattr(materials, "_knowledge_is_discoverable", lambda asset: True)
     ledger = _ledger()
     # 第二个素材：有素材但还没提炼知识
     ledger["assets"].append({
@@ -94,8 +95,15 @@ def test_list_materials_includes_author_facing_fields(isolated):
     by_id = {m["id"]: m for m in result["materials"]}
     assert by_id["book_0001"]["author_group"] == "usable"
     assert by_id["book_0001"]["writing_callable"] is True
-    assert by_id["book_0002"]["author_group"] == "needs_organization"
+    assert by_id["book_0002"]["author_group"] == "pending"
     assert by_id["book_0002"]["writing_callable"] is False
+
+
+def test_author_learning_markdown_parser_and_format_safety():
+    summary, sections = materials._parse_learning_markdown("# 标题\n> 说明\n\n总览正文\n\n## 可以学习\n第一段\n")
+    assert summary == "总览正文"
+    assert sections == [{"title": "可以学习", "body": "第一段"}]
+    assert materials._source_formats({"files": [{"path": "private/path/book.epub", "sha256": "secret"}]}) == ["EPUB"]
 
 
 def test_refresh_uses_materialintake(isolated, monkeypatch):

@@ -102,7 +102,8 @@ def test_run_method_prepare_rejects_non_method(isolated):
 
 # ---------- writing_callable 投影 ----------
 
-def test_finalized_method_package_is_writing_callable(isolated):
+def test_finalized_method_package_is_writing_callable(isolated, monkeypatch):
+    monkeypatch.setattr(materials, "_knowledge_is_discoverable", lambda asset: asset["id"] == "book_9101")
     _write_ledger(isolated, [
         _asset("book_9101", "METHOD_SOURCE", pur="可用", know="可用"),
         _asset("book_9102", "METHOD_SOURCE", pur="可用", know="未开始"),
@@ -112,14 +113,15 @@ def test_finalized_method_package_is_writing_callable(isolated):
     assert by_id["book_9101"]["writing_callable"] is True
     assert by_id["book_9101"]["author_group"] == "usable"
     assert by_id["book_9102"]["writing_callable"] is False
-    assert by_id["book_9102"]["author_group"] == "needs_organization"
+    assert by_id["book_9102"]["author_group"] == "pending"
 
 
-def test_material_detail_stage_for_method_asset(isolated):
+def test_material_detail_stage_for_method_asset(isolated, monkeypatch):
+    monkeypatch.setattr(materials, "_knowledge_is_discoverable", lambda asset: True)
     _write_ledger(isolated, [_asset("book_9101", "METHOD_SOURCE", pur="可用", know="可用")])
     detail = materials.get_material_detail("book_9101")
     assert detail["writing_callable"] is True
-    assert detail["stage"] == "蒸馏完成，可用于写作"
+    assert detail["state"] == "ready"
 
 
 # ---------- 分类决策允许 METHOD_SOURCE ----------

@@ -48,36 +48,37 @@ def _write_bkp(root: Path, acceptance: dict | None):
     (bkp / "identity.json").write_text(json.dumps(identity, ensure_ascii=False), encoding="utf-8")
 
 
-def test_acceptance_pass_shows_bkp_searchable(isolated):
+def test_acceptance_pass_shows_bkp_searchable(isolated, monkeypatch):
+    monkeypatch.setattr(materials, "_knowledge_is_discoverable", lambda asset: True)
     _write_bkp(isolated, {"schema": "gowrite_bkp_acceptance/v1", "required": True, "status": "PASS"})
     classified = materials._classify_author_group(_asset())
     assert classified["writing_callable"] is True
-    assert classified["bkp_acceptance"] == "BKP 可检索"
+    assert classified["state"] == "ready"
 
 
 def test_acceptance_review_blocks_retrieval_with_honest_label(isolated):
     _write_bkp(isolated, {"schema": "gowrite_bkp_acceptance/v1", "required": True, "status": "REVIEW"})
     classified = materials._classify_author_group(_asset())
     assert classified["writing_callable"] is False
-    assert classified["bkp_acceptance"] == "需要复核"
-    assert classified["why"] and classified["next_step"]
+    assert classified["state"] == "needs_attention"
 
 
 def test_acceptance_pending_shows_not_completed(isolated):
     _write_bkp(isolated, {"schema": "gowrite_bkp_acceptance/v1", "required": True, "status": "PENDING"})
     classified = materials._classify_author_group(_asset())
     assert classified["writing_callable"] is False
-    assert classified["bkp_acceptance"] == "未完成全书验收"
+    assert classified["state"] == "needs_attention"
 
 
-def test_legacy_package_without_acceptance_keeps_old_semantics(isolated):
+def test_legacy_package_without_acceptance_keeps_old_semantics(isolated, monkeypatch):
+    monkeypatch.setattr(materials, "_knowledge_is_discoverable", lambda asset: True)
     _write_bkp(isolated, None)
     classified = materials._classify_author_group(_asset())
     assert classified["writing_callable"] is True
-    assert classified.get("bkp_acceptance") is None
+    assert classified["state"] == "ready"
 
 
-def test_no_bkp_directory_keeps_old_semantics(isolated):
+def test_no_bkp_directory_requires_real_loader_discovery(isolated):
     classified = materials._classify_author_group(_asset())
-    assert classified["writing_callable"] is True
-    assert classified.get("bkp_acceptance") is None
+    assert classified["writing_callable"] is False
+    assert classified["state"] == "needs_attention"

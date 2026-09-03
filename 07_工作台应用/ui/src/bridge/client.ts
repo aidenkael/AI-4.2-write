@@ -709,18 +709,26 @@ export interface MaterialItem {
   id: string
   name: string
   type: string
+  type_label: string
   author: string
-  tags: string[]
-  notes: string
-  purification_status: string
-  knowledge_status: string
-  file_count: number
-  /** 作者面分组：usable（可用于写作）/ needs_organization（待整理）/ needs_update（需更新）。 */
-  author_group: 'usable' | 'needs_organization' | 'needs_update'
-  /** 写作时能否被知识检索调用（只有已定稿可用知识才为 true）。 */
+  source_formats: string[]
+  author_group: 'pending' | 'usable' | 'needs_attention'
+  state: MaterialAuthorState
   writing_callable: boolean
-  why: string
-  next_step: string
+  attention_message?: string | null
+}
+
+export type MaterialAuthorState = 'pending_prepare' | 'pending_distill' | 'needs_attention' | 'ready'
+
+export type MaterialAssetType = 'REFERENCE_WORK' | 'METHOD_SOURCE' | 'RESEARCH' | 'LOOSE_MATERIAL'
+
+export interface MaterialPlanItem {
+  action: 'NEW_ASSET' | 'ATTACH_EXISTING' | 'REVIEW'
+  files: string[]
+  name?: string
+  type?: MaterialAssetType
+  asset_id?: string
+  reason?: string
 }
 
 export interface MaterialInboxFile {
@@ -762,7 +770,7 @@ export async function scanMaterialInbox(): Promise<{ inbox: string; files: Mater
 }
 
 /** 作者显式选择的入库决策（走 MaterialIntake 确定性 intake 事务）。 */
-export async function applyMaterialIntake(plan: { items: unknown[] }): Promise<MaterialIntakeResult> {
+export async function applyMaterialIntake(plan: { items: MaterialPlanItem[] }): Promise<MaterialIntakeResult> {
   return call<MaterialIntakeResult>('apply_material_intake', { plan })
 }
 
@@ -795,7 +803,7 @@ export interface ImportMaterialResult {
 export interface ClassifyMaterialResult {
   status: 'ready' | 'pending'
   request_id?: string | null
-  plan: { items: unknown[] }
+  plan: { items: MaterialPlanItem[] }
   ambiguous?: string[]
   agent_required?: boolean
   agent_used?: boolean
@@ -805,7 +813,7 @@ export interface ClassifyMaterialResult {
 export interface ClassifyRequestStatus {
   request_id: string
   status: 'pending' | 'completed' | 'failed' | 'expired' | 'canceled'
-  plan?: { items: unknown[] } | null
+  plan?: { items: MaterialPlanItem[] } | null
   message?: string | null
   error?: string | null
 }
@@ -837,12 +845,15 @@ export interface MaterialDetail {
   id: string
   name: string
   type: string
+  type_label: string
+  author: string
+  source_formats: string[]
+  state: MaterialAuthorState
+  state_label: string
   writing_callable: boolean
-  why: string
-  next_step: string
-  stage: string
-  purification_status: string
-  knowledge_status: string
+  attention_message?: string | null
+  learning_summary?: string | null
+  learning_sections: Array<{ title: string; body: string }>
 }
 
 /** 本地文件选择（pywebview 原生对话框）。 */

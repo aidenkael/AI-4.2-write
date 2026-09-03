@@ -119,11 +119,101 @@ def _bkp_acceptance_view(a: dict[str, Any]) -> str | None:
     return "review" if status == "REVIEW" else "pending"
 
 
-_BKP_ACCEPTANCE_LABELS = {
-    "ready": "BKP 可检索",
-    "review": "需要复核",
-    "pending": "未完成全书验收",
+_AUTHOR_TYPE_LABELS = {
+    "REFERENCE_WORK": "原著",
+    "METHOD_SOURCE": "技巧书",
+    "RESEARCH": "研究资料",
+    "LOOSE_MATERIAL": "零散素材",
+    "NEEDS_REVIEW": "待确认",
 }
+
+
+def _author_type_label(asset_type: str) -> str:
+    return _AUTHOR_TYPE_LABELS.get(asset_type, "其他")
+
+
+def _source_formats(asset: dict[str, Any]) -> list[str]:
+    """只投影作者能理解的来源格式，绝不泄露路径或 hash。"""
+    formats: list[str] = []
+    for entry in asset.get("files") or []:
+        path = entry.get("path") if isinstance(entry, dict) else entry
+        suffix = Path(str(path or "")).suffix.lower().lstrip(".")
+        if suffix:
+            label = suffix.upper()
+            if label not in formats:
+                formats.append(label)
+    return formats
+
+
+def _material_learning_paths(asset_id: str, asset_type: str) -> list[Path]:
+    root = get_repo_root() / "02_素材知识库"
+    asset_dir = next((p for p in sorted(root.glob(f"{asset_id}_*")) if p.is_dir()), None)
+    if asset_dir is None:
+        return []
+    if asset_type == "REFERENCE_WORK":
+        return [asset_dir / "bkp" / "author_view.md", asset_dir / "bkp" / "model.md"]
+    if asset_type == "METHOD_SOURCE":
+        return [asset_dir / "method" / "method_profile.md"]
+    return []
+
+
+def _parse_learning_markdown(text: str) -> tuple[str | None, list[dict[str, str]]]:
+    """解析现有作者投影 Markdown；这是展示层，不产生任何新知识。"""
+    summary_lines: list[str] = []
+    sections: list[dict[str, Any]] = []
+    title: str | None = None
+    body: list[str] = []
+
+    def flush() -> None:
+        nonlocal body
+        content = "\n".join(body).strip()
+        if title and content:
+            sections.append({"title": title, "body": content})
+        elif content:
+            summary_lines.append(content)
+        body = []
+
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("# ") or (not line and not body):
+            continue
+        if line.startswith(">") and not title and not summary_lines:
+            continue
+        if line.startswith("## "):
+            flush()
+            title = line[3:].strip()
+            continue
+        body.append(raw)
+    flush()
+    summary = "\n".join(summary_lines).strip() or None
+    return summary, sections
+
+
+def _learning_projection(asset: dict[str, Any]) -> tuple[str | None, list[dict[str, str]]]:
+    for path in _material_learning_paths(str(asset.get("id") or ""), str(asset.get("type") or "")):
+        try:
+            if path.is_file():
+                return _parse_learning_markdown(path.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+    return None, []
+
+
+def _knowledge_is_discoverable(asset: dict[str, Any]) -> bool:
+    """使用唯一 KnowledgeRetrieve loader 验证来源真实可加载。"""
+    root = get_repo_root()
+    kr_dir = root / "05_Skills与自动化" / "01_Skills" / "KnowledgeRetrieve"
+    if str(kr_dir) not in sys.path:
+        sys.path.insert(0, str(kr_dir))
+    try:
+        import registry
+        expected_kind = "method_source" if asset.get("type") == "METHOD_SOURCE" else "reference_bkp"
+        return any(
+            source.get("source_kind") == expected_kind and source.get("source_id") == asset.get("id")
+            for source in registry.discover_sources(str(root / "02_素材知识库"))
+        )
+    except Exception:
+        return False
 
 
 def _classify_author_group(a: dict[str, Any]) -> dict[str, Any]:
@@ -143,42 +233,20 @@ def _classify_author_group(a: dict[str, Any]) -> dict[str, Any]:
     know = (a.get("knowledge") or {}).get("status") or "未开始"
     if know == "可用":
         view = _bkp_acceptance_view(a)
-        if view == "review":
-            return {
-                "author_group": "usable",
-                "writing_callable": False,
-                "bkp_acceptance": _BKP_ACCEPTANCE_LABELS["review"],
-                "why": "BKP 已蒸馏但未通过全书验收（REVIEW），通过复核前不可被写作检索。",
-                "next_step": "离线完成全书综合审计与复核，验收通过后自动恢复可检索。",
-            }
-        if view == "pending":
-            return {
-                "author_group": "usable",
-                "writing_callable": False,
-                "bkp_acceptance": _BKP_ACCEPTANCE_LABELS["pending"],
-                "why": "BKP 已蒸馏但尚未完成全书验收审计，暂不可被写作检索。",
-                "next_step": "离线执行全书综合审计（BKP_ACCEPTANCE_REPORT.md）并通过验收校验。",
-            }
-        return {
-            "author_group": "usable",
-            "writing_callable": True,
-            "bkp_acceptance": _BKP_ACCEPTANCE_LABELS["ready"] if view == "ready" else None,
-            "why": "已提炼出可用的写作知识包，写作/规划/检查时可按需检索调用。",
-            "next_step": "无需操作；需要时由知识检索按需使用。",
-        }
+        if view != "review" and view != "pending" and _knowledge_is_discoverable(a):
+            return {"author_group": "usable", "state": "ready", "writing_callable": True, "attention_message": None}
+        return {"author_group": "needs_attention", "state": "needs_attention", "writing_callable": False,
+                "attention_message": "资料还需要检查，确认完成后才能用于写作。"}
     if pur == "可用":
-        return {
-            "author_group": "needs_organization",
-            "writing_callable": False,
-            "why": "素材已标准化为可用，但还没有提炼出可复用的写作知识。",
-            "next_step": "需要离线蒸馏为可用知识，完成后才能被写作检索。",
-        }
-    return {
-        "author_group": "needs_update",
-        "writing_callable": False,
-        "why": f"素材当前需要复核/更新（提纯状态：{pur}）。",
-        "next_step": "离线复核并更新素材后，再提炼为可用知识。",
-    }
+        return {"author_group": "pending", "state": "pending_distill", "writing_callable": False, "attention_message": None}
+    if pur in ("需复核", "失败", "不适用") or a.get("type") == "NEEDS_REVIEW":
+        formats = _source_formats(a)
+        unsupported = {"ZIP", "MOBI", "AZW3"}.intersection(formats)
+        message = ("当前格式不能直接提纯，请先转换为 EPUB、TXT 或带文字层的 PDF。"
+                   if unsupported else "资料需要检查后才能继续整理。")
+        return {"author_group": "needs_attention", "state": "needs_attention", "writing_callable": False,
+                "attention_message": message}
+    return {"author_group": "pending", "state": "pending_prepare", "writing_callable": False, "attention_message": None}
 
 
 def list_materials() -> dict[str, Any]:
@@ -199,12 +267,8 @@ def list_materials() -> dict[str, Any]:
             "name": a.get("name") or "",
             "type": a.get("type") or "",
             "author": a.get("author") or "",
-            "tags": list(a.get("tags") or []),
-            "notes": a.get("notes") or "",
-            "purification_status": (a.get("purification") or {}).get("status") or "未处理",
-            "knowledge_status": (a.get("knowledge") or {}).get("status") or "未开始",
-            "bkp_acceptance": classified.get("bkp_acceptance"),
-            "file_count": len(a.get("files") or []),
+            "type_label": _author_type_label(str(a.get("type") or "")),
+            "source_formats": _source_formats(a),
             **classified,
         })
     return {"materials": materials}
@@ -1626,28 +1690,25 @@ def cancel_material_distill_request(request_id: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def get_material_detail(asset_id: str) -> dict[str, Any]:
-    """单素材作者面详情：写作时能否调用 / 为什么 / 当前阶段 / 下一步。"""
+    """单素材作者详情：只投影既有知识，不泄露后台阶段。"""
     asset = _ledger_asset(asset_id)
     classified = _classify_author_group(asset)
-    pur = (asset.get("purification") or {}).get("status") or "未处理"
-    know = (asset.get("knowledge") or {}).get("status") or "未开始"
-    if know == "可用":
-        stage = "蒸馏完成，可用于写作"
-    elif pur == "可用":
-        stage = "提纯完成，待蒸馏"
-    elif pur in ("需复核", "失败", "不适用"):
-        stage = "需人工处理"
-    else:
-        stage = "已入库，待提纯"
+    summary, sections = _learning_projection(asset) if classified["state"] == "ready" else (None, [])
+    labels = {
+        "pending_prepare": "待提纯", "pending_distill": "待蒸馏",
+        "needs_attention": "需要检查", "ready": "可用于写作",
+    }
     return {
         "id": asset.get("id"),
         "name": asset.get("name") or "",
         "type": asset.get("type") or "",
+        "type_label": _author_type_label(str(asset.get("type") or "")),
+        "author": asset.get("author") or "",
+        "source_formats": _source_formats(asset),
+        "state": classified["state"],
+        "state_label": labels[classified["state"]],
         "writing_callable": classified["writing_callable"],
-        "bkp_acceptance": classified.get("bkp_acceptance"),
-        "why": classified["why"],
-        "next_step": classified["next_step"],
-        "stage": stage,
-        "purification_status": pur,
-        "knowledge_status": know,
+        "attention_message": classified.get("attention_message"),
+        "learning_summary": summary,
+        "learning_sections": sections,
     }
