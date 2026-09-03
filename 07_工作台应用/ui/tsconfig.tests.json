@@ -16,6 +16,7 @@
   },
   "include": [
     "src/features/tasks/taskModel.ts",
+    "src/features/materials/materialsModel.ts",
     "src/features/settings/settingsSummary.ts",
     "src/features/storyMap/storyMapModel.ts",
     "src/features/storyMap/storyMapCytoscape.ts",
