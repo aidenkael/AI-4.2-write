@@ -22,7 +22,7 @@ sys.path.insert(
 
 import project_workspace  # noqa: E402
 from operations import agent_runner  # noqa: E402
-from operations import author_edit, project_model, project_snapshot  # noqa: E402
+from operations import author_edit, project_data, project_model, project_snapshot  # noqa: E402
 from operations import qoder_bridge as bridge  # noqa: E402
 from operations import review as rv_ops  # noqa: E402
 from operations import story_planning as sp_ops  # noqa: E402
@@ -260,6 +260,72 @@ def test_planning_focus_text_unique_title_triggers_one_hop(projects_root):
     assert "玄天宗" in _titles(context, "current", "organizations")
     assert context["explicit_relations"]
     assert fx["org"] in {item["target_ref"] for item in context["explicit_relations"]}
+
+
+def test_sparse_author_fields_system_level_and_stable_refs_reach_context(projects_root):
+    """Core-only author data stays sparse while typed refs reach the task Context."""
+    project = _create("稀疏地基闭环")
+    pid = project["project_id"]
+
+    organization = author_edit.create_foundation_record(
+        pid, base_model_rev=_rev(pid), category="organization_force", title="巡护队",
+        material_state="current", data={"purpose": "守护旧城"},
+    )
+    organization_ref = organization["model"]["change_history"][-1]["detail"]["ref"]
+    system = author_edit.create_foundation_record(
+        pid, base_model_rev=_rev(pid), category="system", title="巡护职级",
+        material_state="current", data={"levels_stages": ["见习", "正式"]},
+    )
+    system_ref = system["model"]["change_history"][-1]["detail"]["ref"]
+    core = {
+        "one_line_intro": "守门人与线索保管者",
+        "role_identity": "主角",
+        "goal_desire": "找回失踪名册",
+        "current_level": "见习",
+    }
+    created = author_edit.create_foundation_record(
+        pid, base_model_rev=_rev(pid), category="character", title="林渊",
+        material_state="current", data=core,
+        relations=[
+            {"relation_kind": "character_affiliated_with_organization", "target_ref": organization_ref},
+            {"relation_kind": "character_uses_system", "target_ref": system_ref},
+        ],
+    )
+    character_ref = created["model"]["change_history"][-1]["detail"]["ref"]
+    assert created["change"]["status"] == "pending"
+
+    updated_core = {**core, "current_level": "正式"}
+    updated = author_edit.update_foundation_record(
+        pid, base_model_rev=_rev(pid), ref=character_ref, data=updated_core,
+    )
+    assert updated["change"]["status"] == "pending"
+    character = updated["model"]["objects"][character_ref]
+    assert character["data"] == updated_core
+    assert set(character["author_fields"]) == set(updated_core)
+    assert all(meta["source"] == "author" for meta in character["field_authority"].values())
+    assert "notes" not in character["data"] and "aliases" not in character["data"]
+
+    data = project_data.get_project_data(pid)
+    projected = next(item for item in data["sections"]["characters"] if item["source_ref"] == character_ref)
+    assert projected["record"]["current_level"] == "正式"
+    dependencies = {
+        (item["relation_kind"], item["source_ref"], item["target_ref"])
+        for item in data["explicit_dependencies"]
+    }
+    assert dependencies == {
+        ("character_affiliated_with_organization", character_ref, organization_ref),
+        ("character_uses_system", character_ref, system_ref),
+    }
+
+    context = project_snapshot.focused_task_context(pid, focus_text="林渊下一步如何行动？")
+    context_character = next(item for item in context["current"]["characters"] if item["ref"] == character_ref)
+    assert context_character["record"]["current_level"] == "正式"
+    assert "notes" not in context_character["record"] and "aliases" not in context_character["record"]
+    assert "巡护职级" in _titles(context, "current", "systems")
+    assert "巡护队" in _titles(context, "current", "organizations")
+    assert {item["relation_kind"] for item in context["explicit_relations"]} == {
+        "character_affiliated_with_organization", "character_uses_system",
+    }
 
 
 def test_planning_without_matching_title_keeps_bounded_summary(projects_root):

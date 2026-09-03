@@ -536,6 +536,43 @@ def _fd_prepare_and_complete(pid, monkeypatch, output_builder, request="完善�
     return polled
 
 
+def test_sparse_proposal_and_confirm_require_only_needed_category_fields(isolated, monkeypatch):
+    """FoundationDesign may propose/finalize one needed record without filling a template."""
+    monkeypatch.setattr(fd_ops, "_retrieve_package", lambda query: EMPTY_PACKAGE)
+    project = _create_project("稀疏候选")
+    pid = project["project_id"]
+
+    def build(fp):
+        return _final_result([
+            {"topic": "必要组织", "query": "地基主题", "package_ref": fp,
+             "selected_knowledge_refs": [], "comparison": "0 命中仍合法。"},
+        ], organizations=[
+            {"candidate_key": "org-only", "title": "巡护队", "material_state": "future",
+             "data": {"purpose": "守护旧城"}},
+        ])
+
+    polled = _fd_prepare_and_complete(pid, monkeypatch, build, request="只补一个必要组织")
+    proposal = polled["result"]["candidate"]["proposal"]
+    assert proposal["organizations"][0]["data"] == {"purpose": "守护旧城"}
+    for category in (
+        "characters", "relationships", "world_settings", "locations", "systems",
+        "story_lines", "promise_foreshadowing", "mystery_information", "domain_relations",
+    ):
+        assert proposal[category] == []
+    assert proposal["core_conflict"] is None
+
+    confirmed = fd_ops.confirm_foundation_design(
+        pid, polled["result"]["proposal_token"],
+        [{**proposal["organizations"][0], "kind": "organization"}],
+        project_model.read_project_model(pid)["model_rev"],
+    )
+    assert len(confirmed["created"]) == 1 and not confirmed["warnings"]
+    model = project_model.read_project_model(pid)
+    created = next(item for item in model["objects"].values() if item.get("title") == "巡护队")
+    assert created["data"] == {"purpose": "守护旧城"}
+    assert created["author_fields"] == ["purpose"]
+
+
 def test_fd_domain_relations_written_after_explicit_confirm_only(isolated, monkeypatch):
     monkeypatch.setattr(fd_ops, "_retrieve_package", lambda query: EMPTY_PACKAGE)
     project = _create_project("关系写回")
