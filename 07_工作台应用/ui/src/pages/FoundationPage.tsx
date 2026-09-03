@@ -1,4 +1,4 @@
-import { Check, FileCheck2, GitBranch, MapPin, Pencil, Plus, Save, Sparkles, Trash2, UserRound, X } from 'lucide-react'
+import { Check, FileCheck2, GitBranch, MapPin, Plus, Save, Sparkles, Trash2, UserRound, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FoundationDesignItem, FoundationDesignResult, ProjectData, ProjectDataEntry } from '../bridge/client'
 import { useApp } from '../features/app/AppStore'
@@ -9,7 +9,8 @@ import { describeRecord } from '../features/storyMap/storyMapModel'
 import { authorSourceLabel, authorStatusLabel, compactCharacter } from '../features/presentation/authorPresentation'
 import { AvatarImage } from '../features/presentation/AvatarImage'
 import { useProjectPresentation } from '../features/presentation/useProjectPresentation'
-import { CharacterEditor, RelationshipEditor, recordObject, splitEditorData } from '../features/foundation/recordEditors'
+import { CharacterEditor, RelationshipEditor, SparseFieldEditor, recordObject, splitEditorData } from '../features/foundation/recordEditors'
+import { fieldTuplesForCategory, fieldsForCategory, primaryFoundationSections } from '../features/foundation/fieldPresentation'
 import { RelationSelector } from '../features/foundation/RelationSelector'
 import {
   initializeRelationSelections,
@@ -52,63 +53,10 @@ const tabGroups: Array<{ label: string; tabs: FoundationTab[] }> = [
   { label: '故事线索', tabs: ['storylines', 'foreshadowing', 'mystery_information'] },
 ]
 
-const groupForTab = (tab: FoundationTab) => tabGroups.find((group) => group.tabs.includes(tab)) ?? tabGroups[0]
-
-const characterFields = [
-  ['aliases', '别名'], ['one_line_intro', '一句话介绍'], ['role_identity', '角色 / 身份'],
-  ['position_title', '职位'], ['visible_traits', '可见特征'],
-  ['persona_core', '人设核心'], ['goal_desire', '目标 / 渴望'], ['fear_weakness', '恐惧 / 弱点'],
-  ['inner_conflict', '内在冲突'], ['values_beliefs', '价值 / 信念'], ['background_summary', '背景摘要'],
-  ['speech_style', '说话特点'], ['behavior_anchors', '行为锚点'], ['secrets', '秘密'],
-  ['current_state', '当前状态'], ['current_objective', '当前目标'], ['arc_stage', '人物弧阶段'],
-  ['notes', '备注'],
-] as const
-const fieldSets = {
-  canon_facts: [
-    ['era_time_background', '时代 / 时间背景'], ['geographic_scope', '地理范围'],
-    ['social_structure', '社会结构'], ['political_order', '政治秩序'], ['economy_resources', '经济 / 资源'],
-    ['culture_customs', '文化 / 习俗'], ['technology_level', '科技水平'],
-    ['supernatural_baseline', '超自然基线'], ['important_history', '重要历史'],
-    ['hard_rules', '硬规则'], ['prohibitions_taboos', '禁忌'], ['known_exceptions', '已知例外'],
-    ['story_constraints', '故事约束'], ['notes', '备注'],
-  ],
-  locations: [
-    ['type', '类型'], ['region_parent', '区域 / 上级'], ['physical_features', '物理特征'],
-    ['story_social_function', '故事 / 社会功能'], ['controlling_organization', '控制组织'],
-    ['rules_risks', '规则 / 风险'], ['current_state', '当前状态'],
-  ],
-  organizations: [
-    ['type', '类型'], ['purpose', '目的'], ['hierarchy', '层级'],
-    ['leader_key_members', '领导 / 关键成员'], ['resources', '资源'], ['territory_scope', '范围'],
-    ['rules', '规则'], ['external_relationships', '外部关系'], ['current_state', '当前状态'],
-  ],
-  systems: [
-    ['type', '类型'], ['purpose', '用途'], ['levels_stages', '等级 / 阶段'],
-    ['entry_progression_requirements', '进入 / 晋升条件'], ['abilities_privileges', '能力 / 权利'],
-    ['limitations_costs', '限制 / 代价'], ['visible_markers', '外显标志'],
-    ['exceptions', '例外'], ['important_rules', '重要规则'], ['notes', '备注'],
-  ],
-  storylines: [
-    ['goal_purpose', '目标 / 用途'], ['stakes', '代价'], ['main_conflict', '主要冲突'],
-    ['stage_progress', '阶段 / 进度'], ['dependencies', '依赖'],
-    ['expected_payoff_end_condition', '预期回收 / 结束条件'], ['notes', '备注'],
-  ],
-  foreshadowing: [
-    ['setup_trigger', '埋设 / 触发'], ['reader_question_promise', '读者问题 / 承诺'],
-    ['state', '状态'], ['intended_payoff', '计划回收'],
-    ['actual_payoff', '实际回收'], ['notes', '备注'],
-  ],
-  mystery_information: [
-    ['secret_fact', '秘密 / 事实'], ['who_knows', '谁知道'], ['who_does_not_know', '谁不知道'],
-    ['mistaken_beliefs', '错误认知'], ['reveal_status', '揭示状态'],
-    ['planned_reveal', '计划揭示'], ['actual_reveal_event_chapter', '实际揭示事件 / 章节'],
-  ],
-} as const
-const fieldsForTab = (tab: FoundationTab) => tab === 'characters'
-  ? characterFields
-  : tab === 'relationships'
-    ? []
-    : fieldSets[tab]
+const fieldsForTab = (tab: FoundationTab) => {
+  const category = tabs.find((item) => item.key === tab)?.category ?? 'world_setting'
+  return fieldTuplesForCategory(category)
+}
 
 interface RecordForm {
   mode: 'create' | 'edit'
@@ -455,7 +403,6 @@ export function FoundationPage() {
   const [designOpen, setDesignOpen] = useState(false)
   const [designPrefill, setDesignPrefill] = useState<string | undefined>(undefined)
   const [tab, setTab] = useState<FoundationTab>('characters')
-  const [activeGroupLabel, setActiveGroupLabel] = useState(groupForTab('characters').label)
   const [recordForm, setRecordForm] = useState<RecordForm | null>(null)
   const [sharedEditor, setSharedEditor] = useState<{ kind: 'character' | 'relationship'; entry: ProjectDataEntry | null } | null>(null)
   const [detailEntry, setDetailEntry] = useState<ProjectDataEntry | null>(null)
@@ -464,23 +411,24 @@ export function FoundationPage() {
   const handoffRef = useRef<string | null>(null)
 
   const tabMeta = tabs.find((item) => item.key === tab) ?? tabs[0]
-  const activeGroup = tabGroups.find((group) => group.label === activeGroupLabel) ?? groupForTab(tab)
   const entries = useMemo(() => controller.data?.sections[tab] ?? [], [controller.data, tab])
-  const fields = fieldsForTab(tab)
+  const fields = fieldTuplesForCategory(tabMeta.category)
+  const fieldPresentation = fieldsForCategory(tabMeta.category)
   const characters = controller.data?.sections.characters ?? []
   const readonlyDetailFields = useMemo(() => detailEntry ? describeRecord(detailEntry) : [], [detailEntry])
+  const navigation = useMemo(() => {
+    const sections = controller.data?.sections
+    const counts = Object.fromEntries(tabs.map((item) => [item.key, sections?.[item.key]?.length ?? 0]))
+    return primaryFoundationSections(controller.data?.story_bible_profile.active_modules ?? [], counts)
+  }, [controller.data])
+  const primaryTabs = useMemo(() => new Set(navigation.primary), [navigation.primary])
 
   useEffect(() => {
     setRecordForm(null)
     setSharedEditor(null)
     setDetailEntry(null)
     handoffRef.current = null
-    setActiveGroupLabel(groupForTab('characters').label)
   }, [selected?.project_id])
-
-  useEffect(() => {
-    setActiveGroupLabel(groupForTab(tab).label)
-  }, [tab])
 
   useEffect(() => {
     const profile = controller.data?.story_bible_profile
@@ -500,7 +448,7 @@ export function FoundationPage() {
     setRecordForm({
       mode: 'create', ref: null, title: '', material_state: tab === 'storylines' ? 'future' : 'current',
       category: tabMeta.category,
-      data: Object.fromEntries(fields.map(([key]) => [key, ''])), extraFields: [], preservedData: {}, knownListFields: [],
+      data: Object.fromEntries(fieldPresentation.map((field) => [field.key, ''])), extraFields: [], preservedData: {}, knownListFields: [],
       relationSelections: relationInit.selections, relationHints: relationInit.hints,
     })
   }
@@ -643,145 +591,73 @@ export function FoundationPage() {
 
       <section className="panel foundation-main">
         <header className="foundation-toolbar">
-          <div className="foundation-nav">
-            <div className="foundation-group-tabs" aria-label="作品地基分组">
-            {tabGroups.map((group) => (
-              <button key={group.label} className={activeGroup.label === group.label ? 'active' : ''} onClick={() => { setActiveGroupLabel(group.label); setTab(group.tabs[0]); setRecordForm(null); setSharedEditor(null); setDetailEntry(null) }}>{group.label}</button>
-            ))}
-            </div>
-            <div className="foundation-tabs" aria-label={`${activeGroup.label}分类`}>
-              {activeGroup.tabs.map((key) => {
+          <div><h2>作品地基</h2><p className="muted-note">只记录这部作品真正需要的长期资料，未填写的可选信息不会阻碍创作。</p></div>
+          <button onClick={() => { setDesignPrefill(undefined); setDesignOpen(true) }}><Sparkles /> 完善作品地基</button>
+        </header>
+        <div className="foundation-workspace">
+          <nav className="foundation-category-nav" aria-label="作品地基分类">
+            {tabGroups.map((group) => {
+              const groupTabs = group.tabs.filter((key) => primaryTabs.has(key))
+              if (!groupTabs.length) return null
+              return <section key={group.label}><h3>{group.label}</h3>{groupTabs.map((key) => {
                 const item = tabs.find((candidate) => candidate.key === key) as typeof tabs[number]
                 const { label, Icon } = item
                 return <button key={key} className={tab === key ? 'active' : ''} onClick={() => { setTab(key); setRecordForm(null); setSharedEditor(null); setDetailEntry(null) }}><Icon /> {label}</button>
+              })}</section>
+            })}
+            {navigation.optional.length > 0 && <details><summary>更多类别</summary>{navigation.optional.map((key) => {
+              const item = tabs.find((candidate) => candidate.key === key) as typeof tabs[number]
+              const { label, Icon } = item
+              return <button key={key} className={tab === key ? 'active' : ''} onClick={() => { setTab(key as FoundationTab); setRecordForm(null); setSharedEditor(null); setDetailEntry(null) }}><Icon /> {label}</button>
+            })}</details>}
+          </nav>
+
+          <section className="foundation-record-column">
+            <header><div><h3>{tabMeta.label}</h3><p className="muted-note">{entries.length} 条记录</p></div><button className="primary" onClick={beginCreate}><Plus /> 新增</button></header>
+            {controller.loading && !controller.data && <div className="empty-state">正在加载作品地基…</div>}
+            {controller.error && <p className="error-text">{controller.error}</p>}
+            {!controller.loading && entries.length === 0 && <div className="empty-state">当前尚未记录{tabMeta.label}。规划或「完善作品地基」可以提出需要的内容，你也可以直接新增；不必为了填满类别而创建。</div>}
+            <div className="foundation-record-list">
+              {entries.map((entry) => {
+                const character = tab === 'characters' ? compactCharacter(entry) : null
+                const summary = character?.intro || describeRecord(entry)[0]?.value || '暂无摘要'
+                return <button className="foundation-record-item" key={`${tab}-${entry.id ?? entry.label}`} onClick={() => entry.editable ? beginEdit(entry) : setDetailEntry(entry)}>
+                  {character && <AvatarImage src={entry.source_ref ? presentation?.character_avatars[entry.source_ref]?.image_src : null} alt=""/>}
+                  <span><strong>{entry.label || '（未命名条目）'}</strong><small>{summary}</small></span>
+                  <em className={`material-state ${entry.status === 'future' ? 'future' : 'current'}`}>{entry.status === 'future' ? '规划中' : '当前'}</em>
+                </button>
               })}
             </div>
-          </div>
-          <div className="foundation-toolbar-actions"><button onClick={() => { setDesignPrefill(undefined); setDesignOpen(true) }}><Sparkles /> 完善作品地基</button><button className="primary" onClick={beginCreate}><Plus /> 新增</button></div>
-        </header>
+            {(() => {
+              const retiredFoundation = controller.data?.retired.foundation ?? []
+              const retiredRelationships = controller.data?.retired.relationships ?? []
+              if (retiredFoundation.length === 0 && retiredRelationships.length === 0) return null
+              return <details className="foundation-retired"><summary>已退役（{retiredFoundation.length + retiredRelationships.length}）</summary><ul>
+                {retiredFoundation.map((entry) => <li key={`retired-f-${entry.source_ref ?? entry.label}`}><span className="foundation-retired-name">{entry.label || '（未命名记录）'}</span><span className="muted-note">{entry.category === 'character' ? '人物' : '地基记录'}</span>{entry.source_ref && <button disabled={controller.saving} onClick={() => void controller.restoreFoundation(entry.source_ref as string)}>恢复</button>}</li>)}
+                {retiredRelationships.map((entry) => <li key={`retired-r-${entry.source_ref ?? entry.label}`}><span className="foundation-retired-name">{entry.label || '（未命名关系）'}</span><span className="muted-note">关系</span>{entry.source_ref && <button disabled={controller.saving} onClick={() => void controller.restoreRelationship(entry.source_ref as string)}>恢复</button>}</li>)}
+              </ul></details>
+            })()}
+          </section>
 
-        {controller.loading && <div className="empty-state">正在加载作品地基…</div>}
-        {controller.error && <p className="error-text">{controller.error}</p>}
-        {!controller.loading && entries.length === 0 && <div className="empty-state">当前尚未记录{tabMeta.label}，可以直接新增。</div>}
-
-        {(() => {
-          const retiredFoundation = controller.data?.retired.foundation ?? []
-          const retiredRelationships = controller.data?.retired.relationships ?? []
-          if (retiredFoundation.length === 0 && retiredRelationships.length === 0) return null
-          return (
-            <details className="foundation-retired">
-              <summary>已退役（{retiredFoundation.length + retiredRelationships.length}）</summary>
-              <ul>
-                {retiredFoundation.map((entry) => (
-                  <li key={`retired-f-${entry.source_ref ?? entry.label}`}>
-                    <span className="foundation-retired-name">{entry.label || '（未命名记录）'}</span>
-                    <span className="muted-note">{entry.category === 'character' ? '人物' : '地基记录'}</span>
-                    {entry.source_ref && (
-                      <button disabled={controller.saving} onClick={() => void controller.restoreFoundation(entry.source_ref as string)}>恢复</button>
-                    )}
-                  </li>
-                ))}
-                {retiredRelationships.map((entry) => (
-                  <li key={`retired-r-${entry.source_ref ?? entry.label}`}>
-                    <span className="foundation-retired-name">{entry.label || '（未命名关系）'}</span>
-                    <span className="muted-note">关系</span>
-                    {entry.source_ref && (
-                      <button disabled={controller.saving} onClick={() => void controller.restoreRelationship(entry.source_ref as string)}>恢复</button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )
-        })()}
-
-        <div className="foundation-cards">
-          {entries.map((entry) => {
-            const character = tab === 'characters' ? compactCharacter(entry) : null
-            const details = character
-              ? [
-                  ...(character.intro ? [{ key: 'one_line_intro', label: '一句话介绍', value: character.intro }] : []),
-                  ...(character.role ? [{ key: 'role_identity', label: '身份 / 职位', value: character.role }] : []),
-                ]
-              : describeRecord(entry).slice(0, 2)
-            return (
-              <article className="foundation-card" key={`${tab}-${entry.id ?? entry.label}`}>
-                <div className="foundation-card-head">
-                  {character && <AvatarImage src={entry.source_ref ? presentation?.character_avatars[entry.source_ref]?.image_src : null} alt=""/>}
-                  <h3>{entry.label || '（未命名条目）'}</h3>
-                  <span className={`material-state ${entry.status === 'future' ? 'future' : 'current'}`}>
-                    {entry.status === 'future' ? '规划中' : '当前'}
-                  </span>
-                </div>
-                {details.length === 0 && <p className="muted-note">暂无更多已记录信息。</p>}
-                {details.map((detail) => <p key={detail.key}><b>{detail.label}：</b>{detail.value}</p>)}
-                <footer>
-                  {entry.editable
-                    ? <button onClick={() => beginEdit(entry)}><Pencil /> 查看 / 编辑</button>
-                    : <button onClick={() => setDetailEntry(entry)}>查看详情</button>}
-                </footer>
-              </article>
-            )
-          })}
+          <section className="foundation-detail-pane">
+            {!recordForm && !sharedEditor && !detailEntry && <div className="empty-state">选择左侧类别中的记录查看或编辑。</div>}
+            {recordForm && <aside className="record-drawer panel foundation-inline-editor" aria-label={`${recordForm.mode === 'create' ? '新增' : '编辑'}${tabMeta.label}`}>
+              <header><h2>{recordForm.mode === 'create' ? '新增' : '编辑'}{tabMeta.label}</h2><button onClick={() => setRecordForm(null)}><X /></button></header>
+              <div className="record-drawer-body">
+                <label>名称<input value={recordForm.title} onChange={(event) => setRecordForm({ ...recordForm, title: event.target.value })} /></label>
+                <label>状态<select value={recordForm.material_state} onChange={(event) => setRecordForm({ ...recordForm, material_state: event.target.value as MaterialState })}><option value="current">当前</option><option value="future">规划中</option></select></label>
+                {(RELATION_SPECS_BY_SOURCE_CATEGORY[recordForm.category] ?? []).map((spec: RelationSpec) => <RelationSelector key={spec.relation_kind} label={spec.label} options={relationOptions(controller.data, spec.targetCategories)} selected={recordForm.relationSelections[spec.relation_kind] ?? []} onChange={(next) => setRecordForm({ ...recordForm, relationSelections: { ...recordForm.relationSelections, [spec.relation_kind]: next } })} excludeSelf={recordForm.ref} />)}
+                {recordForm.relationHints.map((hint) => <p className="muted-note legacy-relation-hint" key={hint.field}>{hint.text}</p>)}
+                <SparseFieldEditor key={`${recordForm.category}-${recordForm.ref ?? 'new'}`} category={recordForm.category} values={recordForm.data} onValuesChange={(data) => setRecordForm({ ...recordForm, data })} custom={recordForm.extraFields} onCustomChange={(extraFields) => setRecordForm({ ...recordForm, extraFields })} />
+              </div>
+              <footer>{recordForm.mode === 'edit' && <button className="danger" onClick={() => void retire({ source_ref: recordForm.ref, editable: true } as ProjectDataEntry)}><Trash2 /> 退役</button>}<button className="primary" disabled={controller.saving || !recordForm.title.trim()} onClick={() => void saveRecord()}><Save /> {controller.saving ? '保存中…' : '保存'}</button></footer>
+            </aside>}
+            {sharedEditor?.kind === 'character' && <CharacterEditor inline key={sharedEditor.entry?.source_ref ?? 'new-character'} entry={sharedEditor.entry} controller={controller} onClose={() => setSharedEditor(null)} />}
+            {sharedEditor?.kind === 'relationship' && <RelationshipEditor inline key={sharedEditor.entry?.source_ref ?? 'new-relationship'} entry={sharedEditor.entry} characters={characters} controller={controller} onClose={() => setSharedEditor(null)} />}
+            {detailEntry && <aside className="record-drawer panel foundation-inline-editor" aria-label={`${detailEntry.label}详情`}><header><h2>{detailEntry.label || '未命名记录'}</h2><button onClick={() => setDetailEntry(null)}><X /></button></header><div className="record-drawer-body"><p><span className={`material-state ${detailEntry.status === 'future' ? 'future' : 'current'}`}>{authorStatusLabel(detailEntry.status)}</span></p><p className="muted-note">{authorSourceLabel(detailEntry.source_kind)}</p><div className="record-fields">{readonlyDetailFields.length === 0 && <p className="muted-note">暂无更多已记录信息。</p>}{readonlyDetailFields.map((field) => <p key={field.key}><b>{field.label}：</b>{field.value}</p>)}</div></div></aside>}
+          </section>
         </div>
       </section>
-
-      {recordForm && (
-        <aside className="record-drawer panel" aria-label={`${recordForm.mode === 'create' ? '新增' : '编辑'}${tabMeta.label}`}>
-          <header><h2>{recordForm.mode === 'create' ? '新增' : '编辑'}{tabMeta.label}</h2><button onClick={() => setRecordForm(null)}><X /></button></header>
-          <div className="record-drawer-body">
-          <label>名称<input value={recordForm.title} onChange={(event) => setRecordForm({ ...recordForm, title: event.target.value })} /></label>
-          <label>状态<select value={recordForm.material_state} onChange={(event) => setRecordForm({ ...recordForm, material_state: event.target.value as MaterialState })}><option value="current">当前</option><option value="future">规划中</option></select></label>
-          {(RELATION_SPECS_BY_SOURCE_CATEGORY[recordForm.category] ?? []).map((spec: RelationSpec) => (
-            <RelationSelector
-              key={spec.relation_kind}
-              label={spec.label}
-              options={relationOptions(controller.data, spec.targetCategories)}
-              selected={recordForm.relationSelections[spec.relation_kind] ?? []}
-              onChange={(next) => setRecordForm({
-                ...recordForm,
-                relationSelections: { ...recordForm.relationSelections, [spec.relation_kind]: next },
-              })}
-              excludeSelf={recordForm.ref}
-            />
-          ))}
-          {recordForm.relationHints.map((hint) => <p className="muted-note legacy-relation-hint" key={hint.field}>{hint.text}</p>)}
-          <div className="record-fields">
-            {fields.map(([key, label]) => (
-              <label key={key}>{label}<textarea rows={key === 'background_summary' || key === 'notes' ? 3 : 2} value={recordForm.data[key] ?? ''} onChange={(event) => setRecordForm({ ...recordForm, data: { ...recordForm.data, [key]: event.target.value } })} /></label>
-            ))}
-            {recordForm.extraFields.map((field, index) => (
-              <div className="custom-field-row" key={`${field.key}-${index}`}>
-                <input aria-label="自定义字段名" value={field.key} onChange={(event) => setRecordForm({ ...recordForm, extraFields: recordForm.extraFields.map((item, i) => i === index ? { ...item, key: event.target.value } : item) })} placeholder="自定义字段名" />
-                <textarea aria-label="自定义字段值" rows={2} value={field.value} onChange={(event) => setRecordForm({ ...recordForm, extraFields: recordForm.extraFields.map((item, i) => i === index ? { ...item, value: event.target.value } : item) })} placeholder="内容" />
-                <button aria-label="删除自定义字段" onClick={() => setRecordForm({ ...recordForm, extraFields: recordForm.extraFields.filter((_, i) => i !== index) })}><Trash2 /></button>
-              </div>
-            ))}
-            <button onClick={() => setRecordForm({ ...recordForm, extraFields: [...recordForm.extraFields, { key: '', value: '', isList: false }] })}><Plus /> 添加自定义字段</button>
-          </div>
-          </div>
-          <footer>
-            {recordForm.mode === 'edit' && <button className="danger" onClick={() => void retire({ source_ref: recordForm.ref, editable: true } as ProjectDataEntry)}><Trash2 /> 退役</button>}
-            <button className="primary" disabled={controller.saving || !recordForm.title.trim()} onClick={() => void saveRecord()}><Save /> {controller.saving ? '保存中…' : '保存'}</button>
-          </footer>
-        </aside>
-      )}
-
-      {sharedEditor?.kind === 'character' && <CharacterEditor key={sharedEditor.entry?.source_ref ?? 'new-character'} entry={sharedEditor.entry} controller={controller} onClose={() => setSharedEditor(null)} />}
-      {sharedEditor?.kind === 'relationship' && <RelationshipEditor key={sharedEditor.entry?.source_ref ?? 'new-relationship'} entry={sharedEditor.entry} characters={characters} controller={controller} onClose={() => setSharedEditor(null)} />}
-      {detailEntry && (
-        <aside className="record-drawer panel" aria-label={`${detailEntry.label}详情`}>
-          <header><h2>{detailEntry.label || '未命名记录'}</h2><button onClick={() => setDetailEntry(null)}><X /></button></header>
-          <div className="record-drawer-body">
-          <p><span className={`material-state ${detailEntry.status === 'future' ? 'future' : 'current'}`}>{authorStatusLabel(detailEntry.status)}</span></p>
-          <p className="muted-note">{authorSourceLabel(detailEntry.source_kind)}</p>
-          <div className="record-fields">
-            {readonlyDetailFields.length === 0 && <p className="muted-note">暂无更多已记录信息。</p>}
-            {readonlyDetailFields.map((field) => <p key={field.key}><b>{field.label}：</b>{field.value}</p>)}
-          </div>
-          </div>
-        </aside>
-      )}
 
       {designOpen && selected && (
         <FoundationDesignDrawer

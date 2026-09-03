@@ -7,6 +7,13 @@ import { AvatarImage } from '../presentation/AvatarImage'
 import { useProjectPresentation } from '../presentation/useProjectPresentation'
 import { RelationSelector } from './RelationSelector'
 import {
+  advancedValueCount,
+  fieldsForCategory,
+  fieldTuplesForCategory,
+  sectionFields,
+  type FoundationFieldPresentation,
+} from './fieldPresentation'
+import {
   initializeRelationSelections,
   legacyFieldsToStrip,
   LEGACY_RELATION_FIELD_KEYS,
@@ -18,15 +25,7 @@ import {
 
 type MaterialState = 'current' | 'future'
 
-export const CHARACTER_EDITOR_FIELDS = [
-  ['aliases', '别名'], ['one_line_intro', '一句话介绍'], ['visible_traits', '特征'],
-  ['persona_core', '人设'], ['role_identity', '身份 / 角色'], ['position_title', '职位'],
-  ['background_summary', '背景'], ['power_rank', '武力 / 等级'], ['current_level', '当前体系等级'],
-  ['current_state', '当前状态'], ['current_objective', '当前目标'], ['arc_stage', '人物弧阶段'],
-  ['speech_style', '说话特点'], ['behavior_anchors', '行为特点'], ['goal_desire', '目标 / 欲望'],
-  ['fear_weakness', '恐惧 / 弱点'], ['inner_conflict', '内在冲突'],
-  ['secrets', '秘密'], ['notes', '备注'],
-] as const
+export const CHARACTER_EDITOR_FIELDS = fieldTuplesForCategory('character')
 
 export function recordObject(entry: ProjectDataEntry | null): Record<string, unknown> {
   return entry?.record && typeof entry.record === 'object' && !Array.isArray(entry.record)
@@ -71,6 +70,76 @@ export function splitEditorData(
   return { values, custom, preserved, knownListFields }
 }
 
+function FieldControl({
+  field, value, onChange,
+}: {
+  field: FoundationFieldPresentation
+  value: string
+  onChange(value: string): void
+}) {
+  if (field.input === 'select') {
+    const known = field.options?.some((option) => option.value === value) ?? false
+    return (
+      <label>{field.label}<select value={value} onChange={(event) => onChange(event.target.value)}>
+        <option value="">未设置</option>
+        {value && !known && <option value={value}>{value}（已有值）</option>}
+        {field.options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select></label>
+    )
+  }
+  if (field.input === 'text') {
+    return <label>{field.label}<input value={value} onChange={(event) => onChange(event.target.value)} /></label>
+  }
+  return <label>{field.label}<textarea rows={field.rows ?? 2} value={value} onChange={(event) => onChange(event.target.value)} /></label>
+}
+
+export interface EditableCustomField { key: string; value: string; isList: boolean }
+
+/** Shared sparse field surface used by every Foundation category. */
+export function SparseFieldEditor({
+  category, values, onValuesChange, custom, onCustomChange,
+}: {
+  category: string
+  values: Record<string, string>
+  onValuesChange(next: Record<string, string>): void
+  custom: EditableCustomField[]
+  onCustomChange(next: EditableCustomField[]): void
+}) {
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const core = sectionFields(category, 'core')
+  const advanced = sectionFields(category, 'advanced')
+  const count = advancedValueCount(category, values, custom)
+  const render = (field: FoundationFieldPresentation) => (
+    <FieldControl
+      key={field.key}
+      field={field}
+      value={values[field.key] ?? ''}
+      onChange={(value) => onValuesChange({ ...values, [field.key]: value })}
+    />
+  )
+  return (
+    <div className="record-fields sparse-record-fields">
+      {core.map(render)}
+      <button className="advanced-fields-toggle" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen(!advancedOpen)}>
+        {advancedOpen ? '收起更多信息' : `更多信息${count ? `（已有 ${count} 项）` : ''}`}
+      </button>
+      {advancedOpen && (
+        <div className="advanced-record-fields">
+          {advanced.map(render)}
+          {custom.map((field, index) => (
+            <div className="custom-field-row" key={`${field.key}-${index}`}>
+              <input aria-label="自定义字段名" value={field.key} onChange={(event) => onCustomChange(custom.map((item, i) => i === index ? { ...item, key: event.target.value } : item))} placeholder="自定义字段名" />
+              <textarea aria-label="自定义字段值" rows={2} value={field.value} onChange={(event) => onCustomChange(custom.map((item, i) => i === index ? { ...item, value: event.target.value } : item))} placeholder="内容" />
+              <button aria-label="删除自定义字段" onClick={() => onCustomChange(custom.filter((_, i) => i !== index))}><Trash2 /></button>
+            </div>
+          ))}
+          <button onClick={() => onCustomChange([...custom, { key: '', value: '', isList: false }])}><Plus /> 添加自定义字段</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function relationshipEndpointRefs(record: Record<string, unknown>, characters: ProjectDataEntry[]): [string, string] {
   const raw = Array.isArray(record.targets) ? record.targets
     : Array.isArray(record.characters) ? record.characters
@@ -94,11 +163,12 @@ export function relationshipEndpointRefs(record: Record<string, unknown>, charac
 }
 
 export function CharacterEditor({
-  entry, controller, onClose,
+  entry, controller, onClose, inline = false,
 }: {
   entry: ProjectDataEntry | null
   controller: ProjectDataController
   onClose(): void
+  inline?: boolean
 }) {
   const split = useMemo(() => splitEditorData(entry, CHARACTER_EDITOR_FIELDS), [entry])
   const [title, setTitle] = useState(entry?.label ?? '')
@@ -166,7 +236,7 @@ export function CharacterEditor({
     await reloadPresentation()
   }
   return (
-    <aside className="record-drawer panel" aria-label={`${entry ? '编辑' : '新增'}人物`}>
+    <aside className={`record-drawer panel${inline ? ' foundation-inline-editor' : ''}`} aria-label={`${entry ? '编辑' : '新增'}人物`}>
       <header><h2>{entry ? '编辑' : '新增'}人物</h2><button onClick={onClose}><X /></button></header>
       <div className="record-drawer-body">
       {entry?.source_ref && <section className="presentation-control"><AvatarImage src={avatar?.image_src} alt="人物头像"/><div><strong>人物头像</strong><p className="muted-note">仅用于展示，不会修改人物资料或触发 AI。</p><button onClick={() => void updateAvatar()}><Image /> 上传 / 更换头像</button><button onClick={() => void resetAvatar()}><RotateCcw /> 恢复默认头像</button></div></section>}
@@ -187,11 +257,7 @@ export function CharacterEditor({
         excludeSelf={entry?.source_ref ?? null}
       />
       {relationInit.hints.map((hint) => <p className="muted-note legacy-relation-hint" key={hint.field}>{hint.text}</p>)}
-      <div className="record-fields">
-        {CHARACTER_EDITOR_FIELDS.map(([key, label]) => <label key={key}>{label}<textarea rows={['background_summary', 'notes'].includes(key) ? 3 : 2} value={values[key] ?? ''} onChange={(event) => setValues({ ...values, [key]: event.target.value })} /></label>)}
-        {custom.map((field, index) => <div className="custom-field-row" key={`${field.key}-${index}`}><input aria-label="自定义字段名" value={field.key} onChange={(event) => setCustom(custom.map((item, i) => i === index ? { ...item, key: event.target.value } : item))} /><textarea aria-label="自定义字段值" value={field.value} onChange={(event) => setCustom(custom.map((item, i) => i === index ? { ...item, value: event.target.value } : item))} /><button onClick={() => setCustom(custom.filter((_, i) => i !== index))}><Trash2 /></button></div>)}
-        <button onClick={() => setCustom([...custom, { key: '', value: '', isList: false }])}><Plus /> 添加自定义字段</button>
-      </div>
+      <SparseFieldEditor category="character" values={values} onValuesChange={setValues} custom={custom} onCustomChange={setCustom} />
       </div>
       <footer>{entry && <button className="danger" onClick={() => void retire()}><Trash2 /> 退役</button>}<button className="primary" disabled={controller.saving || !title.trim()} onClick={() => void save()}><Save /> 保存</button></footer>
     </aside>
@@ -199,12 +265,13 @@ export function CharacterEditor({
 }
 
 export function RelationshipEditor({
-  entry, characters, controller, onClose,
+  entry, characters, controller, onClose, inline = false,
 }: {
   entry: ProjectDataEntry | null
   characters: ProjectDataEntry[]
   controller: ProjectDataController
   onClose(): void
+  inline?: boolean
 }) {
   const record = useMemo(() => recordObject(entry), [entry])
   const endpoints = useMemo(() => relationshipEndpointRefs(record, characters), [characters, record])
@@ -212,7 +279,8 @@ export function RelationshipEditor({
   const [sourceRef, setSourceRef] = useState(endpoints[0])
   const [targetRef, setTargetRef] = useState(endpoints[1])
   const [materialState, setMaterialState] = useState<MaterialState>(entry?.status === 'future' ? 'future' : 'current')
-  const keys = ['description', 'current_state', 'relationship_phase', 'key_history', 'current_tension', 'hidden_information', 'trust', 'closeness', 'notes'] as const
+  const fields = fieldsForCategory('relationship')
+  const keys = fields.map((field) => field.key)
   const relationshipStateKey = Object.prototype.hasOwnProperty.call(record, 'current_state') ? 'current_state'
     : Object.prototype.hasOwnProperty.call(record, 'state') ? 'state' : 'current_state'
   const [values, setValues] = useState<Record<string, string>>(Object.fromEntries(keys.map((key) => {
@@ -220,20 +288,33 @@ export function RelationshipEditor({
     const value = record[storageKey]
     return [key, typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' ? String(value) : '']
   })))
-  const preserved = useMemo(() => {
+  const splitCustom = useMemo(() => {
     const editable = new Set<string>(keys)
     editable.add('state')
-    return Object.fromEntries(Object.entries(record).filter(([key]) => (
-      !editable.has(key) && !injected.has(key) && !relationshipEndpointFields.has(key)
-    )))
+    const customFields: EditableCustomField[] = []
+    const preservedFields: Record<string, unknown> = {}
+    Object.entries(record).forEach(([key, value]) => {
+      if (editable.has(key) || injected.has(key) || relationshipEndpointFields.has(key)) return
+      if (isInternalAuthorField(key) || (value && typeof value === 'object' && !Array.isArray(value))) preservedFields[key] = value
+      else if (Array.isArray(value) && value.every((item) => typeof item === 'string')) customFields.push({ key, value: value.join('、'), isList: true })
+      else if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') customFields.push({ key, value: String(value), isList: false })
+    })
+    return { customFields, preservedFields }
   }, [record])
-  const labels: Record<(typeof keys)[number], string> = { description: '描述', current_state: '当前关系状态', relationship_phase: '关系阶段', key_history: '关键经历', current_tension: '当前张力', hidden_information: '隐瞒的信息', trust: '信任（可选）', closeness: '亲近（可选）', notes: '备注' }
+  const [custom, setCustom] = useState(splitCustom.customFields)
   const save = async () => {
     if (!label.trim() || !sourceRef || !targetRef || sourceRef === targetRef) return
-    const data: Record<string, unknown> = { ...preserved }
+    const data: Record<string, unknown> = { ...splitCustom.preservedFields }
     Object.entries(values).forEach(([key, value]) => {
       if (!value.trim()) return
       data[key === 'current_state' ? relationshipStateKey : key] = value.trim()
+    })
+    custom.forEach((field) => {
+      const key = field.key.trim()
+      if (!key || !field.value.trim()) return
+      data[key] = field.isList
+        ? field.value.split(/[、,，\n]/).map((item) => item.trim()).filter(Boolean)
+        : field.value.trim()
     })
     const input = { source_ref: sourceRef, target_ref: targetRef, label: label.trim(), material_state: materialState, data }
     const ok = entry?.source_ref
@@ -246,13 +327,13 @@ export function RelationshipEditor({
     if (await controller.retireRelationship(entry.source_ref)) onClose()
   }
   return (
-    <aside className="record-drawer panel" aria-label={`${entry ? '编辑' : '新增'}关系`}>
+    <aside className={`record-drawer panel${inline ? ' foundation-inline-editor' : ''}`} aria-label={`${entry ? '编辑' : '新增'}关系`}>
       <header><h2>{entry ? '编辑' : '新增'}关系</h2><button onClick={onClose}><X /></button></header>
       <div className="record-drawer-body">
       <label>关系名称 / 类型<input value={label} onChange={(event) => setLabel(event.target.value)} /></label>
       <div className="relationship-endpoints"><label>人物 A<select value={sourceRef} onChange={(event) => setSourceRef(event.target.value)}><option value="">请选择</option>{characters.map((character) => <option key={character.source_ref ?? character.id ?? character.label} value={character.source_ref ?? ''}>{character.label}</option>)}</select></label><label>人物 B<select value={targetRef} onChange={(event) => setTargetRef(event.target.value)}><option value="">请选择</option>{characters.map((character) => <option key={character.source_ref ?? character.id ?? character.label} value={character.source_ref ?? ''}>{character.label}</option>)}</select></label></div>
       <label>状态<select value={materialState} onChange={(event) => setMaterialState(event.target.value as MaterialState)}><option value="current">当前</option><option value="future">规划中</option></select></label>
-      {keys.map((key) => <label key={key}>{labels[key]}<textarea rows={['description', 'key_history', 'notes'].includes(key) ? 3 : 2} value={values[key] ?? ''} onChange={(event) => setValues({ ...values, [key]: event.target.value })} /></label>)}
+      <SparseFieldEditor category="relationship" values={values} onValuesChange={setValues} custom={custom} onCustomChange={setCustom} />
       </div>
       <footer>{entry && <button className="danger" onClick={() => void retire()}><Trash2 /> 退役</button>}<button className="primary" disabled={controller.saving || !label.trim() || !sourceRef || !targetRef || sourceRef === targetRef} onClick={() => void save()}><Save /> 保存</button></footer>
     </aside>
