@@ -286,6 +286,8 @@ p{line-height:1.65}
 .map-tabs button.active:after{content:"";position:absolute;bottom:0;left:12px;right:12px;height:3px;background:var(--blue)}
 .map-graph-wrap{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:0;min-height:560px}
 .map-graph-main{padding:18px 22px;min-width:0}
+.map-author-actions{display:flex;align-items:center;gap:8px;min-height:36px;margin-bottom:10px;flex-wrap:wrap}
+.map-author-actions .muted-note{font-size:12px}
 .map-graph{height:480px;border:1px solid var(--line);border-radius:10px;background:linear-gradient(135deg,#f7fbff,#fff)}
 .map-graph-stage{position:relative}
 .map-tooltip{position:absolute;z-index:12;pointer-events:none;width:min(260px,70vw);display:grid;grid-template-columns:auto 1fr;gap:4px 10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.97);box-shadow:0 12px 30px rgba(33,59,102,.16);font-size:12px}

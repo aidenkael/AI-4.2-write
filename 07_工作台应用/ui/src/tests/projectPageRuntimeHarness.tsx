@@ -164,3 +164,42 @@ export async function retiredRecordsRenderWithRestoreAction(): Promise<boolean> 
     target.window = previous
   }
 }
+
+/** Story Map creates through the same shared Foundation editors, without navigation handoff. */
+export async function storyMapDirectCreateUsesSharedEditors(): Promise<boolean> {
+  const characters = [
+    { id: 'char-1', label: '人物甲', record: { name: '人物甲' }, source_ref: 'char-1', source_kind: 'author_workspace', category: 'character', status: 'current' as const, editable: true },
+    { id: 'char-2', label: '人物乙', record: { name: '人物乙' }, source_ref: 'char-2', source_kind: 'author_workspace', category: 'character', status: 'current' as const, editable: true },
+  ]
+  const mapData: ProjectData = { ...minimalProjectData, sections: { ...minimalProjectData.sections, characters } }
+  const target = globalThis as unknown as { window?: unknown; IS_REACT_ACT_ENVIRONMENT?: boolean }
+  const previous = target.window
+  target.IS_REACT_ACT_ENVIRONMENT = true
+  target.window = {
+    pywebview: { api: new Proxy({}, { get: (_t, method) => (method === 'then' ? undefined : async () => ({ ok: true, data: method === 'get_project_data' ? mapData : bridgeData(String(method)), error: null })) }) },
+    setTimeout, clearTimeout, setInterval, clearInterval, addEventListener: () => {}, removeEventListener: () => {}, confirm: () => true,
+  }
+  try {
+    const holder: { renderer: ReturnType<typeof create> | null } = { renderer: null }
+    await act(async () => { holder.renderer = create(wrap(<StoryMapPage />)); await Promise.resolve(); await Promise.resolve() })
+    for (let i = 0; i < 6; i += 1) await act(async () => { await Promise.resolve() })
+    const renderer = holder.renderer
+    if (!renderer) return false
+    const buttonText = (node: { props: { children?: unknown } }) => {
+      const children = Array.isArray(node.props.children) ? node.props.children : [node.props.children]
+      return children.filter((child) => typeof child === 'string' || typeof child === 'number').join('')
+    }
+    const buttons = renderer.root.findAllByType('button')
+    const addCharacter = buttons.find((button) => buttonText(button).includes('新增人物'))
+    const addRelationship = buttons.find((button) => buttonText(button).includes('新增关系'))
+    if (!addCharacter || !addRelationship || addRelationship.props.disabled) return false
+    await act(async () => { addCharacter.props.onClick() })
+    const characterEditor = renderer.root.findAll((node) => node.props['aria-label'] === '新增人物').length === 1
+    await act(async () => { addRelationship.props.onClick() })
+    const relationshipEditor = renderer.root.findAll((node) => node.props['aria-label'] === '新增关系').length === 1
+    renderer.unmount()
+    return characterEditor && relationshipEditor
+  } finally {
+    target.window = previous
+  }
+}

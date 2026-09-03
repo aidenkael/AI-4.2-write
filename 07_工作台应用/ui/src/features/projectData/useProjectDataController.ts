@@ -20,12 +20,14 @@ import {
   type ProjectData,
   type RelationSelection,
 } from '../../bridge/client'
+import { acceptsProjectDataResponse, projectDataLoadMode } from './projectDataLoadState'
 
 export interface ProjectDataController {
   data: ProjectData | null
   loading: boolean
   error: string | null
   saving: boolean
+  refreshing: boolean
   reload(): Promise<void>
   createFoundation(input: { category: string; title: string; material_state: 'current' | 'future'; data: Record<string, unknown>; relations?: RelationSelection[] }): Promise<boolean>
   updateFoundation(input: { ref: string; title: string; material_state: 'current' | 'future'; data: Record<string, unknown>; relations?: RelationSelection[] }): Promise<boolean>
@@ -46,27 +48,39 @@ export function useProjectDataController(projectId: string | null): ProjectDataC
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const projectRef = useRef<string | null>(projectId)
+  const dataRef = useRef<ProjectData | null>(data)
   projectRef.current = projectId
+  dataRef.current = data
 
   const load = useCallback(async (pid: string) => {
-    setLoading(true)
+    const mode = projectDataLoadMode(dataRef.current?.project_id ?? null, pid)
+    if (mode === 'initial') setLoading(true)
+    else setRefreshing(true)
     setError(null)
     try {
       const next = await getProjectData(pid)
       if (projectRef.current !== pid) return
       if (next.project_id !== pid) throw new Error('返回的作品数据与当前作品不一致，已拒绝。')
+      if (!acceptsProjectDataResponse(projectRef.current, pid, next.project_id)) return
+      dataRef.current = next
       setData(next)
     } catch (e) {
       if (projectRef.current !== pid) return
       setError(toMessage(e))
     } finally {
-      if (projectRef.current === pid) setLoading(false)
+      if (projectRef.current === pid) {
+        if (mode === 'initial') setLoading(false)
+        else setRefreshing(false)
+      }
     }
   }, [])
 
   useEffect(() => {
+    dataRef.current = null
     setData(null)
+    setRefreshing(false)
     if (!projectId) {
       setLoading(false)
       setError(null)
@@ -142,7 +156,7 @@ export function useProjectDataController(projectId: string | null): ProjectDataC
   ), [mutate])
 
   return {
-    data, loading, error, saving,
+    data, loading, error, saving, refreshing,
     reload,
     createFoundation, updateFoundation, retireFoundation, restoreFoundation,
     createRelationship: createRelationshipAction,

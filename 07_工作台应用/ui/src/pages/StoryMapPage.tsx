@@ -95,8 +95,13 @@ export function StoryMapPage() {
   graphRef.current = graph
   const timeModel = useMemo(() => projectTimeEvents(controller.data), [controller.data])
   const threads = useMemo(() => projectOpenThreads(controller.data), [controller.data])
+  const hasLoadedData = Boolean(selected && controller.data?.project_id === selected.project_id)
   const relationshipCount = controller.data?.sections.relationships.length ?? 0
   const characters = controller.data?.sections.characters ?? []
+  const relationshipCharacters = useMemo(
+    () => characters.filter((entry) => Boolean(entry.source_ref)),
+    [characters],
+  )
   const entryForSourceRef = (sourceRef: string | null, kind: 'character' | 'relationship') => {
     if (!sourceRef || !controller.data) return null
     const section = kind === 'character' ? controller.data.sections.characters : controller.data.sections.relationships
@@ -188,9 +193,15 @@ export function StoryMapPage() {
       {controller.loading && <div className="empty-state">正在加载正式作品数据…</div>}
       {controller.error && <p className="error-text">{controller.error}</p>}
 
-      {!controller.loading && !controller.error && tab === 'graph' && (
+      {hasLoadedData && tab === 'graph' && (
         <div className="map-graph-wrap">
           <div className="map-graph-main">
+            <div className="map-author-actions">
+              <button onClick={() => setSharedEditor({ kind: 'character', entry: null })}><Plus /> 新增人物</button>
+              <button disabled={relationshipCharacters.length < 2} onClick={() => setSharedEditor({ kind: 'relationship', entry: null })}><Plus /> 新增关系</button>
+              {relationshipCharacters.length < 2 && <span className="muted-note">至少需要两位已有稳定记录的人物才能新增关系。</span>}
+              {controller.refreshing && <span className="muted-note">正在刷新地图…</span>}
+            </div>
             {graph.nodes.length === 0 && (
               <div className="empty-state">当前尚未记录人物。人物与关系在作品地基中确认后，关系图会从这里生成。</div>
             )}
@@ -248,7 +259,7 @@ export function StoryMapPage() {
         </div>
       )}
 
-      {!controller.loading && !controller.error && tab === 'time' && (
+      {hasLoadedData && tab === 'time' && (
         <div className="map-time">
           {timeModel.items.length === 0 && (
             <div className="empty-state">当前尚未记录已发生事件。</div>
@@ -274,7 +285,7 @@ export function StoryMapPage() {
         </div>
       )}
 
-      {!controller.loading && !controller.error && tab === 'threads' && (
+      {hasLoadedData && tab === 'threads' && (
         <div className="map-threads">
           {threads.length === 0 && (
             <div className="empty-state">当前没有未解决线索。</div>
@@ -294,7 +305,7 @@ export function StoryMapPage() {
         <p className="muted-note"><RefreshCw size={13} /> 地图只从当前作品真相生成；人物与关系会打开同一源记录编辑器，本页不保存第二份故事事实。</p>
       </footer>
       {sharedEditor?.kind === 'character' && <CharacterEditor key={sharedEditor.entry?.source_ref ?? 'map-character'} entry={sharedEditor.entry} controller={controller} onClose={() => setSharedEditor(null)} />}
-      {sharedEditor?.kind === 'relationship' && <RelationshipEditor key={sharedEditor.entry?.source_ref ?? 'map-relationship'} entry={sharedEditor.entry} characters={characters} controller={controller} onClose={() => setSharedEditor(null)} />}
+      {sharedEditor?.kind === 'relationship' && <RelationshipEditor key={sharedEditor.entry?.source_ref ?? 'map-relationship'} entry={sharedEditor.entry} characters={relationshipCharacters} controller={controller} onClose={() => setSharedEditor(null)} />}
     </div>
   )
 }

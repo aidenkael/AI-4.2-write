@@ -27,6 +27,7 @@
     "src/features/planning/planningFields.ts",
     "src/features/planning/planningImpact.ts",
     "src/features/planning/planningModes.ts",
+    "src/features/projectData/projectDataLoadState.ts",
     "src/vite-env.d.ts",
     "src/tests/projectPageRuntimeHarness.tsx"
   ]

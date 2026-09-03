@@ -75,6 +75,7 @@ test('人物节点只消费精确 source_ref 头像，绝不回退姓名首字',
   assert.equal(withoutAvatar.avatarImageSrc, null)
   assert.equal('avatarText' in withoutAvatar, false)
   assert.equal(withoutAvatar.intro, '雨夜归来的医生')
+  assert.equal(withoutAvatar.short, '林砚\n雨夜归来的医生')
   const withAvatar = projectRelationshipGraph(data, { 'char:1': 'data:image/png;base64,AA==' }).nodes[0]
   assert.equal(withAvatar.avatarImageSrc, 'data:image/png;base64,AA==')
 })
@@ -95,6 +96,9 @@ test('Cytoscape 头像只为真实图像建立数据与样式，并在重置时�
   const avatarOnly = storyMapStyles.find((style) => style.selector === 'node[avatar]')
   assert.equal('background-image' in base.style, false)
   assert.equal(avatarOnly.style['background-image'], 'data(avatar)')
+  assert.equal(base.style['text-wrap'], 'wrap')
+  assert.equal(base.style['text-valign'], 'bottom')
+  assert.equal(base.style['text-halign'], 'center')
   const current = { avatar: 'old-image' }
   const element = {
     data(nextData) { Object.assign(current, nextData) },
