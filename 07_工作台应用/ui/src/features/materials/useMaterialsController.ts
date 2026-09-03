@@ -31,6 +31,7 @@ import {
   type MaterialPlanItem,
 } from '../../bridge/client'
 import { useAuthorTask } from '../tasks/AuthorTaskCoordinator'
+import { updateClassifyPlanItem } from './materialsModel'
 
 export interface MaterialsController {
   materials: MaterialItem[]
@@ -254,12 +255,7 @@ export function useMaterialsController(options?: { notify?: (message: string) =>
       if (!current || !current.plan.items[index]) return current
       const items = current.plan.items.map((item, itemIndex) => {
         if (itemIndex !== index) return item
-        const updated = { ...item, ...patch }
-        // 作者已补齐名称与类型时，把「需要确认」收敛成 MaterialIntake 可执行的新资料。
-        if (updated.action === 'REVIEW' && updated.name?.trim() && updated.type) {
-          return { ...updated, action: 'NEW_ASSET' as const, reason: undefined }
-        }
-        return updated
+        return updateClassifyPlanItem(item, patch)
       })
       return { ...current, plan: { ...current.plan, items } }
     })
