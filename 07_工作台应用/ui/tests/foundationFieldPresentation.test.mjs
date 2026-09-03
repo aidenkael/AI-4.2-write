@@ -5,7 +5,10 @@ import {
   advancedValueCount,
   fieldsForCategory,
   primaryFoundationSections,
+  selectOptionsPreservingValue,
+  selectedSystemLevelOptions,
   sectionFields,
+  systemLevelOptions,
 } from '../.test-build/features/foundation/fieldPresentation.js'
 import { splitEditorData } from '../.test-build/features/foundation/recordEditors.js'
 
@@ -73,4 +76,36 @@ test('internal metadata is never declared as an author field', () => {
   for (const field of Object.values(FOUNDATION_FIELD_PRESENTATION).flat()) {
     assert.equal(internal.has(field.key), false, field.key)
   }
+})
+
+test('system levels parse deterministically from current stored forms', () => {
+  assert.deepEqual(systemLevelOptions({ record: { levels_stages: '见习、正式，专家;宗师\n专家' } }), [
+    '见习', '正式', '专家', '宗师',
+  ])
+  assert.deepEqual(systemLevelOptions({ record: { levels_stages: ['一级', '二级；三级', '一级'] } }), [
+    '一级', '二级', '三级',
+  ])
+  assert.deepEqual(systemLevelOptions({ record: { levels_stages: { guessed: true } } }), [])
+})
+
+test('current level dropdown is enabled only for one exact system with real levels', () => {
+  const systems = [
+    { source_ref: 'sys-a', record: { levels_stages: '一阶、二阶' } },
+    { source_ref: 'sys-b', record: { levels_stages: ['甲', '乙'] } },
+  ]
+  assert.deepEqual(selectedSystemLevelOptions(systems, ['sys-a']), ['一阶', '二阶'])
+  assert.deepEqual(selectedSystemLevelOptions(systems, []), [])
+  assert.deepEqual(selectedSystemLevelOptions(systems, ['sys-a', 'sys-b']), [])
+  assert.deepEqual(selectedSystemLevelOptions(systems, ['missing']), [])
+  assert.deepEqual(selectedSystemLevelOptions([{ source_ref: 'sys-c', record: {} }], ['sys-c']), [])
+})
+
+test('unmatched legacy current level stays visible and selectable', () => {
+  assert.deepEqual(selectOptionsPreservingValue([
+    { value: '一阶', label: '一阶' }, { value: '二阶', label: '二阶' },
+  ], '旧制三品'), [
+    { value: '旧制三品', label: '旧制三品（已有值）' },
+    { value: '一阶', label: '一阶' }, { value: '二阶', label: '二阶' },
+  ])
+  assert.equal(selectOptionsPreservingValue([{ value: '一阶', label: '一阶' }], '一阶').length, 1)
 })

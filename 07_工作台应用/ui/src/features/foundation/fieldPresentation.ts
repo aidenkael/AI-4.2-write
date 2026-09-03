@@ -144,3 +144,46 @@ export function primaryFoundationSections(
   })
   return { primary, optional }
 }
+
+interface SystemLevelEntry {
+  source_ref?: string | null
+  id?: string | null
+  record?: unknown
+}
+
+const splitLevelText = (value: string): string[] => (
+  value.split(/[\n、,，;；]/).map((item) => item.trim()).filter(Boolean)
+)
+
+/** Parse only levels the author/system record already stores; never generate a hierarchy. */
+export function systemLevelOptions(systemEntry: SystemLevelEntry | null | undefined): string[] {
+  const record = systemEntry?.record
+  if (!record || typeof record !== 'object' || Array.isArray(record)) return []
+  const raw = (record as Record<string, unknown>).levels_stages
+  const values = typeof raw === 'string'
+    ? splitLevelText(raw)
+    : Array.isArray(raw)
+      ? raw.flatMap((item) => typeof item === 'string' ? splitLevelText(item) : [])
+      : []
+  return [...new Set(values)]
+}
+
+/** A dropdown is safe only for one exact selected system with real stored levels. */
+export function selectedSystemLevelOptions(
+  systems: readonly SystemLevelEntry[],
+  selectedSystemRefs: readonly string[],
+): string[] {
+  if (selectedSystemRefs.length !== 1) return []
+  const ref = selectedSystemRefs[0]
+  const matches = systems.filter((entry) => entry.source_ref === ref || entry.id === ref)
+  return matches.length === 1 ? systemLevelOptions(matches[0]) : []
+}
+
+/** Keep an existing non-canonical value visible until the author changes it. */
+export function selectOptionsPreservingValue(
+  options: readonly { value: string; label: string }[],
+  currentValue: string,
+): Array<{ value: string; label: string }> {
+  if (!currentValue || options.some((option) => option.value === currentValue)) return [...options]
+  return [{ value: currentValue, label: `${currentValue}（已有值）` }, ...options]
+}

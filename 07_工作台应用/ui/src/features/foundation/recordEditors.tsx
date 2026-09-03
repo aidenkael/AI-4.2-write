@@ -10,6 +10,8 @@ import {
   advancedValueCount,
   fieldsForCategory,
   fieldTuplesForCategory,
+  selectOptionsPreservingValue,
+  selectedSystemLevelOptions,
   sectionFields,
   type FoundationFieldPresentation,
 } from './fieldPresentation'
@@ -78,12 +80,11 @@ function FieldControl({
   onChange(value: string): void
 }) {
   if (field.input === 'select') {
-    const known = field.options?.some((option) => option.value === value) ?? false
+    const options = selectOptionsPreservingValue(field.options ?? [], value)
     return (
       <label>{field.label}<select value={value} onChange={(event) => onChange(event.target.value)}>
         <option value="">未设置</option>
-        {value && !known && <option value={value}>{value}（已有值）</option>}
-        {field.options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
       </select></label>
     )
   }
@@ -97,26 +98,30 @@ export interface EditableCustomField { key: string; value: string; isList: boole
 
 /** Shared sparse field surface used by every Foundation category. */
 export function SparseFieldEditor({
-  category, values, onValuesChange, custom, onCustomChange,
+  category, values, onValuesChange, custom, onCustomChange, fieldOverrides = {},
 }: {
   category: string
   values: Record<string, string>
   onValuesChange(next: Record<string, string>): void
   custom: EditableCustomField[]
   onCustomChange(next: EditableCustomField[]): void
+  fieldOverrides?: Record<string, Partial<FoundationFieldPresentation>>
 }) {
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const core = sectionFields(category, 'core')
   const advanced = sectionFields(category, 'advanced')
   const count = advancedValueCount(category, values, custom)
-  const render = (field: FoundationFieldPresentation) => (
+  const render = (baseField: FoundationFieldPresentation) => {
+    const field = { ...baseField, ...fieldOverrides[baseField.key] }
+    return (
     <FieldControl
       key={field.key}
       field={field}
       value={values[field.key] ?? ''}
       onChange={(value) => onValuesChange({ ...values, [field.key]: value })}
     />
-  )
+    )
+  }
   return (
     <div className="record-fields sparse-record-fields">
       {core.map(render)}
@@ -189,6 +194,10 @@ export function CharacterEditor({
   const [systemSelection, setSystemSelection] = useState<string[]>(
     relationInit.selections['character_uses_system'] ?? [],
   )
+  const currentLevelOptions = useMemo(
+    () => selectedSystemLevelOptions(projectData?.sections.systems ?? [], systemSelection),
+    [projectData?.sections.systems, systemSelection],
+  )
   const save = async () => {
     if (!title.trim()) return
     let data: Record<string, unknown> = {
@@ -257,7 +266,15 @@ export function CharacterEditor({
         excludeSelf={entry?.source_ref ?? null}
       />
       {relationInit.hints.map((hint) => <p className="muted-note legacy-relation-hint" key={hint.field}>{hint.text}</p>)}
-      <SparseFieldEditor category="character" values={values} onValuesChange={setValues} custom={custom} onCustomChange={setCustom} />
+      <SparseFieldEditor
+        category="character" values={values} onValuesChange={setValues} custom={custom} onCustomChange={setCustom}
+        fieldOverrides={currentLevelOptions.length ? {
+          current_level: {
+            input: 'select',
+            options: currentLevelOptions.map((level) => ({ value: level, label: level })),
+          },
+        } : undefined}
+      />
       </div>
       <footer>{entry && <button className="danger" onClick={() => void retire()}><Trash2 /> 退役</button>}<button className="primary" disabled={controller.saving || !title.trim()} onClick={() => void save()}><Save /> 保存</button></footer>
     </aside>
