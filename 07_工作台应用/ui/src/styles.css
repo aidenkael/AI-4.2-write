@@ -458,6 +458,13 @@ p{line-height:1.65}
 .materials-overview .overview-card h4{margin:0 0 6px;font-size:14px;color:var(--muted)}
 .materials-overview .overview-count{display:block;font-size:32px;font-weight:700;color:var(--blue)}
 .materials-overview .overview-card p{margin:6px 0 0}
+.overview-types{display:flex;gap:10px;flex-wrap:wrap;margin:2px 0 18px}
+.overview-attention{margin-bottom:18px}
+.overview-attention h4{margin:0 0 8px;font-size:14px;color:var(--amber)}
+.overview-attention ul{margin:0;padding:0;list-style:none;display:grid;gap:8px}
+.overview-attention li{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#fffdfa}
+.overview-attention li strong{font-size:14px}
+.overview-attention .attention-reason{color:var(--muted);font-size:13px}
 
 /* ============ 设置 ============ */
 .settings-layout{display:grid;grid-template-columns:300px 1fr;gap:20px}

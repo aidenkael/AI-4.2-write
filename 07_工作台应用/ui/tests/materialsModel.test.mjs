@@ -21,6 +21,8 @@ import {
   materialsForStage,
   materialCardMeta,
   attentionRetryLabel,
+  workflowStageLabel,
+  countMaterialsByType,
   matchesMaterialFilter,
   needsAttentionMaterials,
   pendingInboxBadgeCount,
@@ -107,6 +109,17 @@ test('attentionRetryLabel：new→重新提纯、purified→重新蒸馏、writi
   assert.equal(attentionRetryLabel('purified'), '重新蒸馏')
   assert.equal(attentionRetryLabel('writing'), null)
   assert.equal(attentionRetryLabel(null), null)
+})
+
+test('素材总览：类型分布（原著/技巧类/其他）+ 阶段区域名', () => {
+  assert.deepEqual(countMaterialsByType([
+    item({ type: 'REFERENCE_WORK' }), item({ type: 'REFERENCE_WORK' }),
+    item({ type: 'METHOD_SOURCE' }), item({ type: 'LOOSE_MATERIAL' }), item({ type: 'RESEARCH' }),
+  ]), { reference: 2, method: 1, other: 2 })
+  assert.equal(workflowStageLabel('new'), '新增素材')
+  assert.equal(workflowStageLabel('purified'), '已提纯素材库')
+  assert.equal(workflowStageLabel('writing'), '写作素材库')
+  assert.equal(workflowStageLabel(null), '')
 })
 
 test('列表使用真实 format：卡片信息行 = 类型 · 格式 · 作者', () => {

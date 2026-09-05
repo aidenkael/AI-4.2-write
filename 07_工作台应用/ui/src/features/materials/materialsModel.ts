@@ -52,6 +52,27 @@ export function attentionRetryLabel(stage: MaterialWorkflowStage | null | undefi
   return null
 }
 
+/** 工作流阶段 → 作者可读区域名（素材总览“需要重新处理”标注所属阶段用）。 */
+export function workflowStageLabel(stage: MaterialWorkflowStage | null): string {
+  if (stage === 'new') return '新增素材'
+  if (stage === 'purified') return '已提纯素材库'
+  if (stage === 'writing') return '写作素材库'
+  return ''
+}
+
+/** 素材总览的类型分布（原著 / 技巧类 / 其他）；其他含 LOOSE_MATERIAL 与 RESEARCH。 */
+export function countMaterialsByType(items: MaterialItem[]): { reference: number; method: number; other: number } {
+  let reference = 0
+  let method = 0
+  let other = 0
+  for (const item of items) {
+    if (item.type === 'REFERENCE_WORK') reference += 1
+    else if (item.type === 'METHOD_SOURCE') method += 1
+    else other += 1
+  }
+  return { reference, method, other }
+}
+
 export function matchesMaterialFilter(item: MaterialItem, filter: string): boolean {
   if (filter === '全部') return true
   if (filter === '原著') return item.type === 'REFERENCE_WORK'

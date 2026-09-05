@@ -9,11 +9,15 @@ import {
   attentionRetryLabel,
   authorStateLabel,
   BATCH_TYPE_CHOICES,
+  countMaterialsByType,
+  deriveWorkflowStage,
   MATERIAL_TOP_NAVIGATION,
   MATERIAL_TYPE_FILTERS,
   matchesMaterialFilter,
   materialCardMeta,
   materialsForStage,
+  needsAttentionMaterials,
+  workflowStageLabel,
   type MaterialTab,
 } from '../features/materials/materialsModel'
 
@@ -28,6 +32,8 @@ export function MaterialsPage() {
   const purifiedItems = useMemo(() => materialsForStage(controller.materials, 'purified'), [controller.materials])
   const writingItems = useMemo(() => materialsForStage(controller.materials, 'writing'), [controller.materials])
   const filteredWriting = useMemo(() => writingItems.filter((m) => matchesMaterialFilter(m, typeFilter)), [writingItems, typeFilter])
+  const attentionItems = useMemo(() => needsAttentionMaterials(controller.materials), [controller.materials])
+  const typeCounts = useMemo(() => countMaterialsByType(controller.materials), [controller.materials])
 
   const selected = controller.materials.find((m) => m.id === selectedId) ?? null
   const detail = controller.detail?.id === selectedId ? controller.detail : null
@@ -165,11 +171,26 @@ export function MaterialsPage() {
     {tab === '素材总览' && <section className="panel materials-overview">
       <h3>素材总览</h3>
       <div className="overview-grid">
-        <div className="overview-card"><h4>新增素材</h4><span className="overview-count">{controller.inbox.length + newItems.length}</span><p className="muted-note">收件箱 + 待提纯</p></div>
-        <div className="overview-card"><h4>已提纯</h4><span className="overview-count">{purifiedItems.length}</span><p className="muted-note">等待蒸馏</p></div>
+        <div className="overview-card"><h4>新素材 / 未提纯</h4><span className="overview-count">{controller.inbox.length + newItems.length}</span><p className="muted-note">收件箱 + 待提纯</p></div>
+        <div className="overview-card"><h4>已提纯 / 待蒸馏</h4><span className="overview-count">{purifiedItems.length}</span><p className="muted-note">等待蒸馏</p></div>
         <div className="overview-card"><h4>可用于写作</h4><span className="overview-count">{writingItems.length}</span><p className="muted-note">蒸馏完成</p></div>
-        <div className="overview-card"><h4>总计</h4><span className="overview-count">{controller.materials.length}</span><p className="muted-note">全部素材</p></div>
+        <div className="overview-card"><h4>需要重新处理</h4><span className="overview-count">{attentionItems.length}</span><p className="muted-note">提纯 / 蒸馏失败</p></div>
       </div>
+      <div className="overview-types">
+        <span className="soft-tag">原著 {typeCounts.reference}</span>
+        <span className="soft-tag">技巧类 {typeCounts.method}</span>
+        <span className="soft-tag">其他 {typeCounts.other}</span>
+      </div>
+      {attentionItems.length > 0 && <div className="overview-attention">
+        <h4>需要重新处理</h4>
+        <ul>
+          {attentionItems.map((m) => <li key={m.id}>
+            <strong>{m.name}</strong>
+            <span className="muted-note">{workflowStageLabel(deriveWorkflowStage(m))}</span>
+            <span className="attention-reason">{m.attention_message}</span>
+          </li>)}
+        </ul>
+      </div>}
       <button className="secondary" disabled={controller.refreshing} onClick={() => void controller.refresh()}>
         <RefreshCw /> {controller.refreshing ? '刷新中…' : '刷新状态'}
       </button>
