@@ -11,7 +11,6 @@ export type AuthorTaskKind =
   | 'story_plan'
   | 'story_write'
   | 'review'
-  | 'material_classify'
   | 'material_distill'
   | 'foundation_design'
 
@@ -59,7 +58,6 @@ export const TASK_LABELS: Record<AuthorTaskKind, string> = {
   story_plan: '大纲与规划',
   story_write: '正文写作',
   review: '作品检查',
-  material_classify: '素材分类',
   material_distill: '素材蒸馏',
   foundation_design: '完善作品地基',
 }
@@ -78,7 +76,6 @@ export function taskTarget(kind: AuthorTaskKind): TaskTarget {
       return { section: 'writing' }
     case 'review':
       return { section: 'review' }
-    case 'material_classify':
     case 'material_distill':
       return { page: 'materials' }
     case 'foundation_design':
@@ -111,7 +108,6 @@ export function waitingAuthorMessage(kind: AuthorTaskKind, phase: string | null)
     if (phase === 'pending_prose') return '上下文已准备好，请再次执行 /gowrite 生成正文'
     return '等待 Qoder /gowrite：正在选择本次写作上下文'
   }
-  if (kind === 'material_classify') return '等待 Qoder /gowrite：正在分类待入库素材'
   if (kind === 'material_distill') return '等待 Qoder /gowrite：正在蒸馏知识'
   return '等待 Qoder /gowrite 执行任务'
 }
@@ -127,8 +123,6 @@ export function candidateReadyMessage(kind: AuthorTaskKind): string {
       return '正文候选已生成 · 返回查看'
     case 'review':
       return '检查报告已生成 · 返回查看'
-    case 'material_classify':
-      return '入库建议已生成 · 返回查看'
     case 'material_distill':
       return '蒸馏完成 · 返回查看'
     case 'foundation_design':

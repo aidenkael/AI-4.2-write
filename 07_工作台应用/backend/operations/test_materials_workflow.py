@@ -1,13 +1,12 @@
-# -*- coding: utf-8 -*-
 """素材工作流 targeted tests（全部假 adapter / 假 CLI / temp root，无真实模型调用）。
 
 覆盖：
 A. 文件导入只进入 00_待入库（inbox 合同），绝不写入最终 canonical 目录；
-B. 确定性事实优先：exact duplicate → ATTACH_EXISTING、unsupported → REVIEW，
-   无需 Agent；
-C. 无法定论文件 → 一次 Agent 分类 turn（Direct 假 adapter）；
-D. Agent 输出校验：只接受 MaterialIntake 允许决策；编造 asset_id / 类型非法拒绝；
-E. 分类后仍走 MaterialIntake 事务入库（apply 不被绕过）；
+B. 批次机械入库计划（零 AI）：build_intake_plan_from_inbox；
+   exact_duplicate → ATTACH_EXISTING、unsupported → REVIEW、其余 → NEW_ASSET；
+C. 格式白名单：只允许 .epub/.pdf/.txt，拒绝 .zip/.mobi/.azw3/.docx；
+D. 批次类型映射：REFERENCE_WORK / METHOD_SOURCE / LOOSE_MATERIAL；无效类型报错；
+E. 入库计划经 MaterialIntake 事务入库（apply 不被绕过）；
 F. 显式 SourcePrepare：真实 SP CLI 被调用（subprocess 假）；失败传播；
 G. 显式 BookDistill：validate/prepare/assemble/profile/bkp 阶段被调用；
    SourcePrepare 未 PASS 时拒绝；
@@ -39,21 +38,6 @@ def _use_direct(adapter_name: str = "fake_classify_agent") -> None:
         direct_model="native-1",
         direct_custom_model=None,
     ))
-
-
-class _ClassifyAdapter:
-    name = "fake_classify_agent"
-
-    def __init__(self, decisions_json):
-        self.calls = 0
-        self.decisions_json = decisions_json
-
-    def run(self, request):
-        self.calls += 1
-        return AgentResult(status="completed", output=self.decisions_json, agent=self.name)
-
-    def cancel(self):
-        return True
 
 
 def _empty_ledger():
@@ -124,10 +108,11 @@ def test_import_avoids_inbox_collision(isolated, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# B. 确定性事实优先（无需 Agent）
+# B. 批次机械入库计划（零 AI）
 # ---------------------------------------------------------------------------
 
-def test_classify_deterministic_duplicate_and_unsupported(isolated, monkeypatch):
+def test_build_intake_plan_duplicate_and_unsupported(isolated, monkeypatch):
+    """exact_duplicate → ATTACH_EXISTING、unsupported → REVIEW，零 Agent 调用。"""
     ledger = _fake_asset_ledger()
     dup_content = b"dup-content"
     ledger["assets"][0]["files"][0]["sha256"] = hashlib.sha256(dup_content).hexdigest()
@@ -138,129 +123,101 @@ def test_classify_deterministic_duplicate_and_unsupported(isolated, monkeypatch)
     built = []
     def _must_not_build():
         built.append("build")
-        raise AssertionError("确定性路径不得调用 Agent")
+        raise AssertionError("机械入库计划不得调用 Agent")
     monkeypatch.setattr(agent_runner, "_build_adapter", _must_not_build)
 
-    result = materials.classify_material_inbox()
+    result = materials.build_intake_plan_from_inbox("REFERENCE_WORK")
     assert result["status"] == "ready"
-    assert result["agent_required"] is False
     assert built == []
     actions = {item["action"] for item in result["plan"]["items"]}
-    assert "ATTACH_EXISTING" in actions  # 重复文件确定性并入
-    assert "REVIEW" in actions            # 不支持类型确定性人工确认
-    # 没有 NEW_ASSET（没有任何文件需要 Agent 判断）
+    assert "ATTACH_EXISTING" in actions
+    assert "REVIEW" in actions
     assert "NEW_ASSET" not in actions
 
 
-# ---------------------------------------------------------------------------
-# C/D. 无法定论文件 → 一次 Agent 分类 + 输出校验
-# ---------------------------------------------------------------------------
-
-def test_classify_ambiguous_routes_one_agent_turn(isolated, monkeypatch):
-    _use_direct()
+def test_build_intake_plan_new_asset_uses_batch_type(isolated):
+    """新文件 → NEW_ASSET，类型等于作者选择的批次类型。"""
     _write_ledger(isolated, _fake_asset_ledger())
     (isolated / "01_原始素材" / "00_待入库" / "新书.epub").write_bytes(b"new-book")
 
-    adapter = _ClassifyAdapter(json.dumps({
-        "items": [{"filename": "新书.epub", "action": "NEW_ASSET", "name": "新书", "type": "REFERENCE_WORK"}],
-    }, ensure_ascii=False))
-    monkeypatch.setattr(agent_runner, "_build_adapter", lambda: (adapter, AgentRequest(task="")))
-
-    result = materials.classify_material_inbox()
+    result = materials.build_intake_plan_from_inbox("METHOD_SOURCE")
     assert result["status"] == "ready"
-    assert adapter.calls == 1, "一次分类 turn 最多一次"
-    assert result["agent_used"] is True
-    assert result["plan"]["items"][0]["action"] == "NEW_ASSET"
-    assert result["plan"]["items"][0]["name"] == "新书"
+    new_items = [item for item in result["plan"]["items"] if item["action"] == "NEW_ASSET"]
+    assert len(new_items) == 1
+    assert new_items[0]["type"] == "METHOD_SOURCE"
+    assert new_items[0]["name"] == "新书"
 
 
-def test_classify_agent_cannot_invent_asset_id(isolated, monkeypatch):
-    _use_direct()
-    _write_ledger(isolated, _fake_asset_ledger())
-    (isolated / "01_原始素材" / "00_待入库" / "新书.epub").write_bytes(b"new-book")
-
-    adapter = _ClassifyAdapter(json.dumps({
-        "items": [{"filename": "新书.epub", "action": "ATTACH_EXISTING", "asset_id": "book_9999"}],
-    }, ensure_ascii=False))
-    monkeypatch.setattr(agent_runner, "_build_adapter", lambda: (adapter, AgentRequest(task="")))
-    # 台账中不存在 book_9999 → 校验拒绝（允许的决策集合校验以台账为准）
-    with pytest.raises(materials.MaterialsError):
-        materials.classify_material_inbox()
+def test_build_intake_plan_invalid_batch_type(isolated):
+    """无效批次类型 → MaterialsError。"""
+    _write_ledger(isolated, _empty_ledger())
+    with pytest.raises(materials.MaterialsError, match="批次类型无效"):
+        materials.build_intake_plan_from_inbox("BAD_TYPE")
 
 
-def test_classify_agent_bad_type_rejected(isolated, monkeypatch):
-    _use_direct()
-    _write_ledger(isolated, _fake_asset_ledger())
-    (isolated / "01_原始素材" / "00_待入库" / "新书.epub").write_bytes(b"new-book")
-    adapter = _ClassifyAdapter(json.dumps({
-        "items": [{"filename": "新书.epub", "action": "NEW_ASSET", "name": "新书", "type": "BAD_TYPE"}],
-    }, ensure_ascii=False))
-    monkeypatch.setattr(agent_runner, "_build_adapter", lambda: (adapter, AgentRequest(task="")))
-    with pytest.raises(materials.MaterialsError):
-        materials.classify_material_inbox()
-
-
-def test_classify_agent_cannot_reference_unscanned_file(isolated, monkeypatch):
-    _use_direct()
-    _write_ledger(isolated, _fake_asset_ledger())
-    (isolated / "01_原始素材" / "00_待入库" / "新书.epub").write_bytes(b"new-book")
-    adapter = _ClassifyAdapter(json.dumps({
-        "items": [{"filename": "不存在.epub", "action": "NEW_ASSET", "name": "X", "type": "REFERENCE_WORK"}],
-    }, ensure_ascii=False))
-    monkeypatch.setattr(agent_runner, "_build_adapter", lambda: (adapter, AgentRequest(task="")))
-    with pytest.raises(materials.MaterialsError):
-        materials.classify_material_inbox()
-
-
-def test_classify_interactive_accepts_structured_result(isolated, monkeypatch):
-    """交互分类：结构化 result（NEW_ASSET + METHOD_SOURCE）经桥消费与文本 output 等效。"""
-    from operations import qoder_bridge as bridge
-    monkeypatch.setattr(bridge, "get_bridge_root", lambda: isolated.parent / ".bridge")
-    SettingsStore().save(AppSettings(
-        default_execution_mode="interactive_bridge",
-        interactive_agent="qoder",
-        direct_agent="fake_classify_agent",
-        direct_model="native-1",
-        direct_custom_model=None,
-    ))
-    _write_ledger(isolated, _fake_asset_ledger())
-    (isolated / "01_原始素材" / "00_待入库" / "方法书.epub").write_bytes(b"method-book")
-
-    pending = materials.classify_material_inbox()
-    assert pending["status"] == "pending"
-    assert pending["agent_required"] is True
-    rid = pending["request_id"]
-
-    # canonical 信封：结构化 result 直接放对象（新 /gowrite 契约）
-    bridge.write_response(rid, result={
-        "items": [{
-            "filename": "方法书.epub", "action": "NEW_ASSET",
-            "name": "人物弧光方法书", "type": "METHOD_SOURCE",
-            "reason": "写作方法教程",
-        }],
-    })
-    status = materials.get_material_classify_request(rid)
-    assert status["status"] == "completed", status.get("error")
-    item = status["plan"]["items"][0]
-    assert item["action"] == "NEW_ASSET"
-    assert item["name"] == "人物弧光方法书"
-    assert item["type"] == "METHOD_SOURCE"
+def test_build_intake_plan_empty_inbox(isolated):
+    """空收件箱 → 空计划。"""
+    _write_ledger(isolated, _empty_ledger())
+    result = materials.build_intake_plan_from_inbox("REFERENCE_WORK")
+    assert result["status"] == "ready"
+    assert result["plan"]["items"] == []
+    assert "没有需要入库" in result["message"]
 
 
 # ---------------------------------------------------------------------------
-# E. 分类后仍走 MaterialIntake 事务入库
+# C. 格式白名单
 # ---------------------------------------------------------------------------
 
-def test_classified_plan_applies_through_materialintake(isolated, monkeypatch):
-    _use_direct()
+def test_import_format_whitelist_rejects_zip_mobi_azw3(isolated, tmp_path):
+    """已移除的格式（zip/mobi/azw3）不得导入。"""
+    for suffix in (".zip", ".mobi", ".azw3"):
+        bad = tmp_path / f"bad{suffix}"
+        bad.write_bytes(b"x")
+        result = materials.import_material_files([{"path": str(bad)}])
+        assert result["imported"] == [], f"{suffix} 应被拒绝"
+        assert len(result["skipped"]) == 1
+
+
+def test_import_accepts_epub_pdf_txt(isolated, tmp_path):
+    """白名单格式全部接受。"""
+    for suffix in (".epub", ".pdf", ".txt"):
+        src = tmp_path / f"book{suffix}"
+        src.write_bytes(b"content")
+        result = materials.import_material_files([{"path": str(src)}])
+        assert len(result["imported"]) == 1, f"{suffix} 应被接受"
+
+
+# ---------------------------------------------------------------------------
+# D. 批次类型映射
+# ---------------------------------------------------------------------------
+
+def test_build_intake_plan_reference_work(isolated):
+    _write_ledger(isolated, _empty_ledger())
+    (isolated / "01_原始素材" / "00_待入库" / "原著.epub").write_bytes(b"ref")
+    result = materials.build_intake_plan_from_inbox("REFERENCE_WORK")
+    item = result["plan"]["items"][0]
+    assert item["type"] == "REFERENCE_WORK"
+
+
+def test_build_intake_plan_loose_material(isolated):
+    _write_ledger(isolated, _empty_ledger())
+    (isolated / "01_原始素材" / "00_待入库" / "杂项.txt").write_bytes(b"loose")
+    result = materials.build_intake_plan_from_inbox("LOOSE_MATERIAL")
+    item = result["plan"]["items"][0]
+    assert item["type"] == "LOOSE_MATERIAL"
+
+
+# ---------------------------------------------------------------------------
+# E. 入库计划经 MaterialIntake 事务入库
+# ---------------------------------------------------------------------------
+
+def test_batch_plan_applies_through_materialintake(isolated, monkeypatch):
+    """批次计划的 NEW_ASSET 经事务 apply，不绕过 MaterialIntake。"""
     from operations import materials as m
     _write_ledger(isolated, _fake_asset_ledger())
     (isolated / "01_原始素材" / "00_待入库" / "新书.epub").write_bytes(b"new-book")
-    adapter = _ClassifyAdapter(json.dumps({
-        "items": [{"filename": "新书.epub", "action": "NEW_ASSET", "name": "新书", "type": "REFERENCE_WORK"}],
-    }, ensure_ascii=False))
-    monkeypatch.setattr(agent_runner, "_build_adapter", lambda: (adapter, AgentRequest(task="")))
-    result = materials.classify_material_inbox()
+
+    result = materials.build_intake_plan_from_inbox("REFERENCE_WORK")
     assert result["status"] == "ready"
 
     catalog, intake, post_action = m._load_materialintake()
@@ -271,7 +228,7 @@ def test_classified_plan_applies_through_materialintake(isolated, monkeypatch):
 
     outcome = materials.apply_material_intake(result["plan"])
     assert outcome["ok"] is True
-    assert applied["plan"]["items"][0]["action"] == "NEW_ASSET", "Agent 决策经事务 apply，不绕过 MaterialIntake"
+    assert applied["plan"]["items"][0]["action"] == "NEW_ASSET", "批次计划经事务 apply，不绕过 MaterialIntake"
 
 
 # ---------------------------------------------------------------------------
@@ -473,8 +430,27 @@ def test_interactive_book_distill_rejects_missing_meta_asset_id(isolated, monkey
 
 
 # ---------------------------------------------------------------------------
-# H. 页面加载零模型（隐式）
+# H. 页面加载零模型（隐式）+ REFERENCE_WORK 学习路径回归
 # ---------------------------------------------------------------------------
+
+def test_reference_work_learning_paths_uses_root_model_md(isolated):
+    """REFERENCE_WORK 的 model.md 必须在 asset_dir 根，不在 bkp/ 子目录。"""
+    asset_dir = isolated / "02_素材知识库" / "book_0001_样例作品"
+    asset_dir.mkdir(parents=True)
+    paths = materials._material_learning_paths("book_0001", "REFERENCE_WORK")
+    assert len(paths) == 2
+    assert paths[0].name == "author_view.md"
+    assert paths[0].parent.name == "bkp"
+    assert paths[1].name == "model.md"
+    assert paths[1].parent.name == "book_0001_样例作品", "model.md 必须在 asset_dir 根，不在 bkp/"
+
+
+def test_method_source_learning_paths(isolated):
+    asset_dir = isolated / "02_素材知识库" / "book_0001_方法书"
+    asset_dir.mkdir(parents=True)
+    paths = materials._material_learning_paths("book_0001", "METHOD_SOURCE")
+    assert len(paths) == 1
+    assert paths[0].name == "method_profile.md"
 
 def test_list_materials_zero_model_calls(isolated, monkeypatch):
     _write_ledger(isolated, _fake_asset_ledger())

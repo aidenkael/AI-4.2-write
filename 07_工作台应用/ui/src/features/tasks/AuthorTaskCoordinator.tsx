@@ -26,20 +26,17 @@ import {
   type ReactNode,
 } from 'react'
 import {
-  cancelMaterialClassifyRequest,
   cancelMaterialDistillRequest,
   cancelNewProjectRequest,
   cancelReviewRequest,
   cancelStoryPlanRequest,
   cancelStoryWriteRequest,
   cancelFoundationDesignRequest,
-  classifyMaterialInbox,
   confirmNewProject,
   confirmStoryPlan,
   confirmStoryWrite,
   confirmFoundationDesign,
   getActiveAuthorOperation,
-  getMaterialClassifyRequest,
   getMaterialDistillRequest,
   getNewProjectRequest,
   getReviewRequest,
@@ -53,7 +50,6 @@ import {
   prepareFoundationDesign,
   distillMaterial,
   type BookDistillRequestStatus,
-  type ClassifyRequestStatus,
   type ConfirmResult,
   type ConfirmStoryPlanResult,
   type ConfirmStoryWriteResult,
@@ -99,7 +95,6 @@ export type TaskPayload =
     }
   | { kind: 'story_write'; project_id: string; author_input: string; chapter_number?: number }
   | { kind: 'review'; project_id: string; chapter_number?: number }
-  | { kind: 'material_classify' }
   | { kind: 'material_distill'; asset_id: string }
   | { kind: 'foundation_design'; project_id: string; author_request: string; base_model_rev: number }
 
@@ -132,7 +127,6 @@ const pollers: Record<AuthorTaskKind, (requestId: string) => Promise<PollStatus>
   story_plan: async (rid) => (await getStoryPlanRequest(rid)) as StoryPlanRequestStatus,
   story_write: async (rid) => (await getStoryWriteRequest(rid)) as StoryWriteRequestStatus,
   review: async (rid) => (await getReviewRequest(rid)) as ReviewRequestStatus,
-  material_classify: async (rid) => (await getMaterialClassifyRequest(rid)) as ClassifyRequestStatus,
   material_distill: async (rid) => (await getMaterialDistillRequest(rid)) as BookDistillRequestStatus,
   foundation_design: async (rid) => await getFoundationDesignRequest(rid),
 }
@@ -142,7 +136,6 @@ const cancellers: Record<AuthorTaskKind, (requestId: string) => Promise<unknown>
   story_plan: cancelStoryPlanRequest,
   story_write: cancelStoryWriteRequest,
   review: cancelReviewRequest,
-  material_classify: cancelMaterialClassifyRequest,
   material_distill: cancelMaterialDistillRequest,
   foundation_design: cancelFoundationDesignRequest,
 }
@@ -169,7 +162,6 @@ const confirmers: Partial<Record<AuthorTaskKind, ((task: AuthorTask, extra?: { i
       base_model_rev: extra?.base_model_rev ?? 0,
     }),
   review: null,
-  material_classify: null,
   material_distill: null,
 }
 
@@ -354,9 +346,6 @@ export function AuthorTaskCoordinatorProvider({ children }: { children: ReactNod
           case 'review':
             prepared = await prepareReview({ project_id: payload.project_id, chapter_number: payload.chapter_number })
             break
-          case 'material_classify':
-            prepared = await classifyMaterialInbox()
-            break
           case 'material_distill':
             prepared = await distillMaterial(payload.asset_id)
             break
@@ -385,8 +374,8 @@ export function AuthorTaskCoordinatorProvider({ children }: { children: ReactNod
           error: null,
           meta: kind === 'material_distill' ? { asset_id: payload.asset_id } : null,
         }
-        // material_classify / material_distill 同步完成（无 request_id）时直接进入候选
-        if (kind === 'material_classify' || kind === 'material_distill') {
+        // material_distill 同步完成（无 request_id）时直接进入候选
+        if (kind === 'material_distill') {
           const res = prepared as unknown as { status?: string; request_id?: string | null }
           if (res.status === 'ready' || res.status === 'completed') {
             next.status = 'candidate'

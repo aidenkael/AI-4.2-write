@@ -432,6 +432,32 @@ p{line-height:1.65}
 .material-actions button.primary{background:var(--blue);border-color:var(--blue);color:#fff}
 .material-actions button:disabled{opacity:.55;cursor:not-allowed}
 
+/* ============ 素材四区互斥工作流 ============ */
+.materials-workflow{display:grid;grid-template-columns:65% 1fr;gap:16px;min-height:calc(100vh - 240px)}
+.materials-left{min-height:0;overflow-y:auto;padding-right:4px}
+.materials-right{min-height:0;overflow-y:auto;position:sticky;top:100px;max-height:calc(100vh - 200px)}
+.materials-right .material-detail{min-height:320px}
+.batch-type-selector{display:grid;gap:10px;margin-top:12px}
+.batch-type-selector h4{margin:0;font-size:14px}
+.type-choices{display:flex;gap:8px;flex-wrap:wrap}
+.type-choices button{border:1px solid var(--line);border-radius:20px;padding:6px 16px;font-size:13px;background:#fff}
+.type-choices button.active{background:#e9f1ff;color:var(--blue);border-color:var(--blue);font-weight:700}
+.inbox-list{margin-top:12px}
+.inbox-list h4{margin:0 0 8px;font-size:14px}
+.stage-materials{margin-top:16px}
+.stage-materials h4{margin:0 0 8px;font-size:14px;display:flex;align-items:center;gap:6px}
+.stage-materials button{width:100%;border-radius:8px;justify-content:flex-start;padding:9px;text-align:left;border:1px solid var(--line);background:#fff}
+.stage-materials button.active{border-color:#7fa4ff;background:#f4f8ff}
+.stage-materials button>span:nth-child(2){display:flex;flex-direction:column;gap:5px}
+.stage-materials em{margin-left:auto;font-style:normal;font-size:13px}
+.materials-overview{padding:22px 26px}
+.materials-overview h3{margin:0 0 16px;font-size:18px}
+.materials-overview .overview-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;margin-bottom:18px}
+.materials-overview .overview-card{border:1px solid var(--line);border-radius:10px;padding:16px;text-align:center;background:#fafcff}
+.materials-overview .overview-card h4{margin:0 0 6px;font-size:14px;color:var(--muted)}
+.materials-overview .overview-count{display:block;font-size:32px;font-weight:700;color:var(--blue)}
+.materials-overview .overview-card p{margin:6px 0 0}
+
 /* ============ 设置 ============ */
 .settings-layout{display:grid;grid-template-columns:300px 1fr;gap:20px}
 .settings-menu{overflow:hidden;padding:16px;display:flex;flex-direction:column}
@@ -561,6 +587,8 @@ p{line-height:1.65}
 .map-graph-wrap{grid-template-columns:1fr}
 .map-detail{border-left:0;border-top:1px solid var(--line)}
 .split{grid-template-columns:1fr}
+.materials-workflow{grid-template-columns:1fr}
+.materials-right{position:static;max-height:none}
 .review-columns{grid-template-columns:1fr}
 .settings-layout{grid-template-columns:240px 1fr}
 .agent-discovery-grid{grid-template-columns:1fr}

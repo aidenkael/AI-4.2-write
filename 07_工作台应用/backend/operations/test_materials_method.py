@@ -124,25 +124,7 @@ def test_material_detail_stage_for_method_asset(isolated, monkeypatch):
     assert detail["state"] == "ready"
 
 
-# ---------- 分类决策允许 METHOD_SOURCE ----------
-
-def test_classify_output_accepts_method_source(isolated):
-    output = json.dumps({"items": [
-        {"filename": "方法书.epub", "action": "NEW_ASSET", "name": "故事方法", "type": "METHOD_SOURCE"},
-    ]}, ensure_ascii=False)
-    scan = {"方法书.epub": {"filename": "方法书.epub"}}
-    decisions = materials._parse_classify_output(output, scan, {"assets": []})
-    assert decisions[0]["type"] == "METHOD_SOURCE"
-
-
-def test_classify_output_rejects_unknown_type(isolated):
-    output = json.dumps({"items": [
-        {"filename": "x.epub", "action": "NEW_ASSET", "name": "x", "type": "METHOD"},
-    ]}, ensure_ascii=False)
-    scan = {"x.epub": {"filename": "x.epub"}}
-    with pytest.raises(materials.MaterialsError):
-        materials._parse_classify_output(output, scan, {"assets": []})
-
+# ---------- validate_intake_plan 允许 METHOD_SOURCE ----------
 
 def test_validate_intake_plan_accepts_method_source(isolated):
     plan = {"items": [{"action": "NEW_ASSET", "files": ["x.epub"], "name": "方法书",

@@ -800,22 +800,10 @@ export interface ImportMaterialResult {
   message: string
 }
 
-export interface ClassifyMaterialResult {
-  status: 'ready' | 'pending'
-  request_id?: string | null
+export interface BuildIntakePlanResult {
+  status: 'ready'
   plan: { items: MaterialPlanItem[] }
-  ambiguous?: string[]
-  agent_required?: boolean
-  agent_used?: boolean
   message: string
-}
-
-export interface ClassifyRequestStatus {
-  request_id: string
-  status: 'pending' | 'completed' | 'failed' | 'expired' | 'canceled'
-  plan?: { items: MaterialPlanItem[] } | null
-  message?: string | null
-  error?: string | null
 }
 
 export interface SourcePrepareResult {
@@ -866,19 +854,9 @@ export async function importMaterialFiles(files: Array<{ path: string }>): Promi
   return call<ImportMaterialResult>('import_material_files', { files })
 }
 
-/** Agent 辅助入库：scan → 确定性事实 → 仅对无法定论文件调一次 Agent。 */
-export async function classifyMaterialInbox(): Promise<ClassifyMaterialResult> {
-  return call<ClassifyMaterialResult>('classify_material_inbox', {})
-}
-
-/** 轮询交互式分类结果。 */
-export async function getMaterialClassifyRequest(requestId: string): Promise<ClassifyRequestStatus> {
-  return call<ClassifyRequestStatus>('get_material_classify_request', { request_id: requestId })
-}
-
-/** 取消交互式分类。 */
-export async function cancelMaterialClassifyRequest(requestId: string): Promise<{ request_id: string; status: string }> {
-  return call<{ request_id: string; status: string }>('cancel_material_classify_request', { request_id: requestId })
+/** 批次机械入库计划（零 AI；作者选批次类型）。 */
+export async function buildIntakePlan(batchType: string): Promise<BuildIntakePlanResult> {
+  return call<BuildIntakePlanResult>('build_intake_plan', { batch_type: batchType })
 }
 
 /** 对指定素材显式运行真实 SourcePrepare（确定性，无模型）。 */
@@ -1484,7 +1462,7 @@ export async function cancelReviewRequest(requestId: string): Promise<{ request_
 
 export interface AuthorOperationFacts {
   request_id: string
-  /** 归一化操作名：new_project / story_plan / story_write / review / material_classify / material_distill。 */
+  /** 归一化操作名：new_project / story_plan / story_write / review / material_distill。 */
   kind: string | null
   project_id: string | null
   execution_mode: 'interactive_bridge' | 'direct' | null

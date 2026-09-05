@@ -1,54 +1,240 @@
-import { CheckCircle2, FileUp, FolderSearch, RefreshCw, Sparkles, UploadCloud, X } from 'lucide-react'
+import { CheckCircle2, FileUp, FolderSearch, RefreshCw, UploadCloud, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { PageHeader } from '../components/PageHeader'
 import { useApp } from '../features/app/AppStore'
 import { useMaterialsController } from '../features/materials/useMaterialsController'
-import type { MaterialAssetType } from '../bridge/client'
-import { attachedMaterialName, authorStateLabel, MATERIAL_TYPE_FILTERS, matchesMaterialFilter, needsAttentionMaterials, pendingInboxBadgeCount } from '../features/materials/materialsModel'
-
-const typeChoices: Array<{ value: MaterialAssetType; label: string }> = [
-  { value: 'REFERENCE_WORK', label: '原著' }, { value: 'METHOD_SOURCE', label: '技巧书' },
-  { value: 'RESEARCH', label: '研究资料' }, { value: 'LOOSE_MATERIAL', label: '零散素材' },
-]
+import type { MaterialAssetType, MaterialPlanItem } from '../bridge/client'
+import {
+  attachedMaterialName,
+  authorStateLabel,
+  BATCH_TYPE_CHOICES,
+  MATERIAL_TOP_NAVIGATION,
+  MATERIAL_TYPE_FILTERS,
+  matchesMaterialFilter,
+  materialsForStage,
+  type MaterialTab,
+} from '../features/materials/materialsModel'
 
 export function MaterialsPage() {
   const { actions } = useApp()
   const controller = useMaterialsController({ notify: actions.notify })
-  const [group, setGroup] = useState<'inbox' | 'library' | 'ready'>('inbox')
+  const [tab, setTab] = useState<MaterialTab>('新增素材')
   const [typeFilter, setTypeFilter] = useState('全部')
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const needsAttention = useMemo(() => needsAttentionMaterials(controller.materials), [controller.materials])
-  const ready = useMemo(() => controller.materials.filter((m) => m.state === 'ready'), [controller.materials])
-  const base = group === 'ready' ? ready : controller.materials
-  const shown = useMemo(() => base.filter((m) => matchesMaterialFilter(m, typeFilter)), [base, typeFilter])
+
+  const newItems = useMemo(() => materialsForStage(controller.materials, 'new'), [controller.materials])
+  const purifiedItems = useMemo(() => materialsForStage(controller.materials, 'purified'), [controller.materials])
+  const writingItems = useMemo(() => materialsForStage(controller.materials, 'writing'), [controller.materials])
+  const filteredWriting = useMemo(() => writingItems.filter((m) => matchesMaterialFilter(m, typeFilter)), [writingItems, typeFilter])
+
   const selected = controller.materials.find((m) => m.id === selectedId) ?? null
   const detail = controller.detail?.id === selectedId ? controller.detail : null
-  const planItems = controller.classifyResult?.plan.items ?? []
-  const canClassify = controller.inbox.some((file) => !file.unsupported)
+  const planItems = controller.planResult?.plan.items ?? []
+  const hasInboxFiles = controller.inbox.some((file) => !file.unsupported)
+
+  const tabIcons: Record<MaterialTab, typeof FileUp> = {
+    '新增素材': FileUp,
+    '已提纯素材库': FolderSearch,
+    '写作素材库': CheckCircle2,
+    '素材总览': RefreshCw,
+  }
+  const tabCounts: Record<MaterialTab, number> = {
+    '新增素材': controller.inbox.length + newItems.length,
+    '已提纯素材库': purifiedItems.length,
+    '写作素材库': writingItems.length,
+    '素材总览': controller.materials.length,
+  }
 
   return <div className="page">
     <PageHeader title="素材与学习" subtitle="把原著和写作技巧整理成写作时可以调用的知识。" />
     <div className="filterbar panel materials-toolbar">
-      {([
-        ['inbox', '待处理', FileUp, pendingInboxBadgeCount(controller.inbox, controller.materials)],
-        ['library', '素材库', FolderSearch, controller.materials.length], ['ready', '可用于写作', CheckCircle2, ready.length],
-      ] as const).map(([id, label, Icon, count]) => <button key={id} className={group === id ? 'active' : ''} onClick={() => { setGroup(id); if (id === 'inbox') void controller.scanInbox() }}><Icon size={15} /> {label}<small className="group-count">{count}</small></button>)}
+      {MATERIAL_TOP_NAVIGATION.map((label) => {
+        const Icon = tabIcons[label]
+        return <button key={label} className={tab === label ? 'active' : ''} onClick={() => { setTab(label); if (label === '新增素材') void controller.scanInbox() }}>
+          <Icon size={15} /> {label}<small className="group-count">{tabCounts[label]}</small>
+        </button>
+      })}
       <button className="secondary" disabled={controller.refreshing} onClick={() => void controller.refresh()}><RefreshCw /> {controller.refreshing ? '刷新中…' : '刷新'}</button>
     </div>
     {controller.loading && <div className="empty-state">正在加载资料…</div>}
     {controller.error && <p className="error-text">{controller.error}</p>}
 
-    {group === 'inbox' && <section className="panel materials-intake">
-      <div className="drop-zone"><UploadCloud size={34} /><p><strong>选择本地资料</strong></p><p className="muted-note">推荐 EPUB；也支持 TXT 和带文字层的 PDF。</p><button className="primary" disabled={controller.importing} onClick={() => void controller.pickAndImport()}>{controller.importing ? '导入中…' : '选择文件'}</button></div>
-      <div className="inbox-actions"><button className="primary" disabled={!canClassify || controller.classifyState === 'running' || controller.classifyState === 'waiting_gowrite' || controller.applying} onClick={() => void controller.classify()}><Sparkles /> 识别资料</button>{controller.classifyState === 'waiting_gowrite' && <button className="secondary" onClick={() => void controller.cancelClassify()}><X /> 取消</button>}</div>
-      {controller.inboxLoading && <p className="muted-note">正在识别资料…</p>}{controller.inboxError && <p className="error-text">{controller.inboxError}</p>}
-      {controller.inbox.map((file) => <div className="inbox-row" key={file.filename}><strong>{file.filename}</strong>{file.unsupported && <small className="muted-note">当前格式需要检查</small>}</div>)}
-      {(controller.classifyState === 'running' || controller.classifyState === 'waiting_gowrite') && <div className="running"><span />正在识别资料…</div>}
-      {controller.classifyState === 'done' && planItems.length > 0 && <section className="panel classify-plan"><h3>确认入库</h3>{planItems.map((item, index) => item.action === 'ATTACH_EXISTING' ? <p key={index}>将并入已有资料：<strong>《{attachedMaterialName(item.asset_id, controller.materials)}》</strong></p> : <div className="inbox-row" key={index}><strong>{item.files.join('、')}</strong><input value={item.name ?? ''} placeholder="资料名称" onChange={(event) => controller.updateClassifyItem(index, { name: event.target.value })} /><select value={item.type ?? ''} onChange={(event) => controller.updateClassifyItem(index, { type: event.target.value as MaterialAssetType })}><option value="">请选择资料类型</option>{typeChoices.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}</select></div>)}<footer><button className="primary" disabled={controller.applying} onClick={() => void controller.confirmApply()}>{controller.applying ? '入库中…' : '确认入库'}</button><button className="secondary" onClick={() => void controller.cancelClassify()}>取消</button></footer></section>}
-      {needsAttention.length > 0 && <section className="learning"><h3>需要检查的已有资料</h3>{needsAttention.map((m) => <p key={m.id}>《{m.name}》：{m.attention_message}</p>)}</section>}
+    {tab === '新增素材' && <section className="materials-workflow">
+      <div className="materials-left">
+        <div className="panel materials-intake">
+          <div className="drop-zone"><UploadCloud size={34} /><p><strong>选择本地资料</strong></p><p className="muted-note">支持 EPUB、TXT、PDF（单文件上限 200 MB）。</p><button className="primary" disabled={controller.importing} onClick={() => void controller.pickAndImport()}>{controller.importing ? '导入中…' : '选择文件'}</button></div>
+          {controller.inboxLoading && <p className="muted-note">正在扫描收件箱…</p>}
+          {controller.inboxError && <p className="error-text">{controller.inboxError}</p>}
+          {controller.inbox.length > 0 && <div className="inbox-list">
+            <h4>待入库文件 <small>（{controller.inbox.length}）</small></h4>
+            {controller.inbox.map((file) => <div className="inbox-row" key={file.filename}>
+              <strong>{file.filename}</strong>
+              <small className="muted-note">{file.suffix}</small>
+              {file.unsupported && <small className="error-text">不支持的格式</small>}
+              {file.exact_duplicate_matches.length > 0 && <small className="muted-note">重复：{file.exact_duplicate_matches.join('、')}</small>}
+            </div>)}
+          </div>}
+          {hasInboxFiles && <div className="batch-type-selector">
+            <h4>批次类型</h4>
+            <div className="type-choices">
+              {BATCH_TYPE_CHOICES.map((choice) => <button key={choice.value} className={controller.batchType === choice.value ? 'active' : ''} onClick={() => controller.setBatchType(choice.value)}>{choice.label}</button>)}
+            </div>
+            <button className="primary" disabled={controller.planState === 'building' || controller.applying} onClick={() => void controller.buildPlan()}>
+              {controller.planState === 'building' ? '生成中…' : '生成入库计划'}
+            </button>
+          </div>}
+          {controller.planState === 'done' && planItems.length > 0 && <section className="panel classify-plan">
+            <h3>确认入库</h3>
+            {planItems.map((item: MaterialPlanItem, index: number) => item.action === 'ATTACH_EXISTING'
+              ? <p key={index}>将并入已有资料：<strong>《{attachedMaterialName(item.asset_id, controller.materials)}》</strong></p>
+              : <div className="inbox-row" key={index}>
+                <strong>{item.files.join('、')}</strong>
+                {item.action === 'REVIEW'
+                  ? <><input value={item.name ?? ''} placeholder="资料名称" onChange={(event) => controller.updatePlanItem(index, { name: event.target.value })} />
+                    <select value={item.type ?? ''} onChange={(event) => controller.updatePlanItem(index, { type: event.target.value as MaterialAssetType })}>
+                      <option value="">请选择资料类型</option>
+                      {BATCH_TYPE_CHOICES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                    </select></>
+                  : <small className="muted-note">{item.name} · {BATCH_TYPE_CHOICES.find((c) => c.value === item.type)?.label ?? item.type}</small>}
+              </div>)}
+            <footer>
+              <button className="primary" disabled={controller.applying} onClick={() => void controller.confirmApply()}>{controller.applying ? '入库中…' : '确认入库'}</button>
+              <button className="secondary" onClick={controller.dismissPlan}>取消</button>
+            </footer>
+          </section>}
+          {newItems.length > 0 && <div className="stage-materials">
+            <h4>已入库待提纯 <small>（{newItems.length}）</small></h4>
+            {newItems.map((m) => <button key={m.id} className={selectedId === m.id ? 'active' : ''} onClick={() => { setSelectedId(m.id); void controller.selectDetail(m.id) }}>
+              <span className="material-thumb">书</span>
+              <span><strong>{m.name}</strong><small>{m.type_label}{m.author ? ` · ${m.author}` : ''}</small></span>
+              <em className="wait">{authorStateLabel(m.state)}</em>
+            </button>)}
+          </div>}
+        </div>
+      </div>
+      <div className="materials-right">
+        <section className="panel material-detail">
+          <h3><FolderSearch /> 资料详情</h3>
+          {selected && (controller.detailLoading || !detail) && <p className="muted-note">正在加载…</p>}
+          {detail && <MaterialDetailPanel detail={detail} controller={controller} />}
+          {!selected && <p className="muted-note">选择一份资料查看详情。</p>}
+        </section>
+      </div>
     </section>}
 
-    {group !== 'inbox' && <><div className="materials-secondary-filter">{MATERIAL_TYPE_FILTERS.map((filter) => <button key={filter} className={typeFilter === filter ? 'active' : ''} onClick={() => setTypeFilter(filter)}>{filter}</button>)}</div><div className="split materials-layout"><section className="panel material-list"><h3>{group === 'ready' ? '可用于写作' : '素材库'} <small>（{shown.length}）</small></h3>{shown.map((material) => <button key={material.id} className={selectedId === material.id ? 'active' : ''} onClick={() => { setSelectedId(material.id); void controller.selectDetail(material.id) }}><span className="material-thumb">书</span><span><strong>{material.name}</strong><small>{material.type_label}{material.author ? ` · ${material.author}` : ''}</small></span><em className={material.state === 'ready' ? 'ok' : 'wait'}>{authorStateLabel(material.state)}</em></button>)}{!controller.loading && shown.length === 0 && <div className="empty-state">这里暂时没有资料。</div>}</section>
-      <section className="panel material-detail"><h3><FolderSearch /> 资料详情</h3>{selected && (controller.detailLoading || !detail) && <p className="muted-note">正在加载…</p>}{detail && <div className="material-answer"><h2>《{detail.name}》</h2><p className="muted-note">{detail.type_label}{detail.author ? ` · ${detail.author}` : ''}{detail.source_formats.length ? ` · ${detail.source_formats.join(' / ')}` : ''}</p>{detail.state === 'pending_prepare' && <><p>还没有整理原文。</p><button className="primary" disabled={controller.busyAssetId !== null} onClick={() => void controller.runPrepare(detail.id)}>{controller.busyAssetId === detail.id ? '正在提纯…' : '提纯'}</button></>}{detail.state === 'pending_distill' && <><p>原文已整理，可以开始学习。</p><button className="primary" disabled={controller.busyAssetId !== null} onClick={() => void controller.runDistill(detail.id)}>{controller.busyAssetId === detail.id ? '正在蒸馏…' : '蒸馏'}</button></>}{detail.state === 'needs_attention' && <><h3>需要检查</h3><p>{detail.attention_message}</p></>}{detail.state === 'ready' && <><h3>✓ 可用于写作</h3><h4>这本书主要可以学什么</h4>{detail.learning_summary && <p>{detail.learning_summary}</p>}{detail.learning_sections.map((section) => <section key={section.title}><h4>{section.title}</h4><p>{section.body}</p></section>)}</>}</div>}{!selected && <p className="muted-note">选择一份资料查看详情。</p>}</section></div></>}
+    {tab === '已提纯素材库' && <MaterialStagePanel
+      items={purifiedItems}
+      title="已提纯素材库"
+      selectedId={selectedId}
+      selected={selected}
+      detail={detail}
+      controller={controller}
+      onSelect={(id) => { setSelectedId(id); void controller.selectDetail(id) }}
+    />}
+
+    {tab === '写作素材库' && <section className="materials-workflow">
+      <div className="materials-left">
+        <div className="materials-secondary-filter">
+          {MATERIAL_TYPE_FILTERS.map((filter) => <button key={filter} className={typeFilter === filter ? 'active' : ''} onClick={() => setTypeFilter(filter)}>{filter}</button>)}
+        </div>
+        <section className="panel material-list">
+          <h3>写作素材库 <small>（{filteredWriting.length}）</small></h3>
+          {filteredWriting.map((material) => <button key={material.id} className={selectedId === material.id ? 'active' : ''} onClick={() => { setSelectedId(material.id); void controller.selectDetail(material.id) }}>
+            <span className="material-thumb">书</span>
+            <span><strong>{material.name}</strong><small>{material.type_label}{material.author ? ` · ${material.author}` : ''}</small></span>
+            <em className="ok">{authorStateLabel(material.state)}</em>
+          </button>)}
+          {!controller.loading && filteredWriting.length === 0 && <div className="empty-state">这里暂时没有资料。</div>}
+        </section>
+      </div>
+      <div className="materials-right">
+        <section className="panel material-detail">
+          <h3><FolderSearch /> 资料详情</h3>
+          {selected && (controller.detailLoading || !detail) && <p className="muted-note">正在加载…</p>}
+          {detail && <MaterialDetailPanel detail={detail} controller={controller} />}
+          {!selected && <p className="muted-note">选择一份资料查看详情。</p>}
+        </section>
+      </div>
+    </section>}
+
+    {tab === '素材总览' && <section className="panel materials-overview">
+      <h3>素材总览</h3>
+      <div className="overview-grid">
+        <div className="overview-card"><h4>新增素材</h4><span className="overview-count">{controller.inbox.length + newItems.length}</span><p className="muted-note">收件箱 + 待提纯</p></div>
+        <div className="overview-card"><h4>已提纯</h4><span className="overview-count">{purifiedItems.length}</span><p className="muted-note">等待蒸馏</p></div>
+        <div className="overview-card"><h4>可用于写作</h4><span className="overview-count">{writingItems.length}</span><p className="muted-note">蒸馏完成</p></div>
+        <div className="overview-card"><h4>总计</h4><span className="overview-count">{controller.materials.length}</span><p className="muted-note">全部素材</p></div>
+      </div>
+      <button className="secondary" disabled={controller.refreshing} onClick={() => void controller.refresh()}>
+        <RefreshCw /> {controller.refreshing ? '刷新中…' : '刷新状态'}
+      </button>
+    </section>}
   </div>
+}
+
+function MaterialDetailPanel({ detail, controller }: {
+  detail: NonNullable<ReturnType<typeof useMaterialsController>['detail']>
+  controller: ReturnType<typeof useMaterialsController>
+}) {
+  return <div className="material-answer">
+    <h2>《{detail.name}》</h2>
+    <p className="muted-note">
+      {detail.type_label}{detail.author ? ` · ${detail.author}` : ''}
+      {detail.source_formats.length ? ` · ${detail.source_formats.join(' / ')}` : ''}
+    </p>
+    {detail.state === 'pending_prepare' && <>
+      <p>还没有整理原文。</p>
+      <button className="primary" disabled={controller.busyAssetId !== null} onClick={() => void controller.runPrepare(detail.id)}>
+        {controller.busyAssetId === detail.id ? '正在提纯…' : '提纯'}
+      </button>
+    </>}
+    {detail.state === 'pending_distill' && <>
+      <p>原文已整理，可以开始学习。</p>
+      <button className="primary" disabled={controller.busyAssetId !== null} onClick={() => void controller.runDistill(detail.id)}>
+        {controller.busyAssetId === detail.id ? '正在蒸馏…' : '蒸馏'}
+      </button>
+    </>}
+    {detail.state === 'needs_attention' && <>
+      <h3>需要检查</h3>
+      <p>{detail.attention_message}</p>
+    </>}
+    {detail.state === 'ready' && <>
+      <h3>✓ 可用于写作</h3>
+      {detail.learning_summary && <h4>这本书主要可以学什么</h4>}
+      {detail.learning_summary && <p>{detail.learning_summary}</p>}
+      {detail.learning_sections.map((section) => <section key={section.title}><h4>{section.title}</h4><p>{section.body}</p></section>)}
+    </>}
+  </div>
+}
+
+function MaterialStagePanel({ items, title, selectedId, selected, detail, controller, onSelect }: {
+  items: ReturnType<typeof useMaterialsController>['materials']
+  title: string
+  selectedId: string | null
+  selected: ReturnType<typeof useMaterialsController>['materials'][number] | null
+  detail: ReturnType<typeof useMaterialsController>['detail']
+  controller: ReturnType<typeof useMaterialsController>
+  onSelect: (id: string) => void
+}) {
+  return <section className="materials-workflow">
+    <div className="materials-left">
+      <section className="panel material-list">
+        <h3>{title} <small>（{items.length}）</small></h3>
+        {items.map((material) => <button key={material.id} className={selectedId === material.id ? 'active' : ''} onClick={() => onSelect(material.id)}>
+          <span className="material-thumb">书</span>
+          <span><strong>{material.name}</strong><small>{material.type_label}{material.author ? ` · ${material.author}` : ''}</small></span>
+          <em className={material.state === 'ready' ? 'ok' : 'wait'}>{authorStateLabel(material.state)}</em>
+        </button>)}
+        {items.length === 0 && <div className="empty-state">这里暂时没有资料。</div>}
+      </section>
+    </div>
+    <div className="materials-right">
+      <section className="panel material-detail">
+        <h3><FolderSearch /> 资料详情</h3>
+        {selected && (controller.detailLoading || !detail) && <p className="muted-note">正在加载…</p>}
+        {detail && <MaterialDetailPanel detail={detail} controller={controller} />}
+        {!selected && <p className="muted-note">选择一份资料查看详情。</p>}
+      </section>
+    </div>
+  </section>
 }

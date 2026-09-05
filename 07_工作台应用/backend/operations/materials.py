@@ -41,12 +41,9 @@ _INTAKE_ALLOWLIST = [
 ]
 
 # 允许从本地导入到 00_待入库 的素材后缀（MaterialIntake 支持的类型）
-_SUPPORTED_IMPORT_SUFFIXES = {".epub", ".txt", ".pdf", ".zip", ".mobi", ".azw3"}
+_SUPPORTED_IMPORT_SUFFIXES = {".epub", ".txt", ".pdf"}
 # 单文件导入上限（200 MB；防误选超大文件）
 _MAX_IMPORT_BYTES = 200 * 1024 * 1024
-
-# Agent 分类任务超时（一次分类 turn 的最大时长）
-_CLASSIFY_TIMEOUT_SECONDS = 60 * 60
 
 
 class MaterialsError(Exception):
@@ -151,7 +148,7 @@ def _material_learning_paths(asset_id: str, asset_type: str) -> list[Path]:
     if asset_dir is None:
         return []
     if asset_type == "REFERENCE_WORK":
-        return [asset_dir / "bkp" / "author_view.md", asset_dir / "bkp" / "model.md"]
+        return [asset_dir / "bkp" / "author_view.md", asset_dir / "model.md"]
     if asset_type == "METHOD_SOURCE":
         return [asset_dir / "method" / "method_profile.md"]
     return []
@@ -446,7 +443,7 @@ def pick_material_files() -> dict[str, Any]:
         result = window.create_file_dialog(
             webview.OPEN_DIALOG,
             allow_multiple=True,
-            file_types=("素材文件 (*.epub;*.txt;*.pdf;*.zip;*.mobi;*.azw3)", "所有文件 (*.*)"),
+            file_types=("素材文件 (*.epub;*.pdf;*.txt)", "所有文件 (*.*)"),
         )
         paths = [str(p) for p in (result or []) if p]
         return {"supported": True, "paths": paths, "message": ""}
@@ -527,343 +524,71 @@ def _unique_inbox_name(inbox: Path, name: str) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# 4.2 Agent 辅助入库（确定性事实优先；仅在无法定论时才调 Agent 一次）
+# 4.2 批次机械入库计划（零 AI；作者选批次类型，代码组装 intake plan）
 # ---------------------------------------------------------------------------
 
-_CLASSIFY_TASK_TEMPLATE = """你是 Go Write 的素材入库分类执行器。下面给出了 00_待入库 中每个文件的确定性事实，以及当前正式素材台账（canonical ledger）的摘要。请只对**仍需要分类**的文件做判断。
+def build_intake_plan_from_inbox(batch_type: str) -> dict[str, Any]:
+    """作者选批次类型后，机械构建入库计划（零 AI，零模型）。
 
-每个文件只能输出 MaterialIntake 允许的一种决策：
-- NEW_ASSET：这是一个新素材（需给出 name 与 type）
-- ATTACH_EXISTING：应并入已有素材（需给出 asset_id，且必须是下方台账中真实存在的 id）
-- REVIEW：无法确定，需要人工确认（reason 说明原因）
-
-规则：
-- 绝不编造台账中不存在的 asset_id；
-- 类型只允许 REFERENCE_WORK / RESEARCH / LOOSE_MATERIAL / METHOD_SOURCE；
-  其中 METHOD_SOURCE = 主要目的是教授/解释写作、编剧、导演、剪辑、戏剧、表演、
-  叙事技巧、读者体验等可迁移创作方法的非虚构资料（方法书/教程/讲义/访谈谈艺录等）；
-  虚构参考作品一律 REFERENCE_WORK；拿不准宁可 REVIEW；
-- 严禁移动文件、严禁修改台账 —— 你只输出决策，入库事务由 Go Write 执行。
-
-台账素材：
-{ledger_summary}
-
-待分类文件：
-{files_summary}
-
-最终回复必须只有合法 JSON 对象，结构如下：
-{{
-  "items": [
-    {{
-      "filename": "文件原名",
-      "action": "NEW_ASSET",
-      "name": "素材名称",
-      "type": "REFERENCE_WORK",
-      "reason": "判断依据（可选）"
-    }}
-  ]
-}}
-
-未出现的文件不要输出。"""
-
-
-def _ledger_summary(ledger: dict[str, Any]) -> str:
-    assets = ledger.get("assets") or []
-    if not assets:
-        return "（当前台账无素材）"
-    return "\n".join(
-        f"- {a.get('id')}：{a.get('name')}（{a.get('type')}）" for a in assets
-    )
-
-
-def _files_summary(files: list[dict[str, Any]]) -> str:
-    if not files:
-        return "（无待分类文件）"
-    return "\n".join(
-        f"- {f.get('filename')}（sha256={f.get('sha256', '')[:12]}…，"
-        f"类型={f.get('suffix') or '?'}）"
-        for f in files
-    )
-
-
-def _parse_classify_output(
-    output: str,
-    scan_by_filename: dict[str, dict],
-    ledger: dict[str, Any] | None = None,
-) -> list[dict[str, Any]]:
-    """解析分类 Agent 输出并逐项校验（只接受 MaterialIntake 允许的决策）。
-
-    校验目标：扫描事实（文件必须真实存在）+ canonical ledger（ATTACH_EXISTING
-    的 asset_id 必须真实存在）。Agent 绝不能绕过 MaterialIntake 决策面。
+    exact_duplicate → ATTACH_EXISTING（确定性）；
+    unsupported → REVIEW（确定性）；
+    其余文件 → NEW_ASSET（按作者选择的批次类型）。
+    返回可直接传给 apply_material_intake 的 plan。
     """
-    known_ids = {a.get("id") for a in (ledger or {}).get("assets", [])}
-    text = (output or "").strip()
-    if text.startswith("```"):
-        lines = text.splitlines()
-        if lines and lines[0].strip().startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        text = "\n".join(lines).strip()
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise MaterialsError(f"分类 Agent 输出不是合法 JSON：{exc}") from exc
-    if not isinstance(data, dict) or not isinstance(data.get("items"), list):
-        raise MaterialsError("分类 Agent 输出缺少 items 列表。")
-    decisions: list[dict[str, Any]] = []
-    for item in data["items"]:
-        if not isinstance(item, dict):
-            raise MaterialsError("分类 Agent 输出项不是对象。")
-        filename = str(item.get("filename") or "").strip()
-        if not filename or filename not in scan_by_filename:
-            raise MaterialsError(f"分类 Agent 输出了扫描中不存在的文件：{filename}")
-        action = item.get("action")
-        if action not in ("NEW_ASSET", "ATTACH_EXISTING", "REVIEW"):
-            raise MaterialsError(f"{filename} 的决策非法（只允许 NEW_ASSET / ATTACH_EXISTING / REVIEW）。")
-        decision = {"filename": filename, "action": action, "reason": str(item.get("reason") or "")}
-        if action == "NEW_ASSET":
-            name = str(item.get("name") or "").strip()
-            mtype = item.get("type")
-            if not name:
-                raise MaterialsError(f"{filename}：NEW_ASSET 必须提供 name。")
-            if mtype not in ("REFERENCE_WORK", "RESEARCH", "LOOSE_MATERIAL", "METHOD_SOURCE"):
-                raise MaterialsError(f"{filename}：NEW_ASSET 类型非法。")
-            decision["name"] = name
-            decision["type"] = mtype
-        elif action == "ATTACH_EXISTING":
-            asset_id = str(item.get("asset_id") or "").strip()
-            if not asset_id:
-                raise MaterialsError(f"{filename}：ATTACH_EXISTING 必须提供 asset_id。")
-            if asset_id not in known_ids:
-                raise MaterialsError(f"{filename}：ATTACH_EXISTING 指向台账中不存在的素材 {asset_id}。")
-            decision["asset_id"] = asset_id
-        decisions.append(decision)
-    return decisions
+    type_map = {
+        "REFERENCE_WORK": "REFERENCE_WORK",
+        "METHOD_SOURCE": "METHOD_SOURCE",
+        "LOOSE_MATERIAL": "LOOSE_MATERIAL",
+    }
+    if batch_type not in type_map:
+        raise MaterialsError("批次类型无效，请选择原著、技巧类或其他。")
 
-
-def classify_material_inbox() -> dict[str, Any]:
-    """Agent 辅助入库：scan → 确定性事实 → 仅对无法定论文件调一次 Agent。
-
-    - exact duplicate → ATTACH_EXISTING（确定性，不调 Agent）；
-    - unsupported → REVIEW（确定性）；
-    - 其余文件 → 一次 Agent 分类 turn（Direct 同步执行；Interactive 创建
-      /gowrite 请求，由 get_material_classify_request 轮询）。
-    Agent 输出只含允许决策，逐项校验后才组装 plan；入库仍走 MaterialIntake
-    transactional apply（本函数绝不动文件/台账）。
-    """
+    request_id = audit.new_request_id()
+    audit.AuditRecorder(request_id, "material_intake_plan")
     catalog, intake, _ = _load_materialintake()
     mat_dir = get_repo_root() / "01_原始素材"
     ledger_path = mat_dir / "素材资产.json"
     ledger = None
     if ledger_path.exists():
-        ledger = catalog.load_ledger(ledger_path)
+        try:
+            ledger = catalog.load_ledger(ledger_path)
+        except (FileNotFoundError, RuntimeError):
+            ledger = None
     files = intake.scan_inbox(mat_dir, ledger)
-    scan_by_filename = {f["filename"]: f for f in files}
+    audit.append_event(request_id, audit.EVENT_SKILL_COMPLETED, "material_intake",
+                       details={"skill": "MaterialIntake", "files": len(files)})
+    audit.finish_file(request_id, audit.STATUS_COMPLETED)
 
-    request_id = audit.new_request_id()
-    audit.AuditRecorder(request_id, "material_classify")
-    audit.append_event(request_id, audit.EVENT_SKILL_STARTED, "material_intake", details={"skill": "MaterialIntake"})
-
-    # 确定性事实优先
     plan_items: list[dict[str, Any]] = []
-    ambiguous: list[dict[str, Any]] = []
     for f in files:
         if f["unsupported"]:
-            plan_items.append({"action": "REVIEW", "files": [f["filename"]], "reason": "不支持的类型，需人工确认"})
+            plan_items.append({
+                "action": "REVIEW",
+                "files": [f["filename"]],
+                "reason": "不支持的类型，需人工确认",
+            })
         elif f["exact_duplicate_matches"]:
             match = f["exact_duplicate_matches"][0]
             asset_id = match.split("(")[0] if "(" in match else match
-            plan_items.append({"action": "ATTACH_EXISTING", "files": [f["filename"]], "asset_id": asset_id})
-        else:
-            ambiguous.append(f)
-    audit.append_event(
-        request_id, audit.EVENT_SKILL_COMPLETED, "material_intake",
-        details={"skill": "MaterialIntake", "deterministic": len(plan_items), "ambiguous": len(ambiguous)},
-    )
-
-    agent_used = False
-    if ambiguous:
-        from operations import agent_runner as runner
-        from config.settings import EXECUTION_MODE_DIRECT, SettingsStore
-        settings = SettingsStore().load()
-        if settings.default_execution_mode != EXECUTION_MODE_DIRECT:
-            # Interactive：一次 /gowrite 分类 turn（同一请求生命周期）
-            from operations import qoder_bridge as bridge
-            from operations import execution_tasks as exec_tasks
-            task = _CLASSIFY_TASK_TEMPLATE.format(
-                ledger_summary=_ledger_summary(ledger or {}),
-                files_summary=_files_summary(ambiguous),
-            )
-            try:
-                bridge.create_request(
-                    task=task,
-                    kind="material_classify_propose",
-                    meta={
-                        "request_id": request_id,
-                        "execution": {
-                            "execution_mode": "interactive_bridge",
-                            "agent_id": settings.interactive_agent,
-                            "model": None,
-                        },
-                    },
-                    request_id=request_id,
-                    timeout_seconds=_CLASSIFY_TIMEOUT_SECONDS,
-                    activate_for_gowrite=True,  # Interactive：显式激活 /gowrite
-                )
-            except bridge.BridgeBusyError as exc:
-                # 已有等待 /gowrite 的交互任务：绝不清除/覆盖它
-                audit.finish_file(request_id, audit.STATUS_FAILED, error=str(exc))
-                raise MaterialsError(str(exc)) from exc
-            audit.append_event(request_id, audit.EVENT_BRIDGE_WAITING, component="material_classify")
-            return {
-                "status": "pending",
-                "request_id": request_id,
-                "plan": {"items": plan_items},
-                "ambiguous": [f["filename"] for f in ambiguous],
-                "agent_required": True,
-                "message": "等待 Qoder /gowrite：正在分类待入库素材",
-            }
-        # Direct：一次 Agent turn（同步；单个分类 turn 可接受）
-        try:
-            adapter, agent_request = runner._build_adapter()
-        except Exception as exc:  # noqa: BLE001
-            audit.finish_file(request_id, audit.STATUS_FAILED, error=str(exc))
-            raise MaterialsError(f"分类执行配置不可用：{exc}") from exc
-        task = _CLASSIFY_TASK_TEMPLATE.format(
-            ledger_summary=_ledger_summary(ledger or {}),
-            files_summary=_files_summary(ambiguous),
-        )
-        agent_request.task = task
-        agent_request.cwd = str(get_repo_root())
-        audit.append_event(
-            request_id, audit.EVENT_AGENT_DIRECT_PROCESS_STARTED, "material_classify",
-            details={"agent": adapter.name},
-        )
-        try:
-            result = adapter.run(agent_request)
-        except Exception as exc:  # noqa: BLE001
-            audit.append_event(request_id, audit.EVENT_AGENT_FAILED, "material_classify", details={"error": str(exc)[:200]})
-            audit.finish_file(request_id, audit.STATUS_FAILED, error=f"分类执行失败：{exc}")
-            raise MaterialsError(f"分类执行失败：{exc}") from exc
-        if result.status != "completed":
-            audit.append_event(request_id, audit.EVENT_AGENT_FAILED, "material_classify", details={"error": (result.error or "")[:200]})
-            audit.finish_file(request_id, audit.STATUS_FAILED, error=result.error or "分类未完成")
-            raise MaterialsError(result.error or "分类未完成，请重试。")
-        audit.append_event(request_id, audit.EVENT_AGENT_COMPLETED, "material_classify")
-        try:
-            decisions = _parse_classify_output(result.output, scan_by_filename, ledger)
-        except MaterialsError as exc:
-            audit.finish_file(request_id, audit.STATUS_FAILED, error=str(exc))
-            raise
-        agent_used = True
-        for decision in decisions:
             plan_items.append({
-                "action": decision["action"],
-                "files": [decision["filename"]],
-                **({"name": decision.get("name"), "type": decision.get("type")} if decision.get("action") == "NEW_ASSET" else {}),
-                **({"asset_id": decision.get("asset_id")} if decision.get("action") == "ATTACH_EXISTING" else {}),
-                **({"reason": decision.get("reason") or "Agent 判定"} if decision.get("action") == "REVIEW" else {}),
+                "action": "ATTACH_EXISTING",
+                "files": [f["filename"]],
+                "asset_id": asset_id,
+            })
+        else:
+            stem = Path(f["filename"]).stem
+            plan_items.append({
+                "action": "NEW_ASSET",
+                "files": [f["filename"]],
+                "name": stem,
+                "type": type_map[batch_type],
             })
 
-    audit.finish_file(request_id, audit.STATUS_COMPLETED)
     return {
         "status": "ready",
         "plan": {"items": plan_items},
-        "ambiguous": [f["filename"] for f in ambiguous],
-        "agent_required": bool(ambiguous),
-        "agent_used": agent_used,
-        "message": "入库建议已生成（需你确认后才会执行）" if plan_items else "没有需要入库的文件",
+        "message": "入库计划已生成（需你确认后才会执行）" if plan_items else "没有需要入库的文件",
     }
-
-
-def get_material_classify_request(request_id: str) -> dict[str, Any]:
-    """轮询交互式分类结果：pending / completed（含 plan）/ failed / canceled。"""
-    from operations import qoder_bridge as bridge
-    request_id = (request_id or "").strip()
-    if not request_id:
-        raise MaterialsError("缺少任务标识（request_id）。")
-    request = bridge.get_request(request_id)
-    if request is None:
-        audit.finish_file(request_id, audit.STATUS_FAILED, error="任务已失效，请重新发起。")
-        return {"request_id": request_id, "status": "failed", "error": "任务已失效，请重新发起。"}
-    state = request.get("state")
-    if state == "canceled":
-        bridge.cleanup_request(request_id)
-        audit.finish_file(request_id, audit.STATUS_CANCELED)
-        return {"request_id": request_id, "status": "canceled"}
-    if state == "failed":
-        bridge.cleanup_request(request_id)
-        audit.finish_file(request_id, audit.STATUS_FAILED, error=request.get("error") or "分类失败")
-        return {"request_id": request_id, "status": "failed", "error": request.get("error") or "分类失败"}
-    if bridge.is_expired(request):
-        bridge.cleanup_request(request_id)
-        audit.finish_file(request_id, audit.STATUS_FAILED, error="任务已超时")
-        return {"request_id": request_id, "status": "expired", "error": "任务已超时，请重新发起。"}
-    response = bridge.read_response(request_id)
-    if response is None:
-        return {"request_id": request_id, "status": "pending", "message": "等待 Qoder /gowrite：正在分类待入库素材"}
-    if response.get("request_id") != request_id:
-        bridge.cleanup_request(request_id)
-        return {"request_id": request_id, "status": "failed", "error": "返回结果与任务不匹配，已丢弃。"}
-    audit.append_event(request_id, audit.EVENT_BRIDGE_RESPONSE_RECEIVED, "material_classify")
-    if response.get("status") != "completed":
-        error = response.get("error") or "分类结果无效"
-        bridge.cleanup_request(request_id)
-        audit.finish_file(request_id, audit.STATUS_FAILED, error=error)
-        return {"request_id": request_id, "status": "failed", "error": error}
-    # 结构化 result 优先；纯文本 output 兜底（output 为对象等畸形信封已被桥拒绝）
-    try:
-        output = bridge.response_result_text(response)
-    except bridge.BridgeProtocolError as exc:
-        error = f"分类结果无效：{exc}"
-        bridge.cleanup_request(request_id)
-        audit.finish_file(request_id, audit.STATUS_FAILED, error=error)
-        return {"request_id": request_id, "status": "failed", "error": error}
-    catalog, intake, _ = _load_materialintake()
-    mat_dir = get_repo_root() / "01_原始素材"
-    ledger_path = mat_dir / "素材资产.json"
-    ledger = None
-    if ledger_path.exists():
-        ledger = catalog.load_ledger(ledger_path)
-    scan_by_filename = {f["filename"]: f for f in intake.scan_inbox(mat_dir, ledger)}
-    try:
-        decisions = _parse_classify_output(output, scan_by_filename, ledger)
-    except MaterialsError as exc:
-        bridge.cleanup_request(request_id)
-        audit.finish_file(request_id, audit.STATUS_FAILED, error=str(exc))
-        return {"request_id": request_id, "status": "failed", "error": str(exc)}
-    plan_items = []
-    for decision in decisions:
-        plan_items.append({
-            "action": decision["action"],
-            "files": [decision["filename"]],
-            **({"name": decision.get("name"), "type": decision.get("type")} if decision.get("action") == "NEW_ASSET" else {}),
-            **({"asset_id": decision.get("asset_id")} if decision.get("action") == "ATTACH_EXISTING" else {}),
-            **({"reason": decision.get("reason") or "Agent 判定"} if decision.get("action") == "REVIEW" else {}),
-        })
-    bridge.cleanup_request(request_id)
-    audit.finish_file(request_id, audit.STATUS_COMPLETED)
-    return {
-        "request_id": request_id,
-        "status": "completed",
-        "plan": {"items": plan_items},
-        "message": "入库建议已生成（需你确认后才会执行）",
-    }
-
-
-def cancel_material_classify_request(request_id: str) -> dict[str, Any]:
-    from operations import qoder_bridge as bridge
-    request_id = (request_id or "").strip()
-    if not request_id:
-        raise MaterialsError("缺少任务标识（request_id）。")
-    request = bridge.get_request(request_id)
-    if request is not None:
-        bridge.mark_canceled(request_id)
-        bridge.clear_active_if(request_id)
-        audit.finish_file(request_id, audit.STATUS_CANCELED)
-    bridge.cleanup_request(request_id)
-    return {"request_id": request_id, "status": "canceled"}
 
 
 # ---------------------------------------------------------------------------

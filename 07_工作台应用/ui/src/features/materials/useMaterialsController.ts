@@ -1,20 +1,21 @@
 /**
  * 素材工作流真实消费者控制器（App 级协调器消费者）。
  *
- * 工作流：本地文件导入 → MaterialIntake 收件箱 → scan → 确定性事实优先、
- * 无法定论时一次 Agent 分类 → 作者确认 → 事务入库 → 显式提纯（SourcePrepare）
- * → 显式蒸馏（BookDistill）→ FINALIZED BKP → 可用于写作。
+ * 工作流：本地文件导入 → MaterialIntake 收件箱 → 作者选批次类型 →
+ * 机械构建入库计划（零 AI） → 作者确认 → 事务入库 → 显式提纯
+ * → 显式蒸馏 → FINALIZED BKP → 可用于写作。
  *
  * 生命周期归属（根不变量）：
- * - material_classify / material_distill 的异步状态属于 App 级协调器；
+ * - material_distill 的异步状态属于 App 级协调器；
  *   离开素材页任务继续、结果保留，返回后页面显式消费；
- * - MaterialIntake apply 与 SourcePrepare 是确定性机械操作，留在本控制器；
+ * - MaterialIntake apply / buildIntakePlan / SourcePrepare 是确定性机械操作，留在本控制器；
  * - 页面加载只读（listMaterials）+ 一次确定性收件箱扫描（零模型）；
  *   绝不隐式调用模型 / 提纯 / 蒸馏。
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   applyMaterialIntake,
+  buildIntakePlan,
   getMaterialDetail,
   importMaterialFiles,
   listMaterials,
@@ -22,7 +23,7 @@ import {
   prepareMaterial,
   refreshMaterials,
   scanMaterialInbox,
-  type ClassifyMaterialResult,
+  type BuildIntakePlanResult,
   type ImportMaterialResult,
   type MaterialDetail,
   type MaterialInboxFile,
@@ -31,7 +32,7 @@ import {
   type MaterialPlanItem,
 } from '../../bridge/client'
 import { useAuthorTask } from '../tasks/AuthorTaskCoordinator'
-import { updateClassifyPlanItem } from './materialsModel'
+import { updatePlanItem } from './materialsModel'
 
 export interface MaterialsController {
   materials: MaterialItem[]
@@ -42,8 +43,9 @@ export interface MaterialsController {
   inboxLoading: boolean
   inboxError: string | null
   applying: boolean
-  classifyState: 'idle' | 'running' | 'waiting_gowrite' | 'done' | 'failed'
-  classifyResult: ClassifyMaterialResult | null
+  planState: 'idle' | 'building' | 'done' | 'failed'
+  planResult: BuildIntakePlanResult | null
+  batchType: string
   importResult: ImportMaterialResult | null
   importing: boolean
   busyAssetId: string | null
@@ -54,10 +56,11 @@ export interface MaterialsController {
   refresh(): Promise<boolean>
   scanInbox(): Promise<void>
   pickAndImport(): Promise<ImportMaterialResult | null>
-  classify(): Promise<void>
-  cancelClassify(): Promise<void>
-  updateClassifyItem(index: number, patch: Pick<MaterialPlanItem, 'name' | 'type'>): void
+  setBatchType(batchType: string): void
+  buildPlan(): Promise<void>
+  updatePlanItem(index: number, patch: Pick<MaterialPlanItem, 'name' | 'type'>): void
   confirmApply(): Promise<boolean>
+  dismissPlan(): void
   selectDetail(assetId: string): Promise<void>
   runPrepare(assetId: string): Promise<boolean>
   runDistill(assetId: string): Promise<boolean>
@@ -78,8 +81,9 @@ export function useMaterialsController(options?: { notify?: (message: string) =>
   const [applying, setApplying] = useState(false)
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<ImportMaterialResult | null>(null)
-  const [classifyState, setClassifyState] = useState<MaterialsController['classifyState']>('idle')
-  const [classifyResult, setClassifyResult] = useState<ClassifyMaterialResult | null>(null)
+  const [planState, setPlanState] = useState<MaterialsController['planState']>('idle')
+  const [planResult, setPlanResult] = useState<BuildIntakePlanResult | null>(null)
+  const [batchType, setBatchType] = useState('REFERENCE_WORK')
   const [busyAssetId, setBusyAssetId] = useState<string | null>(null)
   const [busyKind, setBusyKind] = useState<MaterialsController['busyKind']>(null)
   const [detail, setDetail] = useState<MaterialDetail | null>(null)
@@ -116,7 +120,7 @@ export function useMaterialsController(options?: { notify?: (message: string) =>
 
   useEffect(() => {
     void reload()
-    void scanInbox() // 页面打开在「待处理」：确定性扫描一次，计数/列表真实
+    void scanInbox()
   }, [reload, scanInbox])
 
   // ---------------- 详情 / 提纯（显式同步）/ 蒸馏（协调器任务） ----------------
@@ -134,38 +138,10 @@ export function useMaterialsController(options?: { notify?: (message: string) =>
     }
   }, [])
 
-  // ---------------- 协调器任务 → 本页投影（classify / distill） ----------------
+  // ---------------- 协调器任务 → 本页投影（distill only） ----------------
 
-  const classifyTask = task?.kind === 'material_classify' ? task : null
   const distillTask = task?.kind === 'material_distill' ? task : null
 
-  // classify：运行中/等待 → 状态映射；候选/失败 → 显式消费
-  useEffect(() => {
-    if (!classifyTask) return
-    if (classifyTask.status === 'running' || classifyTask.status === 'pending') {
-      setClassifyState('running')
-      return
-    }
-    if (classifyTask.status === 'waiting_author') {
-      setClassifyState('waiting_gowrite')
-      return
-    }
-    if (classifyTask.status === 'candidate' && classifyTask.result) {
-      const result = classifyTask.result as ClassifyMaterialResult
-      setClassifyState('done')
-      setClassifyResult(result)
-      consume()
-      return
-    }
-    if (classifyTask.status === 'failed') {
-      setClassifyState('failed')
-      setError(classifyTask.error ?? '分类失败，请重试。')
-      consume()
-      return
-    }
-  }, [classifyTask, consume])
-
-  // distill：busy 指示（asset_id 来自任务 meta）+ 完成/失败显式消费
   useEffect(() => {
     if (!distillTask) return
     const assetId = typeof distillTask.meta?.asset_id === 'string' ? distillTask.meta.asset_id : null
@@ -193,7 +169,7 @@ export function useMaterialsController(options?: { notify?: (message: string) =>
     }
   }, [distillTask, consume, detail?.id, notify, reload, selectDetail])
 
-  // ---------------- 导入 / 分类 ----------------
+  // ---------------- 导入 / 批次计划 ----------------
 
   const refresh = useCallback(async () => {
     setRefreshing(true)
@@ -234,37 +210,39 @@ export function useMaterialsController(options?: { notify?: (message: string) =>
     }
   }, [notify, scanInbox])
 
-  const classify = useCallback(async () => {
-    setClassifyState('running')
+  const buildPlan = useCallback(async () => {
+    setPlanState('building')
     setError(null)
-    const busy = await start({ kind: 'material_classify' })
-    if (busy) {
-      setClassifyState('failed')
-      setError(busy)
+    try {
+      const result = await buildIntakePlan(batchType)
+      setPlanResult(result)
+      setPlanState('done')
+    } catch (e) {
+      setPlanState('failed')
+      setError(toMessage(e))
     }
-  }, [start])
+  }, [batchType])
 
-  const cancelClassify = useCallback(async () => {
-    setClassifyState('idle')
-    setClassifyResult(null)
-    await cancelTask()
-  }, [cancelTask])
-
-  const updateClassifyItem = useCallback((index: number, patch: Pick<MaterialPlanItem, 'name' | 'type'>) => {
-    setClassifyResult((current) => {
+  const updatePlanItemFn = useCallback((index: number, patch: Pick<MaterialPlanItem, 'name' | 'type'>) => {
+    setPlanResult((current) => {
       if (!current || !current.plan.items[index]) return current
       const items = current.plan.items.map((item, itemIndex) => {
         if (itemIndex !== index) return item
-        return updateClassifyPlanItem(item, patch)
+        return updatePlanItem(item, patch)
       })
       return { ...current, plan: { ...current.plan, items } }
     })
   }, [])
 
+  const dismissPlan = useCallback(() => {
+    setPlanState('idle')
+    setPlanResult(null)
+  }, [])
+
   // ---------------- 入库确认（MaterialIntake 机械事务，非 AI 任务） ----------------
 
   const confirmApply = useCallback(async () => {
-    const plan = classifyResult?.plan
+    const plan = planResult?.plan
     if (!plan || !plan.items?.length) {
       setError('没有可执行的入库计划。')
       return false
@@ -277,8 +255,8 @@ export function useMaterialsController(options?: { notify?: (message: string) =>
       await scanInbox()
       if (result.git_warning) notify?.(result.git_warning)
       else notify?.(result.message || '素材入库已完成')
-      setClassifyState('idle')
-      setClassifyResult(null)
+      setPlanState('idle')
+      setPlanResult(null)
       setImportResult(null)
       return true
     } catch (e) {
@@ -287,7 +265,7 @@ export function useMaterialsController(options?: { notify?: (message: string) =>
     } finally {
       setApplying(false)
     }
-  }, [classifyResult, notify, reload, scanInbox])
+  }, [planResult, notify, reload, scanInbox])
 
   // ---------------- 详情 / 提纯（显式同步）/ 蒸馏（协调器任务） ----------------
 
@@ -329,9 +307,10 @@ export function useMaterialsController(options?: { notify?: (message: string) =>
   return {
     materials, loading, error, refreshing,
     inbox, inboxLoading, inboxError, applying,
-    classifyState, classifyResult, importResult, importing,
+    planState, planResult, batchType, importResult, importing,
     busyAssetId, busyKind, detail, detailLoading,
-    reload, refresh, scanInbox, pickAndImport, classify, cancelClassify, updateClassifyItem, confirmApply,
+    reload, refresh, scanInbox, pickAndImport,
+    setBatchType, buildPlan, updatePlanItem: updatePlanItemFn, confirmApply, dismissPlan,
     selectDetail, runPrepare, runDistill,
   }
 }

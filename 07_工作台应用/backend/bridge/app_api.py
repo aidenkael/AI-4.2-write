@@ -682,31 +682,11 @@ class AppApi:
         except Exception as exc:  # noqa: BLE001
             return _err(CODE_BRIDGE_INTERNAL, str(exc))
 
-    def classify_material_inbox(self, payload: dict) -> dict:
-        """Agent 辅助入库：scan → 确定性事实 → 仅对无法定论文件调一次 Agent。"""
+    def build_intake_plan(self, payload: dict) -> dict:
+        """批次机械入库计划（零 AI；作者选批次类型，代码组装 intake plan）。"""
         try:
-            return _ok(materials_ops.classify_material_inbox())
-        except MaterialsError as exc:
-            return _err(CODE_MATERIALS_ERROR, str(exc))
-        except Exception as exc:  # noqa: BLE001
-            return _err(CODE_BRIDGE_INTERNAL, str(exc))
-
-    def get_material_classify_request(self, payload: dict) -> dict:
-        """轮询交互式分类：pending / completed（含 plan）/ failed / canceled。"""
-        try:
-            return _ok(materials_ops.get_material_classify_request(
-                request_id=str(payload.get("request_id") or ""),
-            ))
-        except MaterialsError as exc:
-            return _err(CODE_MATERIALS_ERROR, str(exc))
-        except Exception as exc:  # noqa: BLE001
-            return _err(CODE_BRIDGE_INTERNAL, str(exc))
-
-    def cancel_material_classify_request(self, payload: dict) -> dict:
-        try:
-            return _ok(materials_ops.cancel_material_classify_request(
-                request_id=str(payload.get("request_id") or ""),
-            ))
+            batch_type = str(payload.get("batch_type") or "")
+            return _ok(materials_ops.build_intake_plan_from_inbox(batch_type))
         except MaterialsError as exc:
             return _err(CODE_MATERIALS_ERROR, str(exc))
         except Exception as exc:  # noqa: BLE001
