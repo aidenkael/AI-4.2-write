@@ -1,4 +1,4 @@
-import type { MaterialAuthorState, MaterialInboxFile, MaterialItem, MaterialPlanItem } from '../../bridge/client'
+import type { MaterialAuthorState, MaterialInboxFile, MaterialItem } from '../../bridge/client'
 
 export const MATERIAL_TOP_NAVIGATION = ['新增素材', '已提纯素材库', '写作素材库', '素材总览'] as const
 export type MaterialTab = typeof MATERIAL_TOP_NAVIGATION[number]
@@ -11,7 +11,19 @@ export const BATCH_TYPE_CHOICES = [
   { value: 'LOOSE_MATERIAL', label: '其他' },
 ] as const
 
-export type MaterialWorkflowStage = 'new' | 'purified' | 'writing'
+/** 作者未选批次类型时的默认值：必须为空（未选时主按钮 disabled，不猜默认类型）。 */
+export const DEFAULT_BATCH_TYPE = ''
+
+export type MaterialWorkflowStage = 'new' | 'purified' | 'writing' | 'other'
+
+/** 新增素材区唯一主按钮：未选类型 disabled；原著/技巧类=提纯；其他=保存素材。
+ *  running 时显示进行中文案并 disabled（防重复点击）。纯函数，供机械测试。 */
+export function inboxPrimaryAction(batchType: string, processing: boolean): { label: string; disabled: boolean } {
+  const isOther = batchType === 'LOOSE_MATERIAL'
+  if (!batchType) return { label: '提纯', disabled: true }
+  if (processing) return { label: isOther ? '正在保存…' : '正在提纯…', disabled: true }
+  return { label: isOther ? '保存素材' : '提纯', disabled: false }
+}
 
 export function authorStateLabel(state: MaterialAuthorState): string {
   return { pending_prepare: '待提纯', pending_distill: '待蒸馏', needs_attention: '需要检查', ready: '可用于写作' }[state]
@@ -19,9 +31,11 @@ export function authorStateLabel(state: MaterialAuthorState): string {
 
 /** 素材工作流阶段以后端投影的 workflow_stage 为准：后端拥有 purification/knowledge/
  * KnowledgeRetrieve 真实事实，能区分 needs_attention 的失败前阶段（提纯失败=new，
- * 蒸馏/验收失败=purified）。仅当旧投影缺失 workflow_stage 时才按 state 兜底。 */
+ * 蒸馏/验收失败=purified）以及其他/研究资料（other）。直接信任后端四种值；
+ * 仅当旧投影缺失 workflow_stage 时才按 state 兜底。 */
 export function deriveWorkflowStage(item: MaterialItem): MaterialWorkflowStage | null {
-  if (item.workflow_stage === 'new' || item.workflow_stage === 'purified' || item.workflow_stage === 'writing') {
+  if (item.workflow_stage === 'new' || item.workflow_stage === 'purified'
+    || item.workflow_stage === 'writing' || item.workflow_stage === 'other') {
     return item.workflow_stage
   }
   if (item.state === 'ready') return 'writing'
@@ -91,13 +105,4 @@ export function pendingInboxBadgeCount(inbox: MaterialInboxFile[], items: Materi
 
 export function attachedMaterialName(assetId: string | undefined, items: MaterialItem[]): string {
   return items.find((item) => item.id === assetId)?.name || assetId || ''
-}
-
-/** 更新入库计划条目（REVIEW → NEW_ASSET 升级；作者手动填写名称和类型后）。 */
-export function updatePlanItem(item: MaterialPlanItem, patch: Pick<MaterialPlanItem, 'name' | 'type'>): MaterialPlanItem {
-  const updated = { ...item, ...patch }
-  if (updated.action === 'REVIEW' && updated.name?.trim() && updated.type) {
-    return { ...updated, action: 'NEW_ASSET', reason: undefined }
-  }
-  return updated
 }

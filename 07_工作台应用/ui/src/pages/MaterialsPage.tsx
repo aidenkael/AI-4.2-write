@@ -3,14 +3,13 @@ import { useMemo, useState } from 'react'
 import { PageHeader } from '../components/PageHeader'
 import { useApp } from '../features/app/AppStore'
 import { useMaterialsController } from '../features/materials/useMaterialsController'
-import type { MaterialAssetType, MaterialPlanItem } from '../bridge/client'
 import {
-  attachedMaterialName,
   attentionRetryLabel,
   authorStateLabel,
   BATCH_TYPE_CHOICES,
   countMaterialsByType,
   deriveWorkflowStage,
+  inboxPrimaryAction,
   MATERIAL_TOP_NAVIGATION,
   MATERIAL_TYPE_FILTERS,
   matchesMaterialFilter,
@@ -37,8 +36,8 @@ export function MaterialsPage() {
 
   const selected = controller.materials.find((m) => m.id === selectedId) ?? null
   const detail = controller.detail?.id === selectedId ? controller.detail : null
-  const planItems = controller.planResult?.plan.items ?? []
   const hasInboxFiles = controller.inbox.some((file) => !file.unsupported)
+  const primaryAction = inboxPrimaryAction(controller.batchType, controller.processingInbox)
 
   const tabIcons: Record<MaterialTab, typeof FileUp> = {
     '新增素材': FileUp,
@@ -86,29 +85,10 @@ export function MaterialsPage() {
             <div className="type-choices">
               {BATCH_TYPE_CHOICES.map((choice) => <button key={choice.value} className={controller.batchType === choice.value ? 'active' : ''} onClick={() => controller.setBatchType(choice.value)}>{choice.label}</button>)}
             </div>
-            <button className="primary" disabled={controller.planState === 'building' || controller.applying} onClick={() => void controller.buildPlan()}>
-              {controller.planState === 'building' ? '生成中…' : '生成入库计划'}
+            <button className="primary" disabled={primaryAction.disabled} onClick={() => void controller.processInboxBatch()}>
+              {primaryAction.label}
             </button>
           </div>}
-          {controller.planState === 'done' && planItems.length > 0 && <section className="panel classify-plan">
-            <h3>确认入库</h3>
-            {planItems.map((item: MaterialPlanItem, index: number) => item.action === 'ATTACH_EXISTING'
-              ? <p key={index}>将并入已有资料：<strong>《{attachedMaterialName(item.asset_id, controller.materials)}》</strong></p>
-              : <div className="inbox-row" key={index}>
-                <strong className="inbox-name">{item.name || item.files.join('、')}</strong>
-                {item.action === 'REVIEW'
-                  ? <><input value={item.name ?? ''} placeholder="资料名称" onChange={(event) => controller.updatePlanItem(index, { name: event.target.value })} />
-                    <select value={item.type ?? ''} onChange={(event) => controller.updatePlanItem(index, { type: event.target.value as MaterialAssetType })}>
-                      <option value="">请选择资料类型</option>
-                      {BATCH_TYPE_CHOICES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-                    </select></>
-                  : <small className="muted-note">{BATCH_TYPE_CHOICES.find((c) => c.value === item.type)?.label ?? item.type}</small>}
-              </div>)}
-            <footer>
-              <button className="primary" disabled={controller.applying} onClick={() => void controller.confirmApply()}>{controller.applying ? '入库中…' : '确认入库'}</button>
-              <button className="secondary" onClick={controller.dismissPlan}>取消</button>
-            </footer>
-          </section>}
           {newItems.length > 0 && <div className="stage-materials">
             <h4>已入库待提纯 <small>（{newItems.length}）</small></h4>
             <div className="material-grid">

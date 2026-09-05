@@ -1,14 +1,15 @@
 /**
  * 素材工作流真实消费者控制器（App 级协调器消费者）。
  *
- * 工作流：本地文件导入 → MaterialIntake 收件箱 → 作者选批次类型 →
- * 机械构建入库计划（零 AI） → 作者确认 → 事务入库 → 显式提纯
- * → 显式蒸馏 → FINALIZED BKP → 可用于写作。
+ * 作者工作流（一次操作）：导入 EPUB/PDF/TXT → 选批次类型（原著/技巧类/其他）→
+ * 原著/技巧类点一次「提纯」、其他点一次「保存素材」。
+ * 「提纯」内部机械完成：build intake plan → MaterialIntake apply → 对本次 new_ids
+ * 逐个调用现有 prepareMaterial → reload + scan（plan/apply 是后台内部实现，不再是作者步骤）。
  *
  * 生命周期归属（根不变量）：
  * - material_distill 的异步状态属于 App 级协调器；
  *   离开素材页任务继续、结果保留，返回后页面显式消费；
- * - MaterialIntake apply / buildIntakePlan / SourcePrepare 是确定性机械操作，留在本控制器；
+ * - buildIntakePlan / MaterialIntake apply / prepareMaterial 是确定性机械操作，留在本控制器；
  * - 页面加载只读（listMaterials）+ 一次确定性收件箱扫描（零模型）；
  *   绝不隐式调用模型 / 提纯 / 蒸馏。
  */
@@ -23,16 +24,13 @@ import {
   prepareMaterial,
   refreshMaterials,
   scanMaterialInbox,
-  type BuildIntakePlanResult,
   type ImportMaterialResult,
   type MaterialDetail,
   type MaterialInboxFile,
-  type MaterialIntakeResult,
   type MaterialItem,
-  type MaterialPlanItem,
 } from '../../bridge/client'
 import { useAuthorTask } from '../tasks/AuthorTaskCoordinator'
-import { updatePlanItem } from './materialsModel'
+import { DEFAULT_BATCH_TYPE } from './materialsModel'
 
 export interface MaterialsController {
   materials: MaterialItem[]
@@ -42,9 +40,8 @@ export interface MaterialsController {
   inbox: MaterialInboxFile[]
   inboxLoading: boolean
   inboxError: string | null
-  applying: boolean
-  planState: 'idle' | 'building' | 'done' | 'failed'
-  planResult: BuildIntakePlanResult | null
+  /** 新增素材区一次作者动作（提纯/保存）运行中；驱动主按钮进行中文案与 disabled。 */
+  processingInbox: boolean
   batchType: string
   importResult: ImportMaterialResult | null
   importing: boolean
@@ -57,10 +54,8 @@ export interface MaterialsController {
   scanInbox(): Promise<void>
   pickAndImport(): Promise<ImportMaterialResult | null>
   setBatchType(batchType: string): void
-  buildPlan(): Promise<void>
-  updatePlanItem(index: number, patch: Pick<MaterialPlanItem, 'name' | 'type'>): void
-  confirmApply(): Promise<boolean>
-  dismissPlan(): void
+  /** 唯一作者批次动作：机械 build plan → apply → 对 new_ids 提纯 → reload+scan。 */
+  processInboxBatch(): Promise<boolean>
   selectDetail(assetId: string): Promise<void>
   runPrepare(assetId: string): Promise<boolean>
   runDistill(assetId: string): Promise<boolean>
@@ -78,12 +73,10 @@ export function useMaterialsController(options?: { notify?: (message: string) =>
   const [inbox, setInbox] = useState<MaterialInboxFile[]>([])
   const [inboxLoading, setInboxLoading] = useState(false)
   const [inboxError, setInboxError] = useState<string | null>(null)
-  const [applying, setApplying] = useState(false)
+  const [processingInbox, setProcessingInbox] = useState(false)
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<ImportMaterialResult | null>(null)
-  const [planState, setPlanState] = useState<MaterialsController['planState']>('idle')
-  const [planResult, setPlanResult] = useState<BuildIntakePlanResult | null>(null)
-  const [batchType, setBatchType] = useState('REFERENCE_WORK')
+  const [batchType, setBatchType] = useState(DEFAULT_BATCH_TYPE)
   const [busyAssetId, setBusyAssetId] = useState<string | null>(null)
   const [busyKind, setBusyKind] = useState<MaterialsController['busyKind']>(null)
   const [detail, setDetail] = useState<MaterialDetail | null>(null)
@@ -210,62 +203,63 @@ export function useMaterialsController(options?: { notify?: (message: string) =>
     }
   }, [notify, scanInbox])
 
-  const buildPlan = useCallback(async () => {
-    setPlanState('building')
+  // ---------------- 唯一作者批次动作：一次完成 intake + prepare（机械，零 AI） ----------------
+
+  const processInboxBatch = useCallback(async () => {
+    // 1. 未选批次类型：不请求后端
+    if (!batchType) return false
+    setProcessingInbox(true)
     setError(null)
     try {
-      const result = await buildIntakePlan(batchType)
-      setPlanResult(result)
-      setPlanState('done')
-    } catch (e) {
-      setPlanState('failed')
-      setError(toMessage(e))
-    }
-  }, [batchType])
-
-  const updatePlanItemFn = useCallback((index: number, patch: Pick<MaterialPlanItem, 'name' | 'type'>) => {
-    setPlanResult((current) => {
-      if (!current || !current.plan.items[index]) return current
-      const items = current.plan.items.map((item, itemIndex) => {
-        if (itemIndex !== index) return item
-        return updatePlanItem(item, patch)
-      })
-      return { ...current, plan: { ...current.plan, items } }
-    })
-  }, [])
-
-  const dismissPlan = useCallback(() => {
-    setPlanState('idle')
-    setPlanResult(null)
-  }, [])
-
-  // ---------------- 入库确认（MaterialIntake 机械事务，非 AI 任务） ----------------
-
-  const confirmApply = useCallback(async () => {
-    const plan = planResult?.plan
-    if (!plan || !plan.items?.length) {
-      setError('没有可执行的入库计划。')
-      return false
-    }
-    setApplying(true)
-    setError(null)
-    try {
-      const result: MaterialIntakeResult = await applyMaterialIntake(plan)
+      // 2. 机械构建入库计划（零 AI）
+      const built = await buildIntakePlan(batchType)
+      const plan = built.plan
+      // 3. 检查 plan
+      if (!plan?.items?.length) {
+        setError('没有需要处理的文件。')
+        return false
+      }
+      // 4. 存在 REVIEW（无法机械处理的文件）：不 apply，普通用户错误后结束
+      if (plan.items.some((item) => item.action === 'REVIEW')) {
+        setError('存在当前无法处理的文件，请移出后重新操作。')
+        return false
+      }
+      // 5. MaterialIntake 事务入库
+      const result = await applyMaterialIntake(plan)
+      // 6/7. 仅对本次新建的 REFERENCE_WORK / METHOD_SOURCE 逐个提纯；其他只保存
+      const newIds = result.new_ids ?? []
+      let prepared = 0
+      const failed: string[] = []
+      if (batchType === 'REFERENCE_WORK' || batchType === 'METHOD_SOURCE') {
+        // 只 prepare new_ids（attached / exact duplicate 不重复提纯）；
+        // 顺序执行不建并发框架；单本失败不阻断其余 new_ids
+        for (const assetId of newIds) {
+          try {
+            await prepareMaterial(assetId)
+            prepared += 1
+          } catch {
+            failed.push(assetId)
+          }
+        }
+      }
+      // 8. 无论单本提纯成败，最后统一 reload + scan（成功项自然进已提纯，失败项留新增）
       await reload()
       await scanInbox()
       if (result.git_warning) notify?.(result.git_warning)
-      else notify?.(result.message || '素材入库已完成')
-      setPlanState('idle')
-      setPlanResult(null)
+      else if (batchType === 'LOOSE_MATERIAL') notify?.(result.message || '素材已保存')
+      else if (failed.length === 0) notify?.('提纯完成')
+      else notify?.(`已完成 ${prepared} 份，${failed.length} 份提纯失败，请在新增素材中重新处理。`)
+      // 9. 成功后清空批次类型与导入回执
+      setBatchType(DEFAULT_BATCH_TYPE)
       setImportResult(null)
       return true
     } catch (e) {
       setError(toMessage(e))
       return false
     } finally {
-      setApplying(false)
+      setProcessingInbox(false)
     }
-  }, [planResult, notify, reload, scanInbox])
+  }, [batchType, notify, reload, scanInbox])
 
   // ---------------- 详情 / 提纯（显式同步）/ 蒸馏（协调器任务） ----------------
 
@@ -306,11 +300,11 @@ export function useMaterialsController(options?: { notify?: (message: string) =>
 
   return {
     materials, loading, error, refreshing,
-    inbox, inboxLoading, inboxError, applying,
-    planState, planResult, batchType, importResult, importing,
+    inbox, inboxLoading, inboxError, processingInbox,
+    batchType, importResult, importing,
     busyAssetId, busyKind, detail, detailLoading,
     reload, refresh, scanInbox, pickAndImport,
-    setBatchType, buildPlan, updatePlanItem: updatePlanItemFn, confirmApply, dismissPlan,
+    setBatchType, processInboxBatch,
     selectDetail, runPrepare, runDistill,
   }
 }

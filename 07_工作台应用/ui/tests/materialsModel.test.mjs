@@ -3,11 +3,12 @@
  *
  * 覆盖 CP1/CP2/CP3 作者工作流合同：
  * - 一级导航恰好四个（新增素材 / 已提纯素材库 / 写作素材库 / 素材总览）；
- * - 批次类型映射（原著/技巧类/其他 → REFERENCE_WORK/METHOD_SOURCE/LOOSE_MATERIAL）；
- * - workflow_stage 互斥派生 + needs_attention 停留在失败前阶段；
+ * - 批次类型映射（原著/技巧类/其他 → REFERENCE_WORK/METHOD_SOURCE/LOOSE_MATERIAL）+ 无默认选择；
+ * - 新增素材区唯一主按钮（提纯/保存素材）映射；
+ * - workflow_stage 互斥派生 + needs_attention 停留在失败前阶段 + other 不进三生产区；
  * - book_0010 真实形态映射到 purified；
  * - 卡片信息行使用真实 format；needs_attention 重试动作；
- * - 导入 UI 无 AI 分类 / 识别 running 状态；一级刷新按钮已移除。
+ * - 导入 UI 无 AI 分类 / 识别 running 状态；作者 plan/confirm 生命周期已删除；一级刷新按钮已移除。
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -16,6 +17,8 @@ import {
   MATERIAL_TOP_NAVIGATION,
   MATERIAL_TYPE_FILTERS,
   BATCH_TYPE_CHOICES,
+  DEFAULT_BATCH_TYPE,
+  inboxPrimaryAction,
   authorStateLabel,
   deriveWorkflowStage,
   materialsForStage,
@@ -27,7 +30,6 @@ import {
   needsAttentionMaterials,
   pendingInboxBadgeCount,
   attachedMaterialName,
-  updatePlanItem,
 } from '../.test-build/features/materials/materialsModel.js'
 
 // 后端投影形态的 MaterialItem：workflow_stage 由后端权威派生（前端消费，不再自造第二状态）。
@@ -51,6 +53,22 @@ test('batch type 映射正确：原著/技巧类/其他 → REFERENCE_WORK/METHO
     ['技巧类', 'METHOD_SOURCE'],
     ['其他', 'LOOSE_MATERIAL'],
   ])
+  // 可选值只有这三项，没有第四个隐藏类型
+  assert.deepEqual(BATCH_TYPE_CHOICES.map((c) => c.value), ['REFERENCE_WORK', 'METHOD_SOURCE', 'LOOSE_MATERIAL'])
+})
+
+test('batch type 没有默认选择：未选时主按钮 disabled', () => {
+  assert.equal(DEFAULT_BATCH_TYPE, '')
+  // 未选类型：主按钮 disabled（不猜默认类型、不请求后端）
+  assert.deepEqual(inboxPrimaryAction(DEFAULT_BATCH_TYPE, false), { label: '提纯', disabled: true })
+})
+
+test('新增素材区主按钮：原著/技巧类=提纯、其他=保存素材、运行中显示进行中文案', () => {
+  assert.deepEqual(inboxPrimaryAction('REFERENCE_WORK', false), { label: '提纯', disabled: false })
+  assert.deepEqual(inboxPrimaryAction('METHOD_SOURCE', false), { label: '提纯', disabled: false })
+  assert.deepEqual(inboxPrimaryAction('LOOSE_MATERIAL', false), { label: '保存素材', disabled: false })
+  assert.deepEqual(inboxPrimaryAction('REFERENCE_WORK', true), { label: '正在提纯…', disabled: true })
+  assert.deepEqual(inboxPrimaryAction('LOOSE_MATERIAL', true), { label: '正在保存…', disabled: true })
 })
 
 test('stage 互斥派生：pending_prepare→new、pending_distill→purified、ready→writing', () => {
@@ -104,6 +122,30 @@ test('writing 素材不出现在 purified；purified 素材不出现在 new（�
   assert.equal(total, all.length)
 })
 
+test('workflow_stage 支持 other：其他/研究资料不进入三生产区', () => {
+  const loose = item({ type: 'LOOSE_MATERIAL', type_label: '零散素材', state: 'pending_prepare', workflow_stage: 'other' })
+  const research = item({ type: 'RESEARCH', type_label: '研究资料', state: 'pending_prepare', workflow_stage: 'other' })
+  // deriveWorkflowStage 直接信任后端 other
+  assert.equal(deriveWorkflowStage(loose), 'other')
+  assert.equal(deriveWorkflowStage(research), 'other')
+  // other 不进入 new/purified/writing 任一生产区
+  for (const other of [loose, research]) {
+    assert.deepEqual(materialsForStage([other], 'new'), [])
+    assert.deepEqual(materialsForStage([other], 'purified'), [])
+    assert.deepEqual(materialsForStage([other], 'writing'), [])
+    assert.deepEqual(materialsForStage([other], 'other'), [other])
+  }
+  // other 与三区互斥：混合列表里三区之和绝不含 other
+  const writing = item({ state: 'ready', workflow_stage: 'writing' })
+  const all = [writing, loose, research]
+  const productionTotal = materialsForStage(all, 'new').length
+    + materialsForStage(all, 'purified').length
+    + materialsForStage(all, 'writing').length
+  assert.equal(productionTotal, 1, 'other 绝不计入 new/purified/writing')
+  // 总览类型统计仍包含 other（LOOSE_MATERIAL / RESEARCH）
+  assert.deepEqual(countMaterialsByType(all), { reference: 1, method: 0, other: 2 })
+})
+
 test('attentionRetryLabel：new→重新提纯、purified→重新蒸馏、writing→无', () => {
   assert.equal(attentionRetryLabel('new'), '重新提纯')
   assert.equal(attentionRetryLabel('purified'), '重新蒸馏')
@@ -146,9 +188,28 @@ test('导入 UI 无 AI 分类 / 识别 running 状态；改为批次机械入库
     assert.equal(src.includes('正在识别'), false, '不得再有“正在识别”AI 分类状态')
     assert.equal(src.includes('取消识别'), false)
   }
-  // 批次机械计划 + MaterialIntake 事务入口存在（零 AI）
+  // 批次机械计划 + MaterialIntake 事务入口存在（零 AI，后台内部实现）
   assert.ok(controllerSrc.includes('buildIntakePlan'), '批次机械入库计划入口存在')
   assert.ok(controllerSrc.includes('applyMaterialIntake'), 'MaterialIntake 事务入口存在')
+  // 唯一作者批次动作存在（一次完成 intake + prepare）
+  assert.ok(controllerSrc.includes('processInboxBatch'), '唯一作者批次动作 processInboxBatch 存在')
+})
+
+test('作者 plan/confirm 生命周期与逐本类型 UI 已删除（不再有 updatePlanItem 作者模型）', () => {
+  for (const src of [pageSrc, controllerSrc]) {
+    assert.equal(src.includes('planState'), false, '不得残留 planState')
+    assert.equal(src.includes('planResult'), false, '不得残留 planResult')
+    assert.equal(src.includes('updatePlanItem'), false, '不得残留 updatePlanItem 作者模型')
+    assert.equal(src.includes('confirmApply'), false, '不得残留确认入库动作')
+    assert.equal(src.includes('dismissPlan'), false, '不得残留取消计划动作')
+    assert.equal(src.includes('buildPlan'), false, '不得残留生成入库计划动作')
+    assert.equal(src.includes('生成入库计划'), false)
+    assert.equal(src.includes('确认入库'), false)
+    assert.equal(src.includes('classify-plan'), false, '不得残留逐本 REVIEW 编辑 UI')
+  }
+  // MaterialsPage 不再 import 逐本类型相关 bridge 类型
+  assert.equal(pageSrc.includes('MaterialAssetType'), false)
+  assert.equal(pageSrc.includes('MaterialPlanItem'), false)
 })
 
 test('一级刷新按钮已移除；刷新状态只保留在素材总览', () => {
@@ -171,11 +232,4 @@ test('state labels 保持作者可读', () => {
   assert.equal(authorStateLabel('pending_distill'), '待蒸馏')
   assert.equal(authorStateLabel('needs_attention'), '需要检查')
   assert.equal(authorStateLabel('ready'), '可用于写作')
-})
-
-test('作者补全名称/类型后 REVIEW 升级为 NEW_ASSET', () => {
-  const result = updatePlanItem({ action: 'REVIEW', files: ['x.epub'] }, { name: '资料名', type: 'METHOD_SOURCE' })
-  assert.equal(result.action, 'NEW_ASSET')
-  assert.equal(result.type, 'METHOD_SOURCE')
-  assert.equal(result.reason, undefined)
 })

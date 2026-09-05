@@ -518,6 +518,69 @@ def test_workflow_stage_pending_prepare_is_new(isolated):
 
 
 # ---------------------------------------------------------------------------
+# I2. workflow_stage = other（其他/研究资料只登记，不进三生产区；不迁移 canonical type）
+# ---------------------------------------------------------------------------
+
+def _typed_asset(mtype, pur="未处理", know="未开始"):
+    return {"id": "book_0001", "type": mtype, "author": "",
+            "purification": {"status": pur}, "knowledge": {"status": know},
+            "files": [{"path": "x.txt"}]}
+
+
+def test_workflow_stage_loose_material_is_other(isolated):
+    """LOOSE_MATERIAL → workflow_stage=other（不伪装成待提纯，author_group 非 needs_attention）。"""
+    c = materials._classify_author_group(_typed_asset("LOOSE_MATERIAL"))
+    assert c["workflow_stage"] == "other"
+    assert c["author_group"] == "pending"
+    assert c["writing_callable"] is False
+
+
+def test_workflow_stage_research_is_other(isolated):
+    """RESEARCH → workflow_stage=other。"""
+    c = materials._classify_author_group(_typed_asset("RESEARCH"))
+    assert c["workflow_stage"] == "other"
+    assert c["author_group"] == "pending"
+
+
+def test_workflow_stage_other_owner_wins_over_purification_knowledge(isolated):
+    """other owner 在最前面：即使 purification/knowledge 有值也不回落生产链阶段。"""
+    c = materials._classify_author_group(_typed_asset("LOOSE_MATERIAL", pur="可用", know="可用"))
+    assert c["workflow_stage"] == "other"
+
+
+def test_other_does_not_change_canonical_type(isolated):
+    """workflow_stage=other 只改投影阶段，绝不迁移/改写 canonical type。"""
+    _write_ledger(isolated, _fake_asset_ledger(asset_id="loose_0001", name="杂项",
+                                               mtype="LOOSE_MATERIAL", pur="未处理", know="未开始"))
+    mat = materials.list_materials()["materials"][0]
+    assert mat["type"] == "LOOSE_MATERIAL", "canonical type 保持不变"
+    assert mat["workflow_stage"] == "other"
+    assert mat["type_label"] == "零散素材"
+
+
+# ---------------------------------------------------------------------------
+# I3. 作者面通用「提纯」按 canonical type 分派（不回归）
+# ---------------------------------------------------------------------------
+
+def test_prepare_material_routes_by_canonical_type(isolated, monkeypatch):
+    """REFERENCE_WORK→SourcePrepare、METHOD_SOURCE→MethodPrepare（机械分派，无真实提纯）。"""
+    calls = []
+    monkeypatch.setattr(materials, "run_source_prepare",
+                        lambda aid: calls.append(("source_prepare", aid)) or {"status": "completed"})
+    monkeypatch.setattr(materials, "run_method_prepare",
+                        lambda aid: calls.append(("method_prepare", aid)) or {"status": "completed"})
+
+    monkeypatch.setattr(materials, "_ledger_asset", lambda aid: {"id": aid, "type": "REFERENCE_WORK"})
+    materials.prepare_material("book_0001")
+    assert calls == [("source_prepare", "book_0001")]
+
+    calls.clear()
+    monkeypatch.setattr(materials, "_ledger_asset", lambda aid: {"id": aid, "type": "METHOD_SOURCE"})
+    materials.prepare_material("method_0001")
+    assert calls == [("method_prepare", "method_0001")]
+
+
+# ---------------------------------------------------------------------------
 # J. CP4 学习投影读取优先级（新包 author_view → 旧包根 model.md → 都没有则空）
 # ---------------------------------------------------------------------------
 

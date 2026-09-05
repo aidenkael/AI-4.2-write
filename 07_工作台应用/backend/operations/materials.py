@@ -229,10 +229,17 @@ def _classify_author_group(a: dict[str, Any]) -> dict[str, Any]:
     workflow_stage（作者工作流阶段；与 needs_attention 相互独立）：
     - new：尚未提纯成功（含提纯失败需重新提纯）；
     - purified：提纯已通过但知识尚不可用于写作（含蒸馏/验收失败需重新蒸馏）；
-    - writing：蒸馏完成且 KnowledgeRetrieve 真实可发现/可加载。
+    - writing：蒸馏完成且 KnowledgeRetrieve 真实可发现/可加载；
+    - other：其他/研究资料（LOOSE_MATERIAL / RESEARCH）只登记，不进入三生产区，
+      仅在素材总览的类型统计中出现（不伪装成待提纯）。
     needs_attention 只决定该阶段内是否显示错误提示与重试动作，绝不改变素材所属阶段
     （提纯失败留在 new；蒸馏/验收失败留在 purified）。
     """
+    # 其他/研究资料不进入提纯→蒸馏→写作生产链：owner 固定为 other，
+    # 只参与素材总览类型统计（canonical type 保持不变，不迁移历史类型）。
+    if a.get("type") in ("LOOSE_MATERIAL", "RESEARCH"):
+        return {"author_group": "pending", "state": "pending_prepare", "workflow_stage": "other",
+                "writing_callable": False, "attention_message": None}
     pur = (a.get("purification") or {}).get("status") or "未处理"
     know = (a.get("knowledge") or {}).get("status") or "未开始"
     if know == "可用":

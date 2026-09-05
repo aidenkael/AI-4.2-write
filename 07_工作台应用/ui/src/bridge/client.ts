@@ -715,8 +715,9 @@ export interface MaterialItem {
   author_group: 'pending' | 'usable' | 'needs_attention'
   state: MaterialAuthorState
   /** 后端从 purification/knowledge/KnowledgeRetrieve 真实事实派生的作者工作流阶段；
-   *  与 needs_attention 独立（needs_attention 不改变阶段，只决定阶段内的错误/重试）。 */
-  workflow_stage: 'new' | 'purified' | 'writing'
+   *  与 needs_attention 独立（needs_attention 不改变阶段，只决定阶段内的错误/重试）。
+   *  other = 其他/研究资料（LOOSE_MATERIAL/RESEARCH），不进入三生产区，只在素材总览统计。 */
+  workflow_stage: 'new' | 'purified' | 'writing' | 'other'
   writing_callable: boolean
   attention_message?: string | null
 }
@@ -845,7 +846,7 @@ export interface MaterialDetail {
   source_formats: string[]
   state: MaterialAuthorState
   state_label: string
-  workflow_stage: 'new' | 'purified' | 'writing'
+  workflow_stage: 'new' | 'purified' | 'writing' | 'other'
   writing_callable: boolean
   attention_message?: string | null
   learning_summary?: string | null

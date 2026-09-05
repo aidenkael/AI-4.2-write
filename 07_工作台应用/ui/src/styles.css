@@ -427,11 +427,6 @@ p{line-height:1.65}
 .inbox-row select,.inbox-row input{min-height:36px;border:1px solid var(--line);border-radius:8px;background:#fff;padding:6px 8px;font-size:13px}
 .inbox-row .inbox-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .inbox-panel>footer{display:flex;justify-content:flex-end;padding-top:14px}
-.classify-plan{border:1px solid var(--line);border-radius:12px;padding:16px}
-.classify-plan header{display:flex;justify-content:space-between;align-items:center}
-.classify-plan h3{margin:0}
-.classify-plan ul{margin:10px 0;padding-left:20px;display:grid;gap:6px;font-size:14px}
-.classify-plan footer{display:flex;gap:10px;justify-content:flex-end}
 .material-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:6px}
 .material-actions button{min-height:36px;border:1px solid var(--line);border-radius:8px;background:#fff;padding:8px 14px;font-size:13px;font-weight:600;color:var(--text)}
 .material-actions button.primary{background:var(--blue);border-color:var(--blue);color:#fff}
