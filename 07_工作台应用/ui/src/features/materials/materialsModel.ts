@@ -1,4 +1,4 @@
-import type { MaterialAuthorState, MaterialItem, MaterialPlanItem } from '../../bridge/client'
+import type { MaterialAuthorState, MaterialInboxFile, MaterialItem, MaterialPlanItem } from '../../bridge/client'
 
 export const MATERIAL_TOP_NAVIGATION = ['待处理', '素材库', '可用于写作'] as const
 export const MATERIAL_TYPE_FILTERS = ['全部', '原著', '技巧书', '其他'] as const
@@ -13,8 +13,16 @@ export function matchesMaterialFilter(item: MaterialItem, filter: string): boole
   return item.type_label === filter
 }
 
-export function pendingMaterials(items: MaterialItem[]): MaterialItem[] {
-  return items.filter((item) => item.author_group === 'pending' || item.author_group === 'needs_attention')
+export function needsAttentionMaterials(items: MaterialItem[]): MaterialItem[] {
+  return items.filter((item) => item.author_group === 'needs_attention')
+}
+
+export function pendingInboxBadgeCount(inbox: MaterialInboxFile[], items: MaterialItem[]): number {
+  return inbox.filter((file) => !file.unsupported).length + needsAttentionMaterials(items).length
+}
+
+export function attachedMaterialName(assetId: string | undefined, items: MaterialItem[]): string {
+  return items.find((item) => item.id === assetId)?.name || assetId || ''
 }
 
 export function updateClassifyPlanItem(item: MaterialPlanItem, patch: Pick<MaterialPlanItem, 'name' | 'type'>): MaterialPlanItem {

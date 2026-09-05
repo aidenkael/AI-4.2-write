@@ -419,6 +419,59 @@ def test_new_reference_distill_does_not_skip_missing_bkp_prototype(isolated, mon
     assert not (isolated / "02_素材知识库" / "book_0001_样例作品" / "bkp" / "identity.json").exists()
 
 
+def test_interactive_book_distill_uses_exact_meta_asset_id(isolated, monkeypatch):
+    """交互任务的资产身份来自 request meta，绝不从目录名反推。"""
+    from operations import qoder_bridge as bridge
+    request_id = "request-book-0035"
+    request = {
+        "state": "pending",
+        "meta": {
+            "asset_id": "book_0035",
+            "sp_dir": str(isolated / "06_工作区" / "SourcePrepare" / "book_0035_长安十二时辰"),
+            "bd_dir": str(isolated / "02_素材知识库" / "book_0035_长安十二时辰"),
+        },
+    }
+    monkeypatch.setattr(bridge, "get_request", lambda rid: request)
+    monkeypatch.setattr(bridge, "is_expired", lambda value: False)
+    monkeypatch.setattr(bridge, "read_response", lambda rid: {"request_id": request_id, "status": "completed"})
+    captured = {}
+    monkeypatch.setattr(materials, "_finalize_distill", lambda rid, asset_id, sp_dir, bd_dir: captured.update(asset_id=asset_id, sp_dir=sp_dir, bd_dir=bd_dir) or {"status": "completed"})
+
+    result = materials.get_book_distill_request(request_id)
+    assert result["status"] == "completed"
+    assert captured["asset_id"] == "book_0035"
+    assert captured["bd_dir"].name == "book_0035_长安十二时辰"
+
+
+def test_interactive_finalize_never_parses_directory_for_asset_id(isolated, monkeypatch):
+    from operations import qoder_bridge as bridge
+    looked_up = []
+    monkeypatch.setattr(materials, "_ledger_asset", lambda asset_id: looked_up.append(asset_id) or {"id": asset_id})
+    monkeypatch.setattr(materials, "_finalize_reference_distill", lambda *args: None)
+    catalog = type("Catalog", (), {"refresh_and_render": staticmethod(lambda root, check_only=False: 0)})()
+    monkeypatch.setattr(materials, "_load_materialintake", lambda: (catalog, None, None))
+    monkeypatch.setattr(bridge, "cleanup_request", lambda request_id: None)
+
+    materials._finalize_distill(
+        "request-book-0035", "book_0035",
+        isolated / "06_工作区" / "SourcePrepare" / "book_0035_长安十二时辰",
+        isolated / "02_素材知识库" / "book_0035_长安十二时辰",
+    )
+    assert looked_up == ["book_0035"]
+
+
+def test_interactive_book_distill_rejects_missing_meta_asset_id(isolated, monkeypatch):
+    from operations import qoder_bridge as bridge
+    request_id = "request-missing-asset"
+    monkeypatch.setattr(bridge, "get_request", lambda rid: {"state": "pending", "meta": {"sp_dir": "x", "bd_dir": "y"}})
+    monkeypatch.setattr(bridge, "is_expired", lambda value: False)
+    monkeypatch.setattr(bridge, "read_response", lambda rid: {"request_id": request_id, "status": "completed"})
+    monkeypatch.setattr(bridge, "cleanup_request", lambda rid: None)
+    result = materials.get_book_distill_request(request_id)
+    assert result["status"] == "failed"
+    assert "缺少素材标识" in result["error"]
+
+
 # ---------------------------------------------------------------------------
 # H. 页面加载零模型（隐式）
 # ---------------------------------------------------------------------------

@@ -1211,10 +1211,9 @@ class _PendingDistill(Exception):
         self.request_id = request_id
 
 
-def _finalize_distill(request_id: str, sp_dir: Path, bd_dir: Path) -> dict[str, Any]:
+def _finalize_distill(request_id: str, asset_id: str, sp_dir: Path, bd_dir: Path) -> dict[str, Any]:
     """Interactive 蒸馏的确定性完成门；与 Direct 路径严格一致。"""
     from operations import qoder_bridge as bridge
-    asset_id = bd_dir.name.split("_", 1)[0]
     try:
         _finalize_reference_distill(request_id, _ledger_asset(asset_id), sp_dir, bd_dir)
     except MaterialsError as exc:
@@ -1273,9 +1272,14 @@ def get_book_distill_request(request_id: str) -> dict[str, Any]:
         audit.finish_file(request_id, audit.STATUS_FAILED, error=error)
         return {"request_id": request_id, "status": "failed", "error": error}
     audit.append_event(request_id, audit.EVENT_BRIDGE_RESPONSE_RECEIVED, "book_distill")
+    asset_id = meta.get("asset_id")
+    if not isinstance(asset_id, str) or not asset_id.strip():
+        bridge.cleanup_request(request_id)
+        audit.finish_file(request_id, audit.STATUS_FAILED, error="蒸馏任务缺少素材标识")
+        return {"request_id": request_id, "status": "failed", "error": "蒸馏任务缺少素材标识，请重新发起。"}
     try:
         result = _finalize_distill(
-            request_id, Path(meta["sp_dir"]), Path(meta["bd_dir"]),
+            request_id, asset_id.strip(), Path(meta["sp_dir"]), Path(meta["bd_dir"]),
         )
     except MaterialsError as exc:
         return {"request_id": request_id, "status": "failed", "error": str(exc)}
