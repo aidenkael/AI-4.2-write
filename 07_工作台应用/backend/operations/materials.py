@@ -225,25 +225,39 @@ def _classify_author_group(a: dict[str, Any]) -> dict[str, Any]:
     - usable（可用于写作）：knowledge.status == "可用"（已提炼出可用知识包）；
     - needs_organization（待整理）：原著已标准化可用，但还没提炼出写作知识；
     - needs_update（需更新）：素材本身需要复核/更新。
+
+    workflow_stage（作者工作流阶段；与 needs_attention 相互独立）：
+    - new：尚未提纯成功（含提纯失败需重新提纯）；
+    - purified：提纯已通过但知识尚不可用于写作（含蒸馏/验收失败需重新蒸馏）；
+    - writing：蒸馏完成且 KnowledgeRetrieve 真实可发现/可加载。
+    needs_attention 只决定该阶段内是否显示错误提示与重试动作，绝不改变素材所属阶段
+    （提纯失败留在 new；蒸馏/验收失败留在 purified）。
     """
     pur = (a.get("purification") or {}).get("status") or "未处理"
     know = (a.get("knowledge") or {}).get("status") or "未开始"
     if know == "可用":
         view = _bkp_acceptance_view(a)
         if view != "review" and view != "pending" and _knowledge_is_discoverable(a):
-            return {"author_group": "usable", "state": "ready", "writing_callable": True, "attention_message": None}
-        return {"author_group": "needs_attention", "state": "needs_attention", "writing_callable": False,
+            return {"author_group": "usable", "state": "ready", "workflow_stage": "writing",
+                    "writing_callable": True, "attention_message": None}
+        # 已提纯并已蒸馏出知识，但 BKP 未通过验收或 KnowledgeRetrieve 尚不可发现：
+        # 失败发生在蒸馏之后，阶段停留在 purified（绝不回落到 new）。
+        return {"author_group": "needs_attention", "state": "needs_attention", "workflow_stage": "purified",
+                "writing_callable": False,
                 "attention_message": "资料还需要检查，确认完成后才能用于写作。"}
     if pur == "可用":
-        return {"author_group": "pending", "state": "pending_distill", "writing_callable": False, "attention_message": None}
+        return {"author_group": "pending", "state": "pending_distill", "workflow_stage": "purified",
+                "writing_callable": False, "attention_message": None}
     if pur in ("需复核", "失败", "不适用") or a.get("type") == "NEEDS_REVIEW":
         formats = _source_formats(a)
         unsupported = {"ZIP", "MOBI", "AZW3"}.intersection(formats)
         message = ("当前格式不能直接提纯，请先转换为 EPUB、TXT 或带文字层的 PDF。"
                    if unsupported else "资料需要检查后才能继续整理。")
-        return {"author_group": "needs_attention", "state": "needs_attention", "writing_callable": False,
-                "attention_message": message}
-    return {"author_group": "pending", "state": "pending_prepare", "writing_callable": False, "attention_message": None}
+        # 提纯阶段失败：阶段停留在 new（作者在此重新提纯）。
+        return {"author_group": "needs_attention", "state": "needs_attention", "workflow_stage": "new",
+                "writing_callable": False, "attention_message": message}
+    return {"author_group": "pending", "state": "pending_prepare", "workflow_stage": "new",
+            "writing_callable": False, "attention_message": None}
 
 
 def list_materials() -> dict[str, Any]:
@@ -301,6 +315,21 @@ def refresh_materials() -> dict[str, Any]:
     }
 
 
+def _inbox_file_view(f: dict[str, Any]) -> dict[str, Any]:
+    """给收件箱文件补上作者可读的 display_name / format（确定性，零模型，不读全文）。
+
+    display_name 优先用文件名 stem：尚未入库的原始文件没有更可靠的书名来源，
+    绝不为了显示书名而读取全文或调用 AI（符合 CP1.3 优先级：已有 helper → stem）。
+    format 只投影 EPUB/PDF/TXT 等作者能理解的来源格式，不泄露 SHA/路径。
+    """
+    view = dict(f)
+    filename = str(f.get("filename") or "")
+    stem = Path(filename).stem if filename else ""
+    view["display_name"] = stem or filename
+    view["format"] = Path(filename).suffix.lstrip(".").upper() if filename else ""
+    return view
+
+
 def scan_material_inbox() -> dict[str, Any]:
     """只读扫描 00_待入库（MaterialIntake inbox scan）。
 
@@ -321,7 +350,7 @@ def scan_material_inbox() -> dict[str, Any]:
             audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "material_intake", details={"skill": "MaterialIntake"})
             audit.finish_file(request_id, audit.STATUS_FAILED, error=str(exc))
             raise MaterialsError(str(exc)) from exc
-    files = intake.scan_inbox(mat_dir, ledger)
+    files = [_inbox_file_view(f) for f in intake.scan_inbox(mat_dir, ledger)]
     audit.append_event(request_id, audit.EVENT_SKILL_COMPLETED, "material_intake", details={"skill": "MaterialIntake", "files": len(files)})
     audit.finish_file(request_id, audit.STATUS_COMPLETED)
     return {"inbox": "00_待入库", "files": files}
@@ -1475,6 +1504,7 @@ def get_material_detail(asset_id: str) -> dict[str, Any]:
         "source_formats": _source_formats(asset),
         "state": classified["state"],
         "state_label": labels[classified["state"]],
+        "workflow_stage": classified["workflow_stage"],
         "writing_callable": classified["writing_callable"],
         "attention_message": classified.get("attention_message"),
         "learning_summary": summary,

@@ -390,15 +390,19 @@ p{line-height:1.65}
 .materials-secondary-filter button.active{color:var(--blue);font-weight:700}
 .split{display:grid;grid-template-columns:44% 1fr;gap:16px}
 .materials-layout{align-items:start}
-.material-list{padding:18px}
+.material-list{padding:18px;min-height:0}
 .material-list h3{margin:0 0 14px}
-.material-list>button{width:100%;border-radius:8px;justify-content:flex-start;padding:9px;text-align:left}
-.material-list>button.selected,.material-list>button.active{border-color:#7fa4ff;background:#f4f8ff}
-.material-list>button>span:nth-child(2){display:flex;flex-direction:column;gap:5px}
-.material-list em{margin-left:auto;font-style:normal;color:var(--green);font-size:13px}
-.material-list em.ok{color:var(--green)}
-.material-list em.wait{color:var(--amber)}
-.material-thumb{width:64px;height:54px;border-radius:8px;background:linear-gradient(145deg,#1e315c,#2672d8);color:#fff;display:grid;place-items:center;font-weight:700;flex:none}
+/* CP3.1 紧凑卡片网格：宽屏一行约 3–4 张（auto-fill，不硬编码列数）；卡片固定高度、标题两行省略。 */
+.material-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
+.material-card{display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;gap:6px;height:104px;padding:12px 13px;border:1px solid var(--line);border-radius:10px;background:#fff;text-align:left;overflow:hidden}
+.material-card:hover{border-color:#c3d4ff}
+.material-card.active{border-color:#7fa4ff;background:#f4f8ff}
+.material-card-title{font-weight:600;font-size:14px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+.material-card-meta{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.material-card em{margin-top:auto;margin-left:0;font-style:normal;font-size:12px;font-weight:600;color:var(--muted)}
+.material-card em.ok{color:var(--green)}
+.material-card em.wait{color:var(--muted)}
+.material-card em.warn{color:var(--amber)}
 .material-detail{padding:20px}
 .material-detail h2{margin:0;display:flex;align-items:center;gap:8px}
 .material-detail>p{margin:6px 0;color:var(--muted)}
@@ -421,6 +425,7 @@ p{line-height:1.65}
 .inbox-row>div:first-child{display:grid;gap:4px;min-width:0}
 .inbox-row .inbox-decision{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .inbox-row select,.inbox-row input{min-height:36px;border:1px solid var(--line);border-radius:8px;background:#fff;padding:6px 8px;font-size:13px}
+.inbox-row .inbox-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .inbox-panel>footer{display:flex;justify-content:flex-end;padding-top:14px}
 .classify-plan{border:1px solid var(--line);border-radius:12px;padding:16px}
 .classify-plan header{display:flex;justify-content:space-between;align-items:center}
@@ -433,9 +438,9 @@ p{line-height:1.65}
 .material-actions button:disabled{opacity:.55;cursor:not-allowed}
 
 /* ============ 素材四区互斥工作流 ============ */
-.materials-workflow{display:grid;grid-template-columns:65% 1fr;gap:16px;min-height:calc(100vh - 240px)}
+.materials-workflow{display:grid;grid-template-columns:minmax(0,65%) minmax(0,1fr);gap:16px;height:calc(100vh - 300px);min-height:440px}
 .materials-left{min-height:0;overflow-y:auto;padding-right:4px}
-.materials-right{min-height:0;overflow-y:auto;position:sticky;top:100px;max-height:calc(100vh - 200px)}
+.materials-right{min-height:0;overflow-y:auto}
 .materials-right .material-detail{min-height:320px}
 .batch-type-selector{display:grid;gap:10px;margin-top:12px}
 .batch-type-selector h4{margin:0;font-size:14px}
@@ -446,10 +451,6 @@ p{line-height:1.65}
 .inbox-list h4{margin:0 0 8px;font-size:14px}
 .stage-materials{margin-top:16px}
 .stage-materials h4{margin:0 0 8px;font-size:14px;display:flex;align-items:center;gap:6px}
-.stage-materials button{width:100%;border-radius:8px;justify-content:flex-start;padding:9px;text-align:left;border:1px solid var(--line);background:#fff}
-.stage-materials button.active{border-color:#7fa4ff;background:#f4f8ff}
-.stage-materials button>span:nth-child(2){display:flex;flex-direction:column;gap:5px}
-.stage-materials em{margin-left:auto;font-style:normal;font-size:13px}
 .materials-overview{padding:22px 26px}
 .materials-overview h3{margin:0 0 16px;font-size:18px}
 .materials-overview .overview-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;margin-bottom:18px}
@@ -587,8 +588,8 @@ p{line-height:1.65}
 .map-graph-wrap{grid-template-columns:1fr}
 .map-detail{border-left:0;border-top:1px solid var(--line)}
 .split{grid-template-columns:1fr}
-.materials-workflow{grid-template-columns:1fr}
-.materials-right{position:static;max-height:none}
+.materials-workflow{grid-template-columns:1fr;height:auto;min-height:0}
+.materials-right{max-height:none}
 .review-columns{grid-template-columns:1fr}
 .settings-layout{grid-template-columns:240px 1fr}
 .agent-discovery-grid{grid-template-columns:1fr}

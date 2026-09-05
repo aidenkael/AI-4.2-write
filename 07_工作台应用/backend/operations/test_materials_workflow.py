@@ -464,3 +464,85 @@ def test_list_materials_zero_model_calls(isolated, monkeypatch):
     detail = materials.get_material_detail("book_0001")
     assert detail["writing_callable"] is False
     assert detail["state"] == "pending_distill"
+    assert detail["workflow_stage"] == "purified"
+
+
+# ---------------------------------------------------------------------------
+# I. workflow_stage 派生（needs_attention 停留在失败前阶段，不改变所属阶段）
+# ---------------------------------------------------------------------------
+
+def _ref_asset(pur="可用", know="未开始", files=None):
+    return {"id": "book_0001", "type": "REFERENCE_WORK", "author": "",
+            "purification": {"status": pur}, "knowledge": {"status": know},
+            "files": files if files is not None else [{"path": "x.epub"}]}
+
+
+def test_workflow_stage_ready_is_writing(isolated, monkeypatch):
+    monkeypatch.setattr(materials, "_bkp_acceptance_view", lambda a: "ready")
+    monkeypatch.setattr(materials, "_knowledge_is_discoverable", lambda a: True)
+    c = materials._classify_author_group(_ref_asset(pur="可用", know="可用"))
+    assert c["state"] == "ready" and c["workflow_stage"] == "writing" and c["writing_callable"] is True
+
+
+def test_workflow_stage_post_distill_acceptance_pending_stays_purified(isolated, monkeypatch):
+    """Case A：knowledge=可用但 BKP 验收 pending → needs_attention，阶段停留 purified（不回落 new）。"""
+    monkeypatch.setattr(materials, "_bkp_acceptance_view", lambda a: "pending")
+    monkeypatch.setattr(materials, "_knowledge_is_discoverable", lambda a: True)
+    c = materials._classify_author_group(_ref_asset(pur="可用", know="可用"))
+    assert c["state"] == "needs_attention" and c["workflow_stage"] == "purified"
+
+
+def test_workflow_stage_not_discoverable_stays_purified(isolated, monkeypatch):
+    """Case A：knowledge=可用但 KnowledgeRetrieve 不可发现 → needs_attention，阶段停留 purified。"""
+    monkeypatch.setattr(materials, "_bkp_acceptance_view", lambda a: None)
+    monkeypatch.setattr(materials, "_knowledge_is_discoverable", lambda a: False)
+    c = materials._classify_author_group(_ref_asset(pur="可用", know="可用"))
+    assert c["state"] == "needs_attention" and c["workflow_stage"] == "purified"
+
+
+def test_workflow_stage_book_0010_shape_is_purified(isolated):
+    """book_0010 奥术神座真实形态：purification=可用, knowledge=未开始 → purified（待蒸馏）。"""
+    c = materials._classify_author_group(_ref_asset(pur="可用", know="未开始"))
+    assert c["state"] == "pending_distill" and c["workflow_stage"] == "purified"
+
+
+def test_workflow_stage_purify_failure_stays_new(isolated):
+    """Case B：提纯失败 → needs_attention，阶段停留 new（作者在此重新提纯）。"""
+    c = materials._classify_author_group(_ref_asset(pur="失败", know="未开始"))
+    assert c["state"] == "needs_attention" and c["workflow_stage"] == "new"
+
+
+def test_workflow_stage_pending_prepare_is_new(isolated):
+    c = materials._classify_author_group(_ref_asset(pur="未处理", know="未开始"))
+    assert c["state"] == "pending_prepare" and c["workflow_stage"] == "new"
+
+
+# ---------------------------------------------------------------------------
+# J. CP4 学习投影读取优先级（新包 author_view → 旧包根 model.md → 都没有则空）
+# ---------------------------------------------------------------------------
+
+def test_learning_projection_prefers_bkp_author_view(isolated):
+    asset_dir = isolated / "02_素材知识库" / "book_0001_样例作品"
+    (asset_dir / "bkp").mkdir(parents=True)
+    (asset_dir / "bkp" / "author_view.md").write_text("## 总览\n从 author_view 学习。\n", encoding="utf-8")
+    (asset_dir / "model.md").write_text("## 总览\n从 model 学习。\n", encoding="utf-8")
+    _summary, sections = materials._learning_projection({"id": "book_0001", "type": "REFERENCE_WORK"})
+    bodies = " ".join(s["body"] for s in sections)
+    assert "author_view" in bodies and "model" not in bodies, "新包必须优先读 bkp/author_view.md"
+
+
+def test_learning_projection_falls_back_to_root_model(isolated):
+    """旧包形态（book_0038/book_0065）：无 bkp/author_view.md，只有根 model.md → 正确显示 model。"""
+    asset_dir = isolated / "02_素材知识库" / "book_0001_样例作品"
+    (asset_dir / "bkp").mkdir(parents=True)
+    (asset_dir / "model.md").write_text("## 总览\n从 model 学习。\n", encoding="utf-8")
+    _summary, sections = materials._learning_projection({"id": "book_0001", "type": "REFERENCE_WORK"})
+    assert sections and sections[0]["body"].strip() == "从 model 学习。"
+
+
+def test_learning_projection_empty_when_no_source(isolated):
+    """两者都无 → 空详情，绝不造假。"""
+    asset_dir = isolated / "02_素材知识库" / "book_0001_样例作品"
+    (asset_dir / "bkp").mkdir(parents=True)
+    summary, sections = materials._learning_projection({"id": "book_0001", "type": "REFERENCE_WORK"})
+    assert summary is None and sections == []

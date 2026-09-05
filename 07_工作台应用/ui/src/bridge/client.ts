@@ -714,6 +714,9 @@ export interface MaterialItem {
   source_formats: string[]
   author_group: 'pending' | 'usable' | 'needs_attention'
   state: MaterialAuthorState
+  /** 后端从 purification/knowledge/KnowledgeRetrieve 真实事实派生的作者工作流阶段；
+   *  与 needs_attention 独立（needs_attention 不改变阶段，只决定阶段内的错误/重试）。 */
+  workflow_stage: 'new' | 'purified' | 'writing'
   writing_callable: boolean
   attention_message?: string | null
 }
@@ -734,6 +737,10 @@ export interface MaterialPlanItem {
 export interface MaterialInboxFile {
   path: string
   filename: string
+  /** 作者可读显示名（确定性派生，优先文件名 stem；绝不读全文/调用 AI）。 */
+  display_name: string
+  /** 作者可读来源格式：EPUB / PDF / TXT。 */
+  format: string
   sha256: string
   suffix: string
   unsupported: boolean
@@ -838,6 +845,7 @@ export interface MaterialDetail {
   source_formats: string[]
   state: MaterialAuthorState
   state_label: string
+  workflow_stage: 'new' | 'purified' | 'writing'
   writing_callable: boolean
   attention_message?: string | null
   learning_summary?: string | null

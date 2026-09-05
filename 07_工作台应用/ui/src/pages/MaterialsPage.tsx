@@ -1,4 +1,4 @@
-import { CheckCircle2, FileUp, FolderSearch, RefreshCw, UploadCloud, X } from 'lucide-react'
+import { CheckCircle2, FileUp, FolderSearch, RefreshCw, UploadCloud } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { PageHeader } from '../components/PageHeader'
 import { useApp } from '../features/app/AppStore'
@@ -6,11 +6,13 @@ import { useMaterialsController } from '../features/materials/useMaterialsContro
 import type { MaterialAssetType, MaterialPlanItem } from '../bridge/client'
 import {
   attachedMaterialName,
+  attentionRetryLabel,
   authorStateLabel,
   BATCH_TYPE_CHOICES,
   MATERIAL_TOP_NAVIGATION,
   MATERIAL_TYPE_FILTERS,
   matchesMaterialFilter,
+  materialCardMeta,
   materialsForStage,
   type MaterialTab,
 } from '../features/materials/materialsModel'
@@ -54,7 +56,6 @@ export function MaterialsPage() {
           <Icon size={15} /> {label}<small className="group-count">{tabCounts[label]}</small>
         </button>
       })}
-      <button className="secondary" disabled={controller.refreshing} onClick={() => void controller.refresh()}><RefreshCw /> {controller.refreshing ? '刷新中…' : '刷新'}</button>
     </div>
     {controller.loading && <div className="empty-state">正在加载资料…</div>}
     {controller.error && <p className="error-text">{controller.error}</p>}
@@ -68,8 +69,8 @@ export function MaterialsPage() {
           {controller.inbox.length > 0 && <div className="inbox-list">
             <h4>待入库文件 <small>（{controller.inbox.length}）</small></h4>
             {controller.inbox.map((file) => <div className="inbox-row" key={file.filename}>
-              <strong>{file.filename}</strong>
-              <small className="muted-note">{file.suffix}</small>
+              <strong className="inbox-name">{file.display_name || file.filename}</strong>
+              <small className="muted-note">{file.format || file.suffix}</small>
               {file.unsupported && <small className="error-text">不支持的格式</small>}
               {file.exact_duplicate_matches.length > 0 && <small className="muted-note">重复：{file.exact_duplicate_matches.join('、')}</small>}
             </div>)}
@@ -88,14 +89,14 @@ export function MaterialsPage() {
             {planItems.map((item: MaterialPlanItem, index: number) => item.action === 'ATTACH_EXISTING'
               ? <p key={index}>将并入已有资料：<strong>《{attachedMaterialName(item.asset_id, controller.materials)}》</strong></p>
               : <div className="inbox-row" key={index}>
-                <strong>{item.files.join('、')}</strong>
+                <strong className="inbox-name">{item.name || item.files.join('、')}</strong>
                 {item.action === 'REVIEW'
                   ? <><input value={item.name ?? ''} placeholder="资料名称" onChange={(event) => controller.updatePlanItem(index, { name: event.target.value })} />
                     <select value={item.type ?? ''} onChange={(event) => controller.updatePlanItem(index, { type: event.target.value as MaterialAssetType })}>
                       <option value="">请选择资料类型</option>
                       {BATCH_TYPE_CHOICES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
                     </select></>
-                  : <small className="muted-note">{item.name} · {BATCH_TYPE_CHOICES.find((c) => c.value === item.type)?.label ?? item.type}</small>}
+                  : <small className="muted-note">{BATCH_TYPE_CHOICES.find((c) => c.value === item.type)?.label ?? item.type}</small>}
               </div>)}
             <footer>
               <button className="primary" disabled={controller.applying} onClick={() => void controller.confirmApply()}>{controller.applying ? '入库中…' : '确认入库'}</button>
@@ -104,11 +105,13 @@ export function MaterialsPage() {
           </section>}
           {newItems.length > 0 && <div className="stage-materials">
             <h4>已入库待提纯 <small>（{newItems.length}）</small></h4>
-            {newItems.map((m) => <button key={m.id} className={selectedId === m.id ? 'active' : ''} onClick={() => { setSelectedId(m.id); void controller.selectDetail(m.id) }}>
-              <span className="material-thumb">书</span>
-              <span><strong>{m.name}</strong><small>{m.type_label}{m.author ? ` · ${m.author}` : ''}</small></span>
-              <em className="wait">{authorStateLabel(m.state)}</em>
-            </button>)}
+            <div className="material-grid">
+              {newItems.map((m) => <button key={m.id} className={selectedId === m.id ? 'material-card active' : 'material-card'} onClick={() => { setSelectedId(m.id); void controller.selectDetail(m.id) }}>
+                <span className="material-card-title">{m.name}</span>
+                <span className="material-card-meta">{materialCardMeta(m)}</span>
+                <em className={m.state === 'needs_attention' ? 'warn' : 'wait'}>{authorStateLabel(m.state)}</em>
+              </button>)}
+            </div>
           </div>}
         </div>
       </div>
@@ -139,11 +142,13 @@ export function MaterialsPage() {
         </div>
         <section className="panel material-list">
           <h3>写作素材库 <small>（{filteredWriting.length}）</small></h3>
-          {filteredWriting.map((material) => <button key={material.id} className={selectedId === material.id ? 'active' : ''} onClick={() => { setSelectedId(material.id); void controller.selectDetail(material.id) }}>
-            <span className="material-thumb">书</span>
-            <span><strong>{material.name}</strong><small>{material.type_label}{material.author ? ` · ${material.author}` : ''}</small></span>
-            <em className="ok">{authorStateLabel(material.state)}</em>
-          </button>)}
+          <div className="material-grid">
+            {filteredWriting.map((material) => <button key={material.id} className={selectedId === material.id ? 'material-card active' : 'material-card'} onClick={() => { setSelectedId(material.id); void controller.selectDetail(material.id) }}>
+              <span className="material-card-title">{material.name}</span>
+              <span className="material-card-meta">{materialCardMeta(material)}</span>
+              <em className="ok">{authorStateLabel(material.state)}</em>
+            </button>)}
+          </div>
           {!controller.loading && filteredWriting.length === 0 && <div className="empty-state">这里暂时没有资料。</div>}
         </section>
       </div>
@@ -197,6 +202,10 @@ function MaterialDetailPanel({ detail, controller }: {
     {detail.state === 'needs_attention' && <>
       <h3>需要检查</h3>
       <p>{detail.attention_message}</p>
+      {attentionRetryLabel(detail.workflow_stage) && <button className="primary" disabled={controller.busyAssetId !== null}
+        onClick={() => void (detail.workflow_stage === 'purified' ? controller.runDistill(detail.id) : controller.runPrepare(detail.id))}>
+        {controller.busyAssetId === detail.id ? '处理中…' : attentionRetryLabel(detail.workflow_stage)}
+      </button>}
     </>}
     {detail.state === 'ready' && <>
       <h3>✓ 可用于写作</h3>
@@ -220,11 +229,13 @@ function MaterialStagePanel({ items, title, selectedId, selected, detail, contro
     <div className="materials-left">
       <section className="panel material-list">
         <h3>{title} <small>（{items.length}）</small></h3>
-        {items.map((material) => <button key={material.id} className={selectedId === material.id ? 'active' : ''} onClick={() => onSelect(material.id)}>
-          <span className="material-thumb">书</span>
-          <span><strong>{material.name}</strong><small>{material.type_label}{material.author ? ` · ${material.author}` : ''}</small></span>
-          <em className={material.state === 'ready' ? 'ok' : 'wait'}>{authorStateLabel(material.state)}</em>
-        </button>)}
+        <div className="material-grid">
+          {items.map((material) => <button key={material.id} className={selectedId === material.id ? 'material-card active' : 'material-card'} onClick={() => onSelect(material.id)}>
+            <span className="material-card-title">{material.name}</span>
+            <span className="material-card-meta">{materialCardMeta(material)}</span>
+            <em className={material.state === 'ready' ? 'ok' : material.state === 'needs_attention' ? 'warn' : 'wait'}>{authorStateLabel(material.state)}</em>
+          </button>)}
+        </div>
         {items.length === 0 && <div className="empty-state">这里暂时没有资料。</div>}
       </section>
     </div>

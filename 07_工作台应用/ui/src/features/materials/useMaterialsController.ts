@@ -70,7 +70,7 @@ const toMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 export function useMaterialsController(options?: { notify?: (message: string) => void }): MaterialsController {
   const notify = options?.notify
-  const { task, start, cancel: cancelTask, consume } = useAuthorTask()
+  const { task, start, consume } = useAuthorTask()
   const [materials, setMaterials] = useState<MaterialItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)

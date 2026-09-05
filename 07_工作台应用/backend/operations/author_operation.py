@@ -34,7 +34,6 @@ _KIND_TO_OPERATION: dict[str, str] = {
     "story_plan_propose": "story_plan",
     "story_write_propose": "story_write",
     "review_propose": "review",
-    "material_classify_propose": "material_classify",
     "foundation_design_propose": "foundation_design",
     # 蒸馏归一化为同一个作者面操作（后端已按素材类型分派 BookDistill / MethodDistill）
     "book_distill_propose": "material_distill",

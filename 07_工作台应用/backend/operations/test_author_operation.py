@@ -125,17 +125,6 @@ def test_stale_active_pointer_cleared(isolated):
     assert bridge.get_active_request_id() is None
 
 
-def test_material_kind_normalization(isolated):
-    rid = bridge.create_request(
-        task="t", kind="material_classify_propose",
-        meta={"execution": {"execution_mode": "interactive_bridge", "agent_id": "qoder", "model": None}},
-        activate_for_gowrite=True,
-    )
-    facts = ao.get_active_author_operation()
-    assert facts["kind"] == "material_classify"
-    assert facts["state"] == "pending"
-
-
 def test_distill_kind_normalization(isolated):
     """BookDistill / MethodDistill 桥请求都归一化为同一个作者面操作 material_distill。"""
     for bridge_kind in ("book_distill_propose", "method_distill_propose"):
