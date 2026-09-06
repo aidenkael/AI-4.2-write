@@ -716,15 +716,22 @@ export interface MaterialItem {
   state: MaterialAuthorState
   /** 后端从 purification/knowledge/KnowledgeRetrieve 真实事实派生的作者工作流阶段；
    *  与 needs_attention 独立（needs_attention 不改变阶段，只决定阶段内的错误/重试）。
-   *  other = 其他/研究资料（LOOSE_MATERIAL/RESEARCH），不进入三生产区，只在素材总览统计。 */
+   *  other = 其他（LOOSE_MATERIAL；历史 RESEARCH），不进入三生产区，只在素材总览统计。 */
   workflow_stage: 'new' | 'purified' | 'writing' | 'other'
   writing_callable: boolean
   attention_message?: string | null
+  /** §8 派生投影：是否存在真实当前提纯 Markdown（绝不与原始来源格式混用）。 */
+  prepared_available: boolean
+  /** 提纯结果格式：存在真实当前 Prepare 产物时为 "MD"，否则 null。 */
+  prepared_format: string | null
+  /** 已定稿可检索知识包类型：BKP / METHOD / null（写作素材库展示用，不混来源格式）。 */
+  knowledge_package_kind: 'BKP' | 'METHOD' | null
 }
 
 export type MaterialAuthorState = 'pending_prepare' | 'pending_distill' | 'needs_attention' | 'ready'
 
-export type MaterialAssetType = 'REFERENCE_WORK' | 'METHOD_SOURCE' | 'RESEARCH' | 'LOOSE_MATERIAL'
+/** 作者可创建的三种正常类型（§2）；RESEARCH 不再是作者可选类型。 */
+export type MaterialAssetType = 'REFERENCE_WORK' | 'METHOD_SOURCE' | 'LOOSE_MATERIAL'
 
 export interface MaterialPlanItem {
   action: 'NEW_ASSET' | 'ATTACH_EXISTING' | 'REVIEW'
@@ -756,8 +763,6 @@ export interface MaterialIntakeResult {
   duplicates_removed: unknown[]
   reviews: string[]
   moves: unknown[]
-  git_outcome: string
-  git_warning: string | null
   message: string
 }
 
@@ -767,8 +772,14 @@ export async function listMaterials(): Promise<MaterialItem[]> {
   return data.materials
 }
 
-/** 显式触发 MaterialIntake catalog refresh（确定性、无模型）。 */
-export async function refreshMaterials(): Promise<{ assets: number; files: number; containers: number; message: string }> {
+/** 显式「刷新状态」：先 reconcile 作者手动文件夹编辑，再刷新派生状态与三视图（确定性、无模型、无 Git）。 */
+export async function refreshMaterials(): Promise<{
+  assets: number; files: number; containers: number; message: string
+  registered?: Array<{ id: string; name: string; type: string }>
+  moved?: Array<{ id: string; to: string }>
+  renamed?: Array<{ id: string; from: string; to: string }>
+  missing_sources?: string[]
+}> {
   return call('refresh_materials')
 }
 
@@ -849,6 +860,10 @@ export interface MaterialDetail {
   workflow_stage: 'new' | 'purified' | 'writing' | 'other'
   writing_callable: boolean
   attention_message?: string | null
+  /** §8：真实当前提纯产物存在性/格式与已定稿知识包类型（详情分行展示，绝不混用）。 */
+  prepared_available: boolean
+  prepared_format: string | null
+  knowledge_package_kind: 'BKP' | 'METHOD' | null
   learning_summary?: string | null
   learning_sections: Array<{ title: string; body: string }>
 }

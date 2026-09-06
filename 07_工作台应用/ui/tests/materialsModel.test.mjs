@@ -23,6 +23,7 @@ import {
   deriveWorkflowStage,
   materialsForStage,
   materialCardMeta,
+  cardFormatLabel,
   attentionRetryLabel,
   workflowStageLabel,
   countMaterialsByType,
@@ -60,15 +61,18 @@ test('batch type 映射正确：原著/技巧类/其他 → REFERENCE_WORK/METHO
 test('batch type 没有默认选择：未选时主按钮 disabled', () => {
   assert.equal(DEFAULT_BATCH_TYPE, '')
   // 未选类型：主按钮 disabled（不猜默认类型、不请求后端）
-  assert.deepEqual(inboxPrimaryAction(DEFAULT_BATCH_TYPE, false), { label: '提纯', disabled: true })
+  assert.deepEqual(inboxPrimaryAction(DEFAULT_BATCH_TYPE, false), { label: '入库', disabled: true })
 })
 
-test('新增素材区主按钮：原著/技巧类=提纯、其他=保存素材、运行中显示进行中文案', () => {
-  assert.deepEqual(inboxPrimaryAction('REFERENCE_WORK', false), { label: '提纯', disabled: false })
-  assert.deepEqual(inboxPrimaryAction('METHOD_SOURCE', false), { label: '提纯', disabled: false })
-  assert.deepEqual(inboxPrimaryAction('LOOSE_MATERIAL', false), { label: '保存素材', disabled: false })
-  assert.deepEqual(inboxPrimaryAction('REFERENCE_WORK', true), { label: '正在提纯…', disabled: true })
-  assert.deepEqual(inboxPrimaryAction('LOOSE_MATERIAL', true), { label: '正在保存…', disabled: true })
+test('新增素材区主按钮是「入库」（§4：不是提纯； intake 与 Prepare 分离）', () => {
+  assert.deepEqual(inboxPrimaryAction('REFERENCE_WORK', false), { label: '入库', disabled: false })
+  assert.deepEqual(inboxPrimaryAction('METHOD_SOURCE', false), { label: '入库', disabled: false })
+  assert.deepEqual(inboxPrimaryAction('LOOSE_MATERIAL', false), { label: '入库', disabled: false })
+  assert.deepEqual(inboxPrimaryAction('REFERENCE_WORK', true), { label: '正在入库…', disabled: true })
+  // 绝不出现「提纯」作为入库主按钮文案
+  for (const t of ['REFERENCE_WORK', 'METHOD_SOURCE', 'LOOSE_MATERIAL']) {
+    assert.equal(inboxPrimaryAction(t, false).label.includes('提纯'), false)
+  }
 })
 
 test('stage 互斥派生：pending_prepare→new、pending_distill→purified、ready→writing', () => {
@@ -122,9 +126,9 @@ test('writing 素材不出现在 purified；purified 素材不出现在 new（�
   assert.equal(total, all.length)
 })
 
-test('workflow_stage 支持 other：其他/研究资料不进入三生产区', () => {
-  const loose = item({ type: 'LOOSE_MATERIAL', type_label: '零散素材', state: 'pending_prepare', workflow_stage: 'other' })
-  const research = item({ type: 'RESEARCH', type_label: '研究资料', state: 'pending_prepare', workflow_stage: 'other' })
+test('workflow_stage 支持 other：其他（LOOSE_MATERIAL；历史 RESEARCH）不进入三生产区', () => {
+  const loose = item({ type: 'LOOSE_MATERIAL', type_label: '其他', state: 'pending_prepare', workflow_stage: 'other' })
+  const research = item({ type: 'RESEARCH', type_label: '其他', state: 'pending_prepare', workflow_stage: 'other' })
   // deriveWorkflowStage 直接信任后端 other
   assert.equal(deriveWorkflowStage(loose), 'other')
   assert.equal(deriveWorkflowStage(research), 'other')
@@ -164,10 +168,23 @@ test('素材总览：类型分布（原著/技巧类/其他）+ 阶段区域名'
   assert.equal(workflowStageLabel(null), '')
 })
 
-test('列表使用真实 format：卡片信息行 = 类型 · 格式 · 作者', () => {
-  assert.equal(materialCardMeta(item({ type_label: '原著', source_formats: ['EPUB'], author: '马伯庸' })), '原著 · EPUB · 马伯庸')
-  assert.equal(materialCardMeta(item({ type_label: '原著', source_formats: ['EPUB', 'TXT'], author: '' })), '原著 · EPUB / TXT')
-  assert.equal(materialCardMeta(item({ type_label: '技巧书', source_formats: ['PDF'], author: '' })), '技巧书 · PDF')
+test('列表使用阶段对应格式（§8）：new=来源、purified=MD、writing=知识包（不混用）', () => {
+  // new（待入库/待提纯）：原始来源格式
+  assert.equal(materialCardMeta(item({ type_label: '原著', source_formats: ['EPUB'], author: '马伯庸', workflow_stage: 'new' })), '原著 · EPUB · 马伯庸')
+  assert.equal(materialCardMeta(item({ type_label: '原著', source_formats: ['EPUB', 'TXT'], author: '', workflow_stage: 'new' })), '原著 · EPUB / TXT')
+  assert.equal(materialCardMeta(item({ type_label: '技巧类', source_formats: ['PDF'], author: '', workflow_stage: 'new' })), '技巧类 · PDF')
+  // purified（已提纯）：提纯结果 MD，不显示来源格式
+  const purified = item({ type_label: '原著', source_formats: ['EPUB', 'TXT'], author: '', workflow_stage: 'purified', state: 'pending_distill', prepared_format: 'MD', prepared_available: true })
+  assert.equal(cardFormatLabel(purified), 'MD')
+  assert.equal(materialCardMeta(purified), '原著 · MD')
+  // writing（写作素材库）：知识包表示，绝不混来源+MD
+  const writing = item({ type_label: '原著', source_formats: ['EPUB', 'TXT'], author: '', workflow_stage: 'writing', state: 'ready', prepared_format: 'MD', knowledge_package_kind: 'BKP' })
+  assert.equal(cardFormatLabel(writing), '知识包')
+  const meta = materialCardMeta(writing)
+  assert.equal(meta.includes('EPUB'), false, 'writing 卡不得混入来源格式')
+  assert.equal(meta.includes('MD'), false, 'writing 卡不得混入提纯 MD 格式')
+  const methodWriting = item({ type_label: '技巧类', workflow_stage: 'writing', state: 'ready', knowledge_package_kind: 'METHOD' })
+  assert.equal(cardFormatLabel(methodWriting), '方法知识')
 })
 
 test('matchesMaterialFilter 二级筛选按真实 canonical 类型', () => {
@@ -191,8 +208,30 @@ test('导入 UI 无 AI 分类 / 识别 running 状态；改为批次机械入库
   // 批次机械计划 + MaterialIntake 事务入口存在（零 AI，后台内部实现）
   assert.ok(controllerSrc.includes('buildIntakePlan'), '批次机械入库计划入口存在')
   assert.ok(controllerSrc.includes('applyMaterialIntake'), 'MaterialIntake 事务入口存在')
-  // 唯一作者批次动作存在（一次完成 intake + prepare）
+  // 唯一作者批次动作存在（§4：只 intake，绝不自动 prepare）
   assert.ok(controllerSrc.includes('processInboxBatch'), '唯一作者批次动作 processInboxBatch 存在')
+})
+
+test('§4：入库动作不再自动提纯（processInboxBatch 不调用 prepareMaterial）', () => {
+  const start = controllerSrc.indexOf('const processInboxBatch')
+  assert.ok(start >= 0)
+  const body = controllerSrc.slice(start, controllerSrc.indexOf('const runPrepare', start))
+  assert.equal(body.includes('prepareMaterial'), false, '入库批次动作绝不自动提纯')
+  assert.ok(body.includes('applyMaterialIntake'), '入库批次动作走 MaterialIntake 事务')
+})
+
+test('§11：distill 忙碌状态派生自 App 级任务（取消即清除，不持有第二套 local busy）', () => {
+  assert.equal(controllerSrc.includes('setBusyKind'), false, '不得保留独立 distill busy setter')
+  assert.equal(controllerSrc.includes('setBusyAssetId'), false, '不得保留独立 distill busy setter')
+  assert.ok(controllerSrc.includes('distillBusyAssetId'), 'distill 忙碌状态从 App 级任务派生')
+  assert.ok(controllerSrc.includes('prepareBusyAssetId'), '本页只拥有同步 Prepare 忙碌状态')
+})
+
+test('§13：新增素材区分「待入库」/「待提纯」；紧凑上传条取代 drop-zone', () => {
+  assert.ok(pageSrc.includes('待入库'), '新增素材区含「待入库」分组')
+  assert.ok(pageSrc.includes('待提纯'), '新增素材区含「待提纯」分组')
+  assert.ok(pageSrc.includes('upload-bar'), '使用紧凑上传条')
+  assert.equal(pageSrc.includes('drop-zone'), false, '不得保留过大 drop-zone')
 })
 
 test('作者 plan/confirm 生命周期与逐本类型 UI 已删除（不再有 updatePlanItem 作者模型）', () => {

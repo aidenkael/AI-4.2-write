@@ -68,17 +68,29 @@ export function MaterialsPage() {
     {tab === '新增素材' && <section className="materials-workflow">
       <div className="materials-left">
         <div className="panel materials-intake">
-          <div className="drop-zone"><UploadCloud size={34} /><p><strong>选择本地资料</strong></p><p className="muted-note">支持 EPUB、TXT、PDF（单文件上限 200 MB）。</p><button className="primary" disabled={controller.importing} onClick={() => void controller.pickAndImport()}>{controller.importing ? '导入中…' : '选择文件'}</button></div>
+          <div className="upload-bar">
+            <UploadCloud size={20} />
+            <div className="upload-bar-text">
+              <strong>选择本地资料</strong>
+              <span className="muted-note">支持 EPUB / PDF / TXT</span>
+            </div>
+            <button className="primary" disabled={controller.importing} onClick={() => void controller.pickAndImport()}>{controller.importing ? '导入中…' : '选择文件'}</button>
+          </div>
           {controller.inboxLoading && <p className="muted-note">正在扫描收件箱…</p>}
           {controller.inboxError && <p className="error-text">{controller.inboxError}</p>}
-          {controller.inbox.length > 0 && <div className="inbox-list">
-            <h4>待入库文件 <small>（{controller.inbox.length}）</small></h4>
-            {controller.inbox.map((file) => <div className="inbox-row" key={file.filename}>
-              <strong className="inbox-name">{file.display_name || file.filename}</strong>
-              <small className="muted-note">{file.format || file.suffix}</small>
-              {file.unsupported && <small className="error-text">不支持的格式</small>}
-              {file.exact_duplicate_matches.length > 0 && <small className="muted-note">重复：{file.exact_duplicate_matches.join('、')}</small>}
-            </div>)}
+          {controller.inbox.length > 0 && <div className="stage-materials">
+            <h4>待入库 <small>（{controller.inbox.length}）</small></h4>
+            <div className="material-grid">
+              {controller.inbox.map((file) => <div className="material-card inbox-card" key={file.filename}>
+                <span className="material-card-title">{file.display_name || file.filename}</span>
+                <span className="material-card-meta">{file.format || file.suffix}</span>
+                {file.unsupported
+                  ? <em className="warn">不支持的格式</em>
+                  : file.exact_duplicate_matches.length > 0
+                    ? <em className="wait">与已有素材重复</em>
+                    : <em className="wait">待入库</em>}
+              </div>)}
+            </div>
           </div>}
           {hasInboxFiles && <div className="batch-type-selector">
             <h4>批次类型</h4>
@@ -90,7 +102,7 @@ export function MaterialsPage() {
             </button>
           </div>}
           {newItems.length > 0 && <div className="stage-materials">
-            <h4>已入库待提纯 <small>（{newItems.length}）</small></h4>
+            <h4>待提纯 <small>（{newItems.length}）</small></h4>
             <div className="material-grid">
               {newItems.map((m) => <button key={m.id} className={selectedId === m.id ? 'material-card active' : 'material-card'} onClick={() => { setSelectedId(m.id); void controller.selectDetail(m.id) }}>
                 <span className="material-card-title">{m.name}</span>
@@ -184,9 +196,11 @@ function MaterialDetailPanel({ detail, controller }: {
 }) {
   return <div className="material-answer">
     <h2>《{detail.name}》</h2>
-    <p className="muted-note">
-      {detail.type_label}{detail.author ? ` · ${detail.author}` : ''}
-      {detail.source_formats.length ? ` · ${detail.source_formats.join(' / ')}` : ''}
+    <p className="muted-note">{detail.type_label}{detail.author ? ` · ${detail.author}` : ''}</p>
+    <p className="muted-note material-facts">
+      {detail.source_formats.length ? <span>原始来源：{detail.source_formats.join(' / ')}</span> : null}
+      {detail.prepared_available && detail.prepared_format ? <span>提纯结果：{detail.prepared_format}</span> : null}
+      {detail.knowledge_package_kind ? <span>知识包：{detail.knowledge_package_kind === 'METHOD' ? '方法知识' : '参考知识'}</span> : null}
     </p>
     {detail.state === 'pending_prepare' && <>
       <p>还没有整理原文。</p>

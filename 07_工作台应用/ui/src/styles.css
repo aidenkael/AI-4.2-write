@@ -414,36 +414,29 @@ p{line-height:1.65}
 .material-answer p{margin:0;line-height:1.65}
 .material-answer strong{margin-right:8px}
 .materials-intake{display:grid;gap:14px;margin-top:14px}
-.drop-zone{display:flex;flex-direction:column;align-items:center;gap:8px;padding:28px 18px;border:2px dashed var(--line);border-radius:14px;background:#fafcff;text-align:center}
-.drop-zone.dragging{border-color:var(--blue);background:#eef5ff}
-.drop-zone p{margin:0}
-.drop-zone .primary{margin-top:6px}
-.inbox-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-.inbox-panel{margin-top:18px;padding:18px}
-.inbox-panel>header{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.inbox-row{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:12px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}
-.inbox-row>div:first-child{display:grid;gap:4px;min-width:0}
-.inbox-row .inbox-decision{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.inbox-row select,.inbox-row input{min-height:36px;border:1px solid var(--line);border-radius:8px;background:#fff;padding:6px 8px;font-size:13px}
-.inbox-row .inbox-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.inbox-panel>footer{display:flex;justify-content:flex-end;padding-top:14px}
-.material-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:6px}
-.material-actions button{min-height:36px;border:1px solid var(--line);border-radius:8px;background:#fff;padding:8px 14px;font-size:13px;font-weight:600;color:var(--text)}
-.material-actions button.primary{background:var(--blue);border-color:var(--blue);color:#fff}
-.material-actions button:disabled{opacity:.55;cursor:not-allowed}
+/* §13 紧凑上传条（取代过大 drop-zone） */
+.upload-bar{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:#fafcff}
+.upload-bar>svg{color:var(--blue);flex:0 0 auto}
+.upload-bar-text{display:grid;gap:2px;min-width:0;flex:1 1 auto}
+.upload-bar-text strong{font-size:14px}
+.upload-bar-text .muted-note{font-size:12px}
+.upload-bar .primary{flex:0 0 auto;margin-left:auto}
+/* 待入库紧凑卡（与素材卡一致，不可点击） */
+.inbox-card{cursor:default}
+.inbox-card:hover{border-color:var(--line)}
+/* 详情事实行：原始来源 / 提纯结果 / 知识包分行展示（§8，绝不混用） */
+.material-facts{display:flex;flex-wrap:wrap;gap:4px 14px}
 
-/* ============ 素材四区互斥工作流 ============ */
-.materials-workflow{display:grid;grid-template-columns:minmax(0,65%) minmax(0,1fr);gap:16px;height:calc(100vh - 300px);min-height:440px}
-.materials-left{min-height:0;overflow-y:auto;padding-right:4px}
-.materials-right{min-height:0;overflow-y:auto}
+/* ============ 素材四区互斥工作流（§13：稳定两栏、无横向滚动、左右各自纵向滚动） ============ */
+.materials-workflow{display:grid;grid-template-columns:minmax(0,68%) minmax(0,1fr);gap:16px;height:calc(100vh - 300px);min-height:440px;overflow-x:hidden}
+.materials-left{min-height:0;min-width:0;overflow-y:auto;overflow-x:hidden;padding-right:4px}
+.materials-right{min-height:0;min-width:0;overflow-y:auto;overflow-x:hidden}
 .materials-right .material-detail{min-height:320px}
 .batch-type-selector{display:grid;gap:10px;margin-top:12px}
 .batch-type-selector h4{margin:0;font-size:14px}
 .type-choices{display:flex;gap:8px;flex-wrap:wrap}
 .type-choices button{border:1px solid var(--line);border-radius:20px;padding:6px 16px;font-size:13px;background:#fff}
 .type-choices button.active{background:#e9f1ff;color:var(--blue);border-color:var(--blue);font-weight:700}
-.inbox-list{margin-top:12px}
-.inbox-list h4{margin:0 0 8px;font-size:14px}
 .stage-materials{margin-top:16px}
 .stage-materials h4{margin:0 0 8px;font-size:14px;display:flex;align-items:center;gap:6px}
 .materials-overview{padding:22px 26px}

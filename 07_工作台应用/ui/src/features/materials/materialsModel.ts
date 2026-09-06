@@ -16,13 +16,12 @@ export const DEFAULT_BATCH_TYPE = ''
 
 export type MaterialWorkflowStage = 'new' | 'purified' | 'writing' | 'other'
 
-/** 新增素材区唯一主按钮：未选类型 disabled；原著/技巧类=提纯；其他=保存素材。
+/** 新增素材区唯一主按钮：未选类型 disabled；选定后为「入库」（§4：intake 与提纯分离，入库绝不自动提纯）。
  *  running 时显示进行中文案并 disabled（防重复点击）。纯函数，供机械测试。 */
 export function inboxPrimaryAction(batchType: string, processing: boolean): { label: string; disabled: boolean } {
-  const isOther = batchType === 'LOOSE_MATERIAL'
-  if (!batchType) return { label: '提纯', disabled: true }
-  if (processing) return { label: isOther ? '正在保存…' : '正在提纯…', disabled: true }
-  return { label: isOther ? '保存素材' : '提纯', disabled: false }
+  if (!batchType) return { label: '入库', disabled: true }
+  if (processing) return { label: '正在入库…', disabled: true }
+  return { label: '入库', disabled: false }
 }
 
 export function authorStateLabel(state: MaterialAuthorState): string {
@@ -48,12 +47,27 @@ export function materialsForStage(items: MaterialItem[], stage: MaterialWorkflow
   return items.filter((item) => deriveWorkflowStage(item) === stage)
 }
 
-/** 书籍卡紧凑信息行：类型 · 真实格式 · 作者（例：原著 · EPUB · 马伯庸）。
- *  格式只来自 source_formats（asset.files 后缀派生）；缺项自动省略，绝不堆状态解释。 */
-export function materialCardMeta(item: { type_label: string; source_formats: string[]; author: string }): string {
+/** 卡片格式标签（§8）：按工作流阶段选择展示格式，绝不混用来源/提纯/知识格式。
+ *  new/other（待入库/待提纯）→ 原始来源（EPUB/PDF/TXT）；purified（已提纯）→ 提纯结果 MD；
+ *  writing（写作素材库）→ 知识包表示（不混来源+MD）。 */
+export function cardFormatLabel(item: MaterialItem): string {
+  const stage = deriveWorkflowStage(item)
+  if (stage === 'writing') {
+    if (item.knowledge_package_kind === 'METHOD') return '方法知识'
+    if (item.knowledge_package_kind === 'BKP') return '知识包'
+    return ''
+  }
+  if (stage === 'purified') return item.prepared_format || 'MD'
+  return item.source_formats?.length ? item.source_formats.join(' / ') : ''
+}
+
+/** 书籍卡紧凑信息行：类型 · 阶段对应格式 · 作者（例：原著 · EPUB · 马伯庸）。
+ *  格式由 cardFormatLabel 按阶段决定；缺项自动省略，绝不堆状态解释。 */
+export function materialCardMeta(item: MaterialItem): string {
   const parts: string[] = []
   if (item.type_label) parts.push(item.type_label)
-  if (item.source_formats?.length) parts.push(item.source_formats.join(' / '))
+  const fmt = cardFormatLabel(item)
+  if (fmt) parts.push(fmt)
   if (item.author) parts.push(item.author)
   return parts.join(' · ')
 }
