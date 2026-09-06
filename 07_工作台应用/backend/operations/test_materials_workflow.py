@@ -60,17 +60,39 @@ def _write_ledger(root, ledger=None):
 
 
 def _fake_asset_ledger(asset_id="book_0001", name="样例作品", mtype="REFERENCE_WORK",
-                       pur="可用", know="未开始"):
+                       pur="可用", know="未开始", sha="a" * 64):
     return {
         "schema_version": "1.0",
         "assets": [{
             "id": asset_id, "name": name, "type": mtype, "author": "", "tags": [], "notes": "",
-            "files": [{"path": "01_参考作品/样例作品/样例.epub", "sha256": "a" * 64, "primary": True}],
+            "files": [{"path": f"01_原著/{name}/样例.epub", "sha256": sha, "primary": True}],
             "purification": {"status": pur},
             "knowledge": {"status": know},
         }],
         "containers": [],
     }
+
+
+def _write_source(root, rel="01_原著/样例作品/样例.epub", content=b"sample-epub-bytes"):
+    """在磁盘上创建真实来源文件（§7：_source_files_missing / prepared 校验需要真实磁盘状态）。"""
+    src = root / "01_原始素材" / rel
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_bytes(content)
+    return src
+
+
+def _write_sp_package(root, asset_id="book_0001", name="样例作品", sha="a" * 64,
+                      status="PASS", with_md=True, subdir="chapters"):
+    """创建真实 06 SourcePrepare PASS 包（full.md + chapters/ + metadata.json），sha 与 ledger 匹配。"""
+    sp = root / "06_工作区" / "SourcePrepare" / f"{asset_id}_{name}"
+    (sp / subdir).mkdir(parents=True, exist_ok=True)
+    if with_md:
+        (sp / "full.md").write_text("# full\n", encoding="utf-8")
+    (sp / "metadata.json").write_text(json.dumps({
+        "book_id": asset_id, "status": status,
+        "selected_source": {"format": ".epub", "sha256": sha},
+    }, ensure_ascii=False), encoding="utf-8")
+    return sp
 
 
 # ---------------------------------------------------------------------------
@@ -84,9 +106,9 @@ def test_import_stages_only_to_inbox(isolated, tmp_path):
     assert len(result["imported"]) == 1
     dest = isolated / "01_原始素材" / "00_待入库" / "sample.epub"
     assert dest.read_bytes() == b"fake-epub-content"
-    # 绝不写入最终 canonical 目录（无 01_参考作品/01_研究资料 等创建）
-    for sub in ("01_参考作品", "01_研究资料", "01_零散素材"):
-        assert not (isolated / sub).exists(), f"导入不得直接写 {sub}"
+    # 绝不写入最终 canonical 角色目录（导入只进 00_待入库）
+    for sub in ("01_原著", "02_技巧类", "03_其他"):
+        assert not (isolated / "01_原始素材" / sub).exists(), f"导入不得直接写 {sub}"
 
 
 def test_import_rejects_unsupported_and_missing(isolated, tmp_path):
@@ -283,6 +305,7 @@ def test_run_source_prepare_rejects_loose_material(isolated):
 # ---------------------------------------------------------------------------
 
 def test_run_book_distill_requires_pass_input(isolated, monkeypatch):
+    """§9：没有真实当前 Prepare MD → 拒绝蒸馏（绝不直接读 EPUB/PDF/TXT），作者可读「请先重新提纯」。"""
     _write_ledger(isolated, _fake_asset_ledger(pur="可用"))
     monkeypatch.setattr(materials, "_REPO_ROOT", isolated.parent)
     monkeypatch.setattr(materials.sys, "executable", "python")
@@ -293,14 +316,17 @@ def test_run_book_distill_requires_pass_input(isolated, monkeypatch):
     gate_script.write_text("", encoding="utf-8")
     monkeypatch.setattr(materials, "_ACCEPTANCE_GATE_SCRIPT", gate_script)
 
-    # 没有 SP 输出目录 → 拒绝（必须先生成 PASS 提纯产物）
-    with pytest.raises(materials.MaterialsError, match="还没有任何提纯产物"):
+    # 没有真实当前 Prepare MD → 拒绝（必须先生成 PASS 提纯产物）
+    with pytest.raises(materials.MaterialsError, match="请先重新提纯"):
         materials.run_book_distill("book_0001")
 
 
 def test_run_book_distill_deterministic_stages(isolated, monkeypatch):
+    """§9：Agent 只写 06 staging；assemble/profile/bkp/acceptance 全部通过后受控发布到 02。"""
     _use_direct("fake_distill_agent")
     _write_ledger(isolated, _fake_asset_ledger(pur="可用"))
+    _write_source(isolated)
+    _write_sp_package(isolated)
     monkeypatch.setattr(materials, "_REPO_ROOT", isolated.parent)
     monkeypatch.setattr(materials.sys, "executable", "python")
     bd_script = materials._REPO_ROOT / "05_Skills与自动化" / "01_Skills" / "BookDistill" / "scripts" / "book_distill.py"
@@ -309,8 +335,6 @@ def test_run_book_distill_deterministic_stages(isolated, monkeypatch):
     gate_script = bd_script.with_name("acceptance_gate.py")
     gate_script.write_text("", encoding="utf-8")
     monkeypatch.setattr(materials, "_ACCEPTANCE_GATE_SCRIPT", gate_script)
-    sp_dir = isolated / "06_工作区" / "SourcePrepare" / "book_0001_样例作品"
-    sp_dir.mkdir(parents=True)
 
     class _FakeAdapter:
         name = "fake_distill_agent"
@@ -324,18 +348,22 @@ def test_run_book_distill_deterministic_stages(isolated, monkeypatch):
     calls = []
     catalog, _, _ = materials._load_materialintake()
 
+    def _out_dir(cmd):
+        return Path(cmd[cmd.index("--output") + 1]) if "--output" in cmd else None
+
     def fake_run(cmd, **kw):
-        if any("book_distill.py" in str(c) for c in cmd):
+        cmd = [str(c) for c in cmd]
+        if any("book_distill.py" in c for c in cmd):
             calls.append(cmd[2])  # 子命令：validate/prepare/assemble/profile/bkp
             if cmd[2] == "bkp":
-                bkp = isolated / "02_素材知识库" / "book_0001_样例作品" / "bkp"
+                bkp = _out_dir(cmd) / "bkp"  # staging/bkp
                 (bkp / "knowledge").mkdir(parents=True, exist_ok=True)
                 (bkp / "identity.json").write_text(json.dumps({"book": {"book_id": "book_0001", "title": "样例作品"}}, ensure_ascii=False), encoding="utf-8")
                 (bkp / "knowledge" / "cards.md").write_text("## K001\n", encoding="utf-8")
                 (bkp / "author_view.md").write_text("## 总览\n可学习。\n", encoding="utf-8")
-        if any("acceptance_gate.py" in str(c) for c in cmd):
+        if any("acceptance_gate.py" in c for c in cmd):
             calls.append("acceptance")
-            identity_path = isolated / "02_素材知识库" / "book_0001_样例作品" / "bkp" / "identity.json"
+            identity_path = Path(cmd[2]) / "bkp" / "identity.json"  # cmd[2]=staging asset_dir
             identity = json.loads(identity_path.read_text(encoding="utf-8"))
             identity["acceptance"] = {"required": True, "status": "PASS"}
             identity_path.write_text(json.dumps(identity, ensure_ascii=False), encoding="utf-8")
@@ -343,41 +371,47 @@ def test_run_book_distill_deterministic_stages(isolated, monkeypatch):
 
     monkeypatch.setattr(materials.subprocess, "run", fake_run)
     monkeypatch.setattr(materials, "_knowledge_is_discoverable", lambda asset: True)
-    monkeypatch.setattr(catalog, "refresh_and_render", lambda root, check_only: 0)
+    monkeypatch.setattr(catalog, "refresh_and_render", lambda root, check_only=False, tolerate_missing=False: 0)
 
     result = materials.run_book_distill("book_0001")
     assert result["status"] == "completed"
-    # validate + prepare 后进入 Agent 阶段，再 assemble/profile/bkp
     assert "validate" in calls and "prepare" in calls
     assert calls.count("assemble") >= 1 and calls.count("profile") >= 1 and calls.count("bkp") >= 1
     assert "acceptance" in calls
-    assert adapter is not None
+    # §9：定稿后受控发布到正式 02（staging 已被移走）
+    published = isolated / "02_素材知识库" / "book_0001_样例作品" / "bkp" / "identity.json"
+    assert published.exists(), "finalize 通过后才发布到 02"
+    assert result["output_dir"].replace("\\", "/").endswith("02_素材知识库/book_0001_样例作品")
 
 
 def test_new_reference_distill_does_not_skip_missing_bkp_prototype(isolated, monkeypatch):
-    """新书 Agent 未产出 curated 原型时，绝不能跳过 BKP/验收假装完成。"""
+    """新书 Agent 未产出 curated 原型时，绝不能跳过 BKP/验收假装完成；§9：失败绝不发布到 02。"""
     _use_direct("fake_distill_agent")
     _write_ledger(isolated, _fake_asset_ledger(pur="可用"))
+    _write_source(isolated)
+    _write_sp_package(isolated)
     monkeypatch.setattr(materials, "_REPO_ROOT", isolated.parent)
     monkeypatch.setattr(materials.sys, "executable", "python")
     script = materials._REPO_ROOT / "05_Skills与自动化" / "01_Skills" / "BookDistill" / "scripts" / "book_distill.py"
     script.parent.mkdir(parents=True)
     script.write_text("", encoding="utf-8")
-    (isolated / "06_工作区" / "SourcePrepare" / "book_0001_样例作品").mkdir(parents=True)
     monkeypatch.setattr(agent_runner, "_build_adapter", lambda: (type("A", (), {"name": "fake", "run": lambda self, req: AgentResult(status="completed", output="{}", agent="fake")})(), AgentRequest(task="")))
 
     def fake_run(cmd, **kw):
-        code = 1 if any("book_distill.py" in str(part) for part in cmd) and cmd[2] == "bkp" else 0
+        cmd = [str(c) for c in cmd]
+        code = 1 if any("book_distill.py" in part for part in cmd) and cmd[2] == "bkp" else 0
         return subprocess.CompletedProcess(cmd, code, stdout="missing bkp_prototype", stderr="")
 
     monkeypatch.setattr(materials.subprocess, "run", fake_run)
     with pytest.raises(materials.MaterialsError, match="学习资料整理失败"):
         materials.run_book_distill("book_0001")
+    # §9：bkp 失败在 staging，正式 02 绝不被写入
     assert not (isolated / "02_素材知识库" / "book_0001_样例作品" / "bkp" / "identity.json").exists()
+    assert not (isolated / "02_素材知识库" / "book_0001_样例作品").exists()
 
 
 def test_interactive_book_distill_uses_exact_meta_asset_id(isolated, monkeypatch):
-    """交互任务的资产身份来自 request meta，绝不从目录名反推。"""
+    """交互任务的资产身份来自 request meta，绝不从目录名反推；§9：meta 携带 06 staging 路径。"""
     from operations import qoder_bridge as bridge
     request_id = "request-book-0035"
     request = {
@@ -385,36 +419,55 @@ def test_interactive_book_distill_uses_exact_meta_asset_id(isolated, monkeypatch
         "meta": {
             "asset_id": "book_0035",
             "sp_dir": str(isolated / "06_工作区" / "SourcePrepare" / "book_0035_长安十二时辰"),
-            "bd_dir": str(isolated / "02_素材知识库" / "book_0035_长安十二时辰"),
+            "stage_dir": str(isolated / "06_工作区" / "BookDistill" / "req_book_0035_长安十二时辰"),
         },
     }
     monkeypatch.setattr(bridge, "get_request", lambda rid: request)
     monkeypatch.setattr(bridge, "is_expired", lambda value: False)
     monkeypatch.setattr(bridge, "read_response", lambda rid: {"request_id": request_id, "status": "completed"})
     captured = {}
-    monkeypatch.setattr(materials, "_finalize_distill", lambda rid, asset_id, sp_dir, bd_dir: captured.update(asset_id=asset_id, sp_dir=sp_dir, bd_dir=bd_dir) or {"status": "completed"})
+    monkeypatch.setattr(materials, "_finalize_distill", lambda rid, asset_id, sp_dir, stage_dir: captured.update(asset_id=asset_id, sp_dir=sp_dir, stage_dir=stage_dir) or {"status": "completed"})
 
     result = materials.get_book_distill_request(request_id)
     assert result["status"] == "completed"
     assert captured["asset_id"] == "book_0035"
-    assert captured["bd_dir"].name == "book_0035_长安十二时辰"
+    assert captured["stage_dir"].name == "req_book_0035_长安十二时辰"
 
 
 def test_interactive_finalize_never_parses_directory_for_asset_id(isolated, monkeypatch):
     from operations import qoder_bridge as bridge
     looked_up = []
+    monkeypatch.setattr(bridge, "get_request", lambda rid: {"state": "pending"})
     monkeypatch.setattr(materials, "_ledger_asset", lambda asset_id: looked_up.append(asset_id) or {"id": asset_id})
-    monkeypatch.setattr(materials, "_finalize_reference_distill", lambda *args: None)
-    catalog = type("Catalog", (), {"refresh_and_render": staticmethod(lambda root, check_only=False: 0)})()
-    monkeypatch.setattr(materials, "_load_materialintake", lambda: (catalog, None, None))
+    monkeypatch.setattr(materials, "_finalize_reference_distill",
+                        lambda *args: {"output_dir": str(isolated / "02_素材知识库" / "book_0035_长安十二时辰")})
     monkeypatch.setattr(bridge, "cleanup_request", lambda request_id: None)
 
-    materials._finalize_distill(
+    result = materials._finalize_distill(
         "request-book-0035", "book_0035",
         isolated / "06_工作区" / "SourcePrepare" / "book_0035_长安十二时辰",
-        isolated / "02_素材知识库" / "book_0035_长安十二时辰",
+        isolated / "06_工作区" / "BookDistill" / "req_book_0035_长安十二时辰",
     )
     assert looked_up == ["book_0035"]
+    assert result["asset_id"] == "book_0035"
+
+
+def test_interactive_finalize_rejects_canceled_request(isolated, monkeypatch):
+    """§11：发布前确认请求未取消；已取消的晚到响应绝不 finalize/发布到 02。"""
+    from operations import qoder_bridge as bridge
+    monkeypatch.setattr(bridge, "get_request", lambda rid: {"state": "canceled"})
+    cleaned = []
+    monkeypatch.setattr(bridge, "cleanup_request", lambda rid: cleaned.append(rid))
+    finalized = []
+    monkeypatch.setattr(materials, "_finalize_reference_distill", lambda *args: finalized.append(args))
+    with pytest.raises(materials.MaterialsError, match="蒸馏已取消"):
+        materials._finalize_distill(
+            "request-canceled", "book_0035",
+            isolated / "06_工作区" / "SourcePrepare" / "book_0035_x",
+            isolated / "06_工作区" / "BookDistill" / "req_book_0035_x",
+        )
+    assert finalized == [], "取消的请求绝不进入确定性 finalize/发布"
+    assert "request-canceled" in cleaned
 
 
 def test_interactive_book_distill_rejects_missing_meta_asset_id(isolated, monkeypatch):
@@ -454,6 +507,8 @@ def test_method_source_learning_paths(isolated):
 
 def test_list_materials_zero_model_calls(isolated, monkeypatch):
     _write_ledger(isolated, _fake_asset_ledger())
+    _write_source(isolated)
+    _write_sp_package(isolated)  # 真实当前 Prepare MD → purified（§7）
     built = []
     monkeypatch.setattr(agent_runner, "_build_adapter", lambda: (built.append(1), None)[1])
     result = materials.list_materials()
@@ -465,6 +520,7 @@ def test_list_materials_zero_model_calls(isolated, monkeypatch):
     assert detail["writing_callable"] is False
     assert detail["state"] == "pending_distill"
     assert detail["workflow_stage"] == "purified"
+    assert detail["prepared_available"] is True and detail["prepared_format"] == "MD"
 
 
 # ---------------------------------------------------------------------------
@@ -500,21 +556,81 @@ def test_workflow_stage_not_discoverable_stays_purified(isolated, monkeypatch):
     assert c["state"] == "needs_attention" and c["workflow_stage"] == "purified"
 
 
-def test_workflow_stage_book_0010_shape_is_purified(isolated):
-    """book_0010 奥术神座真实形态：purification=可用, knowledge=未开始 → purified（待蒸馏）。"""
+def test_workflow_stage_book_0010_shape_is_purified(isolated, monkeypatch):
+    """book_0010 奥术神座形态：purification=可用, knowledge=未开始 + 真实当前 Prepare MD → purified。"""
+    monkeypatch.setattr(materials, "_source_files_missing", lambda a: False)
+    monkeypatch.setattr(materials, "_prepare_package_current",
+                        lambda a, **k: {"available": True, "format": "MD", "reason": None})
     c = materials._classify_author_group(_ref_asset(pur="可用", know="未开始"))
     assert c["state"] == "pending_distill" and c["workflow_stage"] == "purified"
+    assert c["prepared_available"] is True and c["prepared_format"] == "MD"
 
 
-def test_workflow_stage_purify_failure_stays_new(isolated):
+def test_workflow_stage_purify_failure_stays_new(isolated, monkeypatch):
     """Case B：提纯失败 → needs_attention，阶段停留 new（作者在此重新提纯）。"""
+    monkeypatch.setattr(materials, "_source_files_missing", lambda a: False)
+    monkeypatch.setattr(materials, "_prepare_package_current",
+                        lambda a, **k: {"available": False, "format": None, "reason": None})
     c = materials._classify_author_group(_ref_asset(pur="失败", know="未开始"))
     assert c["state"] == "needs_attention" and c["workflow_stage"] == "new"
 
 
-def test_workflow_stage_pending_prepare_is_new(isolated):
+def test_workflow_stage_pending_prepare_is_new(isolated, monkeypatch):
+    monkeypatch.setattr(materials, "_source_files_missing", lambda a: False)
+    monkeypatch.setattr(materials, "_prepare_package_current",
+                        lambda a, **k: {"available": False, "format": None, "reason": None})
     c = materials._classify_author_group(_ref_asset(pur="未处理", know="未开始"))
     assert c["state"] == "pending_prepare" and c["workflow_stage"] == "new"
+
+
+# ---------------------------------------------------------------------------
+# I1b. §7/§15D 已提纯真值 = 真实当前 Markdown（集成，真磁盘）
+# ---------------------------------------------------------------------------
+
+def test_purified_requires_real_current_markdown(isolated):
+    """真实 PASS metadata + 匹配来源 + 必需 MD → purified。"""
+    _write_ledger(isolated, _fake_asset_ledger(pur="可用", know="未开始"))
+    _write_source(isolated)
+    _write_sp_package(isolated)
+    c = materials._classify_author_group(materials._ledger_asset("book_0001"))
+    assert c["workflow_stage"] == "purified" and c["prepared_available"] is True
+
+
+def test_historical_purified_without_current_md_is_not_purified(isolated):
+    """历史 purification=可用 但 06 MD 缺失 → 不算 purified（回落待提纯 new）。"""
+    _write_ledger(isolated, _fake_asset_ledger(pur="可用", know="未开始"))
+    _write_source(isolated)  # 来源存在，但无 06 SourcePrepare 包
+    c = materials._classify_author_group(materials._ledger_asset("book_0001"))
+    assert c["workflow_stage"] == "new" and c["state"] == "pending_prepare"
+    assert c["prepared_available"] is False
+
+
+def test_mismatched_fingerprint_is_not_purified(isolated):
+    """metadata selected_source.sha 与当前来源不匹配 → 不算 purified。"""
+    _write_ledger(isolated, _fake_asset_ledger(pur="可用", know="未开始", sha="a" * 64))
+    _write_source(isolated)
+    _write_sp_package(isolated, sha="b" * 64)  # 指纹不匹配
+    c = materials._classify_author_group(materials._ledger_asset("book_0001"))
+    assert c["workflow_stage"] == "new" and c["prepared_available"] is False
+
+
+def test_incomplete_prepare_md_is_not_purified(isolated):
+    """缺少必需 MD（full.md）→ 不算 purified。"""
+    _write_ledger(isolated, _fake_asset_ledger(pur="可用", know="未开始"))
+    _write_source(isolated)
+    _write_sp_package(isolated, with_md=False)
+    c = materials._classify_author_group(materials._ledger_asset("book_0001"))
+    assert c["workflow_stage"] == "new" and c["prepared_available"] is False
+
+
+def test_finalized_package_writing_ready_without_prepare(isolated, monkeypatch):
+    """已定稿可检索 02 包 → writing-ready，即使 06 Prepare 产物已删（§7 兼容）。"""
+    _write_ledger(isolated, _fake_asset_ledger(pur="可用", know="可用"))
+    monkeypatch.setattr(materials, "_bkp_acceptance_view", lambda a: "ready")
+    monkeypatch.setattr(materials, "_knowledge_is_discoverable", lambda a: True)
+    c = materials._classify_author_group(materials._ledger_asset("book_0001"))
+    assert c["workflow_stage"] == "writing" and c["writing_callable"] is True
+    assert c["knowledge_package_kind"] == "BKP"
 
 
 # ---------------------------------------------------------------------------
@@ -555,7 +671,7 @@ def test_other_does_not_change_canonical_type(isolated):
     mat = materials.list_materials()["materials"][0]
     assert mat["type"] == "LOOSE_MATERIAL", "canonical type 保持不变"
     assert mat["workflow_stage"] == "other"
-    assert mat["type_label"] == "零散素材"
+    assert mat["type_label"] == "其他"
 
 
 # ---------------------------------------------------------------------------
@@ -609,3 +725,53 @@ def test_learning_projection_empty_when_no_source(isolated):
     (asset_dir / "bkp").mkdir(parents=True)
     summary, sections = materials._learning_projection({"id": "book_0001", "type": "REFERENCE_WORK"})
     assert summary is None and sections == []
+
+
+# ---------------------------------------------------------------------------
+# K. §4/§15C 入库不自动提纯；§11/§15E 取消与晚到响应绝不发布；KnowledgeRetrieve 只见 02
+# ---------------------------------------------------------------------------
+
+def test_apply_intake_does_not_prepare(isolated, monkeypatch):
+    """§4/§15C：入库事务绝不自动调用 Prepare（提纯是分离的显式动作）。"""
+    _write_ledger(isolated, _fake_asset_ledger())
+    catalog, intake, post_action = materials._load_materialintake()
+    monkeypatch.setattr(intake, "apply_plan", lambda p, l, r: {
+        "ok": True, "new_ids": ["book_0009"], "attached": [], "duplicates_removed": [],
+        "reviews": [], "moves": [], "errors": [], "rolled_back": []})
+    prepared = []
+    monkeypatch.setattr(materials, "run_source_prepare", lambda aid: prepared.append(("sp", aid)))
+    monkeypatch.setattr(materials, "run_method_prepare", lambda aid: prepared.append(("mp", aid)))
+    monkeypatch.setattr(materials, "prepare_material", lambda aid: prepared.append(("gen", aid)))
+    result = materials.apply_material_intake(
+        {"items": [{"action": "NEW_ASSET", "files": ["x.epub"], "name": "n", "type": "REFERENCE_WORK"}]})
+    assert result["ok"] is True and result["new_ids"] == ["book_0009"]
+    assert prepared == [], "入库事务绝不触发任何 Prepare"
+
+
+def test_get_book_distill_request_canceled_never_finalizes(isolated, monkeypatch):
+    """§11/§15E：已取消请求的晚到响应绝不 finalize/发布到 02。"""
+    from operations import qoder_bridge as bridge
+    monkeypatch.setattr(bridge, "get_request",
+                        lambda rid: {"state": "canceled", "meta": {"asset_id": "book_0001", "sp_dir": "x", "stage_dir": "y"}})
+    monkeypatch.setattr(bridge, "cleanup_request", lambda rid: None)
+    finalized = []
+    monkeypatch.setattr(materials, "_finalize_distill", lambda *a: finalized.append(a) or {"status": "completed"})
+    result = materials.get_book_distill_request("req-canceled")
+    assert result["status"] == "canceled"
+    assert finalized == [], "取消的请求绝不进入 finalize/发布"
+
+
+def test_knowledge_retrieve_sees_only_published_02_package(isolated):
+    """§9/§15E：06 staging 不可被 KnowledgeRetrieve 发现；受控发布到 02 后才发现。"""
+    stage = isolated / "06_工作区" / "BookDistill" / "req_book_0001_样例作品"
+    (stage / "bkp").mkdir(parents=True)
+    (stage / "bkp" / "identity.json").write_text(json.dumps({
+        "book": {"book_id": "book_0001", "title": "样例作品", "author": ""},
+        "acceptance": {"required": True, "status": "PASS"},
+    }, ensure_ascii=False), encoding="utf-8")
+    asset = {"id": "book_0001", "type": "REFERENCE_WORK"}
+    # staging 在 06（不在 02）→ 不可发现
+    assert materials._knowledge_is_discoverable(asset) is False
+    # 受控发布到 02 → 可发现
+    materials._publish_dir(stage, isolated / "02_素材知识库" / "book_0001_样例作品")
+    assert materials._knowledge_is_discoverable(asset) is True

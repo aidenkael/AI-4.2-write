@@ -18,7 +18,7 @@ def _ledger():
             {
                 "id": "book_0001", "name": "样例作品", "type": "REFERENCE_WORK",
                 "author": "作者甲", "tags": ["标签1"], "notes": "备注",
-                "files": [{"path": "01_参考作品/样例作品/样例.epub", "sha256": "a" * 64, "primary": True}],
+                "files": [{"path": "01_原著/样例作品/样例.epub", "sha256": "a" * 64, "primary": True}],
                 "purification": {"status": "可用", "evidence": "sourceprepare_metadata"},
                 "knowledge": {"status": "可用"},
             },
@@ -84,10 +84,10 @@ def test_list_materials_includes_author_facing_fields(isolated, monkeypatch):
     ledger = _ledger()
     # 第二个素材：有素材但还没提炼知识
     ledger["assets"].append({
-        "id": "book_0002", "name": "待整理作品", "type": "RESEARCH",
+        "id": "book_0002", "name": "待整理作品", "type": "LOOSE_MATERIAL",
         "author": "", "tags": [], "notes": "",
-        "files": [{"path": "01_研究资料/待整理/资料.pdf", "sha256": "b" * 64, "primary": True}],
-        "purification": {"status": "可用"},
+        "files": [{"path": "03_其他/待整理/资料.pdf", "sha256": "b" * 64, "primary": True}],
+        "purification": {"status": "不适用"},
         "knowledge": {"status": "未开始"},
     })
     (isolated / "01_原始素材" / "素材资产.json").write_text(json.dumps(ledger, ensure_ascii=False), encoding="utf-8")
@@ -111,7 +111,12 @@ def test_refresh_uses_materialintake(isolated, monkeypatch):
     catalog, intake, post_action = materials._load_materialintake()
 
     called = {}
-    monkeypatch.setattr(catalog, "refresh_and_render", lambda root, check_only: (called.setdefault("rc", 0) and 0))
+    # §5：刷新先 reconcile 手动文件夹编辑（无编辑 → changed=False），再常规确定性刷新。
+    monkeypatch.setattr(intake, "reconcile_manual_edits",
+                        lambda root: {"ok": True, "changed": False, "registered": [],
+                                      "moved": [], "renamed": [], "missing_sources": []})
+    monkeypatch.setattr(catalog, "refresh_and_render",
+                        lambda root, check_only=False, tolerate_missing=False: (called.setdefault("rc", 0) and 0))
     result = materials.refresh_materials()
     assert result["assets"] == 1
     assert result["files"] == 1
@@ -139,36 +144,43 @@ def test_apply_respects_transaction(isolated, monkeypatch):
     report = {"ok": True, "new_ids": [], "attached": [], "duplicates_removed": [],
               "reviews": ["00_待入库/x.epub"], "moves": [], "errors": [], "rolled_back": []}
 
-    monkeypatch.setattr(post_action, "precheck", lambda root: (True, "OK"))
     monkeypatch.setattr(intake, "apply_plan", lambda p, l, r: report)
-    monkeypatch.setattr(post_action, "safe_commit_push", lambda root, allowlist, msg: "NO_TRACKED_CHANGES")
 
     result = materials.apply_material_intake(plan)
     assert result["ok"] is True
     assert result["reviews"] == ["00_待入库/x.epub"]
-    assert result["git_outcome"] == "NO_TRACKED_CHANGES"
-    assert result["git_warning"] is None
+    # §6：已移除死的 author-facing git_outcome/git_warning
+    assert "git_outcome" not in result and "git_warning" not in result
 
 
-def test_apply_stops_on_precheck_failure(isolated, monkeypatch):
+def test_workbench_intake_does_not_call_git(isolated, monkeypatch):
+    """§6/§15C：Workbench 入库不做 Git precheck/commit/push，不因 DIRTY_WORKTREE 失败。"""
     _write_ledger(isolated)
     catalog, intake, post_action = materials._load_materialintake()
-    monkeypatch.setattr(post_action, "precheck", lambda root: (False, "DIRTY_WORKTREE"))
-
-    plan = {"items": []}
-    with pytest.raises(materials.MaterialsError) as ei:
-        materials.apply_material_intake(plan)
-    assert "前置检查未通过" in str(ei.value)
+    git_calls = []
+    monkeypatch.setattr(post_action, "precheck",
+                        lambda root: git_calls.append("precheck") or (False, "DIRTY_WORKTREE"))
+    monkeypatch.setattr(post_action, "safe_commit_push",
+                        lambda root, allowlist, msg: git_calls.append("push") or "OK")
+    monkeypatch.setattr(intake, "apply_plan", lambda p, l, r: {
+        "ok": True, "new_ids": [], "attached": [], "duplicates_removed": [],
+        "reviews": [], "moves": [], "errors": [], "rolled_back": []})
+    result = materials.apply_material_intake({"items": []})
+    assert result["ok"] is True
+    assert git_calls == [], "Workbench 入库绝不触发 Git precheck/commit/push"
 
 
 def test_apply_surfaces_transaction_failure(isolated, monkeypatch):
     _write_ledger(isolated)
     catalog, intake, post_action = materials._load_materialintake()
-    monkeypatch.setattr(post_action, "precheck", lambda root: (True, "OK"))
-    monkeypatch.setattr(intake, "apply_plan", lambda p, l, r: {"ok": False, "errors": ["STOP_BEFORE_MOVE: x"]})
+    monkeypatch.setattr(intake, "apply_plan",
+                        lambda p, l, r: {"ok": False, "errors": ["STOP_BEFORE_MOVE: MISSING_REGISTERED_FILE: x"]})
     with pytest.raises(materials.MaterialsError) as ei:
         materials.apply_material_intake({"items": []})
-    assert "入库失败" in str(ei.value)
+    # §12：作者可读，绝不泄露 STOP_BEFORE_MOVE / MISSING_REGISTERED_FILE 内部文本
+    msg = str(ei.value)
+    assert "刷新状态" in msg
+    assert "STOP_BEFORE_MOVE" not in msg and "MISSING_REGISTERED_FILE" not in msg
 
 
 def test_validate_intake_plan(isolated):

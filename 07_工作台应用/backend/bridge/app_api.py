@@ -748,7 +748,7 @@ class AppApi:
 
     def prepare_material(self, payload: dict) -> dict:
         """作者面通用「提纯」：UI 只传素材 id，后端按类型分派
-        （REFERENCE_WORK/RESEARCH → SourcePrepare；METHOD_SOURCE → MethodPrepare）。"""
+        （REFERENCE_WORK → SourcePrepare；METHOD_SOURCE → MethodPrepare）。"""
         try:
             return _ok(materials_ops.prepare_material(
                 asset_id=str(payload.get("asset_id") or ""),

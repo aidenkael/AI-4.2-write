@@ -27,13 +27,38 @@ def isolated(tmp_path, monkeypatch):
 
 
 def _asset(asset_id, asset_type, pur="未处理", know="未开始"):
+    role_dir = "02_技巧类" if asset_type == "METHOD_SOURCE" else (
+        "03_其他" if asset_type == "LOOSE_MATERIAL" else "01_原著")
     return {
         "id": asset_id, "name": f"素材{asset_id}", "type": asset_type,
         "author": "", "tags": [], "notes": "",
-        "files": [{"path": f"02_研究资料/{asset_id}/x.txt", "sha256": "c" * 64, "primary": True}],
+        "files": [{"path": f"{role_dir}/{asset_id}/x.txt", "sha256": "c" * 64, "primary": True}],
         "purification": {"status": pur, "evidence": None},
         "knowledge": {"status": know},
     }
+
+
+def _write_method_source(root, asset_id, name=None):
+    """在磁盘创建 METHOD_SOURCE 真实来源文件（§7 需要真实磁盘状态）。"""
+    name = name or f"素材{asset_id}"
+    src = root / "01_原始素材" / "02_技巧类" / asset_id / "x.txt"
+    src.parent.mkdir(parents=True, exist_ok=True)
+    src.write_bytes(b"method-source")
+    return src
+
+
+def _write_mp_package(root, asset_id, name=None, sha="c" * 64, status="PASS", with_md=True):
+    """创建真实 06 MethodPrepare PASS 包（full.md + sections/ + metadata.json）。"""
+    name = name or f"素材{asset_id}"
+    mp = root / "06_工作区" / "MethodPrepare" / f"{asset_id}_{name}"
+    (mp / "sections").mkdir(parents=True, exist_ok=True)
+    if with_md:
+        (mp / "full.md").write_text("# full\n", encoding="utf-8")
+    (mp / "metadata.json").write_text(json.dumps({
+        "asset_id": asset_id, "status": status,
+        "selected_source": {"format": ".txt", "sha256": sha},
+    }, ensure_ascii=False), encoding="utf-8")
+    return mp
 
 
 def _write_ledger(root, assets):
@@ -108,12 +133,18 @@ def test_finalized_method_package_is_writing_callable(isolated, monkeypatch):
         _asset("book_9101", "METHOD_SOURCE", pur="可用", know="可用"),
         _asset("book_9102", "METHOD_SOURCE", pur="可用", know="未开始"),
     ])
+    # book_9102 有真实当前 MethodPrepare MD → purified（§7）
+    _write_method_source(isolated, "book_9102")
+    _write_mp_package(isolated, "book_9102")
     result = materials.list_materials()
     by_id = {m["id"]: m for m in result["materials"]}
     assert by_id["book_9101"]["writing_callable"] is True
     assert by_id["book_9101"]["author_group"] == "usable"
+    assert by_id["book_9101"]["knowledge_package_kind"] == "METHOD"
     assert by_id["book_9102"]["writing_callable"] is False
     assert by_id["book_9102"]["author_group"] == "pending"
+    assert by_id["book_9102"]["workflow_stage"] == "purified"
+    assert by_id["book_9102"]["prepared_format"] == "MD"
 
 
 def test_material_detail_stage_for_method_asset(isolated, monkeypatch):
