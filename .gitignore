@@ -57,6 +57,14 @@ __pycache__/
 # MethodPrepare 本地工作区（方法素材确定性预处理产物；不上传）
 06_工作区/MethodPrepare/
 
+# BookDistill / MethodDistill request-scoped 蒸馏 staging（§9：Agent 只写此处；
+# 未定稿/失败/取消产物绝不进入正式 02；定稿后受控发布到 02 并清理 staging；Local Only）
+06_工作区/BookDistill/
+06_工作区/MethodDistill/
+
+# 临时脚本/调查产物（Local Only，可删除）
+06_工作区/tmp/
+
 # 应用开发临时产物（UI、接口、pywebview、Agent 接入等；Local Only）
 06_工作区/应用开发/
 

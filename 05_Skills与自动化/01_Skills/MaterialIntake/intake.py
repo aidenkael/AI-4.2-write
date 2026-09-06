@@ -41,6 +41,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -49,16 +50,17 @@ import catalog  # noqa: E402
 import post_action  # noqa: E402
 
 INBOX_DIR = "00_待入库"
+# 作者可见的三种正常素材类型 ↔ 物理角色目录（唯一真相：Workbench 类型 == ledger 类型 == 目录含义）。
 ROLE_DIR = {
-    "REFERENCE_WORK": "01_参考作品",
-    "RESEARCH": "02_研究资料",
-    "LOOSE_MATERIAL": "03_零散素材",
-    # METHOD_SOURCE 物理落入现有 02_研究资料 区；语义类型 authority 始终是素材资产.json，
-    # 物理目录名不是类型真相；不新增/重编根目录，不迁移已有素材。
-    "METHOD_SOURCE": "02_研究资料",
+    "REFERENCE_WORK": "01_原著",
+    "METHOD_SOURCE": "02_技巧类",
+    "LOOSE_MATERIAL": "03_其他",
 }
+# 反查：物理角色目录名 → canonical type（manual reconcile 用）。
+ROLE_DIR_TO_TYPE = {v: k for k, v in ROLE_DIR.items()}
 VALID_ACTIONS = ("NEW_ASSET", "ATTACH_EXISTING", "REVIEW")
-VALID_TYPES = ("REFERENCE_WORK", "RESEARCH", "LOOSE_MATERIAL", "METHOD_SOURCE")
+# RESEARCH 不再是作者可创建的普通类型；历史 RESEARCH 记录由迁移确定性归入 LOOSE_MATERIAL。
+VALID_TYPES = ("REFERENCE_WORK", "LOOSE_MATERIAL", "METHOD_SOURCE")
 UNSUPPORTED_SUFFIXES = (".doc", ".docx")
 ID_RE = re.compile(r"^book_(\d{4})$")
 
@@ -516,6 +518,244 @@ def _mutate_ledger(ledger: dict, journal: list[dict]) -> dict:
 
     new_ledger["assets"].sort(key=lambda a: a["id"])
     return new_ledger
+
+
+# --------------------------------------------------------------------------- #
+# Manual Explorer reconcile（作者手动文件夹编辑在「刷新状态」时确定性并入 ledger）
+# --------------------------------------------------------------------------- #
+
+SUPPORTED_SOURCE_SUFFIXES = (".epub", ".pdf", ".txt")
+
+
+def _folder_units(mat_dir: Path) -> list[dict]:
+    """扫描三个角色目录；每个直接子文件夹 = 一个素材文件夹单元（manual sync unit）。
+
+    只计入受支持来源文件（EPUB/PDF/TXT）；排除 .gitkeep / collection_manifest.json。
+    无受支持文件的空文件夹忽略。files 按相对路径排序，第一个为 primary。
+    """
+    units: list[dict] = []
+    for mtype, role_dir in sorted(ROLE_DIR.items(), key=lambda kv: kv[1]):
+        base = mat_dir / role_dir
+        if not base.is_dir():
+            continue
+        for folder in sorted(base.iterdir()):
+            if not folder.is_dir():
+                continue
+            files: list[dict] = []
+            for p in sorted(folder.rglob("*")):
+                if not p.is_file():
+                    continue
+                if p.name == ".gitkeep" or p.name == catalog.MANIFEST_FILENAME:
+                    continue
+                if p.suffix.lower() not in SUPPORTED_SOURCE_SUFFIXES:
+                    continue
+                files.append({"path": p.relative_to(mat_dir).as_posix(),
+                              "sha256": catalog.sha256_file(p), "primary": False})
+            if not files:
+                continue
+            files[0]["primary"] = True
+            units.append({
+                "role_dir": role_dir, "type": mtype, "folder_name": folder.name,
+                "rel_dir": folder.relative_to(mat_dir).as_posix(), "files": files,
+                "fingerprint": catalog.content_fingerprint(files),
+            })
+    return units
+
+
+def _structural_edit_detected(mat_dir: Path, ledger: dict) -> bool:
+    """廉价结构快检（零 SHA）：登记来源是否都在磁盘 + 角色目录子文件夹集合是否与登记一致。
+
+    无结构变化（未移动/改名/新建/删除文件夹）→ False，跳过昂贵的指纹匹配；
+    任何结构差异 → True，进入完整内容指纹 reconcile。
+    """
+    recorded_dirs: set[str] = set()
+    all_present = True
+    for a in ledger["assets"]:
+        for f in a.get("files", []):
+            recorded_dirs.add(str(Path(f["path"]).parent.as_posix()))
+            if not (mat_dir / f["path"]).is_file():
+                all_present = False
+    actual_dirs: set[str] = set()
+    for role_dir in ROLE_DIR.values():
+        base = mat_dir / role_dir
+        if not base.is_dir():
+            continue
+        for folder in base.iterdir():
+            if folder.is_dir():
+                actual_dirs.add(folder.relative_to(mat_dir).as_posix())
+    return (not all_present) or (recorded_dirs != actual_dirs)
+
+
+def _finalized_package_kind(distill_dir: Path, asset_id: str) -> tuple[str | None, Path | None]:
+    """返回 asset 在 02 的已定稿知识包类型（"bkp"/"method"/None）与其目录，用于类型变更时判定不兼容。"""
+    if not distill_dir.exists():
+        return None, None
+    for d in sorted(distill_dir.iterdir()):
+        if not d.is_dir() or not d.name.startswith(asset_id + "_"):
+            continue
+        if (d / "bkp" / "identity.json").is_file():
+            return "bkp", d
+        if (d / "method" / "identity.json").is_file():
+            return "method", d
+    return None, None
+
+
+def reconcile_manual_edits(root: Path) -> dict:
+    """把作者手动 Explorer 编辑（移动/改名/新建素材文件夹）确定性并入 canonical ledger。
+
+    manual sync unit = 一个素材文件夹；身份 = 精确内容指纹（SHA multiset），绝不模糊标题合并。
+      - 文件夹指纹唯一匹配一个既有 asset → 保留 id，更新 files[].path + canonical type
+        （按所在角色目录）+ 名字（文件夹改名且唯一时）；
+      - 文件夹指纹不匹配任何 asset → 注册为新 asset（类型按角色目录，名字按文件夹名）；
+      - 指纹匹配多个 asset / 同一指纹出现在多个文件夹 / 映射歧义 → fail closed（不写盘）；
+      - 既有 asset 登记来源在磁盘缺失 → 保留记录（绝不静默删除），记入 missing_sources；
+      - asset 类型变更导致 02 已定稿包不兼容 → 把该包移入 06 recovery（不再可检索，不删除）。
+
+    事务性：歧义/失败 → 不写任何文件；成功且有变化 → snapshot 三份 metadata → 写
+    reconciled ledger → catalog.refresh_and_render(tolerate_missing) → 失败回滚三份 metadata。
+    """
+    mat_dir = root / catalog.MATERIAL_DIR_NAME
+    distill_dir = root / catalog.DISTILL_DIR_NAME
+    report: dict = {"ok": False, "changed": False, "moved": [], "renamed": [], "registered": [],
+                    "type_changed": [], "missing_sources": [], "relocated_packages": [], "errors": []}
+
+    ledger_path = mat_dir / catalog.LEDGER_FILENAME
+    if not ledger_path.exists():
+        report["ok"] = True  # 无 ledger 时不报错（由上层 refresh 统一处理）
+        return report
+    try:
+        ledger = catalog.load_ledger(ledger_path)
+    except (FileNotFoundError, RuntimeError) as exc:
+        report["errors"].append(f"ledger 不可用：{exc}")
+        return report
+
+    # 廉价结构快检：无任何手动文件夹编辑 → 无需昂贵指纹匹配（后续 refresh 仍重算 SHA/派生状态）。
+    if not _structural_edit_detected(mat_dir, ledger):
+        report["ok"] = True
+        return report
+
+    units = _folder_units(mat_dir)
+
+    # asset 内容指纹索引
+    fp_index: dict[str, list[str]] = {}
+    for a in ledger["assets"]:
+        if not a.get("files"):
+            continue
+        fp_index.setdefault(catalog.content_fingerprint(a["files"]), []).append(a["id"])
+
+    # fail closed：同一指纹出现在多个文件夹 / 匹配多个已登记 asset → 归属歧义
+    errors: list[str] = []
+    unit_fp_count: dict[str, int] = {}
+    for u in units:
+        unit_fp_count[u["fingerprint"]] = unit_fp_count.get(u["fingerprint"], 0) + 1
+    for fp, cnt in unit_fp_count.items():
+        if cnt > 1:
+            errors.append("同一内容出现在多个素材文件夹，无法确定归属，请检查后重试。")
+            break
+    if not errors:
+        for u in units:
+            if len(fp_index.get(u["fingerprint"], [])) > 1:
+                errors.append("同一内容匹配多个已登记素材，无法确定归属，请检查后重试。")
+                break
+    if errors:
+        report["errors"] = errors
+        return report  # fail closed：不写盘
+
+    new_assets = json.loads(json.dumps(ledger["assets"], ensure_ascii=False))
+    new_by_id = {a["id"]: a for a in new_assets}
+    matched_ids: set[str] = set()
+    changed = False
+
+    for u in units:
+        ids = fp_index.get(u["fingerprint"], [])
+        if ids:
+            asset_id = ids[0]
+            matched_ids.add(asset_id)
+            target = new_by_id[asset_id]
+            if {f["path"] for f in target["files"]} != {f["path"] for f in u["files"]}:
+                target["files"] = json.loads(json.dumps(u["files"], ensure_ascii=False))
+                report["moved"].append({"id": asset_id, "to": u["rel_dir"]})
+                changed = True
+            if target["type"] != u["type"]:
+                report["type_changed"].append({"id": asset_id, "from": target["type"], "to": u["type"]})
+                target["type"] = u["type"]
+                changed = True
+            folder_name = safe_name(u["folder_name"])
+            if folder_name and folder_name != target["name"]:
+                report["renamed"].append({"id": asset_id, "from": target["name"], "to": folder_name})
+                target["name"] = folder_name
+                changed = True
+        else:
+            new_id = allocate_next_id({"assets": new_assets})
+            new_asset = {
+                "id": new_id, "name": safe_name(u["folder_name"]), "type": u["type"],
+                "author": "", "tags": [], "notes": "",
+                "files": json.loads(json.dumps(u["files"], ensure_ascii=False)),
+                "purification": {"status": "不适用" if u["type"] == "LOOSE_MATERIAL" else "未处理",
+                                 "evidence": None},
+                "knowledge": {"status": "未开始"},
+            }
+            new_assets.append(new_asset)
+            new_by_id[new_id] = new_asset
+            fp_index.setdefault(u["fingerprint"], []).append(new_id)
+            report["registered"].append({"id": new_id, "name": new_asset["name"], "type": u["type"]})
+            changed = True
+
+    for a in ledger["assets"]:
+        if a["id"] in matched_ids or not a.get("files"):
+            continue
+        if not any((mat_dir / f["path"]).is_file() for f in a["files"]):
+            report["missing_sources"].append(a["id"])
+
+    # 类型变更 → 不兼容的 02 已定稿包移入 06 recovery（不再可检索；不删除）
+    for tc in report["type_changed"]:
+        kind, pkg_dir = _finalized_package_kind(distill_dir, tc["id"])
+        if kind is None or pkg_dir is None:
+            continue
+        expected = "method" if tc["to"] == "METHOD_SOURCE" else "bkp"
+        if kind == expected:
+            continue
+        recovery = root / "06_工作区" / "BookDistill" / "_incompatible_recovery"
+        try:
+            recovery.mkdir(parents=True, exist_ok=True)
+            dest = recovery / pkg_dir.name
+            shutil.move(str(pkg_dir), str(dest))
+        except OSError as exc:
+            report["errors"].append(f"迁移不兼容知识包失败，已停止：{exc}")
+            return report  # fail closed
+        report["relocated_packages"].append({"id": tc["id"], "to": str(dest)})
+        changed = True
+
+    if not changed:
+        report["ok"] = True
+        return report
+
+    snapshots = _snapshot_metadata(mat_dir)
+    new_assets.sort(key=lambda a: a["id"])
+    new_ledger = {"schema_version": ledger["schema_version"], "assets": new_assets,
+                  "containers": ledger["containers"]}
+    try:
+        catalog.write_ledger(new_ledger, mat_dir / catalog.LEDGER_FILENAME)
+        rc = catalog.refresh_and_render(root, tolerate_missing=True)
+        if rc != 0:
+            raise RuntimeError(f"catalog refresh rc={rc}")
+    except Exception as exc:  # noqa: BLE001
+        for rel, data in snapshots.items():
+            p = mat_dir / rel
+            try:
+                if data is None:
+                    if p.exists():
+                        p.unlink()
+                else:
+                    p.write_bytes(data)
+            except OSError:
+                pass
+        report["errors"].append("刷新素材状态失败，已回滚，未改动素材登记。")
+        return report
+
+    report["ok"] = True
+    report["changed"] = True
+    return report
 
 
 # --------------------------------------------------------------------------- #

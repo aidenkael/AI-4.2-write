@@ -291,9 +291,13 @@ def test_csv_excludes_legacy_fields(ledger):
 def test_index_generation(ledger):
     text = catalog.render_index_md(ledger)
     assert "素材总数：136" in text
-    assert "## 参考作品（REFERENCE_WORK）" in text
-    assert "## 研究资料（RESEARCH）" in text
-    assert "## 待确认（NEEDS_REVIEW）" in text
+    # §2/§14：三个作者类型 section（原著/技巧类/其他）
+    assert "## 原著（REFERENCE_WORK）" in text
+    assert "## 技巧类（METHOD_SOURCE）" in text
+    assert "## 其他（LOOSE_MATERIAL）" in text
+    # 研究资料/待确认 不再是独立作者类型 section
+    assert "## 研究资料（RESEARCH）" not in text
+    assert "## 待确认（NEEDS_REVIEW）" not in text
     for banned in ("sha256", "SHA256", "z-library", "文件大小", "更新时间", "章节数"):
         assert banned not in text
 

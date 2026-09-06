@@ -3,8 +3,8 @@
 
 覆盖验收：
   1. METHOD_SOURCE 在 canonical ledger 校验中合法；未知类型仍被拒绝；
-  2. intake 校验接受 METHOD_SOURCE NEW_ASSET，并把它路由到现有 02_研究资料 区
-     （不新增根目录、不影响既有类型）；
+  2. intake 校验接受 METHOD_SOURCE NEW_ASSET，并把它路由到 02_技巧类 区
+     （三种作者类型↔角色目录之一；不影响既有类型）；
   3. catalog refresh：MethodPrepare metadata → purification 推导（可用/需复核/失败）；
      FINALIZED method 知识包 → knowledge 可用；来源指纹过期 → 需更新。
 """
@@ -37,7 +37,7 @@ def _asset(asset_id="book_9001", name="故事写作方法", content=b"method boo
     asset = {
         "id": asset_id, "name": name, "type": "METHOD_SOURCE", "author": "作者M",
         "tags": [], "notes": "",
-        "files": [{"path": f"02_研究资料/{name}/{name}.txt", "sha256": sha, "primary": True}],
+        "files": [{"path": f"02_技巧类/{name}/{name}.txt", "sha256": sha, "primary": True}],
         "purification": {"status": "未处理", "evidence": None},
         "knowledge": {"status": "未开始"},
     }
@@ -49,7 +49,7 @@ def _make_repo(tmp_path: Path, assets=None) -> Path:
     root = tmp_path
     mat = root / catalog.MATERIAL_DIR_NAME
     (mat / intake.INBOX_DIR).mkdir(parents=True)
-    (mat / "02_研究资料").mkdir(parents=True)
+    (mat / "02_技巧类").mkdir(parents=True)
     _write_ledger(root, {"schema_version": "1.0", "assets": assets or [], "containers": []})
     return root
 
@@ -59,7 +59,7 @@ def _make_repo(tmp_path: Path, assets=None) -> Path:
 def test_method_source_valid_in_ledger(tmp_path):
     asset, sha = _asset()
     root = _make_repo(tmp_path, [asset])
-    (root / catalog.MATERIAL_DIR_NAME / "02_研究资料" / asset["name"]).mkdir(parents=True)
+    (root / catalog.MATERIAL_DIR_NAME / "02_技巧类" / asset["name"]).mkdir(parents=True)
     (root / catalog.MATERIAL_DIR_NAME / asset["files"][0]["path"]).write_bytes(b"method book content")
     ledger = _read_ledger(root)
     assert catalog.validate_ledger(ledger) == []
@@ -91,7 +91,7 @@ def test_intake_plan_accepts_method_source(tmp_path):
     assert intake.validate_plan(plan, ledger, inbox) == []
 
 
-def test_intake_routes_method_source_into_research_area(tmp_path):
+def test_intake_routes_method_source_into_method_area(tmp_path):
     root = _make_repo(tmp_path)
     inbox = root / catalog.MATERIAL_DIR_NAME / intake.INBOX_DIR
     (inbox / "method_book.txt").write_bytes(b"new method content")
@@ -103,8 +103,8 @@ def test_intake_routes_method_source_into_research_area(tmp_path):
     assert report["new_ids"], "METHOD_SOURCE 入库必须产生新 asset"
     new = _read_ledger(root)["assets"][-1]
     assert new["type"] == "METHOD_SOURCE"
-    # 物理落入现有 02_研究资料 区（不新增根目录）
-    assert new["files"][0]["path"].startswith("02_研究资料/")
+    # 物理落入 02_技巧类 区（METHOD_SOURCE 角色目录）
+    assert new["files"][0]["path"].startswith("02_技巧类/")
     assert (root / catalog.MATERIAL_DIR_NAME / new["files"][0]["path"]).is_file()
     # 语义类型 authority 是台账，不是目录名：目录名不含类型信息
     assert "METHOD_SOURCE" not in new["files"][0]["path"]
@@ -128,7 +128,7 @@ def _write_mp_metadata(root: Path, asset_id: str, name: str, status: str, sha: s
     (mp_dir / "metadata.json").write_text(json.dumps({
         "skill_version": "method_prepare/v1", "asset_id": asset_id, "asset_name": name,
         "type": "METHOD_SOURCE", "status": status,
-        "selected_source": {"path": f"02_研究资料/{name}/{name}.txt", "format": ".txt", "sha256": sha},
+        "selected_source": {"path": f"02_技巧类/{name}/{name}.txt", "format": ".txt", "sha256": sha},
         "input_fingerprint": "fp", "content_fingerprint": "cfp",
         "structure_fingerprint": "sfp", "parser": "txt:encoding=utf-8",
         "section_count": 2, "limitations": [],
@@ -156,7 +156,7 @@ def _refresh(root: Path) -> dict:
 def test_method_prepare_pass_makes_purification_usable(tmp_path):
     asset, sha = _asset()
     root = _make_repo(tmp_path, [asset])
-    (root / catalog.MATERIAL_DIR_NAME / "02_研究资料" / asset["name"]).mkdir(parents=True)
+    (root / catalog.MATERIAL_DIR_NAME / "02_技巧类" / asset["name"]).mkdir(parents=True)
     (root / catalog.MATERIAL_DIR_NAME / asset["files"][0]["path"]).write_bytes(b"method book content")
     _write_mp_metadata(root, asset["id"], asset["name"], "PASS", sha)
 
@@ -171,7 +171,7 @@ def test_method_prepare_review_and_fail_statuses(tmp_path):
     for status, expected in (("REVIEW", "需复核"), ("FAIL", "失败")):
         asset, sha = _asset()
         root = _make_repo(tmp_path / status, [asset])
-        (root / catalog.MATERIAL_DIR_NAME / "02_研究资料" / asset["name"]).mkdir(parents=True)
+        (root / catalog.MATERIAL_DIR_NAME / "02_技巧类" / asset["name"]).mkdir(parents=True)
         (root / catalog.MATERIAL_DIR_NAME / asset["files"][0]["path"]).write_bytes(b"method book content")
         _write_mp_metadata(root, asset["id"], asset["name"], status, sha)
         ledger = _refresh(root)
@@ -181,7 +181,7 @@ def test_method_prepare_review_and_fail_statuses(tmp_path):
 def test_finalized_method_package_makes_knowledge_callable(tmp_path):
     asset, sha = _asset()
     root = _make_repo(tmp_path, [asset])
-    (root / catalog.MATERIAL_DIR_NAME / "02_研究资料" / asset["name"]).mkdir(parents=True)
+    (root / catalog.MATERIAL_DIR_NAME / "02_技巧类" / asset["name"]).mkdir(parents=True)
     (root / catalog.MATERIAL_DIR_NAME / asset["files"][0]["path"]).write_bytes(b"method book content")
     _write_mp_metadata(root, asset["id"], asset["name"], "PASS", sha)
     _write_method_identity(root, asset["id"], asset["name"], sha)
@@ -195,7 +195,7 @@ def test_finalized_method_package_makes_knowledge_callable(tmp_path):
 def test_draft_method_package_not_callable(tmp_path):
     asset, sha = _asset()
     root = _make_repo(tmp_path, [asset])
-    (root / catalog.MATERIAL_DIR_NAME / "02_研究资料" / asset["name"]).mkdir(parents=True)
+    (root / catalog.MATERIAL_DIR_NAME / "02_技巧类" / asset["name"]).mkdir(parents=True)
     (root / catalog.MATERIAL_DIR_NAME / asset["files"][0]["path"]).write_bytes(b"method book content")
     _write_method_identity(root, asset["id"], asset["name"], sha, schema_status="DRAFT")
 
@@ -213,7 +213,7 @@ def test_non_retrieval_ready_finalized_not_callable(tmp_path, bad_status):
     """只有 FINALIZED_RETRIEVAL_READY 才算 finalized；其他 FINALIZED_* 不使方法包 callable。"""
     asset, sha = _asset()
     root = _make_repo(tmp_path, [asset])
-    (root / catalog.MATERIAL_DIR_NAME / "02_研究资料" / asset["name"]).mkdir(parents=True)
+    (root / catalog.MATERIAL_DIR_NAME / "02_技巧类" / asset["name"]).mkdir(parents=True)
     (root / catalog.MATERIAL_DIR_NAME / asset["files"][0]["path"]).write_bytes(b"method book content")
     _write_method_identity(root, asset["id"], asset["name"], sha, schema_status=bad_status)
 
@@ -225,7 +225,7 @@ def test_non_retrieval_ready_finalized_not_callable(tmp_path, bad_status):
 def test_stale_source_fingerprint_marks_needs_update(tmp_path):
     asset, sha = _asset()
     root = _make_repo(tmp_path, [asset])
-    (root / catalog.MATERIAL_DIR_NAME / "02_研究资料" / asset["name"]).mkdir(parents=True)
+    (root / catalog.MATERIAL_DIR_NAME / "02_技巧类" / asset["name"]).mkdir(parents=True)
     src = root / catalog.MATERIAL_DIR_NAME / asset["files"][0]["path"]
     src.write_bytes(b"method book content")
     _write_mp_metadata(root, asset["id"], asset["name"], "PASS", sha)

@@ -170,11 +170,11 @@ def test_new_single(tmp_path):
     assert a["author"] == "作者B" and a["tags"] == ["科幻"]
     assert len(a["files"]) == 1
     f = a["files"][0]
-    assert f["path"] == "01_参考作品/新书/新书.epub"  # 正确目录
+    assert f["path"] == "01_原著/新书/新书.epub"  # 正确目录
     assert f["sha256"] == sha and f["primary"] is True
     assert a["purification"] == {"status": "未处理", "evidence": None}
     assert a["knowledge"] == {"status": "未开始"}
-    assert (root / catalog.MATERIAL_DIR_NAME / "01_参考作品" / "新书" / "新书.epub").exists()
+    assert (root / catalog.MATERIAL_DIR_NAME / "01_原著" / "新书" / "新书.epub").exists()
     assert not (root / catalog.MATERIAL_DIR_NAME / intake.INBOX_DIR / "新书.epub").exists()
 
 
@@ -299,7 +299,7 @@ def test_move_sha_integrity(tmp_path):
     assert report["ok"] is True
     m = report["moves"][0]
     assert m["before"] == m["after"] == sha  # before SHA == after SHA
-    moved = root / catalog.MATERIAL_DIR_NAME / "01_参考作品" / "书" / "书.epub"
+    moved = root / catalog.MATERIAL_DIR_NAME / "01_原著" / "书" / "书.epub"
     assert catalog.sha256_file(moved) == sha
 
 
@@ -330,8 +330,8 @@ def test_rollback_on_failure(tmp_path, monkeypatch):
     # 已移动文件全部回滚到 inbox；目标目录无残留
     inbox = root / catalog.MATERIAL_DIR_NAME / intake.INBOX_DIR
     assert (inbox / "a.epub").exists() and (inbox / "b.epub").exists()
-    assert not (root / catalog.MATERIAL_DIR_NAME / "01_参考作品" / "a").exists()
-    assert not (root / catalog.MATERIAL_DIR_NAME / "01_参考作品" / "b").exists()
+    assert not (root / catalog.MATERIAL_DIR_NAME / "01_原著" / "a").exists()
+    assert not (root / catalog.MATERIAL_DIR_NAME / "01_原著" / "b").exists()
     assert _ledger_bytes(root) == before  # ledger 未写半份
 
 
@@ -339,30 +339,43 @@ def test_rollback_on_failure(tmp_path, monkeypatch):
 
 def test_role_routing(tmp_path):
     root, _ = _make_repo(tmp_path)
-    _put_inbox(root, "c.pdf", b"research doc")
+    _put_inbox(root, "c.pdf", b"method doc")
     _put_inbox(root, "a.epub", b"reference work")
     _put_inbox(root, "b.txt", b"loose note")
     items = [
-        {"action": "NEW_ASSET", "files": ["00_待入库/a.epub"], "name": "参考甲",
+        {"action": "NEW_ASSET", "files": ["00_待入库/a.epub"], "name": "原著甲",
          "type": "REFERENCE_WORK"},
-        {"action": "NEW_ASSET", "files": ["00_待入库/b.txt"], "name": "零散乙",
+        {"action": "NEW_ASSET", "files": ["00_待入库/b.txt"], "name": "其他乙",
          "type": "LOOSE_MATERIAL"},
-        {"action": "NEW_ASSET", "files": ["00_待入库/c.pdf"], "name": "研究丙",
-         "type": "RESEARCH"},
+        {"action": "NEW_ASSET", "files": ["00_待入库/c.pdf"], "name": "技巧丙",
+         "type": "METHOD_SOURCE"},
     ]
     report = intake.apply_plan({"items": items}, _read_ledger(root), root)
     assert report["ok"] is True
     ledger = _read_ledger(root)
-    ids = {a["name"]: a for a in ledger["assets"] if a["id"].startswith("book_000")}
-    ref = next(a for a in ledger["assets"] if a["name"] == "参考甲")
-    res = next(a for a in ledger["assets"] if a["name"] == "研究丙")
-    loose = next(a for a in ledger["assets"] if a["name"] == "零散乙")
-    assert ref["files"][0]["path"].startswith("01_参考作品/")
-    assert res["files"][0]["path"].startswith("02_研究资料/")
-    assert loose["files"][0]["path"].startswith("03_零散素材/")
+    ref = next(a for a in ledger["assets"] if a["name"] == "原著甲")
+    meth = next(a for a in ledger["assets"] if a["name"] == "技巧丙")
+    loose = next(a for a in ledger["assets"] if a["name"] == "其他乙")
+    # §2/§3：三种作者类型 ↔ 物理角色目录（原著/技巧类/其他）
+    assert ref["files"][0]["path"].startswith("01_原著/")
+    assert meth["files"][0]["path"].startswith("02_技巧类/")
+    assert loose["files"][0]["path"].startswith("03_其他/")
     # 批量 NEW_ASSET 按 deterministic inbox path 排序分配 ID：a.epub < b.txt < c.pdf
     assert sorted(report["new_ids"]) == ["book_0004", "book_0005", "book_0006"]
-    assert [a["id"] for a in (ref, loose, res)] == ["book_0004", "book_0005", "book_0006"]
+    assert [a["id"] for a in (ref, loose, meth)] == ["book_0004", "book_0005", "book_0006"]
+
+
+def test_intake_rejects_research_new_asset(tmp_path):
+    """§2/§15A：新作者入库路径不能创建 RESEARCH（已退役为普通作者类型）。"""
+    root, _ = _make_repo(tmp_path)
+    _put_inbox(root, "r.pdf", b"research doc")
+    inbox = root / catalog.MATERIAL_DIR_NAME / intake.INBOX_DIR
+    plan = {"items": [{"action": "NEW_ASSET", "files": ["00_待入库/r.pdf"], "name": "研究", "type": "RESEARCH"}]}
+    errors = intake.validate_plan(plan, _read_ledger(root), inbox)
+    assert any("type 非法" in e for e in errors)
+    assert "RESEARCH" not in intake.VALID_TYPES
+    # 三种作者可创建类型↔角色目录
+    assert intake.ROLE_DIR == {"REFERENCE_WORK": "01_原著", "METHOD_SOURCE": "02_技巧类", "LOOSE_MATERIAL": "03_其他"}
 
 
 # ---------- M. ATTACH_MARKS_STALE（第 47 节） ----------
@@ -454,8 +467,8 @@ def test_refresh_rc_failure_rollback(tmp_path, monkeypatch):
     # raw 文件回 inbox；目标目录无残留
     inbox = mat / intake.INBOX_DIR
     assert (inbox / "a.epub").exists() and (inbox / "b.epub").exists()
-    assert not (mat / "01_参考作品" / "a").exists()
-    assert not (mat / "01_参考作品" / "b").exists()
+    assert not (mat / "01_原著" / "a").exists()
+    assert not (mat / "01_原著" / "b").exists()
     # ledger / CSV / MD byte-for-byte 原样
     for rel, data in before.items():
         assert (mat / rel).read_bytes() == data

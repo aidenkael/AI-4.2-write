@@ -397,14 +397,16 @@ def derive_knowledge(package_evidence: dict | None, file_shas: set) -> dict:
 
 
 def refresh_ledger(ledger: dict, mat_dir: Path, distill_dir: Path, sp_dir: Path,
-                   mp_dir: Path | None = None) -> tuple[dict, dict]:
+                   mp_dir: Path | None = None, tolerate_missing: bool = False) -> tuple[dict, dict]:
     """基于磁盘事实与证据刷新 ledger；返回 (new_ledger, report)。
 
     report = {"missing": [...], "unregistered": [...]}
     - canonical / human semantic 字段全部保留（id/name/type/author/tags/notes/
       files[].path/primary/source_container/container membership）。
     - files[].sha256 重新计算（机器事实快照）。
-    - registered path 缺失 → 记入 missing（调用方应停止写盘，保持原 ledger 不被半写）。
+    - registered path 缺失 → 记入 missing；默认调用方应停止写盘（保持原 ledger 不被半写）。
+      tolerate_missing=True（仅作者「刷新状态」/manual reconcile 路径）：缺失来源
+      保留其最后已知 sha256（绝不静默删除登记），供上层投影为可读 attention。
     - 未登记新文件 → 记入 unregistered（不自动建 asset / 分类 / 分配 ID）。
     """
     scanned = scan_material_files(mat_dir)
@@ -417,6 +419,9 @@ def refresh_ledger(ledger: dict, mat_dir: Path, distill_dir: Path, sp_dir: Path,
             rel = f["path"]
             if rel not in scanned:
                 report["missing"].append(rel)
+                if tolerate_missing:
+                    # 保留登记与最后已知 sha256（来源缺失是可读 attention，不是静默破坏性删除）。
+                    new_files.append(dict(f))
                 continue
             nf = dict(f)
             nf["sha256"] = scanned[rel]
@@ -515,9 +520,10 @@ def render_catalog_csv(ledger: dict) -> list:
 
 
 def write_csv(rows: list, out_path: Path) -> None:
-    """写 derived CSV（utf-8-sig，Excel 友好）。"""
+    """写 derived CSV（utf-8-sig BOM 供 Excel 识别；lineterminator=\n 与 JSON/MD 派生视图统一为 LF，
+    避免 CRLF 触发 git diff --check 行尾误报）。"""
     with open(out_path, "w", encoding="utf-8-sig", newline="") as f:
-        csv.writer(f).writerows(rows)
+        csv.writer(f, lineterminator="\n").writerows(rows)
 
 
 def write_ledger(ledger: dict, out_path: Path) -> None:
@@ -527,7 +533,11 @@ def write_ledger(ledger: dict, out_path: Path) -> None:
 
 
 def render_index_md(ledger: dict) -> str:
-    """渲染素材总索引.md（总览 + 参考作品表 + 研究资料表 + 待确认表；不含 SHA/大小/文件名/来源网站等）。"""
+    """渲染素材总索引.md（总览 + 三个作者类型表：原著 / 技巧类 / 其他；不含 SHA/大小/文件名/来源网站等）。
+
+    作者可见类型只有三种（原著=REFERENCE_WORK / 技巧类=METHOD_SOURCE / 其他=LOOSE_MATERIAL）；
+    历史 RESEARCH / NEEDS_REVIEW（如存在）归入「其他」表展示，绝不隐藏数据，但不再作为独立作者类型。
+    """
     assets = ledger["assets"]
     n = len(assets)
     by_type = {}
@@ -568,12 +578,13 @@ def render_index_md(ledger: dict) -> str:
                 f"{a['purification']['status']} | {a['knowledge']['status']} |")
         return rows
 
+    other_items = (by_type.get("LOOSE_MATERIAL", [])
+                   + by_type.get("RESEARCH", [])
+                   + by_type.get("NEEDS_REVIEW", []))
     sections = [
-        ("## 参考作品（REFERENCE_WORK）", by_type.get("REFERENCE_WORK", [])),
-        ("## 方法/技巧资料（METHOD_SOURCE）", by_type.get("METHOD_SOURCE", [])),
-        ("## 研究资料（RESEARCH）", by_type.get("RESEARCH", [])),
-        ("## 零散素材（LOOSE_MATERIAL）", by_type.get("LOOSE_MATERIAL", [])),
-        ("## 待确认（NEEDS_REVIEW）", by_type.get("NEEDS_REVIEW", [])),
+        ("## 原著（REFERENCE_WORK）", by_type.get("REFERENCE_WORK", [])),
+        ("## 技巧类（METHOD_SOURCE）", by_type.get("METHOD_SOURCE", [])),
+        ("## 其他（LOOSE_MATERIAL）", other_items),
     ]
     for title, items in sections:
         lines.append(title)
@@ -583,10 +594,12 @@ def render_index_md(ledger: dict) -> str:
     return "\n".join(lines)
 
 
-def refresh_and_render(root: Path, check_only: bool = False) -> int:
+def refresh_and_render(root: Path, check_only: bool = False, tolerate_missing: bool = False) -> int:
     """canonical 默认流程：load ledger → refresh → validate →（check_only 停止）→ 写三视图。
 
-    供 CLI 与 SourcePrepare local writeback 复用；任何 MISSING 都停止且不写盘。
+    供 CLI 与 SourcePrepare local writeback 复用；默认任何 MISSING 都停止且不写盘。
+    tolerate_missing=True（仅作者「刷新状态」/manual reconcile 路径）：缺失来源
+    保留登记（可读 attention）而不阻断整体刷新；其余校验仍严格。
     """
     mat_dir = root / MATERIAL_DIR_NAME
     distill_dir = root / DISTILL_DIR_NAME
@@ -600,9 +613,10 @@ def refresh_and_render(root: Path, check_only: bool = False) -> int:
         return 2
 
     ledger = load_ledger(ledger_path)
-    new_ledger, report = refresh_ledger(ledger, mat_dir, distill_dir, sp_dir, mp_dir)
+    new_ledger, report = refresh_ledger(ledger, mat_dir, distill_dir, sp_dir, mp_dir,
+                                        tolerate_missing=tolerate_missing)
 
-    if report["missing"]:
+    if report["missing"] and not tolerate_missing:
         print(f"[catalog] MISSING_REGISTERED_FILE × {len(report['missing'])}：")
         for rel in report["missing"]:
             print(f"  - {rel}")
