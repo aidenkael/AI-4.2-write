@@ -6,6 +6,7 @@ import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { useNewProjectController } from '../features/projects/useNewProjectController'
 import { useIdeasController } from '../features/ideas/useIdeasController'
 import { useAuthorTask } from '../features/tasks/AuthorTaskCoordinator'
+import { taskFor } from '../features/tasks/coordinatorModel'
 import { ProjectCoverControl } from '../features/presentation/ProjectCoverControl'
 
 /**
@@ -20,7 +21,8 @@ import { ProjectCoverControl } from '../features/presentation/ProjectCoverContro
 export function WorksPage() {
   const { actions } = useApp()
   const { projects, loading, error, reload, openProjectById } = useFormalProjectShell()
-  const { task } = useAuthorTask()
+  const { tasksByRequestId } = useAuthorTask()
+  const task = taskFor(tasksByRequestId, 'new_project')
   const ideas = useIdeasController({ notify: actions.notify })
   const np = useNewProjectController({ notify: actions.notify })
   const [openingId, setOpeningId] = useState<string | null>(null)

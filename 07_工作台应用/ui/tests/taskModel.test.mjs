@@ -41,9 +41,9 @@ test('deriveTaskStatus: interactive pending → waiting_author; direct → runni
 })
 
 test('waitingAuthorMessage: stage-specific, never fabricated', () => {
-  assert.ok(waitingAuthorMessage('story_write', 'pending_prose').includes('再次执行 /gowrite'))
-  assert.ok(waitingAuthorMessage('story_write', null).includes('正在选择本次写作上下文'))
-  assert.ok(waitingAuthorMessage('story_plan', null).includes('/gowrite'))
+  assert.ok(waitingAuthorMessage('story_write', 'pending_prose').includes('生成正文'))
+  assert.ok(waitingAuthorMessage('story_write', null).includes('选择本次写作上下文'))
+  assert.equal(waitingAuthorMessage('story_plan', null), '等待 Agent')
 })
 
 test('candidateReadyMessage is truthful per kind', () => {
@@ -59,8 +59,8 @@ test('taskStripView: waiting_author → gowrite primary action', () => {
   })
   assert.equal(view.label, '正文写作')
   assert.equal(view.primaryAction, 'gowrite')
-  assert.equal(view.primaryLabel, '前往 Qoder 执行 /gowrite')
-  assert.ok(view.stateText.includes('再次执行 /gowrite'))
+  assert.equal(view.primaryLabel, '前往 Qoder')
+  assert.equal(view.stateText, '等待 Agent')
   assert.equal(view.canCancel, true)
 })
 
@@ -70,7 +70,7 @@ test('taskStripView: running → return action with direct-mode secondary detail
     phase: null, message: null, execution: { execution_mode: 'direct' }, result: null, error: null,
   })
   assert.equal(view.primaryAction, 'return')
-  assert.ok(view.stateText.includes('后台 AI 正在执行'))
+  assert.ok(view.stateText.includes('Agent 正在执行'))
   assert.ok(view.stateText.includes('直接模式'))
 })
 

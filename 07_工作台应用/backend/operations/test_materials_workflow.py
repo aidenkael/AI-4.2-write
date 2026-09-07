@@ -280,10 +280,12 @@ def test_run_source_prepare_invokes_real_cli(isolated, monkeypatch):
         return subprocess.CompletedProcess(cmd, 0, stdout="PASS book_0001\n", stderr="")
 
     monkeypatch.setattr(materials.subprocess, "run", fake_run)
+    monkeypatch.setattr(materials, "_refresh_catalog_or_fail", lambda *args: None)
     result = materials.run_source_prepare("book_0001")
     assert result["status"] == "completed"
     assert "--book" in calls[0] and "book_0001" in calls[0]
     assert "--no-git-sync" in calls[0]
+    assert "--no-catalog-writeback" in calls[0]
     assert precheck_calls == [], "Workbench 命令必须使 Git precheck 不可达"
 
 

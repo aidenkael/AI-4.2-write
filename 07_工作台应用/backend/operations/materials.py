@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from operations import execution_audit as audit
+from operations import material_settlement
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -493,23 +494,23 @@ def refresh_materials() -> dict[str, Any]:
     catalog, intake, _ = _load_materialintake()
     root = get_repo_root()
 
-    # 1) manual reconcile（事务性；歧义 fail closed，不写盘）
-    rec = intake.reconcile_manual_edits(root)
-    if not rec.get("ok"):
-        errors = rec.get("errors") or ["素材状态刷新失败"]
-        message = errors[0] if len(errors) == 1 else "；".join(errors)
-        audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "material_intake",
-                           details={"skill": "MaterialIntake", "errors": errors})
-        audit.finish_file(request_id, audit.STATUS_FAILED, error=message)
-        raise MaterialsError(message)
+    # manual reconcile + derived-view refresh is one shared canonical mutation.
+    with material_settlement.serialized():
+        rec = intake.reconcile_manual_edits(root)
+        if not rec.get("ok"):
+            errors = rec.get("errors") or ["素材状态刷新失败"]
+            message = errors[0] if len(errors) == 1 else "；".join(errors)
+            audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "material_intake",
+                               details={"skill": "MaterialIntake", "errors": errors})
+            audit.finish_file(request_id, audit.STATUS_FAILED, error=message)
+            raise MaterialsError(message)
 
-    # 2) reconcile 未改动（无手动编辑）时，执行常规确定性刷新（重算 SHA + 派生状态 + 三视图）
-    if not rec.get("changed"):
-        rc = catalog.refresh_and_render(root, check_only=False, tolerate_missing=True)
-        if rc != 0:
-            audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "material_intake", details={"skill": "MaterialIntake"})
-            audit.finish_file(request_id, audit.STATUS_FAILED, error="素材状态刷新失败")
-            raise MaterialsError("素材状态刷新失败，请检查素材目录是否完整。")
+        if not rec.get("changed"):
+            rc = catalog.refresh_and_render(root, check_only=False, tolerate_missing=True)
+            if rc != 0:
+                audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "material_intake", details={"skill": "MaterialIntake"})
+                audit.finish_file(request_id, audit.STATUS_FAILED, error="素材状态刷新失败")
+                raise MaterialsError("素材状态刷新失败，请检查素材目录是否完整。")
 
     audit.append_event(request_id, audit.EVENT_SKILL_COMPLETED, "material_intake",
                        details={"skill": "MaterialIntake", "registered": len(rec.get("registered") or []),
@@ -615,15 +616,15 @@ def apply_material_intake(plan: dict[str, Any]) -> dict[str, Any]:
     root = get_repo_root()
     mat_dir = root / "01_原始素材"
     ledger_path = mat_dir / "素材资产.json"
-    try:
-        ledger = catalog.load_ledger(ledger_path)
-    except (FileNotFoundError, RuntimeError) as exc:
-        audit.finish_file(request_id, audit.STATUS_FAILED, error=str(exc))
-        raise MaterialsError("素材目录不可用，请检查素材文件夹后重试。") from exc
-
-    # 确定性 intake 事务（绝不绕过其 transaction/rollback；内部已含 health check + snapshot + 回滚）
-    audit.append_event(request_id, audit.EVENT_SKILL_STARTED, "material_intake", details={"skill": "MaterialIntake"})
-    report = intake.apply_plan(plan, ledger, root)
+    # ledger read + intake apply/rollback is one shared canonical transaction.
+    with material_settlement.serialized():
+        try:
+            ledger = catalog.load_ledger(ledger_path)
+        except (FileNotFoundError, RuntimeError) as exc:
+            audit.finish_file(request_id, audit.STATUS_FAILED, error=str(exc))
+            raise MaterialsError("素材目录不可用，请检查素材文件夹后重试。") from exc
+        audit.append_event(request_id, audit.EVENT_SKILL_STARTED, "material_intake", details={"skill": "MaterialIntake"})
+        report = intake.apply_plan(plan, ledger, root)
     if not report.get("ok"):
         errors = report.get("errors") or ["素材入库失败"]
         audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "material_intake",
@@ -1004,11 +1005,12 @@ def run_source_prepare(asset_id: str) -> dict[str, Any]:
         "--root", str(get_repo_root()),
         "--book", asset_id,
         "--no-git-sync",
+        "--no-catalog-writeback",
     ]
     audit.append_event(
         request_id, audit.EVENT_AGENT_DIRECT_PROCESS_STARTED, "source_prepare",
         details={"asset_id": asset_id,
-                 "command": "source_prepare.py --book " + asset_id + " --no-git-sync"},
+                 "command": "source_prepare.py --book " + asset_id + " --no-git-sync --no-catalog-writeback"},
     )
     try:
         proc = subprocess.run(
@@ -1029,6 +1031,8 @@ def run_source_prepare(asset_id: str) -> dict[str, Any]:
                            details={"skill": "SourcePrepare", "returncode": proc.returncode, "detail": detail})
         audit.finish_file(request_id, audit.STATUS_FAILED, error=detail)
         raise MaterialsError(_prepare_error_message(detail))
+    # The long conversion stayed outside the lock; only shared catalog writeback is serialized.
+    _refresh_catalog_or_fail(request_id, "source_prepare")
     audit.append_event(request_id, audit.EVENT_SKILL_COMPLETED, "source_prepare", details={"skill": "SourcePrepare", "asset_id": asset_id})
     audit.finish_file(request_id, audit.STATUS_COMPLETED)
     return {
@@ -1163,20 +1167,21 @@ def _finalize_reference_distill(request_id: str, asset: dict[str, Any], sp_dir: 
     # 发布事务保持开放，直到 discovery + catalog settlement 都成功。
     target_dir = get_repo_root() / "02_素材知识库" / sp_dir.name
     tx = _PublishTransaction(stage_dir, target_dir, request_id)
-    try:
-        tx.begin()
-        if not _knowledge_is_discoverable(asset):
-            raise MaterialsError("knowledge discovery failed")
-        catalog, _, _ = _load_materialintake()
-        rc = catalog.refresh_and_render(get_repo_root(), check_only=False)
-        if rc != 0:
-            raise MaterialsError(f"catalog settlement rc={rc}")
-        tx.commit()
-    except Exception as exc:  # noqa: BLE001 - technical detail stays in audit
-        audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "book_distill",
-                           details={"step": "post_publish_verification", "error": str(exc)[:300]})
-        _rollback_publish_or_fail(tx, request_id, "book_distill")
-        raise MaterialsError("原著学习结果暂不能用于写作，已保留原知识包，请重试。") from exc
+    with material_settlement.serialized():
+        try:
+            tx.begin()
+            if not _knowledge_is_discoverable(asset):
+                raise MaterialsError("knowledge discovery failed")
+            catalog, _, _ = _load_materialintake()
+            rc = catalog.refresh_and_render(get_repo_root(), check_only=False)
+            if rc != 0:
+                raise MaterialsError(f"catalog settlement rc={rc}")
+            tx.commit()
+        except Exception as exc:  # noqa: BLE001 - technical detail stays in audit
+            audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "book_distill",
+                               details={"step": "post_publish_verification", "error": str(exc)[:300]})
+            _rollback_publish_or_fail(tx, request_id, "book_distill")
+            raise MaterialsError("原著学习结果暂不能用于写作，已保留原知识包，请重试。") from exc
     return {"output_dir": str(target_dir)}
 
 
@@ -1284,6 +1289,7 @@ def _run_distill_agent_stage(request_id: str, asset_id: str, sp_dir: Path, stage
                 meta={
                     "request_id": request_id,
                     "asset_id": asset_id,
+                    "target_label": str(_ledger_asset(asset_id).get("name") or ""),
                     "sp_dir": str(sp_dir),
                     "stage_dir": str(stage_dir),
                     "execution": {
@@ -1389,6 +1395,8 @@ def get_book_distill_request(request_id: str) -> dict[str, Any]:
         return {"request_id": request_id, "status": "expired", "error": "任务已超时，请重新发起。"}
     response = bridge.read_response(request_id)
     if response is None:
+        if request.get("execution_phase") == "running":
+            return {"request_id": request_id, "status": "pending", "execution_phase": "running", "message": "Agent 正在执行素材学习"}
         return {"request_id": request_id, "status": "pending", "message": "等待 Qoder /gowrite：正在原著学习，完成后将自动整理参考知识"}
     if response.get("request_id") != request_id:
         bridge.cleanup_request(request_id)
@@ -1438,7 +1446,8 @@ _MD_SCRIPT = _REPO_ROOT / "05_Skills与自动化" / "01_Skills" / "MethodDistill
 def _refresh_catalog_or_fail(request_id: str, component: str) -> None:
     """结算后刷新素材状态；失败抛稳定错误（不阻断已完成的产物）。"""
     catalog, _, _ = _load_materialintake()
-    rc = catalog.refresh_and_render(get_repo_root(), check_only=False)
+    with material_settlement.serialized():
+        rc = catalog.refresh_and_render(get_repo_root(), check_only=False)
     if rc != 0:
         audit.append_event(request_id, audit.EVENT_SKILL_FAILED, component, details={"step": "catalog_refresh"})
         raise MaterialsError("处理完成，但素材状态刷新失败，请手动刷新素材页。")
@@ -1649,17 +1658,18 @@ def _finalize_method_distill_core(request_id: str, asset_id: str,
 
     target_method_dir = get_repo_root() / "02_素材知识库" / mp_dir.name / "method"
     tx = _PublishTransaction(stage_method_dir, target_method_dir, request_id)
-    try:
-        tx.begin()
-        if not _knowledge_is_discoverable({"id": asset_id, "type": "METHOD_SOURCE"}):
-            raise MaterialsError("knowledge discovery failed")
-        _refresh_catalog_or_fail(request_id, "method_distill")
-        tx.commit()
-    except Exception as exc:  # noqa: BLE001 - technical detail stays in audit
-        audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "method_distill",
-                           details={"step": "post_publish_verification", "error": str(exc)[:300]})
-        _rollback_publish_or_fail(tx, request_id, "method_distill")
-        raise MaterialsError("方法学习结果暂不能用于写作，已保留原知识包，请重试。") from exc
+    with material_settlement.serialized():
+        try:
+            tx.begin()
+            if not _knowledge_is_discoverable({"id": asset_id, "type": "METHOD_SOURCE"}):
+                raise MaterialsError("knowledge discovery failed")
+            _refresh_catalog_or_fail(request_id, "method_distill")
+            tx.commit()
+        except Exception as exc:  # noqa: BLE001 - technical detail stays in audit
+            audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "method_distill",
+                               details={"step": "post_publish_verification", "error": str(exc)[:300]})
+            _rollback_publish_or_fail(tx, request_id, "method_distill")
+            raise MaterialsError("方法学习结果暂不能用于写作，已保留原知识包，请重试。") from exc
     return {"output_dir": str(target_method_dir)}
 
 
@@ -1727,6 +1737,7 @@ def _run_method_distill_agent_stage(request_id: str, asset_id: str,
                 meta={
                     "request_id": request_id,
                     "asset_id": asset_id,
+                    "target_label": str(_ledger_asset(asset_id).get("name") or ""),
                     "mp_dir": str(mp_dir),
                     "stage_method_dir": str(stage_method_dir),
                     "execution": {
@@ -1791,6 +1802,8 @@ def get_method_distill_request(request_id: str) -> dict[str, Any]:
         return {"request_id": request_id, "status": "expired", "error": "任务已超时，请重新发起。"}
     response = bridge.read_response(request_id)
     if response is None:
+        if request.get("execution_phase") == "running":
+            return {"request_id": request_id, "status": "pending", "execution_phase": "running", "message": "Agent 正在执行素材学习"}
         return {"request_id": request_id, "status": "pending",
                 "message": "等待 Qoder /gowrite：正在方法学习，完成后将自动整理方法知识"}
     if response.get("request_id") != request_id:
@@ -1847,10 +1860,24 @@ def distill_material(asset_id: str) -> dict[str, Any]:
 
     REFERENCE_WORK → BookDistill；METHOD_SOURCE → MethodDistill；其他类型保守拒绝。
     """
-    asset = _ledger_asset((asset_id or "").strip())
-    if asset.get("type") == "METHOD_SOURCE":
-        return run_method_distill(asset_id)
-    return run_book_distill(asset_id)
+    asset_id = (asset_id or "").strip()
+    asset = _ledger_asset(asset_id)
+    # The in-process claim closes the scan-to-request race without holding the
+    # settlement lock during preparation or Agent work. Persisted requests keep
+    # the guard authoritative across Workbench reloads.
+    with material_settlement.claim_active_asset(asset_id) as claimed:
+        if not claimed:
+            raise MaterialsError("该素材正在学习，请等待完成或取消当前任务。")
+        from operations import qoder_bridge as bridge
+        requests_dir = bridge.get_bridge_root() / "requests"
+        if requests_dir.exists():
+            for path in requests_dir.glob("*.json"):
+                pending = bridge.get_request(path.stem)
+                if pending and pending.get("state") == "pending" and (pending.get("meta") or {}).get("asset_id") == asset_id:
+                    raise MaterialsError("该素材正在学习，请等待完成或取消当前任务。")
+        if asset.get("type") == "METHOD_SOURCE":
+            return run_method_distill(asset_id)
+        return run_book_distill(asset_id)
 
 
 def get_material_distill_request(request_id: str) -> dict[str, Any]:

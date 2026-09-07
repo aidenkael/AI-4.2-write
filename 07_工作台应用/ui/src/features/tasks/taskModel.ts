@@ -28,6 +28,7 @@ export interface AuthorTaskExecution {
   execution_mode?: string | null
   agent_id?: string | null
   model?: string | null
+  agent_command?: string | null
 }
 
 export interface AuthorTask {
@@ -105,11 +106,11 @@ export function deriveTaskStatus(
 /** 等待作者动作时的默认提示（phase 特化；与后端消息一致，绝不伪造）。 */
 export function waitingAuthorMessage(kind: AuthorTaskKind, phase: string | null): string {
   if (kind === 'story_write') {
-    if (phase === 'pending_prose') return '上下文已准备好，请再次执行 /gowrite 生成正文'
-    return '等待 Qoder /gowrite：正在选择本次写作上下文'
+    if (phase === 'pending_prose') return '上下文已准备好，等待 Agent 生成正文'
+    return '等待 Agent 选择本次写作上下文'
   }
-  if (kind === 'material_distill') return '等待 Qoder /gowrite：正在学习素材知识'
-  return '等待 Qoder /gowrite 执行任务'
+  if (kind === 'material_distill') return '等待 Agent 学习素材知识'
+  return '等待 Agent'
 }
 
 /** 候选就绪通知文本（通知一次；不重复）。 */
@@ -155,14 +156,13 @@ export function taskStripView(task: AuthorTask): TaskStripView {
     case 'pending':
       return { label, stateText: '正在准备…', primaryAction: 'return', primaryLabel: '返回任务', canCancel: true }
     case 'running':
-      return { label, stateText: `后台 AI 正在执行${secondary}`, primaryAction: 'return', primaryLabel: '返回任务', canCancel: true }
+      return { label, stateText: `Agent 正在执行${secondary}`, primaryAction: 'return', primaryLabel: '返回任务', canCancel: true }
     case 'waiting_author': {
-      const phase = task.kind === 'story_write' ? task.phase : null
       return {
         label,
-        stateText: task.message ?? waitingAuthorMessage(task.kind, phase),
+        stateText: '等待 Agent',
         primaryAction: 'gowrite',
-        primaryLabel: '前往 Qoder 执行 /gowrite',
+        primaryLabel: '前往 Qoder',
         canCancel: true,
       }
     }

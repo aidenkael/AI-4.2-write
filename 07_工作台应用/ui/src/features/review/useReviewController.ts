@@ -16,6 +16,7 @@ import {
   type ReviewSurface,
 } from '../../bridge/client'
 import { useAuthorTask } from '../tasks/AuthorTaskCoordinator'
+import { taskFor } from '../tasks/coordinatorModel'
 
 export type ReviewStatus =
   | 'loading'
@@ -43,7 +44,8 @@ export interface ReviewController {
 const toMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 export function useReviewController(projectId: string | null): ReviewController {
-  const { task, start: startTask, cancel: cancelTask, consume } = useAuthorTask()
+  const { tasksByRequestId, start: startTask, cancel: cancelTask, consume } = useAuthorTask()
+  const task = taskFor(tasksByRequestId, 'review', projectId)
   const [surface, setSurface] = useState<ReviewSurface | null>(null)
   const [surfaceLoading, setSurfaceLoading] = useState(true)
   const [surfaceError, setSurfaceError] = useState<string | null>(null)
@@ -116,7 +118,7 @@ export function useReviewController(projectId: string | null): ReviewController 
           }
         : null)
       setError(null)
-      consume()
+      consume(task.requestId)
       return
     }
     if (task.status === 'failed') {
@@ -124,7 +126,7 @@ export function useReviewController(projectId: string | null): ReviewController 
       setStatus('failed')
       setError(task.error ?? '检查失败，请重试。')
       setExecution(null)
-      consume()
+      consume(task.requestId)
       return
     }
   }, [task, taskMatches, consume])
@@ -157,8 +159,8 @@ export function useReviewController(projectId: string | null): ReviewController 
     setExecution(null)
     setStatus('idle')
     setError(null)
-    await cancelTask()
-  }, [cancelTask])
+    if (task) await cancelTask(task.requestId)
+  }, [cancelTask, task])
 
   return {
     surface, surfaceLoading, surfaceError, report, status, error, selectedChapter, execution,

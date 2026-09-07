@@ -5,6 +5,7 @@ import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { useProjectDataController } from '../features/projectData/useProjectDataController'
 import { useAuthorTask } from '../features/tasks/AuthorTaskCoordinator'
+import { taskFor } from '../features/tasks/coordinatorModel'
 import { describeRecord } from '../features/storyMap/storyMapModel'
 import { authorSourceLabel, authorStatusLabel, compactCharacter } from '../features/presentation/authorPresentation'
 import { AvatarImage } from '../features/presentation/AvatarImage'
@@ -267,8 +268,8 @@ function FoundationDesignDrawer(props: {
   reload: () => Promise<void>
   onClose: () => void
 }) {
-  const { task, start, cancel, confirm } = useAuthorTask()
-  const fdTask = task && task.kind === 'foundation_design' && task.projectId === props.projectId ? task : null
+  const { tasksByRequestId, start, cancel, confirm } = useAuthorTask()
+  const fdTask = taskFor(tasksByRequestId, 'foundation_design', props.projectId)
   const [request, setRequest] = useState(props.initialRequest ?? '')
   const [localError, setLocalError] = useState<string | null>(null)
   const [edits, setEdits] = useState<FdEditItem[]>([])
@@ -309,7 +310,7 @@ function FoundationDesignDrawer(props: {
     }))
     // 确认载荷只发送作者选中的显式领域关系；未选不写。
     const relations = fdSelectedRelationPayload(relationSelections)
-    const result = await confirm('foundation_design', { items, relations, base_model_rev: props.modelRev })
+    const result = await confirm(fdTask?.requestId ?? '', 'foundation_design', { items, relations, base_model_rev: props.modelRev })
     setBusy(false)
     if (result) {
       props.notify('作品地基已更新。')
@@ -382,11 +383,11 @@ function FoundationDesignDrawer(props: {
       </div>
       <footer>
         {!fdTask && <button className="primary" disabled={busy || !request.trim()} onClick={() => void begin()}>开始设计</button>}
-        {working && <button disabled={busy} onClick={() => void cancel()}>取消</button>}
-        {fdTask?.status === 'failed' && <button onClick={() => void cancel()}>关闭</button>}
+        {working && <button disabled={busy} onClick={() => fdTask && void cancel(fdTask.requestId)}>取消</button>}
+        {fdTask?.status === 'failed' && <button onClick={() => void cancel(fdTask.requestId)}>关闭</button>}
         {candidate && (
           <>
-            <button disabled={busy} onClick={() => void cancel()}>丢弃</button>
+            <button disabled={busy} onClick={() => void cancel(fdTask?.requestId ?? '')}>丢弃</button>
             <button className="primary" disabled={busy || !edits.some((it) => it.include)} onClick={() => void accept()}>采用所选条目</button>
           </>
         )}

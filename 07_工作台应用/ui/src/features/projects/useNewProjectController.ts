@@ -11,6 +11,7 @@
  */
 import { useCallback, useRef, useState } from 'react'
 import { useAuthorTask } from '../tasks/AuthorTaskCoordinator'
+import { taskFor } from '../tasks/coordinatorModel'
 import type { ConfirmResult, StoryCandidate } from '../../bridge/client'
 
 export type NewProjectStatus =
@@ -51,7 +52,7 @@ export interface NewProjectController {
 const toMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 function taskView(
-  task: ReturnType<typeof useAuthorTask>['task'],
+  task: ReturnType<typeof taskFor>,
 ): Pick<NewProjectControllerState, 'requestId' | 'proposalToken' | 'candidate' | 'backendMessage' | 'status' | 'error' | 'execution'> | null {
   if (!task || task.kind !== 'new_project') return null
   const base = {
@@ -93,7 +94,8 @@ function taskView(
 
 export function useNewProjectController(options: { notify?: (message: string) => void }): NewProjectController {
   const { notify } = options
-  const { task, start, cancel: cancelTask, confirm: confirmTask } = useAuthorTask()
+  const { tasksByRequestId, start, cancel: cancelTask, confirm: confirmTask } = useAuthorTask()
+  const task = taskFor(tasksByRequestId, 'new_project')
   const [name, setNameState] = useState('')
   const [idea, setIdeaState] = useState('')
   const [confirmed, setConfirmed] = useState<ConfirmResult | null>(null)
@@ -142,23 +144,23 @@ export function useNewProjectController(options: { notify?: (message: string) =>
 
   const cancel = useCallback(async () => {
     setLocalError(null)
-    await cancelTask()
-  }, [cancelTask])
+    if (task) await cancelTask(task.requestId)
+  }, [cancelTask, task])
 
   const discard = useCallback(async () => {
     setLocalError(null)
-    await cancelTask()
-  }, [cancelTask])
+    if (task) await cancelTask(task.requestId)
+  }, [cancelTask, task])
 
   const regenerate = useCallback(async () => {
     setLocalError(null)
-    await cancelTask()
+    if (task) await cancelTask(task.requestId)
     await generate()
-  }, [cancelTask, generate])
+  }, [cancelTask, generate, task])
 
   const confirm = useCallback(async (): Promise<ConfirmResult | null> => {
     try {
-      const result = await confirmTask('new_project')
+      const result = await confirmTask(task?.requestId ?? '', 'new_project')
       if (!result) {
         setLocalError(task?.error ?? '确认失败，请重试。')
         return null

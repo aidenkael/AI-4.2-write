@@ -268,7 +268,8 @@ test('§4：入库动作不再自动提纯（processInboxBatch 不调用 prepare
 test('§11：distill 忙碌状态派生自 App 级任务（取消即清除，不持有第二套 local busy）', () => {
   assert.equal(controllerSrc.includes('setBusyKind'), false, '不得保留独立 distill busy setter')
   assert.equal(controllerSrc.includes('setBusyAssetId'), false, '不得保留独立 distill busy setter')
-  assert.ok(controllerSrc.includes('distillBusyAssetId'), 'distill 忙碌状态从 App 级任务派生')
+  assert.ok(controllerSrc.includes('activeDistillAssetIds'), '多个 distill 忙碌状态从 App 级任务集合派生')
+  assert.ok(controllerSrc.includes('tasksByRequestId'), '素材页消费 request-keyed 全局任务真相')
   assert.ok(controllerSrc.includes('prepareBusyAssetId'), '本页只拥有同步 Prepare 忙碌状态')
 })
 

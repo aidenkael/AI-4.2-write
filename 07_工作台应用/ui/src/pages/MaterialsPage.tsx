@@ -228,22 +228,22 @@ function MaterialDetailPanel({ detail, controller }: {
     </p>
     {detail.state === 'pending_prepare' && <>
       <p>还没有整理原文。</p>
-      <button className="primary" disabled={controller.busyAssetId !== null} onClick={() => void controller.runPrepare(detail.id)}>
-        {controller.busyAssetId === detail.id ? '正在提纯…' : '提纯'}
+      <button className="primary" disabled={controller.isAssetBusy(detail.id)} onClick={() => void controller.runPrepare(detail.id)}>
+        {controller.busyKindForAsset(detail.id) === 'prepare' ? '正在提纯…' : '提纯'}
       </button>
     </>}
     {detail.state === 'pending_distill' && <>
       <p>{learningExplanation(detail.type)}</p>
-      <button className="primary" disabled={controller.busyAssetId !== null} onClick={() => void controller.runDistill(detail.id)}>
-        {controller.busyAssetId === detail.id ? learningBusyLabel(detail.type) : learningActionLabel(detail.type)}
+      <button className="primary" disabled={controller.isAssetBusy(detail.id)} onClick={() => void controller.runDistill(detail.id)}>
+        {controller.busyKindForAsset(detail.id) === 'distill' ? learningBusyLabel(detail.type) : learningActionLabel(detail.type)}
       </button>
     </>}
     {detail.state === 'needs_attention' && <>
       <h3>需要检查</h3>
       <p>{detail.attention_message}</p>
-      {attentionRetryLabel(detail.workflow_stage, detail.type) && <button className="primary" disabled={controller.busyAssetId !== null}
+      {attentionRetryLabel(detail.workflow_stage, detail.type) && <button className="primary" disabled={controller.isAssetBusy(detail.id)}
         onClick={() => void (detail.workflow_stage === 'purified' ? controller.runDistill(detail.id) : controller.runPrepare(detail.id))}>
-        {controller.busyAssetId === detail.id
+        {controller.isAssetBusy(detail.id)
           ? (detail.workflow_stage === 'purified' ? learningBusyLabel(detail.type) : '正在提纯…')
           : attentionRetryLabel(detail.workflow_stage, detail.type)}
       </button>}

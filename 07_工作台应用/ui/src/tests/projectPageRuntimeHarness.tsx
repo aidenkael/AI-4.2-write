@@ -40,7 +40,7 @@ const formal: FormalProjectShellValue = {
   reload: async () => {}, openProjectById: async () => true, clearSelection: () => {},
 }
 const tasks: AuthorTaskController = {
-  task: null, start: async () => null, cancel: async () => {}, confirm: async () => null, consume: () => {}, navigateToTask: () => {}, resume: async () => {},
+  tasksByRequestId: {}, start: async () => null, cancel: async () => {}, confirm: async () => null, consume: () => {}, navigateToTask: () => {}, resume: async () => {},
 }
 
 function bridgeData(method: string): unknown {

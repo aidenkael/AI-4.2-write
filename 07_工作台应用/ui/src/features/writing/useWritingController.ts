@@ -20,6 +20,7 @@ import {
   type StoryWriteSurface,
 } from '../../bridge/client'
 import { useAuthorTask } from '../tasks/AuthorTaskCoordinator'
+import { taskFor } from '../tasks/coordinatorModel'
 
 export type WritingStatus =
   | 'loading'
@@ -72,7 +73,7 @@ const toMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 /** 协调器任务 → 本页可见状态（仅匹配本项目；另一项目的任务不影响本页）。 */
 function taskViewForProject(
-  task: ReturnType<typeof useAuthorTask>['task'],
+  task: ReturnType<typeof taskFor>,
   projectId: string | null,
 ): Pick<WritingControllerState, 'requestId' | 'writingToken' | 'candidate' | 'status' | 'phase' | 'phaseMessage' | 'error' | 'execution'> | null {
   if (!task || task.kind !== 'story_write') return null
@@ -118,7 +119,8 @@ export function useWritingController(options: {
   notify?: (message: string) => void
 }): WritingController {
   const { projectId, notify } = options
-  const { task, start, cancel: cancelTask, confirm: confirmTask } = useAuthorTask()
+  const { tasksByRequestId, start, cancel: cancelTask, confirm: confirmTask } = useAuthorTask()
+  const task = taskFor(tasksByRequestId, 'story_write', projectId)
   const [writingSurface, setWritingSurface] = useState<StoryWriteSurface | null>(null)
   const [selectedChapterNumber, setSelectedChapterNumber] = useState<number | null>(null)
   const [authorInput, setAuthorInputState] = useState('')
@@ -304,21 +306,21 @@ export function useWritingController(options: {
   const cancel = useCallback(async () => {
     setAcceptedNote(false)
     setLocalError(null)
-    await cancelTask()
-  }, [cancelTask])
+    if (task) await cancelTask(task.requestId)
+  }, [cancelTask, task])
 
   const discard = useCallback(async () => {
     setAcceptedNote(false)
     setLocalError(null)
-    await cancelTask()
-  }, [cancelTask])
+    if (task) await cancelTask(task.requestId)
+  }, [cancelTask, task])
 
   const regenerate = useCallback(async () => {
     setAcceptedNote(false)
     setLocalError(null)
-    await cancelTask()
+    if (task) await cancelTask(task.requestId)
     await generate()
-  }, [cancelTask, generate])
+  }, [cancelTask, generate, task])
 
   const confirm = useCallback(async () => {
     const pid = projectRef.current
@@ -327,7 +329,7 @@ export function useWritingController(options: {
       return
     }
     try {
-      const confirmed = await confirmTask('story_write')
+      const confirmed = await confirmTask(task?.requestId ?? '', 'story_write')
       if (!confirmed) {
         setLocalError(task?.error ?? '确认失败，请重试。')
         return

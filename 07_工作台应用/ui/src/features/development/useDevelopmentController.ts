@@ -17,6 +17,7 @@ import {
   type StoryPlanCandidate,
 } from '../../bridge/client'
 import { useAuthorTask } from '../tasks/AuthorTaskCoordinator'
+import { taskFor } from '../tasks/coordinatorModel'
 
 export type DevelopmentStatus =
   | 'loading'
@@ -61,7 +62,7 @@ export interface DevelopmentController {
 const toMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 function taskViewForProject(
-  task: ReturnType<typeof useAuthorTask>['task'],
+  task: ReturnType<typeof taskFor>,
   projectId: string | null,
 ): Pick<DevelopmentControllerState, 'requestId' | 'planningToken' | 'candidate' | 'backendMessage' | 'status' | 'error' | 'execution'> | null {
   if (!task || task.kind !== 'story_plan') return null
@@ -108,7 +109,8 @@ export function useDevelopmentController(options: {
   notify?: (message: string) => void
 }): DevelopmentController {
   const { projectId, notify } = options
-  const { task, start, cancel: cancelTask, confirm: confirmTask } = useAuthorTask()
+  const { tasksByRequestId, start, cancel: cancelTask, confirm: confirmTask } = useAuthorTask()
+  const task = taskFor(tasksByRequestId, 'story_plan', projectId)
   const [overview, setOverview] = useState<ProjectOverview | null>(null)
   const [overviewLoading, setOverviewLoading] = useState(false)
   const [overviewError, setOverviewError] = useState<string | null>(null)
@@ -213,21 +215,21 @@ export function useDevelopmentController(options: {
   const cancel = useCallback(async () => {
     setAcceptedNote(false)
     setLocalError(null)
-    await cancelTask()
-  }, [cancelTask])
+    if (task) await cancelTask(task.requestId)
+  }, [cancelTask, task])
 
   const discard = useCallback(async () => {
     setAcceptedNote(false)
     setLocalError(null)
-    await cancelTask()
-  }, [cancelTask])
+    if (task) await cancelTask(task.requestId)
+  }, [cancelTask, task])
 
   const regenerate = useCallback(async () => {
     setAcceptedNote(false)
     setLocalError(null)
-    await cancelTask()
+    if (task) await cancelTask(task.requestId)
     await generate()
-  }, [cancelTask, generate])
+  }, [cancelTask, generate, task])
   const confirm = useCallback(async () => {
     const pid = projectRef.current
     if (!pid || !candidate) {
@@ -235,7 +237,7 @@ export function useDevelopmentController(options: {
       return
     }
     try {
-      const confirmed = await confirmTask('story_plan')
+      const confirmed = await confirmTask(task?.requestId ?? '', 'story_plan')
       if (!confirmed) {
         setLocalError(task?.error ?? '确认失败，请重试。')
         return

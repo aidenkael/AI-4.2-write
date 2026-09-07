@@ -44,8 +44,8 @@ export interface MaterialsController {
   batchType: string
   importResult: ImportMaterialResult | null
   importing: boolean
-  busyAssetId: string | null
-  busyKind: 'prepare' | 'distill' | null
+  isAssetBusy(assetId: string): boolean
+  busyKindForAsset(assetId: string): 'prepare' | 'distill' | null
   detail: MaterialDetail | null
   detailLoading: boolean
   openingFolderId: string | null
@@ -66,7 +66,7 @@ const toMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 export function useMaterialsController(options?: { notify?: (message: string) => void }): MaterialsController {
   const notify = options?.notify
-  const { task, start, consume } = useAuthorTask()
+  const { tasksByRequestId, start, consume } = useAuthorTask()
   const [materials, setMaterials] = useState<MaterialItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -134,33 +134,31 @@ export function useMaterialsController(options?: { notify?: (message: string) =>
 
   // ---------------- 协调器任务 → 本页投影（distill only） ----------------
 
-  const distillTask = task?.kind === 'material_distill' ? task : null
-  // §11：distill 忙碌状态派生自 App 级 material_distill 任务（不持有第二套真相）；
-  // 取消清除任务后 distillTask 变 null，可见忙碌状态立即消失（不再卡在「正在蒸馏」）。
-  const distillBusyAssetId = distillTask
-    && (distillTask.status === 'running' || distillTask.status === 'pending' || distillTask.status === 'waiting_author')
-    ? (typeof distillTask.meta?.asset_id === 'string' ? distillTask.meta.asset_id : null)
-    : null
-  const busyKind: MaterialsController['busyKind'] = prepareBusyAssetId ? 'prepare' : (distillBusyAssetId ? 'distill' : null)
-  const busyAssetId: string | null = prepareBusyAssetId ?? distillBusyAssetId
+  const distillTasks = Object.values(tasksByRequestId).filter((candidate) => candidate.kind === 'material_distill')
+  const activeDistillAssetIds = new Set(distillTasks
+    .filter((candidate) => candidate.status === 'running' || candidate.status === 'pending' || candidate.status === 'waiting_author')
+    .map((candidate) => typeof candidate.meta?.asset_id === 'string' ? candidate.meta.asset_id : '')
+    .filter(Boolean))
+  const isAssetBusy = (assetId: string) => prepareBusyAssetId === assetId || activeDistillAssetIds.has(assetId)
+  const busyKindForAsset = (assetId: string): 'prepare' | 'distill' | null => (
+    prepareBusyAssetId === assetId ? 'prepare' : (activeDistillAssetIds.has(assetId) ? 'distill' : null)
+  )
 
   useEffect(() => {
-    if (!distillTask) return
-    const assetId = typeof distillTask.meta?.asset_id === 'string' ? distillTask.meta.asset_id : null
-    if (distillTask.status === 'candidate' && distillTask.result) {
-      const result = distillTask.result as { message?: string }
-      notify?.(result.message ?? '学习完成')
-      void reload()
-      if (detail?.id && detail.id === assetId) void selectDetail(detail.id)
-      consume()
-      return
+    for (const distillTask of distillTasks) {
+      const assetId = typeof distillTask.meta?.asset_id === 'string' ? distillTask.meta.asset_id : null
+      if (distillTask.status === 'candidate' && distillTask.result) {
+        const result = distillTask.result as { message?: string }
+        notify?.(result.message ?? '学习完成')
+        void reload()
+        if (detail?.id && detail.id === assetId) void selectDetail(detail.id)
+        consume(distillTask.requestId)
+      } else if (distillTask.status === 'failed') {
+        setError(distillTask.error ?? '学习失败，请重试。')
+        consume(distillTask.requestId)
+      }
     }
-    if (distillTask.status === 'failed') {
-      setError(distillTask.error ?? '学习失败，请重试。')
-      consume()
-      return
-    }
-  }, [distillTask, consume, detail?.id, notify, reload, selectDetail])
+  }, [tasksByRequestId, consume, detail?.id, notify, reload, selectDetail])
 
   // ---------------- 导入 / 批次计划 ----------------
 
@@ -263,13 +261,14 @@ export function useMaterialsController(options?: { notify?: (message: string) =>
   const runDistill = useCallback(async (assetId: string) => {
     setError(null)
     // §11：distill 忙碌状态由 App 级任务派生，不在本页设置第二套 local busy。
-    const busy = await start({ kind: 'material_distill', asset_id: assetId })
+    const assetName = materials.find((item) => item.id === assetId)?.name
+    const busy = await start({ kind: 'material_distill', asset_id: assetId, asset_name: assetName })
     if (busy) {
       setError(busy)
       return false
     }
     return true
-  }, [start])
+  }, [materials, start])
 
   const openFolder = useCallback(async (assetId: string) => {
     setOpeningFolderId(assetId)
@@ -289,7 +288,7 @@ export function useMaterialsController(options?: { notify?: (message: string) =>
     materials, loading, error, refreshing,
     inbox, inboxLoading, inboxError, processingInbox,
     batchType, importResult, importing,
-    busyAssetId, busyKind, detail, detailLoading, openingFolderId,
+    isAssetBusy, busyKindForAsset, detail, detailLoading, openingFolderId,
     reload, refresh, scanInbox, pickAndImport,
     setBatchType, processInboxBatch,
     selectDetail, openFolder, runPrepare, runDistill,

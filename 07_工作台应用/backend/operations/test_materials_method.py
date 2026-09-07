@@ -10,6 +10,8 @@
 import json
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -17,6 +19,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from operations import materials  # noqa: E402
+from operations import material_settlement  # noqa: E402
 
 
 @pytest.fixture()
@@ -317,3 +320,115 @@ def test_interactive_method_wrapper_rechecks_cancellation_before_core(isolated, 
             "req", "book_9101", Path("x"), Path("y"))
 
     assert finalized == []
+
+
+def test_different_assets_can_enter_long_distill_stage_concurrently(isolated, monkeypatch):
+    _write_ledger(isolated, [_asset("book_0001", "REFERENCE_WORK"), _asset("book_0002", "REFERENCE_WORK")])
+    entered = []
+    both = threading.Event()
+    release = threading.Event()
+
+    def run(asset_id):
+        entered.append(asset_id)
+        if len(entered) == 2:
+            both.set()
+        assert release.wait(2)
+        return {"asset_id": asset_id, "status": "pending", "request_id": asset_id}
+
+    monkeypatch.setattr(materials, "run_book_distill", run)
+    results = []
+    threads = [threading.Thread(target=lambda aid=aid: results.append(materials.distill_material(aid)))
+               for aid in ("book_0001", "book_0002")]
+    for thread in threads:
+        thread.start()
+    assert both.wait(1), "different asset claims must not serialize long work"
+    release.set()
+    for thread in threads:
+        thread.join(2)
+    assert {item["asset_id"] for item in results} == {"book_0001", "book_0002"}
+
+
+def test_same_asset_duplicate_is_rejected_during_long_stage(isolated, monkeypatch):
+    _write_ledger(isolated, [_asset("book_0001", "REFERENCE_WORK")])
+    entered = threading.Event()
+    release = threading.Event()
+
+    def run(asset_id):
+        entered.set()
+        assert release.wait(2)
+        return {"asset_id": asset_id, "status": "pending", "request_id": "r1"}
+
+    monkeypatch.setattr(materials, "run_book_distill", run)
+    first = threading.Thread(target=lambda: materials.distill_material("book_0001"))
+    first.start()
+    assert entered.wait(1)
+    with pytest.raises(materials.MaterialsError, match="正在学习"):
+        materials.distill_material("book_0001")
+    release.set()
+    first.join(2)
+
+
+def test_material_final_settlements_are_serialized(isolated, monkeypatch):
+    _write_ledger(isolated, [_asset("book_9101", "METHOD_SOURCE"), _asset("book_9102", "METHOD_SOURCE")])
+    packages = []
+    for asset_id in ("book_9101", "book_9102"):
+        mp = isolated / "06_工作区" / "MethodPrepare" / f"{asset_id}_素材{asset_id}"
+        stage = isolated / "06_工作区" / "MethodDistill" / asset_id / "method"
+        mp.mkdir(parents=True)
+        stage.mkdir(parents=True)
+        (stage / "new.marker").write_text("new\n", encoding="utf-8")
+        packages.append((asset_id, mp, stage))
+    monkeypatch.setattr(materials, "_run_md_cli", lambda *a, **k: subprocess.CompletedProcess([], 0))
+    monkeypatch.setattr(materials, "_knowledge_is_discoverable", lambda asset: True)
+    catalog, _, _ = materials._load_materialintake()
+    state = {"inside": 0, "max": 0}
+    counter_lock = threading.Lock()
+
+    def refresh(*args, **kwargs):
+        with counter_lock:
+            state["inside"] += 1
+            state["max"] = max(state["max"], state["inside"])
+        time.sleep(0.08)
+        with counter_lock:
+            state["inside"] -= 1
+        return 0
+
+    monkeypatch.setattr(catalog, "refresh_and_render", refresh)
+    errors = []
+    def settle(args):
+        try:
+            materials._finalize_method_distill_core(f"req-{args[0]}", *args)
+        except Exception as exc:  # pragma: no cover - asserted below
+            errors.append(exc)
+    threads = [threading.Thread(target=settle, args=(args,)) for args in packages]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(3)
+    assert errors == []
+    assert state["max"] == 1
+
+
+def test_material_lock_is_not_held_during_agent_stage(isolated, monkeypatch):
+    asset_id = "book_9101"
+    _write_ledger(isolated, [_asset(asset_id, "METHOD_SOURCE")])
+    mp = isolated / "06_工作区" / "MethodPrepare" / f"{asset_id}_素材{asset_id}"
+    mp.mkdir(parents=True)
+    monkeypatch.setattr(materials, "_prepare_package_current", lambda asset: {"available": True})
+    monkeypatch.setattr(materials, "_find_mp_dir", lambda aid: mp)
+    monkeypatch.setattr(materials, "_run_md_cli", lambda *a, **k: subprocess.CompletedProcess([], 0))
+    acquired = threading.Event()
+
+    def agent_stage(request_id, aid, mp_dir, stage_dir):
+        def probe():
+            with material_settlement.serialized():
+                acquired.set()
+        thread = threading.Thread(target=probe)
+        thread.start()
+        thread.join(1)
+        assert acquired.is_set(), "Agent stage must stay outside the material settlement lock"
+        raise materials._PendingMethodDistill(request_id)
+
+    monkeypatch.setattr(materials, "_run_method_distill_agent_stage", agent_stage)
+    result = materials.run_method_distill(asset_id)
+    assert result["status"] == "pending"

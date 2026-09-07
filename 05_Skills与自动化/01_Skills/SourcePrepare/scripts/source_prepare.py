@@ -926,6 +926,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--dry-run", action="store_true", help="仅输出处理计划，不转换、不写索引")
     ap.add_argument("--no-git-sync", action="store_true",
                     help="完成后不执行 Post-Action git writeback（测试/调试用）")
+    ap.add_argument("--no-catalog-writeback", action="store_true",
+                    help="仅供 Workbench：转换后由宿主在共享结算锁内刷新素材目录")
     args = ap.parse_args(argv)
 
     if not args.book and not args.all:
@@ -972,12 +974,16 @@ def main(argv: Optional[list[str]] = None) -> int:
     for r in results:
         print(r)
 
-    # local writeback：SP 完成后刷新 ledger / CSV / MD（MaterialIntake contract，不 git）
-    try:
-        rc = material_catalog.refresh_and_render(root)
-    except Exception as exc:
-        print(f"WARN writeback 失败（refresh_and_render）：{exc}", file=sys.stderr)
-        rc = 1
+    # local writeback：SP 完成后刷新 ledger / CSV / MD（MaterialIntake contract，不 git）。
+    # Workbench 将这一步放进自身的进程内共享结算锁；CLI 默认行为不变。
+    if args.no_catalog_writeback:
+        rc = 0
+    else:
+        try:
+            rc = material_catalog.refresh_and_render(root)
+        except Exception as exc:
+            print(f"WARN writeback 失败（refresh_and_render）：{exc}", file=sys.stderr)
+            rc = 1
 
     # Post-Action Writeback（Phase 2B2 第 31-34 节）：formal 结果（PASS/REVIEW/FAIL）
     # 且 metadata 完整（refresh rc==0）且无 runtime ERROR → git sync。
