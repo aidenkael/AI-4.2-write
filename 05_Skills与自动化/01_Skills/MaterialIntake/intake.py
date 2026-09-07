@@ -527,13 +527,17 @@ def _mutate_ledger(ledger: dict, journal: list[dict]) -> dict:
 SUPPORTED_SOURCE_SUFFIXES = (".epub", ".pdf", ".txt")
 
 
-def _folder_units(mat_dir: Path) -> list[dict]:
+def _folder_units(mat_dir: Path, *, excluded_shas: set[str] | None = None,
+                  excluded_paths: set[str] | None = None,
+                  sha_by_rel: dict[str, str] | None = None) -> list[dict]:
     """扫描三个角色目录；每个直接子文件夹 = 一个素材文件夹单元（manual sync unit）。
 
     只计入受支持来源文件（EPUB/PDF/TXT）；排除 .gitkeep / collection_manifest.json。
     无受支持文件的空文件夹忽略。files 按相对路径排序，第一个为 primary。
     """
     units: list[dict] = []
+    excluded_shas = excluded_shas or set()
+    excluded_paths = excluded_paths or set()
     for mtype, role_dir in sorted(ROLE_DIR.items(), key=lambda kv: kv[1]):
         base = mat_dir / role_dir
         if not base.is_dir():
@@ -549,8 +553,11 @@ def _folder_units(mat_dir: Path) -> list[dict]:
                     continue
                 if p.suffix.lower() not in SUPPORTED_SOURCE_SUFFIXES:
                     continue
-                files.append({"path": p.relative_to(mat_dir).as_posix(),
-                              "sha256": catalog.sha256_file(p), "primary": False})
+                rel_path = p.relative_to(mat_dir).as_posix()
+                sha = (sha_by_rel or {}).get(rel_path) or catalog.sha256_file(p)
+                if rel_path in excluded_paths or sha in excluded_shas:
+                    continue
+                files.append({"path": rel_path, "sha256": sha, "primary": False})
             if not files:
                 continue
             files[0]["primary"] = True
@@ -575,6 +582,13 @@ def _structural_edit_detected(mat_dir: Path, ledger: dict) -> bool:
             recorded_dirs.add(str(Path(f["path"]).parent.as_posix()))
             if not (mat_dir / f["path"]).is_file():
                 all_present = False
+    for c in ledger.get("containers", []):
+        container_dir = str(c.get("container_dir") or "").replace("\\", "/").strip("/")
+        if container_dir:
+            recorded_dirs.add(container_dir)
+        original_path = str((c.get("original") or {}).get("path") or "")
+        if original_path and not (mat_dir / original_path).is_file():
+            all_present = False
     actual_dirs: set[str] = set()
     for role_dir in ROLE_DIR.values():
         base = mat_dir / role_dir
@@ -584,6 +598,113 @@ def _structural_edit_detected(mat_dir: Path, ledger: dict) -> bool:
             if folder.is_dir():
                 actual_dirs.add(folder.relative_to(mat_dir).as_posix())
     return (not all_present) or (recorded_dirs != actual_dirs)
+
+
+def _reconcile_container_paths(
+        mat_dir: Path, ledger: dict,
+) -> tuple[list[dict], list[dict], list[str], dict[str, str]]:
+    """Exact-SHA reconcile for manually moved canonical container folders.
+
+    A container path is updated only when its registered original is missing and exactly one
+    physical source file has the same registered SHA.  The old original/manifest paths must both
+    be descendants of ``container_dir`` so the folder-prefix replacement is mechanically proven.
+    Container identity and the registered original SHA are never changed here.
+    """
+    containers = json.loads(json.dumps(ledger.get("containers", []), ensure_ascii=False))
+    wanted_shas = {
+        str((c.get("original") or {}).get("sha256") or "")
+        for c in containers
+        if (c.get("original") or {}).get("sha256")
+    }
+    disk_by_sha: dict[str, list[str]] = {sha: [] for sha in wanted_shas}
+    sha_by_rel: dict[str, str] = {}
+    if wanted_shas:
+        for role_dir in ROLE_DIR.values():
+            base = mat_dir / role_dir
+            if not base.is_dir():
+                continue
+            for path in sorted(base.rglob("*")):
+                if not path.is_file() or path.suffix.lower() not in SUPPORTED_SOURCE_SUFFIXES:
+                    continue
+                sha = catalog.sha256_file(path)
+                rel = path.relative_to(mat_dir).as_posix()
+                sha_by_rel[rel] = sha
+                if sha in disk_by_sha:
+                    disk_by_sha[sha].append(rel)
+
+    updates: list[dict] = []
+    errors: list[str] = []
+    for container in containers:
+        original = container.get("original") or {}
+        old_path = str(original.get("path") or "").replace("\\", "/").strip("/")
+        old_dir = str(container.get("container_dir") or "").replace("\\", "/").strip("/")
+        sha = str(original.get("sha256") or "")
+        if not old_path or not old_dir or not sha:
+            continue
+        matches = disk_by_sha.get(sha, [])
+        if len(matches) > 1:
+            errors.append("同一容器原始内容出现在多个文件夹，无法确定容器归属，请检查后重试。")
+            break
+        if not matches or matches[0] == old_path:
+            continue
+
+        old_dir_path = Path(old_dir)
+        old_original_path = Path(old_path)
+        old_manifest_path = Path(str(container.get("manifest_path") or ""))
+        try:
+            original_suffix = old_original_path.relative_to(old_dir_path)
+            manifest_suffix = old_manifest_path.relative_to(old_dir_path)
+        except ValueError:
+            errors.append("容器路径关系不可确定，未应用本次文件夹变更。")
+            break
+
+        found = Path(matches[0])
+        suffix_parts = original_suffix.parts
+        if not suffix_parts or tuple(found.parts[-len(suffix_parts):]) != suffix_parts:
+            errors.append("容器文件关系不可确定，未应用本次文件夹变更。")
+            break
+        new_dir = Path(*found.parts[:-len(suffix_parts)])
+        if not new_dir.parts or new_dir.parts[0] not in ROLE_DIR_TO_TYPE:
+            errors.append("容器新位置不在有效素材目录中，未应用本次变更。")
+            break
+
+        new_dir_posix = new_dir.as_posix()
+        new_manifest = (new_dir / manifest_suffix).as_posix()
+        original["path"] = matches[0]
+        container["container_dir"] = new_dir_posix
+        container["manifest_path"] = new_manifest
+        updates.append({"id": container.get("id"), "from": old_dir, "to": new_dir_posix})
+    return containers, updates, errors, sha_by_rel
+
+
+def _unique_recovery_dest(recovery: Path, name: str) -> Path:
+    candidate = recovery / name
+    index = 1
+    while candidate.exists():
+        candidate = recovery / f"{name}.__reconcile_{index}"
+        index += 1
+    return candidate
+
+
+def _rollback_package_relocations(journal: list[dict]) -> list[str]:
+    """Reverse task-created 02 -> 06 moves.  Return internal rollback diagnostics."""
+    failures: list[str] = []
+    for move in reversed(journal):
+        src = Path(move["from"])
+        dest = Path(move["to"])
+        try:
+            if dest.exists():
+                if src.exists():
+                    raise OSError("original package path is occupied")
+                src.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(dest), str(src))
+                try:
+                    dest.parent.rmdir()
+                except OSError:
+                    pass
+        except OSError as exc:
+            failures.append(f"{type(exc).__name__}: {exc}")
+    return failures
 
 
 def _finalized_package_kind(distill_dir: Path, asset_id: str) -> tuple[str | None, Path | None]:
@@ -611,13 +732,16 @@ def reconcile_manual_edits(root: Path) -> dict:
       - 既有 asset 登记来源在磁盘缺失 → 保留记录（绝不静默删除），记入 missing_sources；
       - asset 类型变更导致 02 已定稿包不兼容 → 把该包移入 06 recovery（不再可检索，不删除）。
 
-    事务性：歧义/失败 → 不写任何文件；成功且有变化 → snapshot 三份 metadata → 写
-    reconciled ledger → catalog.refresh_and_render(tolerate_missing) → 失败回滚三份 metadata。
+    事务性：歧义/失败 → 不写任何文件；成功且有变化 → snapshot 三份 metadata →
+    不兼容知识包迁移日志 → 写 reconciled ledger →
+    catalog.refresh_and_render(tolerate_missing)；后续任一步失败时同时回滚 metadata
+    与知识包位置。
     """
     mat_dir = root / catalog.MATERIAL_DIR_NAME
     distill_dir = root / catalog.DISTILL_DIR_NAME
     report: dict = {"ok": False, "changed": False, "moved": [], "renamed": [], "registered": [],
-                    "type_changed": [], "missing_sources": [], "relocated_packages": [], "errors": []}
+                    "type_changed": [], "container_paths_updated": [], "missing_sources": [],
+                    "relocated_packages": [], "errors": []}
 
     ledger_path = mat_dir / catalog.LEDGER_FILENAME
     if not ledger_path.exists():
@@ -634,7 +758,30 @@ def reconcile_manual_edits(root: Path) -> dict:
         report["ok"] = True
         return report
 
-    units = _folder_units(mat_dir)
+    new_containers, container_updates, container_errors, sha_by_rel = _reconcile_container_paths(
+        mat_dir, ledger)
+    if container_errors:
+        report["errors"] = container_errors
+        return report
+    report["container_paths_updated"] = container_updates
+
+    # Canonical container originals are not logical asset files.  Exclude their exact SHA from
+    # asset-folder matching unless that same content is explicitly registered by an asset too.
+    asset_paths = {f.get("path") for a in ledger["assets"] for f in a.get("files", [])}
+    asset_shas = {f.get("sha256") for a in ledger["assets"] for f in a.get("files", [])}
+    container_only_shas = {
+        (c.get("original") or {}).get("sha256") for c in ledger.get("containers", [])
+        if (c.get("original") or {}).get("sha256") not in asset_shas
+    }
+    container_original_paths = {
+        (c.get("original") or {}).get("path") for c in ledger.get("containers", [])
+        if (c.get("original") or {}).get("path") not in asset_paths
+    }
+    container_original_paths.update(
+        rel for rel, sha in sha_by_rel.items() if sha in container_only_shas)
+    units = _folder_units(
+        mat_dir, excluded_shas=container_only_shas,
+        excluded_paths=container_original_paths, sha_by_rel=sha_by_rel)
 
     # asset 内容指纹索引
     fp_index: dict[str, list[str]] = {}
@@ -664,7 +811,7 @@ def reconcile_manual_edits(root: Path) -> dict:
     new_assets = json.loads(json.dumps(ledger["assets"], ensure_ascii=False))
     new_by_id = {a["id"]: a for a in new_assets}
     matched_ids: set[str] = set()
-    changed = False
+    changed = bool(container_updates)
 
     for u in units:
         ids = fp_index.get(u["fingerprint"], [])
@@ -707,7 +854,8 @@ def reconcile_manual_edits(root: Path) -> dict:
         if not any((mat_dir / f["path"]).is_file() for f in a["files"]):
             report["missing_sources"].append(a["id"])
 
-    # 类型变更 → 不兼容的 02 已定稿包移入 06 recovery（不再可检索；不删除）
+    # 预计划类型变更导致的不兼容 02 包迁移；此时不产生副作用。
+    relocation_plans: list[dict] = []
     for tc in report["type_changed"]:
         kind, pkg_dir = _finalized_package_kind(distill_dir, tc["id"])
         if kind is None or pkg_dir is None:
@@ -716,14 +864,8 @@ def reconcile_manual_edits(root: Path) -> dict:
         if kind == expected:
             continue
         recovery = root / "06_工作区" / "BookDistill" / "_incompatible_recovery"
-        try:
-            recovery.mkdir(parents=True, exist_ok=True)
-            dest = recovery / pkg_dir.name
-            shutil.move(str(pkg_dir), str(dest))
-        except OSError as exc:
-            report["errors"].append(f"迁移不兼容知识包失败，已停止：{exc}")
-            return report  # fail closed
-        report["relocated_packages"].append({"id": tc["id"], "to": str(dest)})
+        dest = _unique_recovery_dest(recovery, pkg_dir.name)
+        relocation_plans.append({"id": tc["id"], "from": str(pkg_dir), "to": str(dest)})
         changed = True
 
     if not changed:
@@ -733,13 +875,22 @@ def reconcile_manual_edits(root: Path) -> dict:
     snapshots = _snapshot_metadata(mat_dir)
     new_assets.sort(key=lambda a: a["id"])
     new_ledger = {"schema_version": ledger["schema_version"], "assets": new_assets,
-                  "containers": ledger["containers"]}
+                  "containers": new_containers}
+    relocation_journal: list[dict] = []
     try:
+        for move in relocation_plans:
+            src = Path(move["from"])
+            dest = Path(move["to"])
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            relocation_journal.append(move)
+            shutil.move(str(src), str(dest))
+            report["relocated_packages"].append({"id": move["id"], "to": str(dest)})
         catalog.write_ledger(new_ledger, mat_dir / catalog.LEDGER_FILENAME)
         rc = catalog.refresh_and_render(root, tolerate_missing=True)
         if rc != 0:
             raise RuntimeError(f"catalog refresh rc={rc}")
     except Exception as exc:  # noqa: BLE001
+        metadata_rollback_failures: list[str] = []
         for rel, data in snapshots.items():
             p = mat_dir / rel
             try:
@@ -748,9 +899,20 @@ def reconcile_manual_edits(root: Path) -> dict:
                         p.unlink()
                 else:
                     p.write_bytes(data)
-            except OSError:
-                pass
-        report["errors"].append("刷新素材状态失败，已回滚，未改动素材登记。")
+            except OSError as rollback_exc:
+                metadata_rollback_failures.append(f"{rel}: {type(rollback_exc).__name__}: {rollback_exc}")
+        package_rollback_failures = _rollback_package_relocations(relocation_journal)
+        if metadata_rollback_failures or package_rollback_failures:
+            report["recovery_required"] = True
+            report["internal_error"] = {
+                "code": "RECOVERY_REQUIRED",
+                "metadata": metadata_rollback_failures,
+                "packages": package_rollback_failures,
+                "cause": f"{type(exc).__name__}: {exc}",
+            }
+            report["errors"].append("素材状态同步失败，自动恢复未完整，需要人工检查。")
+        else:
+            report["errors"].append("素材状态同步失败，未应用本次文件夹变更。")
         return report
 
     report["ok"] = True

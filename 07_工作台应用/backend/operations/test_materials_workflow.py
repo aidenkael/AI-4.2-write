@@ -13,6 +13,7 @@ G. 显式 BookDistill：validate/prepare/assemble/profile/bkp 阶段被调用；
 H. 页面加载零模型：list_materials 无 Agent/Skill 调用（隐式）。
 """
 import hashlib
+import importlib.util
 import json
 import subprocess
 import sys
@@ -261,6 +262,7 @@ def test_run_source_prepare_invokes_real_cli(isolated, monkeypatch):
     _write_ledger(isolated, _fake_asset_ledger())
     script = isolated.parent / "sp.py"
     calls = []
+    precheck_calls = []
 
     monkeypatch.setattr(materials, "_REPO_ROOT", isolated.parent)
     monkeypatch.setattr(materials.sys, "executable", "python")
@@ -270,12 +272,19 @@ def test_run_source_prepare_invokes_real_cli(isolated, monkeypatch):
 
     def fake_run(cmd, **kw):
         calls.append(cmd)
+        # Fake child-process boundary: Git precheck would report DIRTY_WORKTREE only when
+        # Workbench forgot the explicit local-mode flag.
+        if "--no-git-sync" not in cmd:
+            precheck_calls.append("DIRTY_WORKTREE")
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="PRECHECK FAILED")
         return subprocess.CompletedProcess(cmd, 0, stdout="PASS book_0001\n", stderr="")
 
     monkeypatch.setattr(materials.subprocess, "run", fake_run)
     result = materials.run_source_prepare("book_0001")
     assert result["status"] == "completed"
     assert "--book" in calls[0] and "book_0001" in calls[0]
+    assert "--no-git-sync" in calls[0]
+    assert precheck_calls == [], "Workbench 命令必须使 Git precheck 不可达"
 
 
 def test_run_source_prepare_failure_propagates(isolated, monkeypatch):
@@ -292,6 +301,39 @@ def test_run_source_prepare_failure_propagates(isolated, monkeypatch):
     with pytest.raises(materials.MaterialsError) as ei:
         materials.run_source_prepare("book_0001")
     assert "提纯失败" in str(ei.value)
+
+
+def test_source_prepare_local_mode_skips_dirty_precheck_but_cli_default_preserves_it(
+        isolated, monkeypatch):
+    """Fake SP runtime proves --no-git-sync skips precheck; default CLI still owns Git gate."""
+    script = Path(materials.__file__).resolve().parents[3] / (
+        "05_Skills与自动化/01_Skills/SourcePrepare/scripts/source_prepare.py")
+    module_name = "source_prepare_workbench_regression"
+    spec = importlib.util.spec_from_file_location(module_name, script)
+    assert spec is not None and spec.loader is not None
+    source_prepare = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = source_prepare
+    spec.loader.exec_module(source_prepare)
+    processed = []
+    prechecked = []
+    monkeypatch.setattr(source_prepare, "find_pandoc", lambda root: None)
+    monkeypatch.setattr(source_prepare, "load_ledger_assets", lambda root: {})
+    monkeypatch.setattr(source_prepare, "locate", lambda *a: [{
+        "work_name": "样例", "asset_type": "REFERENCE_WORK", "files": [],
+        "book_id": "book_0001"}])
+    monkeypatch.setattr(source_prepare, "process_book",
+                        lambda *a, **k: processed.append("book_0001") or "PASS book_0001")
+    monkeypatch.setattr(source_prepare.material_catalog, "refresh_and_render", lambda root: 0)
+    monkeypatch.setattr(source_prepare.post_action, "precheck",
+                        lambda root: prechecked.append("DIRTY_WORKTREE") or (False, "DIRTY_WORKTREE"))
+
+    assert source_prepare.main([
+        "--root", str(isolated), "--book", "book_0001", "--no-git-sync"]) == 0
+    assert processed == ["book_0001"] and prechecked == []
+
+    processed.clear()
+    assert source_prepare.main(["--root", str(isolated), "--book", "book_0001"]) == 1
+    assert processed == [] and prechecked == ["DIRTY_WORKTREE"]
 
 
 def test_run_source_prepare_rejects_loose_material(isolated):
@@ -773,5 +815,63 @@ def test_knowledge_retrieve_sees_only_published_02_package(isolated):
     # staging 在 06（不在 02）→ 不可发现
     assert materials._knowledge_is_discoverable(asset) is False
     # 受控发布到 02 → 可发现
-    materials._publish_dir(stage, isolated / "02_素材知识库" / "book_0001_样例作品")
+    tx = materials._PublishTransaction(
+        stage, isolated / "02_素材知识库" / "book_0001_样例作品", "req-test")
+    tx.begin()
     assert materials._knowledge_is_discoverable(asset) is True
+    tx.commit()
+
+
+@pytest.mark.parametrize("failure", ["discovery", "catalog"])
+def test_book_publish_rolls_back_through_post_publish_verification(
+        isolated, monkeypatch, failure):
+    """Discovery/catalog 任一失败都恢复旧 02 包，新 candidate 回到 06 staging。"""
+    _write_ledger(isolated, _fake_asset_ledger())
+    sp_dir = isolated / "06_工作区" / "SourcePrepare" / "book_0001_样例作品"
+    stage = isolated / "06_工作区" / "BookDistill" / "req_book_0001_样例作品"
+    stage.mkdir(parents=True)
+    (stage / "new.marker").write_text("new\n", encoding="utf-8")
+    dest = isolated / "02_素材知识库" / sp_dir.name
+    dest.mkdir(parents=True)
+    (dest / "old.marker").write_text("old\n", encoding="utf-8")
+    ledger_before = (isolated / "01_原始素材" / "素材资产.json").read_bytes()
+
+    monkeypatch.setattr(materials, "_run_bd_cli", lambda *a, **k: subprocess.CompletedProcess([], 0))
+    monkeypatch.setattr(materials, "_run_reference_acceptance", lambda *a, **k: None)
+    monkeypatch.setattr(materials, "_knowledge_is_discoverable",
+                        lambda asset: failure != "discovery")
+    catalog, _, _ = materials._load_materialintake()
+    if failure == "catalog":
+        def fail_after_partial_metadata(*args, **kwargs):
+            (isolated / "01_原始素材" / "素材资产.json").write_bytes(b"partial\n")
+            return 1
+        monkeypatch.setattr(catalog, "refresh_and_render", fail_after_partial_metadata)
+
+    with pytest.raises(materials.MaterialsError, match="已保留原知识包"):
+        materials._finalize_reference_distill(
+            "req", _fake_asset_ledger()["assets"][0], sp_dir, stage)
+
+    assert (dest / "old.marker").read_text(encoding="utf-8") == "old\n"
+    assert not (dest / "new.marker").exists()
+    assert (stage / "new.marker").read_text(encoding="utf-8") == "new\n"
+    assert (isolated / "01_原始素材" / "素材资产.json").read_bytes() == ledger_before
+
+
+def test_book_failed_first_publish_leaves_no_formal_package(isolated, monkeypatch):
+    """无旧包的首次发布 discovery 失败：新包退回 06，02 仍不存在。"""
+    _write_ledger(isolated, _fake_asset_ledger())
+    sp_dir = isolated / "06_工作区" / "SourcePrepare" / "book_0001_样例作品"
+    stage = isolated / "06_工作区" / "BookDistill" / "req_book_0001_样例作品"
+    stage.mkdir(parents=True)
+    (stage / "new.marker").write_text("new\n", encoding="utf-8")
+    dest = isolated / "02_素材知识库" / sp_dir.name
+    monkeypatch.setattr(materials, "_run_bd_cli", lambda *a, **k: subprocess.CompletedProcess([], 0))
+    monkeypatch.setattr(materials, "_run_reference_acceptance", lambda *a, **k: None)
+    monkeypatch.setattr(materials, "_knowledge_is_discoverable", lambda asset: False)
+
+    with pytest.raises(materials.MaterialsError):
+        materials._finalize_reference_distill(
+            "req", _fake_asset_ledger()["assets"][0], sp_dir, stage)
+
+    assert not dest.exists()
+    assert (stage / "new.marker").is_file()

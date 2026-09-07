@@ -26,13 +26,14 @@ def _sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
-def _make_repo(tmp_path: Path, assets=None) -> Path:
+def _make_repo(tmp_path: Path, assets=None, containers=None) -> Path:
     root = tmp_path
     mat = root / catalog.MATERIAL_DIR_NAME
     (mat / intake.INBOX_DIR).mkdir(parents=True)
     for d in ROLE_DIRS:
         (mat / d).mkdir(parents=True)
-    catalog.write_ledger({"schema_version": "1.0", "assets": assets or [], "containers": []},
+    catalog.write_ledger({"schema_version": "1.0", "assets": assets or [],
+                          "containers": containers or []},
                          mat / catalog.LEDGER_FILENAME)
     return root
 
@@ -165,6 +166,115 @@ def test_no_manual_edit_is_noop(tmp_path):
     rep = intake.reconcile_manual_edits(root)
     assert rep["ok"] is True and rep["changed"] is False
     assert (root / catalog.MATERIAL_DIR_NAME / catalog.LEDGER_FILENAME).read_bytes() == before
+
+
+def _finalized_bkp(root: Path, asset_id="book_0001", name="书") -> Path:
+    package = root / catalog.DISTILL_DIR_NAME / f"{asset_id}_{name}"
+    (package / "bkp").mkdir(parents=True)
+    (package / "bkp" / "identity.json").write_text("{}\n", encoding="utf-8")
+    (package / "old.marker").write_text("old\n", encoding="utf-8")
+    return package
+
+
+def test_type_change_package_and_metadata_rollback_together(tmp_path, monkeypatch):
+    """A. catalog settlement 失败 → metadata bytes + 不兼容 02 包一起恢复。"""
+    content = b"transaction-book"
+    root = _make_repo(tmp_path, [_asset(
+        "book_0001", "书", "REFERENCE_WORK", "01_原著/书/book.epub", content)])
+    _put_source(root, "01_原著/书/book.epub", content)
+    _put_source(root, "02_技巧类/书/book.epub", content)
+    _rm(root, "01_原著/书/book.epub")
+    package = _finalized_bkp(root)
+    mat = root / catalog.MATERIAL_DIR_NAME
+    (mat / catalog.LEGACY_CSV_FILENAME).write_bytes(b"csv-before\n")
+    (mat / catalog.INDEX_FILENAME).write_bytes(b"md-before\n")
+    before = {name: (mat / name).read_bytes() for name in (
+        catalog.LEDGER_FILENAME, catalog.LEGACY_CSV_FILENAME, catalog.INDEX_FILENAME)}
+    monkeypatch.setattr(catalog, "refresh_and_render",
+                        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("forced")))
+
+    rep = intake.reconcile_manual_edits(root)
+
+    assert rep["ok"] is False
+    assert package.is_dir() and (package / "old.marker").is_file()
+    assert not (root / "06_工作区" / "BookDistill" / "_incompatible_recovery" / package.name).exists()
+    assert {name: (mat / name).read_bytes() for name in before} == before
+
+
+def test_successful_type_change_relocates_incompatible_package(tmp_path):
+    """B. 全部结算成功后，不兼容包在 06 recovery，ledger 提交新类型。"""
+    content = b"successful-type-change"
+    root = _make_repo(tmp_path, [_asset(
+        "book_0001", "书", "REFERENCE_WORK", "01_原著/书/book.epub", content)])
+    _put_source(root, "01_原著/书/book.epub", content)
+    _put_source(root, "02_技巧类/书/book.epub", content)
+    _rm(root, "01_原著/书/book.epub")
+    package = _finalized_bkp(root)
+
+    rep = intake.reconcile_manual_edits(root)
+
+    recovery = root / "06_工作区" / "BookDistill" / "_incompatible_recovery" / package.name
+    assert rep["ok"] is True and rep["changed"] is True
+    assert not package.exists() and (recovery / "old.marker").is_file()
+    assert _read(root)["assets"][0]["type"] == "METHOD_SOURCE"
+
+
+def test_container_backed_folder_move_updates_all_paths_preserving_identity(tmp_path):
+    """C. 精确 SHA 可证的容器文件夹改名，asset/container 路径同一事务更新。"""
+    source = b"split-book"
+    original = b"original-container"
+    container_sha = _sha(original)
+    asset = _asset("book_0001", "旧名", "REFERENCE_WORK", "01_原著/旧名/book.epub", source)
+    asset["files"][0]["source_container"] = "container-1"
+    container = {
+        "id": "container-1", "category": "01_原著", "container_dir": "01_原著/旧名",
+        "manifest_path": "01_原著/旧名/collection_manifest.json",
+        "original": {"filename": "original.epub", "path": "01_原著/旧名/original.epub",
+                     "sha256": container_sha},
+        "source_format": "epub", "split_book_ids": ["book_0001"], "split_count": 1,
+    }
+    root = _make_repo(tmp_path, [asset], [container])
+    old = root / catalog.MATERIAL_DIR_NAME / "01_原著" / "旧名"
+    old.mkdir(parents=True)
+    (old / "book.epub").write_bytes(source)
+    (old / "original.epub").write_bytes(original)
+    (old / "collection_manifest.json").write_text("{}\n", encoding="utf-8")
+    new = old.with_name("新名")
+    old.rename(new)
+
+    rep = intake.reconcile_manual_edits(root)
+
+    assert rep["ok"] is True and rep["container_paths_updated"] == [
+        {"id": "container-1", "from": "01_原著/旧名", "to": "01_原著/新名"}]
+    ledger = _read(root)
+    assert ledger["assets"][0]["files"][0]["path"] == "01_原著/新名/book.epub"
+    updated = ledger["containers"][0]
+    assert updated["container_dir"] == "01_原著/新名"
+    assert updated["manifest_path"] == "01_原著/新名/collection_manifest.json"
+    assert updated["original"]["path"] == "01_原著/新名/original.epub"
+    assert updated["id"] == "container-1" and updated["original"]["sha256"] == container_sha
+
+
+def test_ambiguous_container_mapping_fails_closed(tmp_path):
+    """D. 容器原始 SHA 在多个新位置出现 → fail closed，不写 metadata/不移 package。"""
+    original = b"same-container"
+    container = {
+        "id": "container-1", "category": "01_原著", "container_dir": "01_原著/旧名",
+        "manifest_path": "01_原著/旧名/collection_manifest.json",
+        "original": {"filename": "original.epub", "path": "01_原著/旧名/original.epub",
+                     "sha256": _sha(original)},
+        "source_format": "epub", "split_book_ids": [], "split_count": 0,
+    }
+    root = _make_repo(tmp_path, containers=[container])
+    _put_source(root, "01_原著/新名/original.epub", original)
+    _put_source(root, "02_技巧类/另一份/original.epub", original)
+    ledger_path = root / catalog.MATERIAL_DIR_NAME / catalog.LEDGER_FILENAME
+    before = ledger_path.read_bytes()
+
+    rep = intake.reconcile_manual_edits(root)
+
+    assert rep["ok"] is False and rep["errors"]
+    assert ledger_path.read_bytes() == before
 
 
 if __name__ == "__main__":

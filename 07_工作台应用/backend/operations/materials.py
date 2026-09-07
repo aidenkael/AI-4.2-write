@@ -777,28 +777,90 @@ def _distill_error_message(detail: str) -> str:
     return "蒸馏失败，请重试。"
 
 
-def _publish_dir(src: Path, dest: Path) -> None:
-    """把已定稿的 06 staging 包受控发布到 02（原子替换；失败不留下半成品 02 目录）。
+class _PublishTransaction:
+    """Request-scoped 06 -> 02 publish held open through discovery/catalog settlement."""
 
-    §9：未完成/失败/取消的 Agent 输出绝不写入正式 02；只有确定性 finalize 全部通过后才发布。
-    """
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    if dest.exists():
-        backup = dest.with_name(dest.name + ".__publish_backup__")
-        if backup.exists():
-            shutil.rmtree(backup, ignore_errors=True)
-        shutil.move(str(dest), str(backup))
+    def __init__(self, src: Path, dest: Path, request_id: str) -> None:
+        self.src = src
+        self.dest = dest
+        token = f"{request_id}.{uuid.uuid4().hex}"
+        self.backup = dest.with_name(f"{dest.name}.__publish_backup__.{token}")
+        self._had_previous = False
+        self._previous_moved = False
+        self._candidate_published = False
+        self._begun = False
+        self._committed = False
+        self._metadata: dict[Path, bytes | None] = {}
+
+    def begin(self) -> None:
+        if self._begun:
+            raise RuntimeError("publish transaction already begun")
+        catalog, _, _ = _load_materialintake()
+        mat_dir = get_repo_root() / "01_原始素材"
+        for name in (catalog.LEDGER_FILENAME, catalog.LEGACY_CSV_FILENAME, catalog.INDEX_FILENAME):
+            path = mat_dir / name
+            self._metadata[path] = path.read_bytes() if path.exists() else None
+        self.dest.parent.mkdir(parents=True, exist_ok=True)
+        self._had_previous = self.dest.exists()
+        self._begun = True
         try:
-            shutil.move(str(src), str(dest))
+            if self._had_previous:
+                shutil.move(str(self.dest), str(self.backup))
+                self._previous_moved = True
+            shutil.move(str(self.src), str(self.dest))
+            self._candidate_published = True
         except OSError:
-            # 发布失败：恢复原正式包，不留半成品
-            if not dest.exists():
-                shutil.move(str(backup), str(dest))
+            self.rollback()
             raise
-        shutil.rmtree(backup, ignore_errors=True)
-    else:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(src), str(dest))
+
+    def commit(self) -> None:
+        if not self._begun or self._committed:
+            raise RuntimeError("publish transaction is not open")
+        if self.backup.exists():
+            shutil.rmtree(self.backup)
+        self._committed = True
+
+    def rollback(self) -> None:
+        if not self._begun or self._committed:
+            return
+        failures: list[str] = []
+        try:
+            if self._candidate_published and self.dest.exists():
+                self.src.parent.mkdir(parents=True, exist_ok=True)
+                failed_target = self.src
+                if failed_target.exists():
+                    failed_target = self.src.with_name(
+                        f"{self.src.name}.__failed_publish__.{uuid.uuid4().hex}")
+                shutil.move(str(self.dest), str(failed_target))
+        except OSError as exc:
+            failures.append(f"candidate: {type(exc).__name__}: {exc}")
+        try:
+            if self._previous_moved and self.backup.exists():
+                if self.dest.exists():
+                    raise OSError("formal destination remains occupied")
+                shutil.move(str(self.backup), str(self.dest))
+        except OSError as exc:
+            failures.append(f"previous: {type(exc).__name__}: {exc}")
+        for path, data in self._metadata.items():
+            try:
+                if data is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(data)
+            except OSError as exc:
+                failures.append(f"metadata:{path.name}: {type(exc).__name__}: {exc}")
+        if failures:
+            raise RuntimeError("; ".join(failures))
+
+
+def _rollback_publish_or_fail(tx: _PublishTransaction, request_id: str, component: str) -> None:
+    try:
+        tx.rollback()
+    except Exception as exc:  # noqa: BLE001 - rollback diagnostics stay in audit
+        audit.append_event(request_id, audit.EVENT_SKILL_FAILED, component,
+                           details={"step": "publish_rollback", "error": str(exc)[:400]})
+        raise MaterialsError("蒸馏结果暂不能用于写作，自动恢复未完成，请查看运行记录。") from exc
 
 
 def run_source_prepare(asset_id: str) -> dict[str, Any]:
@@ -833,10 +895,12 @@ def run_source_prepare(asset_id: str) -> dict[str, Any]:
         sys.executable, str(script),
         "--root", str(get_repo_root()),
         "--book", asset_id,
+        "--no-git-sync",
     ]
     audit.append_event(
         request_id, audit.EVENT_AGENT_DIRECT_PROCESS_STARTED, "source_prepare",
-        details={"asset_id": asset_id, "command": "source_prepare.py --book " + asset_id},
+        details={"asset_id": asset_id,
+                 "command": "source_prepare.py --book " + asset_id + " --no-git-sync"},
     )
     try:
         proc = subprocess.run(
@@ -988,20 +1052,23 @@ def _finalize_reference_distill(request_id: str, asset: dict[str, Any], sp_dir: 
                                details={"skill": "BookDistill", "stage": label, "detail": detail})
             raise MaterialsError(f"{label}失败，请重试。")
     _run_reference_acceptance(request_id, stage_dir)
-    # 受控发布 staging → 正式 02（§9：只有 finalize 全部通过后才发布）
+    # 发布事务保持开放，直到 discovery + catalog settlement 都成功。
     target_dir = get_repo_root() / "02_素材知识库" / sp_dir.name
+    tx = _PublishTransaction(stage_dir, target_dir, request_id)
     try:
-        _publish_dir(stage_dir, target_dir)
-    except OSError as exc:
-        raise MaterialsError("蒸馏结果发布失败，请重试。") from exc
-    # discovery check（02 正式包）
-    if not _knowledge_is_discoverable(asset):
-        raise MaterialsError("原著学习结果暂不能用于写作，请检查资料状态。")
-    # 刷新素材状态（knowledge 只可能由 FINALIZED BKP 证据推导为可用）
-    catalog, _, _ = _load_materialintake()
-    rc = catalog.refresh_and_render(get_repo_root(), check_only=False)
-    if rc != 0:
-        raise MaterialsError("蒸馏完成，但素材状态刷新失败，请手动刷新素材页。")
+        tx.begin()
+        if not _knowledge_is_discoverable(asset):
+            raise MaterialsError("knowledge discovery failed")
+        catalog, _, _ = _load_materialintake()
+        rc = catalog.refresh_and_render(get_repo_root(), check_only=False)
+        if rc != 0:
+            raise MaterialsError(f"catalog settlement rc={rc}")
+        tx.commit()
+    except Exception as exc:  # noqa: BLE001 - technical detail stays in audit
+        audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "book_distill",
+                           details={"step": "post_publish_verification", "error": str(exc)[:300]})
+        _rollback_publish_or_fail(tx, request_id, "book_distill")
+        raise MaterialsError("蒸馏结果暂不能用于写作，已保留原知识包，请重试。") from exc
     return {"output_dir": str(target_dir)}
 
 
@@ -1440,47 +1507,82 @@ def run_method_distill(asset_id: str) -> dict[str, Any]:
             "message": "等待 Qoder /gowrite：正在蒸馏方法知识，完成后将自动定稿",
         }
 
-    # 4) 确定性 finalize + 受控发布到 02 + settlement
-    return _finalize_method_distill(request_id, asset_id, mp_dir, stage_method_dir)
+    # 4) Direct 路径直接调用无 bridge 依赖的确定性核心。
+    try:
+        fin = _finalize_method_distill_core(request_id, asset_id, mp_dir, stage_method_dir)
+    except MaterialsError as exc:
+        audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "method_distill",
+                           details={"skill": "MethodDistill"})
+        audit.finish_file(request_id, audit.STATUS_FAILED, error=str(exc))
+        raise
+    audit.append_event(request_id, audit.EVENT_SKILL_COMPLETED, "method_distill",
+                       details={"skill": "MethodDistill", "asset_id": asset_id})
+    audit.finish_file(request_id, audit.STATUS_COMPLETED)
+    return {
+        "asset_id": asset_id,
+        "status": "completed",
+        "output_dir": fin["output_dir"],
+        "message": "方法知识蒸馏完成（已定稿并可被知识检索调用）",
+    }
 
 
-def _finalize_method_distill(request_id: str, asset_id: str,
-                             mp_dir: Path, stage_method_dir: Path) -> dict[str, Any]:
-    """确定性 finalize（against 06 staging）→ 受控发布到 02 → 刷新素材状态。
-
-    §6：不做 Git precheck/commit/push；§9：未定稿/失败/取消绝不进入正式 02；
-    §11：发布前确认请求未取消。
-    """
-    from operations import qoder_bridge as bridge
-    req = bridge.get_request(request_id)
-    if req is not None and req.get("state") == "canceled":
-        bridge.cleanup_request(request_id)
-        audit.finish_file(request_id, audit.STATUS_CANCELED)
-        raise MaterialsError("蒸馏已取消。")
+def _finalize_method_distill_core(request_id: str, asset_id: str,
+                                  mp_dir: Path, stage_method_dir: Path) -> dict[str, Any]:
+    """Bridge-independent deterministic finalize + transactional publish/verification."""
     try:
         proc = _run_md_cli(["finalize", "--input", str(mp_dir), "--output", str(stage_method_dir)], request_id)
     except subprocess.TimeoutExpired:
         audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "method_distill", details={"skill": "MethodDistill"})
-        audit.finish_file(request_id, audit.STATUS_FAILED, error="方法知识定稿超时")
-        bridge.cleanup_request(request_id)
         raise MaterialsError("方法知识定稿超时，请重试。")
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "")[:800]
         audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "method_distill", details={"skill": "MethodDistill", "detail": detail})
-        audit.finish_file(request_id, audit.STATUS_FAILED, error=detail)
-        bridge.cleanup_request(request_id)
         raise MaterialsError(_distill_error_message(detail))
 
-    # 受控发布 staging/method → 02/<asset>_<名称>/method（§9：定稿通过后才发布）
     target_method_dir = get_repo_root() / "02_素材知识库" / mp_dir.name / "method"
+    tx = _PublishTransaction(stage_method_dir, target_method_dir, request_id)
     try:
-        _publish_dir(stage_method_dir, target_method_dir)
-    except OSError as exc:
-        audit.finish_file(request_id, audit.STATUS_FAILED, error="发布失败")
-        bridge.cleanup_request(request_id)
-        raise MaterialsError("方法知识发布失败，请重试。") from exc
+        tx.begin()
+        if not _knowledge_is_discoverable({"id": asset_id, "type": "METHOD_SOURCE"}):
+            raise MaterialsError("knowledge discovery failed")
+        _refresh_catalog_or_fail(request_id, "method_distill")
+        tx.commit()
+    except Exception as exc:  # noqa: BLE001 - technical detail stays in audit
+        audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "method_distill",
+                           details={"step": "post_publish_verification", "error": str(exc)[:300]})
+        _rollback_publish_or_fail(tx, request_id, "method_distill")
+        raise MaterialsError("蒸馏结果暂不能用于写作，已保留原知识包，请重试。") from exc
+    return {"output_dir": str(target_method_dir)}
 
-    _refresh_catalog_or_fail(request_id, "method_distill")
+
+def _finalize_method_distill_interactive(request_id: str, asset_id: str,
+                                          mp_dir: Path,
+                                          stage_method_dir: Path) -> dict[str, Any]:
+    """Validate Interactive request ownership, then call the bridge-independent core."""
+    from operations import qoder_bridge as bridge
+    request = bridge.get_request(request_id)
+    valid = (
+        request is not None
+        and request.get("request_id") == request_id
+        and request.get("kind") == "method_distill_propose"
+        and request.get("state") != "canceled"
+        and not bridge.is_expired(request)
+    )
+    if not valid:
+        if request is not None:
+            bridge.cleanup_request(request_id)
+        audit.finish_file(request_id, audit.STATUS_CANCELED,
+                          error="interactive request missing/canceled/expired")
+        raise MaterialsError("蒸馏已取消。")
+    try:
+        fin = _finalize_method_distill_core(
+            request_id, asset_id, mp_dir, stage_method_dir)
+    except MaterialsError as exc:
+        audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "method_distill",
+                           details={"skill": "MethodDistill"})
+        audit.finish_file(request_id, audit.STATUS_FAILED, error=str(exc))
+        bridge.cleanup_request(request_id)
+        raise
     bridge.cleanup_request(request_id)
     audit.append_event(request_id, audit.EVENT_SKILL_COMPLETED, "method_distill",
                        details={"skill": "MethodDistill", "asset_id": asset_id})
@@ -1488,7 +1590,7 @@ def _finalize_method_distill(request_id: str, asset_id: str,
     return {
         "asset_id": asset_id,
         "status": "completed",
-        "output_dir": str(target_method_dir),
+        "output_dir": fin["output_dir"],
         "message": "方法知识蒸馏完成（已定稿并可被知识检索调用）",
     }
 
@@ -1593,7 +1695,7 @@ def get_method_distill_request(request_id: str) -> dict[str, Any]:
         return {"request_id": request_id, "status": "failed", "error": error}
     audit.append_event(request_id, audit.EVENT_BRIDGE_RESPONSE_RECEIVED, "method_distill")
     try:
-        result = _finalize_method_distill(
+        result = _finalize_method_distill_interactive(
             request_id, str(meta.get("asset_id") or ""),
             Path(meta["mp_dir"]), Path(meta["stage_method_dir"]),
         )

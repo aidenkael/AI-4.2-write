@@ -8,6 +8,7 @@
   - 定稿方法知识包 → 素材列表投影 writing_callable=true（author_group=usable）。
 """
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -196,3 +197,123 @@ def test_material_distill_cancel_dispatch_by_kind(isolated, monkeypatch):
     rid_md = bridge.create_request(task="t", kind="method_distill_propose", meta={})
     materials.cancel_material_distill_request(rid_md)
     assert calls == [("md", rid_md)]
+
+
+def _method_finalize_fixture(isolated):
+    asset_id = "book_9101"
+    _write_ledger(isolated, [_asset(asset_id, "METHOD_SOURCE")])
+    mp_dir = isolated / "06_工作区" / "MethodPrepare" / f"{asset_id}_素材{asset_id}"
+    mp_dir.mkdir(parents=True)
+    stage_method = isolated / "06_工作区" / "MethodDistill" / "req" / "method"
+    stage_method.mkdir(parents=True)
+    (stage_method / "new.marker").write_text("new\n", encoding="utf-8")
+    return asset_id, mp_dir, stage_method
+
+
+def test_direct_method_finalize_requires_no_bridge_request(isolated, monkeypatch):
+    """Direct 核心定稿不读 qoder_bridge request。"""
+    from operations import qoder_bridge as bridge
+    asset_id, mp_dir, stage_method = _method_finalize_fixture(isolated)
+    monkeypatch.setattr(bridge, "get_request",
+                        lambda rid: (_ for _ in ()).throw(AssertionError("bridge must not be read")))
+    monkeypatch.setattr(materials, "_run_md_cli",
+                        lambda *a, **k: subprocess.CompletedProcess([], 0))
+    monkeypatch.setattr(materials, "_knowledge_is_discoverable", lambda asset: True)
+    catalog, _, _ = materials._load_materialintake()
+    monkeypatch.setattr(catalog, "refresh_and_render", lambda *a, **k: 0)
+
+    result = materials._finalize_method_distill_core(
+        "direct-no-request", asset_id, mp_dir, stage_method)
+
+    assert Path(result["output_dir"]).joinpath("new.marker").is_file()
+
+
+@pytest.mark.parametrize("failure", ["discovery", "catalog"])
+def test_method_publish_restores_previous_package_on_verification_failure(
+        isolated, monkeypatch, failure):
+    asset_id, mp_dir, stage_method = _method_finalize_fixture(isolated)
+    dest = isolated / "02_素材知识库" / mp_dir.name / "method"
+    dest.mkdir(parents=True)
+    (dest / "old.marker").write_text("old\n", encoding="utf-8")
+    ledger_path = isolated / "01_原始素材" / "素材资产.json"
+    ledger_before = ledger_path.read_bytes()
+    monkeypatch.setattr(materials, "_run_md_cli",
+                        lambda *a, **k: subprocess.CompletedProcess([], 0))
+    monkeypatch.setattr(materials, "_knowledge_is_discoverable",
+                        lambda asset: failure != "discovery")
+    catalog, _, _ = materials._load_materialintake()
+    def refresh(*args, **kwargs):
+        if failure == "catalog":
+            ledger_path.write_bytes(b"partial\n")
+            return 1
+        return 0
+    monkeypatch.setattr(catalog, "refresh_and_render", refresh)
+
+    with pytest.raises(materials.MaterialsError, match="已保留原知识包"):
+        materials._finalize_method_distill_core("req", asset_id, mp_dir, stage_method)
+
+    assert (dest / "old.marker").read_text(encoding="utf-8") == "old\n"
+    assert not (dest / "new.marker").exists()
+    assert (stage_method / "new.marker").read_text(encoding="utf-8") == "new\n"
+    assert ledger_path.read_bytes() == ledger_before
+
+
+def test_interactive_method_canceled_before_response_never_publishes(isolated, monkeypatch):
+    from operations import qoder_bridge as bridge
+    monkeypatch.setattr(bridge, "get_bridge_root", lambda: isolated / ".bridge")
+    (isolated / ".bridge").mkdir(parents=True)
+    dest = isolated / "02_素材知识库" / "book_9101_素材" / "method"
+    dest.mkdir(parents=True)
+    (dest / "old.marker").write_text("old\n", encoding="utf-8")
+    rid = bridge.create_request(
+        task="t", kind="method_distill_propose",
+        meta={"asset_id": "book_9101", "mp_dir": "x", "stage_method_dir": "y"})
+    bridge.mark_canceled(rid)
+    bridge.write_response(rid, result={"status": "completed"})
+    finalized = []
+    monkeypatch.setattr(materials, "_finalize_method_distill_interactive",
+                        lambda *a: finalized.append(a))
+
+    result = materials.get_method_distill_request(rid)
+
+    assert result["status"] == "canceled" and finalized == []
+    assert (dest / "old.marker").is_file()
+
+
+def test_interactive_method_missing_request_rejects_late_response(isolated, monkeypatch):
+    from operations import qoder_bridge as bridge
+    monkeypatch.setattr(bridge, "get_bridge_root", lambda: isolated / ".bridge")
+    (isolated / ".bridge").mkdir(parents=True)
+    dest = isolated / "02_素材知识库" / "book_9101_素材" / "method"
+    dest.mkdir(parents=True)
+    (dest / "old.marker").write_text("old\n", encoding="utf-8")
+    rid = bridge.create_request(
+        task="t", kind="method_distill_propose",
+        meta={"asset_id": "book_9101", "mp_dir": "x", "stage_method_dir": "y"})
+    bridge.cleanup_request(rid)
+    bridge.write_response(rid, result={"status": "completed"})
+    finalized = []
+    monkeypatch.setattr(materials, "_finalize_method_distill_interactive",
+                        lambda *a: finalized.append(a))
+
+    result = materials.get_method_distill_request(rid)
+
+    assert result["status"] == "failed" and finalized == []
+    assert (dest / "old.marker").is_file()
+
+
+def test_interactive_method_wrapper_rechecks_cancellation_before_core(isolated, monkeypatch):
+    """Outer poll 后若发生取消，Interactive wrapper 的 TOCTOU 检查仍阻止发布。"""
+    from operations import qoder_bridge as bridge
+    monkeypatch.setattr(bridge, "get_request", lambda rid: {
+        "request_id": rid, "kind": "method_distill_propose", "state": "canceled"})
+    monkeypatch.setattr(bridge, "cleanup_request", lambda rid: None)
+    finalized = []
+    monkeypatch.setattr(materials, "_finalize_method_distill_core",
+                        lambda *a: finalized.append(a))
+
+    with pytest.raises(materials.MaterialsError, match="已取消"):
+        materials._finalize_method_distill_interactive(
+            "req", "book_9101", Path("x"), Path("y"))
+
+    assert finalized == []
