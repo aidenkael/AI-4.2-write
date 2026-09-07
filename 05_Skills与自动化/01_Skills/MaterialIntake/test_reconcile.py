@@ -141,20 +141,137 @@ def test_duplicate_identity_fails_closed_atomically(tmp_path):
     assert (root / catalog.MATERIAL_DIR_NAME / catalog.LEDGER_FILENAME).read_bytes() == before
 
 
-def test_missing_source_is_safe_attention_not_deleted(tmp_path):
-    """删除已登记素材文件夹 → 保留登记（绝不静默删除），记入 missing_sources 供可读 attention。"""
+def _csv_rows(root: Path) -> list:
+    import csv as _csv
+    p = root / catalog.MATERIAL_DIR_NAME / catalog.LEGACY_CSV_FILENAME
+    with open(p, encoding="utf-8-sig", newline="") as f:
+        return list(_csv.reader(f))
+
+
+def _index_md(root: Path) -> str:
+    return (root / catalog.MATERIAL_DIR_NAME / catalog.INDEX_FILENAME).read_text(encoding="utf-8")
+
+
+def _multi_asset(asset_id, name, mtype, files):
+    """files = [(rel, content, primary)] → 多来源资产 fixture。"""
+    recs = [{"path": rel, "sha256": _sha(content), "primary": prim} for rel, content, prim in files]
+    return {"id": asset_id, "name": name, "type": mtype, "author": "", "tags": [], "notes": "",
+            "files": recs, "purification": {"status": "未处理", "evidence": None},
+            "knowledge": {"status": "未开始"}}
+
+
+def test_all_source_deletion_removes_asset(tmp_path):
+    """§5.2：删除一个资产的全部来源 → refresh 后该 asset 从 ledger 移除（取代旧的永久保留）。"""
     content = b"existing-book"
     root = _make_repo(tmp_path, [_asset("book_0001", "书", "REFERENCE_WORK", "01_原著/书/b.epub", content)])
     _put_source(root, "01_原著/书/b.epub", content)
     _rm(root, "01_原著/书/b.epub")
 
     rep = intake.reconcile_manual_edits(root)
-    assert rep["ok"] is True
-    assert "book_0001" in rep["missing_sources"]
+    assert rep["ok"] is True and rep["changed"] is True
+    assert "book_0001" in rep["removed_assets"]
     led = _read(root)
-    assert len(led["assets"]) == 1, "缺失来源绝不静默删除登记"
-    assert led["assets"][0]["id"] == "book_0001"
-    assert led["assets"][0]["files"][0]["path"] == "01_原著/书/b.epub"
+    assert led["assets"] == [], "全部来源删除 → 移除 canonical asset，不留 source-less 卡片"
+    # §6：CSV/index 从结算后 ledger 派生（不再含被删资产）
+    rows = _csv_rows(root)
+    assert all(r[0] != "book_0001" for r in rows[1:])
+    assert "book_0001" not in _index_md(root)
+
+
+def test_partial_source_deletion_preserves_id(tmp_path):
+    """§5.1/§5.3：多来源资产删其中一个（子集 SHA）→ 保留同一 id，不新建重复 asset。"""
+    a_bytes, b_bytes = b"src-a", b"src-b"
+    asset = _multi_asset("book_0001", "书", "REFERENCE_WORK", [
+        ("01_原著/书/a.epub", a_bytes, True),
+        ("01_原著/书/b.epub", b_bytes, False)])
+    root = _make_repo(tmp_path, [asset])
+    _put_source(root, "01_原著/书/a.epub", a_bytes)
+    _put_source(root, "01_原著/书/b.epub", b_bytes)
+    _rm(root, "01_原著/书/a.epub")
+
+    rep = intake.reconcile_manual_edits(root)
+    assert rep["ok"] is True and rep["changed"] is True
+    led = _read(root)
+    assert len(led["assets"]) == 1, "子集 SHA 绝不新建重复 asset"
+    a = led["assets"][0]
+    assert a["id"] == "book_0001"
+    assert [f["path"] for f in a["files"]] == ["01_原著/书/b.epub"]
+    assert rep["registered"] == []
+
+
+def test_primary_deletion_reselects_remaining_primary(tmp_path):
+    """§5.1：删除当前 primary 来源 → 确定性选首个剩余 canonical 文件为 primary。"""
+    a_bytes, b_bytes = b"primary-src", b"second-src"
+    asset = _multi_asset("book_0001", "书", "REFERENCE_WORK", [
+        ("01_原著/书/a.epub", a_bytes, True),
+        ("01_原著/书/b.epub", b_bytes, False)])
+    root = _make_repo(tmp_path, [asset])
+    _put_source(root, "01_原著/书/a.epub", a_bytes)
+    _put_source(root, "01_原著/书/b.epub", b_bytes)
+    _rm(root, "01_原著/书/a.epub")
+
+    rep = intake.reconcile_manual_edits(root)
+    assert rep["ok"] is True
+    a = _read(root)["assets"][0]
+    assert len(a["files"]) == 1 and a["files"][0]["primary"] is True
+
+
+def test_partial_deletion_keeps_unsupported_survivor(tmp_path):
+    """§5.4 围城形态：EPUB(primary) 删除 + 不支持的 .mobi 幸存 → 保留 id、.mobi 升为 primary。"""
+    epub_bytes, mobi_bytes = b"weicheng-epub", b"weicheng-mobi"
+    asset = _multi_asset("book_0072", "围城", "REFERENCE_WORK", [
+        ("01_原著/围城/w.epub", epub_bytes, True),
+        ("01_原著/围城/w.mobi", mobi_bytes, False)])
+    root = _make_repo(tmp_path, [asset])
+    _put_source(root, "01_原著/围城/w.epub", epub_bytes)
+    _put_source(root, "01_原著/围城/w.mobi", mobi_bytes)
+    _rm(root, "01_原著/围城/w.epub")  # 只删 EPUB，.mobi 保留
+
+    rep = intake.reconcile_manual_edits(root)
+    assert rep["ok"] is True
+    led = _read(root)
+    assert len(led["assets"]) == 1 and led["assets"][0]["id"] == "book_0072"
+    files = led["assets"][0]["files"]
+    assert [f["path"] for f in files] == ["01_原著/围城/w.mobi"]
+    assert files[0]["primary"] is True, ".mobi 幸存 → 重选为 primary"
+    # 结算后账本不再指向已删来源
+    assert all("w.epub" not in f["path"] for f in files)
+
+
+def test_all_source_deletion_relocates_finalized_02_package(tmp_path):
+    """§5.2：全来源删除 → 已定稿正式 02 包移出可发现 02（不永久删除）。"""
+    content = b"distilled-book"
+    root = _make_repo(tmp_path, [_asset("book_0001", "书", "REFERENCE_WORK", "01_原著/书/b.epub", content)])
+    _put_source(root, "01_原著/书/b.epub", content)
+    package = _finalized_bkp(root)
+    _rm(root, "01_原著/书/b.epub")
+
+    rep = intake.reconcile_manual_edits(root)
+    assert rep["ok"] is True
+    assert "book_0001" in rep["removed_assets"]
+    assert not package.exists(), "正式 02 包已移出可发现 02"
+    recovery = root / "06_工作区" / "BookDistill" / "_source_deleted_recovery" / package.name
+    assert (recovery / "old.marker").is_file(), "02 包保留在 06 recovery，未永久删除"
+
+
+def test_multi_asset_overlap_fails_closed(tmp_path):
+    """§5.3：一个文件夹内容同时与多个已登记 asset 重叠 → fail closed，不写盘。"""
+    x_bytes, y_bytes = b"content-x", b"content-y"
+    root = _make_repo(tmp_path, [
+        _asset("book_0001", "甲", "REFERENCE_WORK", "01_原著/甲/x.epub", x_bytes),
+        _asset("book_0002", "乙", "REFERENCE_WORK", "01_原著/乙/y.epub", y_bytes)])
+    _put_source(root, "01_原著/甲/x.epub", x_bytes)
+    _put_source(root, "01_原著/乙/y.epub", y_bytes)
+    # 把两个来源合并进同一文件夹（同时重叠 book_0001 与 book_0002）
+    _put_source(root, "01_原著/合并/x.epub", x_bytes)
+    _put_source(root, "01_原著/合并/y.epub", y_bytes)
+    _rm(root, "01_原著/甲/x.epub")
+    _rm(root, "01_原著/乙/y.epub")
+    before = (root / catalog.MATERIAL_DIR_NAME / catalog.LEDGER_FILENAME).read_bytes()
+
+    rep = intake.reconcile_manual_edits(root)
+    assert rep["ok"] is False and rep["errors"]
+    assert (root / catalog.MATERIAL_DIR_NAME / catalog.LEDGER_FILENAME).read_bytes() == before
 
 
 def test_no_manual_edit_is_noop(tmp_path):

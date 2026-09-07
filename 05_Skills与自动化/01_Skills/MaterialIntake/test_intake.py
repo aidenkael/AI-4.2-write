@@ -556,3 +556,103 @@ def test_success_transaction(tmp_path):
     ledger = _read_ledger(root)
     assert len(ledger["assets"]) == 3
 
+
+# ---------- U. §2 书名归一化 ----------
+
+def test_normalize_book_title_parentheses():
+    n = intake.normalize_book_title
+    # 任务示例：只删括号及其内容，括号外文本（含逗号）完整保留
+    assert n("Creating Character Arcs The Masterful Authors Guide to Uniting Story "
+             "Structure, Plot, and Character Development (K. M. Weiland) "
+             "(z-library.sk, 1lib.sk, z-lib.sk)") == (
+        "Creating Character Arcs The Masterful Authors Guide to Uniting Story "
+        "Structure, Plot, and Character Development")
+    assert n("围城 (出版七十周年纪念版) (钱锺书) (z-library.sk)") == "围城"
+    assert n("书名（中文括号）(ascii)") == "书名"
+    # 反复移除直到无括号块（嵌套）
+    assert n("嵌套 (外层 (内层) 仍在外) 结尾") == "嵌套 结尾"
+    # 折叠重复空白 + trim 首尾空白/尾点
+    assert n("  多余   空白  ") == "多余 空白"
+    assert n("尾部点...") == "尾部点"
+    # 空/全括号 → 未命名（防御）
+    assert n("(only parens)") == "未命名"
+
+
+def test_normalized_long_name_within_windows_max_path():
+    """复现根因：原长括号名 + 截断80文件夹 超 MAX_PATH（WinError 3）；归一化后回到限内。"""
+    raw_stem = ("Creating Character Arcs The Masterful Authors Guide to Uniting Story "
+                "Structure, Plot, and Character Development (K. M. Weiland) "
+                "(z-library.sk, 1lib.sk, z-lib.sk)")
+    norm = intake.normalize_book_title(raw_stem)
+    base = len("E:\\AI-Write\\01_原始素材\\02_技巧类\\")
+    normalized_full = base + len(norm) + 1 + len(norm) + len(".epub")
+    assert normalized_full < 260, f"归一化后路径应 < MAX_PATH，实际 {normalized_full}"
+    # 未归一化：文件夹被 safe_name 截断到 80 + 完整括号文件名 → 超 MAX_PATH
+    raw_full = base + 80 + 1 + len(raw_stem) + len(".epub")
+    assert raw_full >= 260, "原始长括号名确实超 MAX_PATH（复现的失败根因）"
+
+
+def test_new_intake_normalizes_name_folder_and_file(tmp_path):
+    """§2.2：新书入库时 asset.name / 角色文件夹名 / 来源文件名 stem 用同一归一化标题；源字节不变。"""
+    root, _ = _make_repo(tmp_path)
+    long_name = "Deep Work Rules for Focused Success (Cal Newport) (z-library.sk, 1lib.sk).epub"
+    payload = b"normalized book bytes"
+    _put_inbox(root, long_name, payload)
+    sha = _sha(payload)
+    norm = intake.normalize_book_title(Path(long_name).stem)
+    assert norm == "Deep Work Rules for Focused Success"
+    report = intake.apply_plan({"items": [{"action": "NEW_ASSET",
+                                           "files": [f"00_待入库/{long_name}"],
+                                           "name": norm, "type": "METHOD_SOURCE"}]},
+                               _read_ledger(root), root)
+    assert report["ok"] is True
+    a = _read_ledger(root)["assets"][-1]
+    assert a["name"] == "Deep Work Rules for Focused Success"
+    f = a["files"][0]
+    assert f["path"] == ("02_技巧类/Deep Work Rules for Focused Success/"
+                         "Deep Work Rules for Focused Success.epub")
+    assert "(" not in f["path"] and ")" not in f["path"]
+    assert f["sha256"] == sha, "归一化只改名，绝不改源字节"
+    phys = root / catalog.MATERIAL_DIR_NAME / f["path"]
+    assert phys.is_file() and phys.read_bytes() == payload
+
+
+# ---------- V. §3 真实 OSError 回滚 ----------
+
+def _metadata_snapshot(root: Path) -> dict:
+    mat = root / catalog.MATERIAL_DIR_NAME
+    return {rel: ((mat / rel).read_bytes() if (mat / rel).exists() else None)
+            for rel in METADATA_RELS}
+
+
+def test_three_file_oserror_rollback(tmp_path, monkeypatch):
+    """§3：3 文件批次，第3个移动招 OSError/WinError → 1/2 回 inbox、3 留 inbox、
+    ledger/CSV/index 字节不变、无部分 canonical 文件夹残留。"""
+    root, _ = _make_repo(tmp_path)
+    for name in ("a", "b", "c"):
+        _put_inbox(root, f"{name}.epub", f"oserror {name}".encode())
+    before_meta = _metadata_snapshot(root)
+    real_replace = Path.replace
+
+    def fake_replace(self, target):
+        if self.name == "c.epub":
+            raise OSError(3, "系统找不到指定的路径。", str(target))
+        return real_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", fake_replace)
+    items = [{"action": "NEW_ASSET", "files": [f"00_待入库/{n}.epub"], "name": n,
+              "type": "REFERENCE_WORK"} for n in ("a", "b", "c")]
+    report = intake.apply_plan({"items": items}, _read_ledger(root), root)
+
+    assert report["ok"] is False
+    assert report.get("filesystem_rollback") is True
+    assert any("INTAKE_FILESYSTEM_FAILURE" in e for e in report["errors"])
+    inbox = root / catalog.MATERIAL_DIR_NAME / intake.INBOX_DIR
+    # 1/2 已回滚到 inbox；3 因移动失败仍在 inbox
+    assert (inbox / "a.epub").exists() and (inbox / "b.epub").exists()
+    assert (inbox / "c.epub").exists()
+    # 无部分 canonical 文件夹残留（a/b/c 空目录均被清理）
+    for n in ("a", "b", "c"):
+        assert not (root / catalog.MATERIAL_DIR_NAME / "01_原著" / n).exists()
+    # canonical metadata 字节未变（失败发生在 settlement 之前）
+    assert _metadata_snapshot(root) == before_meta

@@ -875,3 +875,91 @@ def test_book_failed_first_publish_leaves_no_formal_package(isolated, monkeypatc
 
     assert not dest.exists()
     assert (stage / "new.marker").is_file()
+
+
+# ---------------------------------------------------------------------------
+# §2.3 / §3 / §5 / §13：归一化入库边界 + 文件系统失败作者消息 + 删除结算
+# ---------------------------------------------------------------------------
+
+def test_build_intake_plan_normalizes_new_asset_name(isolated):
+    """§2.3：Workbench 入库边界用同一归一化 helper——NEW_ASSET name 去括号。"""
+    inbox = isolated / "01_原始素材" / "00_待入库"
+    long_name = "Deep Work Rules for Focused Success (Cal Newport) (z-library.sk, 1lib.sk).epub"
+    (inbox / long_name).write_bytes(b"method-bytes")
+    _write_ledger(isolated, _empty_ledger())
+    result = materials.build_intake_plan_from_inbox("METHOD_SOURCE")
+    items = result["plan"]["items"]
+    assert len(items) == 1 and items[0]["action"] == "NEW_ASSET"
+    assert items[0]["name"] == "Deep Work Rules for Focused Success"
+    assert items[0]["type"] == "METHOD_SOURCE"
+    assert "(" not in items[0]["name"]
+
+
+def test_intake_filesystem_failure_maps_to_author_message(isolated, monkeypatch):
+    """§13：入库文件系统失败（已回滚）→ 作者可读消息，绝不泄露 WinError/绝对路径/异常文本。"""
+    _write_ledger(isolated, _empty_ledger())
+    _catalog, intake, _ = materials._load_materialintake()
+
+    def fake_apply(plan, ledger, root):
+        return {"ok": False, "filesystem_rollback": True, "rolled_back": ["00_待入库/a.epub"],
+                "errors": ["INTAKE_FILESYSTEM_FAILURE: OSError: [WinError 3] 系统找不到指定的路径。: "
+                           "'E:\\AI-Write\\01_原始素材\\02_技巧类\\x\\y.epub'"]}
+
+    monkeypatch.setattr(intake, "apply_plan", fake_apply)
+    with pytest.raises(materials.MaterialsError) as ei:
+        materials.apply_material_intake({"items": [
+            {"action": "NEW_ASSET", "files": ["00_待入库/a.epub"], "name": "x", "type": "METHOD_SOURCE"}]})
+    msg = str(ei.value)
+    assert msg == "素材入库失败，文件已恢复到待入库，请重试。"
+    for leak in ("WinError", "E:\\", "OSError", "Traceback", "02_技巧类"):
+        assert leak not in msg
+
+
+def _mk_role_dirs(root):
+    for d in ("01_原著", "02_技巧类", "03_其他"):
+        (root / "01_原始素材" / d).mkdir(parents=True, exist_ok=True)
+
+
+def test_refresh_all_source_deletion_removes_asset_and_card(isolated):
+    """§5.2：作者删除某资产全部来源 → 刷新结算后该 asset 移除，无 source-less 需检查卡片。"""
+    root = isolated
+    _mk_role_dirs(root)
+    content = b"the-book-bytes"
+    sha = hashlib.sha256(content).hexdigest()
+    _write_ledger(root, {"schema_version": "1.0", "assets": [{
+        "id": "book_0001", "name": "书", "type": "REFERENCE_WORK", "author": "", "tags": [], "notes": "",
+        "files": [{"path": "01_原著/书/b.epub", "sha256": sha, "primary": True}],
+        "purification": {"status": "未处理"}, "knowledge": {"status": "未开始"}}], "containers": []})
+    src = _write_source(root, "01_原著/书/b.epub", content)
+    src.unlink()
+    src.parent.rmdir()
+
+    res = materials.refresh_materials()
+    assert "book_0001" in (res.get("removed_assets") or [])
+    listed = materials.list_materials()
+    assert all(m["id"] != "book_0001" for m in listed["materials"]), "移除后不再有任何卡片"
+
+
+def test_refresh_partial_source_deletion_keeps_asset(isolated):
+    """§5.1：多来源资产删其一 → 刷新后保留同一 id、剩余来源、primary 重选，无缺失来源卡片。"""
+    root = isolated
+    _mk_role_dirs(root)
+    a_bytes, b_bytes = b"src-a", b"src-b"
+    _write_ledger(root, {"schema_version": "1.0", "assets": [{
+        "id": "book_0001", "name": "书", "type": "REFERENCE_WORK", "author": "", "tags": [], "notes": "",
+        "files": [{"path": "01_原著/书/a.epub", "sha256": hashlib.sha256(a_bytes).hexdigest(), "primary": True},
+                  {"path": "01_原著/书/b.epub", "sha256": hashlib.sha256(b_bytes).hexdigest(), "primary": False}],
+        "purification": {"status": "未处理"}, "knowledge": {"status": "未开始"}}], "containers": []})
+    _write_source(root, "01_原著/书/a.epub", a_bytes)
+    _write_source(root, "01_原著/书/b.epub", b_bytes)
+    (root / "01_原始素材" / "01_原著" / "书" / "a.epub").unlink()  # 只删一个来源
+
+    res = materials.refresh_materials()
+    assert "book_0001" not in (res.get("removed_assets") or [])
+    led = json.loads((root / "01_原始素材" / "素材资产.json").read_text(encoding="utf-8"))
+    a = led["assets"][0]
+    assert a["id"] == "book_0001"
+    assert [f["path"] for f in a["files"]] == ["01_原著/书/b.epub"]
+    assert a["files"][0]["primary"] is True
+    m = next(x for x in materials.list_materials()["materials"] if x["id"] == "book_0001")
+    assert "缺失" not in (m.get("attention_message") or ""), "已结算的部分删除不得遗留缺失来源卡片"

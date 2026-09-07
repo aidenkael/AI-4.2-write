@@ -516,13 +516,16 @@ def refresh_materials() -> dict[str, Any]:
                                 "moved": len(rec.get("moved") or []), "renamed": len(rec.get("renamed") or [])})
     audit.finish_file(request_id, audit.STATUS_COMPLETED)
     ledger = _load_ledger(catalog)
-    missing = rec.get("missing_sources") or []
+    removed = rec.get("removed_assets") or []
+    source_deleted = rec.get("source_deleted") or []
     registered = rec.get("registered") or []
     message = "素材状态已刷新"
     if registered:
         message = f"素材状态已刷新，新登记 {len(registered)} 份素材"
-    if missing:
-        message += f"；{len(missing)} 份素材来源文件缺失，请检查"
+    if removed:
+        message += f"；{len(removed)} 份素材来源已全部删除，已从素材库移除"
+    elif source_deleted:
+        message += f"；{len(source_deleted)} 份素材已同步手动删除的来源文件"
     return {
         "assets": len(ledger.get("assets", [])),
         "files": sum(len(a.get("files", [])) for a in ledger.get("assets", [])),
@@ -530,7 +533,9 @@ def refresh_materials() -> dict[str, Any]:
         "registered": registered,
         "moved": rec.get("moved") or [],
         "renamed": rec.get("renamed") or [],
-        "missing_sources": missing,
+        "removed_assets": removed,
+        "source_deleted": source_deleted,
+        "missing_sources": rec.get("missing_sources") or [],
         "message": message,
     }
 
@@ -577,14 +582,18 @@ def scan_material_inbox() -> dict[str, Any]:
 
 
 def _intake_error_message(errors: list[str]) -> str:
-    """把 MaterialIntake 内部错误映射为作者可读中文（§12：技术细节只留审计/日志）。"""
+    """把 MaterialIntake 内部错误映射为作者可读中文（§13：技术细节只留审计/日志）。
+
+    文件系统失败（已回滚）绝不向作者暴露 WinError / 绝对路径 / Python 异常文本 / traceback；
+    只给出一句可执行中文提示，技术详情保留在审计与 report["errors"]。
+    """
     joined = " ".join(errors)
+    if "INTAKE_FILESYSTEM_FAILURE" in joined or "RECOVERY_REQUIRED" in joined:
+        return "素材入库失败，文件已恢复到待入库，请重试。"
     if "STOP_BEFORE_MOVE" in joined or "MISSING_REGISTERED_FILE" in joined:
         return "素材目录与登记不一致，请先点「刷新状态」同步手动改动后重试。"
     if "EXACT_DUPLICATE" in joined:
         return "重复文件的处理条件不满足，已保留现场，请检查待入库文件后重试。"
-    if "RECOVERY_REQUIRED" in joined:
-        return "素材入库未完成并已尽量恢复，请检查素材文件夹后重试。"
     if "type 非法" in joined or "NEW_ASSET" in joined:
         return "入库信息不完整，请选择批次类型后重试。"
     if "不存在" in joined:
@@ -822,7 +831,9 @@ def build_intake_plan_from_inbox(batch_type: str) -> dict[str, Any]:
                 "asset_id": asset_id,
             })
         else:
-            stem = Path(f["filename"]).stem
+            # §2.3：新书入库边界统一用同一归一化 helper——同一归一化标题驱动
+            # asset.name / 角色文件夹名 / 来源文件名 stem（去括号，避免 Windows 路径失败）。
+            stem = intake.normalize_book_title(Path(f["filename"]).stem)
             plan_items.append({
                 "action": "NEW_ASSET",
                 "files": [f["filename"]],
