@@ -141,6 +141,33 @@ def test_distill_kind_normalization(isolated):
         bridge.cleanup_request(rid)
 
 
+def test_multi_operation_recovery_returns_all_active_material_tasks(isolated):
+    ids = []
+    for index, bridge_kind in enumerate(("book_distill_propose", "method_distill_propose"), start=1):
+        ids.append(bridge.create_request(
+            task="t", kind=bridge_kind,
+            meta={
+                "asset_id": f"book_{index:04d}",
+                "execution": {"execution_mode": "interactive_bridge", "agent_id": "qoder", "model": None},
+            },
+            activate_for_gowrite=True,
+        ))
+    facts = ao.get_active_author_operations()
+    assert {item["request_id"] for item in facts} == set(ids)
+    assert {item["asset_id"] for item in facts} == {"book_0001", "book_0002"}
+    assert all(item["kind"] == "material_distill" for item in facts)
+    assert all(item["agent_command"].startswith("/gowrite:") for item in facts)
+
+
+def test_multi_recovery_reports_and_cleans_direct_orphan(isolated):
+    rid = _direct_request()
+    facts = ao.get_active_author_operations()
+    assert len(facts) == 1 and facts[0]["request_id"] == rid
+    assert facts[0]["state"] == "orphaned"
+    assert bridge.get_request(rid) is None
+    assert ao.get_active_author_operations() == []
+
+
 def test_canceled_interactive_cleared(isolated):
     rid = _interactive_request()
     bridge.mark_canceled(rid)

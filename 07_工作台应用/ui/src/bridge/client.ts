@@ -1502,6 +1502,10 @@ export interface AuthorOperationFacts {
   phase: string | null
   /** pending / running / orphaned。orphaned = Direct 请求存在但 worker 已不存在（进程重启）。 */
   state: string | null
+  execution_phase?: 'waiting_agent' | 'running' | null
+  agent_command?: string | null
+  asset_id?: string | null
+  target_label?: string | null
   message: string | null
 }
 
@@ -1510,7 +1514,12 @@ export async function getActiveAuthorOperation(): Promise<AuthorOperationFacts |
   return call<AuthorOperationFacts | null>('get_active_author_operation', {})
 }
 
-/** 尽力把 Qoder 桌面端切到前台（全局任务条"前往 Qoder 执行 /gowrite"）。 */
+/** Recover every non-terminal task; task text and credentials never cross this boundary. */
+export async function getActiveAuthorOperations(): Promise<AuthorOperationFacts[]> {
+  return call<AuthorOperationFacts[]>('get_active_author_operations', {})
+}
+
+/** 尽力把 Qoder 桌面端切到前台；命令始终使用后端 facts 原文。 */
 export async function focusQoder(): Promise<{ focused: boolean }> {
   return call<{ focused: boolean }>('focus_qoder', {})
 }

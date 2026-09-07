@@ -66,7 +66,11 @@ def _facts_from_request(request: dict[str, Any], *, orphaned: bool) -> dict[str,
         execution_mode = None
     operation = _KIND_TO_OPERATION.get(kind)
     phase = request.get("phase")
+    execution_phase = request.get("execution_phase")
+    if execution_phase not in ("waiting_agent", "running"):
+        execution_phase = "running" if execution_mode == "direct" else "waiting_agent"
     state = "orphaned" if orphaned else ("running" if execution_mode == "direct" else "pending")
+    label = meta.get("target_label") or meta.get("asset_name") or meta.get("name") or None
     return {
         "request_id": str(request.get("request_id") or ""),
         "kind": operation,
@@ -76,6 +80,10 @@ def _facts_from_request(request: dict[str, Any], *, orphaned: bool) -> dict[str,
         "agent_id": execution.get("agent_id") or None,
         "model": execution.get("model") or None,
         "phase": phase if isinstance(phase, str) and phase else None,
+        "execution_phase": execution_phase,
+        "agent_command": request.get("agent_command") if isinstance(request.get("agent_command"), str) else None,
+        "asset_id": str(meta.get("asset_id") or "") or None,
+        "target_label": str(label) if label else None,
         "state": state,
         "message": _author_message(kind, phase, execution_mode, orphaned),
     }
@@ -105,30 +113,37 @@ def _direct_pending_requests() -> list[dict[str, Any]]:
     return found
 
 
+def get_active_author_operations() -> list[dict[str, Any]]:
+    """All recoverable operations, including each fail-closed Direct orphan once."""
+    facts: list[dict[str, Any]] = []
+    root = bridge.get_bridge_root() / "requests"
+    if root.exists():
+        for path in sorted(root.glob("*.json")):
+            request = bridge.get_request(path.stem)
+            if request is None or request.get("state") != "pending":
+                continue
+            meta = request.get("meta") or {}
+            execution = meta.get("execution") or {}
+            orphaned = False
+            if execution.get("execution_mode") == "direct":
+                task = execution_tasks.manager.get(path.stem)
+                orphaned = task is None
+            item = _facts_from_request(request, orphaned=orphaned)
+            if item.get("kind"):
+                facts.append(item)
+            if orphaned:
+                bridge.cleanup_request(path.stem)
+                execution_tasks.manager.remove(path.stem)
+    return facts
+
+
 def get_active_author_operation() -> dict[str, Any]:
     """返回当前唯一待办作者操作（无则 data=None 语义由调用方处理）。
 
     返回 dict 或 None；只含非机密事实（见模块 docstring）。
     """
-    # 1. 优先：/gowrite 活跃请求（Interactive，作者动作待办）
-    active_id = bridge.get_active_request_id()
-    if active_id:
-        request = bridge.get_request(active_id)
-        if request is not None and request.get("state") == "pending":
-            return _facts_from_request(request, orphaned=False)
-        # 活跃指针已失效（请求不存在或已终态）：清掉陈旧指针，绝不指向旧任务
-        bridge.clear_active_if(active_id)
-
-    # 2. Direct pending 请求：只有任务管理器里仍有真实 worker 才可恢复
-    for request in _direct_pending_requests():
-        request_id = str(request.get("request_id") or "")
-        task = execution_tasks.manager.get(request_id)
-        if task is None:
-            # 进程重启后 worker 已不存在：fail closed（清理请求，绝不当运行中）
-            bridge.cleanup_request(request_id)
-            execution_tasks.manager.remove(request_id)
-            facts = _facts_from_request(request, orphaned=True)
-            return facts
-        return _facts_from_request(request, orphaned=False)
+    recovered = get_active_author_operations()
+    if recovered:
+        return recovered[0]
 
     return None

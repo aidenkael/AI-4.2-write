@@ -5,23 +5,24 @@
 - Go Write 只负责：生成唯一 request_id → 保存当前完整 Agent task →
   指定结果写回位置 → 等待/检测结果 → 校验 request_id →
   把模型最终结果交回现有严格业务解析。
-- Qoder 桌面端（作者常用会话，可随时丢弃）只负责执行 `/gowrite`：
-  读 active.json → 读请求文件 → 按 task 执行 → 写 response 文件。
+- Qoder 桌面端（作者常用会话，可随时丢弃）执行后端分配的 `/gowrite:<slot>`：
+  原子 claim 固定 slot → 读取该请求 → 按 task 执行 → 写 response 文件。
 
 本模块是纯文件协议，不调用任何模型 API，不复制任何 StoryDesign / StoryPlan
 / StoryWrite 业务规则（真正的业务要求由 pending task 提供）。
 
 文件布局（全部在 06_工作区/应用开发/.qoder_bridge/，Local Only，可删除）：
-- active.json                    当前活跃 /gowrite 请求指针（Qoder 从这里找任务）
+- slots/<slot>.json             四个固定 Interactive slot（精确绑定 request_id）
+- claims/<request_id>.claim     跨 Qoder 会话/进程的原子执行 claim
 - requests/<request_id>.json     待执行任务（Go Write 写，Qoder 读）
 - responses/<request_id>.json    执行结果（Qoder 写，Go Write 读）
 
-请求存储与 /gowrite 激活分离：
+请求存储与 Interactive slot 分配分离：
 - 任何请求（Interactive / Direct）都写入 requests/<request_id>.json；
-- 只有 Interactive 请求通过 ``activate_for_gowrite=True`` 显式激活
-  active.json；Direct 请求绝不进入 active.json；
-- 同一时刻至多一个活跃 /gowrite 请求；第二个 Interactive 请求触发
-  ``BridgeBusyError``，绝不静默覆盖。
+- 只有 Interactive 请求通过 ``activate_for_gowrite=True`` 分配固定 slot；
+  Direct 请求不分配 slot；
+- 仅 material_distill 可占用多个 slot；所有其他 Author Operation 仍独占，
+  并与 material_distill 双向互斥。
 
 安全：
 - request_id 是防串任务的唯一键；response 必须携带相同 request_id。
@@ -34,7 +35,9 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 import uuid
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -56,6 +59,9 @@ _ALLOWED_RESPONSE_STATUSES = frozenset({"completed", "failed"})
 
 # 默认任务超时：作者可能 Alt+Tab 后稍晚才执行 /gowrite，给 30 分钟
 DEFAULT_TASK_TIMEOUT_SECONDS = 30 * 60
+INTERACTIVE_SLOT_COUNT = 4
+_MATERIAL_KINDS = frozenset({"book_distill_propose", "method_distill_propose"})
+_INTERACTIVE_ALLOCATION_LOCK = threading.RLock()
 
 # 本机 Qoder 桌面端窗口标题匹配词（AppActivate 按标题部分匹配）
 _QODER_WINDOW_TITLE = "Qoder"
@@ -80,6 +86,22 @@ def _responses_dir() -> Path:
 
 def _active_path() -> Path:
     return get_bridge_root() / "active.json"
+
+
+def _slots_dir() -> Path:
+    return get_bridge_root() / "slots"
+
+
+def _claims_dir() -> Path:
+    return get_bridge_root() / "claims"
+
+
+def _slot_path(slot: int) -> Path:
+    return _slots_dir() / f"{slot}.json"
+
+
+def _claim_path(request_id: str) -> Path:
+    return _claims_dir() / f"{request_id}.claim"
 
 
 def request_path(request_id: str) -> Path:
@@ -133,6 +155,7 @@ def create_request(
         "kind": kind,
         "created_at": created.isoformat(timespec="seconds"),
         "expires_at": expires.isoformat(timespec="seconds"),
+        "wait_timeout_seconds": timeout,
         "state": "pending",  # pending | canceled | completed | failed
         "task": task,        # 完整 Agent task（业务规则全部在这里）
         "response_path": str(response_path(request_id)),
@@ -147,8 +170,8 @@ def create_request(
     (requests_dir / f"{request_id}.json").write_text(
         json.dumps(request, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    if activate_for_gowrite and not activate_request(request_id):
-        # 交互忙碌：绝不静默覆盖 active.json；回滚刚创建的请求文件
+    if activate_for_gowrite and not allocate_interactive_slot(request_id):
+        # 没有空闲槽：绝不覆盖其它 Interactive 请求；回滚刚创建的请求文件。
         try:
             (requests_dir / f"{request_id}.json").unlink(missing_ok=True)
         except OSError:
@@ -161,43 +184,129 @@ class BridgeBusyError(Exception):
     """已有活跃的 /gowrite 请求（交互桥忙碌），禁止覆盖。"""
 
     def __init__(self) -> None:
-        super().__init__("已有等待 Qoder /gowrite 的任务，请先完成或取消。")
+        super().__init__("Agent 并行任务已达上限，请等待或取消一个任务。")
+
+
+def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
+    """Small local-file atomic replace; request files are never a global selector."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+    temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def allocate_interactive_slot(request_id: str) -> bool:
+    """Reserve one slot while preserving material-only concurrency."""
+    with _INTERACTIVE_ALLOCATION_LOCK:
+        req = get_request(request_id)
+        if req is None or req.get("state") != "pending":
+            return False
+        existing = req.get("slot")
+        if isinstance(existing, int) and 1 <= existing <= INTERACTIVE_SLOT_COUNT:
+            return True
+
+        occupied: list[dict[str, Any]] = []
+        for slot in range(1, INTERACTIVE_SLOT_COUNT + 1):
+            other_id = _slot_request_id(slot)
+            if not other_id or other_id == request_id:
+                continue
+            other = get_request(other_id)
+            if other and other.get("state") == "pending":
+                occupied.append(other)
+        request_is_material = req.get("kind") in _MATERIAL_KINDS
+        if occupied and (
+            not request_is_material
+            or any(other.get("kind") not in _MATERIAL_KINDS for other in occupied)
+        ):
+            return False
+
+        _slots_dir().mkdir(parents=True, exist_ok=True)
+        for slot in range(1, INTERACTIVE_SLOT_COUNT + 1):
+            path = _slot_path(slot)
+            try:
+                fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                continue
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    json.dump({"request_id": request_id}, handle, ensure_ascii=False)
+                req["slot"] = slot
+                req["agent_command"] = f"/gowrite:{slot}"
+                req["execution_phase"] = "waiting_agent"
+                _write_json_atomic(request_path(request_id), req)
+                return True
+            except Exception:
+                path.unlink(missing_ok=True)
+                raise
+        return False
+
+
+def _slot_request_id(slot: int) -> Optional[str]:
+    try:
+        data = json.loads(_slot_path(slot).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    request_id = data.get("request_id")
+    return request_id if isinstance(request_id, str) and request_id else None
+
+
+def claim_request_for_slot(slot: int) -> Optional[dict[str, Any]]:
+    """Atomically claim exactly the request reserved for ``slot``.
+
+    The O_EXCL claim is process-safe across separate Qoder sessions.  A second
+    execution, a stale command, or a canceled request fails closed.
+    """
+    if slot not in range(1, INTERACTIVE_SLOT_COUNT + 1):
+        return None
+    request_id = _slot_request_id(slot)
+    if not request_id:
+        return None
+    req = get_request(request_id)
+    if not req or req.get("state") != "pending" or req.get("execution_phase") != "waiting_agent":
+        return None
+    try:
+        _claims_dir().mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(_claim_path(request_id)), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return None
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(str(slot))
+        # Re-read after acquiring the claim so cancellation cannot become runnable.
+        req = get_request(request_id)
+        if not req or req.get("state") != "pending" or req.get("execution_phase") != "waiting_agent":
+            _claim_path(request_id).unlink(missing_ok=True)
+            return None
+        req["execution_phase"] = "running"
+        _write_json_atomic(request_path(request_id), req)
+        return req
+    except Exception:
+        _claim_path(request_id).unlink(missing_ok=True)
+        raise
+
+
+def release_claim(request_id: str) -> None:
+    _claim_path(request_id).unlink(missing_ok=True)
+
+
+def release_interactive_slot(request_id: str) -> None:
+    req = get_request(request_id)
+    slot = req.get("slot") if isinstance(req, dict) else None
+    if isinstance(slot, int) and _slot_request_id(slot) == request_id:
+        _slot_path(slot).unlink(missing_ok=True)
+    release_claim(request_id)
 
 
 def activate_request(request_id: str) -> bool:
-    """显式把请求设为 Qoder /gowrite 活跃任务（仅 Interactive 使用）。
-
-    规则：
-    - active.json 已指向同一请求 → 幂等成功（两阶段 StoryWrite 原地更新任务
-      时 active 指针保持不变）；
-    - active.json 已指向其它请求 → 返回 False（第二个 Interactive 请求
-      绝不能覆盖第一个）；
-    - 请求不存在或已终态 → 返回 False。
-    """
-    current = get_active_request_id()
-    if current is not None and current != request_id:
-        return False
-    req = get_request(request_id)
-    if req is None or req.get("state") != "pending":
-        return False
-    _active_path().write_text(
-        json.dumps({"active_request_id": request_id}, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    return True
+    """Compatibility name: allocate one exact Interactive slot."""
+    # Compatibility name for callers not yet migrated. It does not create or
+    # consult a global active pointer.
+    return allocate_interactive_slot(request_id)
 
 
 def get_active_request_id() -> Optional[str]:
-    """当前活跃请求 id（Qoder /gowrite 入口）。"""
-    path = _active_path()
-    if not path.exists():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    rid = data.get("active_request_id")
-    return rid if isinstance(rid, str) and rid else None
+    """Removed global-selection API. Interactive tasks are slot-bound."""
+    return None
 
 
 def get_request(request_id: str) -> Optional[dict[str, Any]]:
@@ -213,6 +322,8 @@ def get_request(request_id: str) -> Optional[dict[str, Any]]:
 
 def is_expired(request: dict[str, Any]) -> bool:
     """请求是否已超时（现在 > expires_at）。"""
+    if request.get("execution_phase") == "running":
+        return False
     raw = request.get("expires_at")
     if not raw:
         return False
@@ -346,9 +457,8 @@ def mark_canceled(request_id: str) -> bool:
     if req is None:
         return False
     req["state"] = "canceled"
-    request_path(request_id).write_text(
-        json.dumps(req, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    _write_json_atomic(request_path(request_id), req)
+    release_interactive_slot(request_id)
     try:
         response_path(request_id).unlink(missing_ok=True)
     except OSError:
@@ -357,13 +467,8 @@ def mark_canceled(request_id: str) -> bool:
 
 
 def clear_active_if(request_id: str) -> None:
-    """若 active 指针仍指向该请求则清掉（取消/终态时调用）。"""
-    active = get_active_request_id()
-    if active == request_id:
-        try:
-            _active_path().unlink(missing_ok=True)
-        except OSError:
-            pass
+    """Compatibility cleanup: release only this request's reserved slot."""
+    release_interactive_slot(request_id)
 
 
 def clear_response(request_id: str) -> None:
@@ -377,7 +482,8 @@ def clear_response(request_id: str) -> None:
 def set_request_task(request_id: str, task: str, *, phase: Optional[str] = None) -> bool:
     """原地更新请求文件的任务文本（两阶段交互桥：阶段 1 验收后换成阶段 2 任务）。
 
-    保持 state/kind/meta/expires_at 不变；请求仍处于 pending，active 指针不动。
+    Two-phase Interactive requests release their old claim, retain their slot,
+    return to waiting_agent, and renew only the waiting deadline.
     请求不存在或已终态时返回 False。
     """
     req = get_request(request_id)
@@ -388,20 +494,28 @@ def set_request_task(request_id: str, task: str, *, phase: Optional[str] = None)
     req["task"] = task
     if phase is not None:
         req["phase"] = phase
-    request_path(request_id).write_text(
-        json.dumps(req, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    if isinstance(req.get("slot"), int):
+        release_claim(request_id)
+        req["execution_phase"] = "waiting_agent"
+        timeout = int(req.get("wait_timeout_seconds") or DEFAULT_TASK_TIMEOUT_SECONDS)
+        req["expires_at"] = (datetime.now(timezone.utc) + timedelta(seconds=timeout)).isoformat(timespec="seconds")
+    _write_json_atomic(request_path(request_id), req)
     return True
 
 
 def cleanup_request(request_id: str) -> None:
     """终态清理：删除请求/响应文件，并清掉可能指向本请求的 active 指针。"""
+    release_interactive_slot(request_id)
     try:
         request_path(request_id).unlink(missing_ok=True)
         response_path(request_id).unlink(missing_ok=True)
     except OSError:
         pass
-    clear_active_if(request_id)
+    # Old active.json is no longer read. Remove a stale legacy file only.
+    try:
+        _active_path().unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -433,9 +547,23 @@ def cleanup_bridge_root() -> None:
 
     保留静态文件（如 gowrite.md.template）；不影响正式作品。
     """
-    for d in (_requests_dir(), _responses_dir()):
+    for d in (_requests_dir(), _responses_dir(), _slots_dir(), _claims_dir()):
         shutil.rmtree(d, ignore_errors=True)
     try:
         _active_path().unlink(missing_ok=True)
     except OSError:
         pass
+
+
+if __name__ == "__main__":
+    # Qoder custom commands use this tiny deterministic entrypoint before they
+    # read a task. It deliberately prints only the claimable request JSON.
+    if len(sys.argv) == 3 and sys.argv[1] == "claim":
+        try:
+            claimed = claim_request_for_slot(int(sys.argv[2]))
+        except ValueError:
+            claimed = None
+        if claimed is not None:
+            print(json.dumps(claimed, ensure_ascii=False))
+            raise SystemExit(0)
+    raise SystemExit(1)

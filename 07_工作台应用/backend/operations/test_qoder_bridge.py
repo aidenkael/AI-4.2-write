@@ -19,7 +19,7 @@ def isolated(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_create_request_writes_files_and_active(isolated):
+def test_create_request_writes_files_and_slot_command(isolated):
     rid = bridge.create_request(task="TASK", kind="story_design_propose", meta={"name": "n"}, activate_for_gowrite=True)
     assert len(rid) == 32
     req = bridge.get_request(rid)
@@ -30,7 +30,7 @@ def test_create_request_writes_files_and_active(isolated):
     assert req["meta"]["name"] == "n"
     resp_parts = Path(req["response_path"]).parts
     assert "responses" in resp_parts and resp_parts[-1] == f"{rid}.json"
-    assert bridge.get_active_request_id() == rid
+    assert req["slot"] == 1 and req["agent_command"] == "/gowrite:1"
 
 
 def test_create_request_does_not_activate_by_default(isolated):
@@ -40,21 +40,35 @@ def test_create_request_does_not_activate_by_default(isolated):
     assert bridge.get_active_request_id() is None
 
 
-def test_activate_request_sets_exact_active(isolated):
+def test_activate_request_sets_exact_slot(isolated):
     """Interactive 创建 → 显式激活，active.json 精确指向该请求。"""
     rid = bridge.create_request(task="T", kind="k", activate_for_gowrite=True)
-    assert bridge.get_active_request_id() == rid
+    assert bridge.get_request(rid)["slot"] == 1
 
 
-def test_second_interactive_cannot_overwrite(isolated):
-    """第二个 Interactive 请求不能覆盖第一个（绝不静默覆盖 active.json）。"""
-    a = bridge.create_request(task="A", kind="k", activate_for_gowrite=True)
+def test_four_slots_then_busy(isolated):
+    ids = [bridge.create_request(task=str(i), kind="book_distill_propose", activate_for_gowrite=True) for i in range(4)]
+    assert [bridge.get_request(rid)["agent_command"] for rid in ids] == [f"/gowrite:{i}" for i in range(1, 5)]
     with pytest.raises(bridge.BridgeBusyError):
-        bridge.create_request(task="B", kind="k", activate_for_gowrite=True)
-    assert bridge.get_active_request_id() == a
-    # 忙碌时刚创建的请求文件被回滚，不会留下孤儿请求
-    reqs = list((isolated / "qoder_bridge" / "requests").glob("*.json"))
-    assert len(reqs) == 1
+        bridge.create_request(task="overflow", kind="method_distill_propose", activate_for_gowrite=True)
+
+
+def test_non_material_and_material_slots_are_mutually_exclusive(isolated):
+    exclusive = bridge.create_request(task="write", kind="story_write_propose", activate_for_gowrite=True)
+    with pytest.raises(bridge.BridgeBusyError):
+        bridge.create_request(task="book", kind="book_distill_propose", activate_for_gowrite=True)
+    bridge.cleanup_request(exclusive)
+    material = bridge.create_request(task="book", kind="book_distill_propose", activate_for_gowrite=True)
+    with pytest.raises(bridge.BridgeBusyError):
+        bridge.create_request(task="review", kind="review_propose", activate_for_gowrite=True)
+    bridge.cleanup_request(material)
+
+
+def test_non_material_author_operations_remain_exclusive(isolated):
+    first = bridge.create_request(task="write", kind="story_write_propose", activate_for_gowrite=True)
+    with pytest.raises(bridge.BridgeBusyError):
+        bridge.create_request(task="plan", kind="story_plan_propose", activate_for_gowrite=True)
+    bridge.cleanup_request(first)
 
 
 def test_activate_request_refuses_missing_or_terminal(isolated):
@@ -66,20 +80,15 @@ def test_activate_request_refuses_missing_or_terminal(isolated):
     assert bridge.get_active_request_id() is None
 
 
-def test_clear_active_if_only_matching_id(isolated):
+def test_slot_cleanup_is_request_bound(isolated):
     """取消/终态只清与自身 id 匹配的 active 指针，绝不清别人的。"""
     a = bridge.create_request(task="A", kind="k", activate_for_gowrite=True)
-    assert bridge.get_active_request_id() == a
     bridge.mark_canceled(a)
     bridge.clear_active_if(a)
-    assert bridge.get_active_request_id() is None
     b = bridge.create_request(task="B", kind="k", activate_for_gowrite=True)
-    assert bridge.get_active_request_id() == b
-    # 旧请求的迟到清理绝不能清掉新的活跃指针
+    assert bridge.get_request(b)["slot"] == 1
     bridge.clear_active_if(a)
-    assert bridge.get_active_request_id() == b
-    bridge.clear_active_if(b)
-    assert bridge.get_active_request_id() is None
+    assert bridge.get_request(b)["slot"] == 1
 
 
 def test_get_request_missing_returns_none(isolated):
@@ -101,18 +110,19 @@ def test_write_and_read_response(isolated):
     assert resp["result"] == {"ok": 1}
 
 
-def test_set_request_task_keeps_active_pointer(isolated):
+def test_set_request_task_resets_claim_and_keeps_slot(isolated):
     """StoryWrite 两阶段：Stage 1 → Stage 2 原地换任务，active 指针保持同一请求。"""
     rid = bridge.create_request(
         task="STAGE1", kind="story_write_propose", activate_for_gowrite=True, phase="pending_selection",
     )
-    assert bridge.get_active_request_id() == rid
+    assert bridge.claim_request_for_slot(1)["request_id"] == rid
     assert bridge.set_request_task(rid, "STAGE2", phase="pending_prose") is True
     req = bridge.get_request(rid)
     assert req["task"] == "STAGE2"
     assert req["phase"] == "pending_prose"
     assert req["state"] == "pending"
-    assert bridge.get_active_request_id() == rid
+    assert req["execution_phase"] == "waiting_agent"
+    assert bridge.claim_request_for_slot(1)["request_id"] == rid
 
 
 def test_read_response_invalid_json_returns_failed_envelope(isolated):
@@ -325,14 +335,23 @@ def test_cleanup_request_removes_files_and_active(isolated):
     assert bridge.get_active_request_id() is None
 
 
-def test_cleanup_request_keeps_other_active(isolated):
+def test_cleanup_request_keeps_other_slot(isolated):
     a = bridge.create_request(task="A", kind="k", activate_for_gowrite=True)
     bridge.mark_canceled(a)
-    bridge.clear_active_if(a)
     b = bridge.create_request(task="B", kind="k", activate_for_gowrite=True)
     # 旧请求文件/指针的终态清理（幂等重放）不得影响新的活跃请求
     bridge.cleanup_request(a)
-    assert bridge.get_active_request_id() == b
+    assert bridge.get_request(b)["slot"] == 1
+
+
+def test_cancel_one_request_leaves_other_active_request_intact(isolated):
+    a = bridge.create_request(task="A", kind="book_distill_propose", activate_for_gowrite=True)
+    b = bridge.create_request(task="B", kind="method_distill_propose", activate_for_gowrite=True)
+    bridge.mark_canceled(a)
+    bridge.cleanup_request(a)
+    assert bridge.get_request(a) is None
+    assert bridge.get_request(b)["state"] == "pending"
+    assert bridge.get_request(b)["agent_command"] == "/gowrite:2"
 
 
 def test_is_expired_uses_expires_at(isolated):
@@ -341,3 +360,12 @@ def test_is_expired_uses_expires_at(isolated):
     assert bridge.is_expired(req) is False
     req["expires_at"] = "2000-01-01T00:00:00+00:00"
     assert bridge.is_expired(req) is True
+
+
+def test_claim_is_atomic_and_running_request_does_not_expire(isolated):
+    rid = bridge.create_request(task="T", kind="k", activate_for_gowrite=True)
+    assert bridge.claim_request_for_slot(1)["request_id"] == rid
+    assert bridge.claim_request_for_slot(1) is None
+    req = bridge.get_request(rid)
+    req["expires_at"] = "2000-01-01T00:00:00+00:00"
+    assert bridge.is_expired(req) is False

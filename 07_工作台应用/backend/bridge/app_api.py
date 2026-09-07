@@ -1112,6 +1112,13 @@ class AppApi:
         except Exception as exc:  # noqa: BLE001
             return _err(CODE_BRIDGE_INTERNAL, str(exc))
 
+    def get_active_author_operations(self, payload: dict | None = None) -> dict:
+        """Recover every non-terminal author task without exposing task text."""
+        try:
+            return _ok(author_operation_ops.get_active_author_operations())
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
     def list_execution_audits(self, payload: dict) -> dict:
         """最近执行记录列表（摘要字段；按时间倒序）。"""
         try:

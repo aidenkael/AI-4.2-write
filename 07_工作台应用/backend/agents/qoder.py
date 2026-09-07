@@ -145,7 +145,7 @@ def _parse_models(output: str) -> list[dict[str, str]]:
 
 
 _QODER_DESKTOP_DATA_DIRS = (".qoder", ".qoder-cn")
-_QODER_COMMAND_NAME = "gowrite.md"
+_QODER_COMMAND_NAME = "gowrite"
 
 
 def _command_paths() -> list[Path]:
@@ -158,12 +158,13 @@ def _command_paths() -> list[Path]:
     root so the bridge is detected regardless of which app instance is active.
     """
     return [
-        Path.home() / data_dir / "commands" / _QODER_COMMAND_NAME
+        Path.home() / data_dir / "commands" / _QODER_COMMAND_NAME / f"{slot}.md"
         for data_dir in _QODER_DESKTOP_DATA_DIRS
+        for slot in range(1, 5)
     ]
 
 
-def command_definition() -> str:
+def command_definition(slot: int = 1) -> str:
     """当前 /gowrite 命令定义（Go Write 安装到所有受支持 Qoder 位置的确切文本）。
 
     响应信封契约（gowrite_response/v1）：``result`` 只放结构化 JSON 对象，
@@ -172,9 +173,10 @@ def command_definition() -> str:
     """
     return (
         "---\n"
-        "description: Execute the active Go Write request and write its response\n"
+        f"description: Execute Go Write task slot {slot} and write its response\n"
         "---\n"
-        "Read `06_工作区/应用开发/.qoder_bridge/active.json`, then read the referenced request. "
+        f"First run `python 07_工作台应用/backend/operations/qoder_bridge.py claim {slot}` from the Go Write repository. "
+        "If it exits non-zero, stop: this slot has no waiting task or it was already claimed. Read only the returned request JSON, then "
         "Execute only its `task`. Write one UTF-8 JSON response file to the request's `response_path` "
         "with schema `gowrite_response/v1`, using a real JSON serializer (never hand-concatenate JSON). "
         "The response must be a JSON object with the exact same `request_id` as the request file, and "
@@ -195,9 +197,10 @@ def command_definition() -> str:
 
 def command_locations() -> list[dict[str, Any]]:
     """Per-location command readiness facts (real path + real content state)."""
-    definition = command_definition()
     locations = []
     for path in _command_paths():
+        slot = int(path.stem) if path.stem.isdigit() else 1
+        definition = command_definition(slot)
         exists = path.is_file()
         matches = False
         if exists:
@@ -235,7 +238,8 @@ def install_command() -> dict[str, Any]:
     for path in paths:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(command_definition(), encoding="utf-8", newline="\n")
+            slot = int(path.stem) if path.stem.isdigit() else 1
+            path.write_text(command_definition(slot), encoding="utf-8", newline="\n")
             installed_paths.append(str(path))
         except (OSError, UnicodeError) as exc:
             errors.append(f"{path}: 写入 Qoder Desktop 命令失败：{exc}")
@@ -292,11 +296,11 @@ class QoderAdapter(AgentAdapter):
             "interactive": {
                 "available": bool(desktop["installed"]),
                 "bridge_ready": bool(desktop["installed"] and ready),
-                "command_name": "/gowrite",
+                "command_name": "/gowrite:1 … /gowrite:4",
                 "command_ready": ready,
                 "command_locations": locations,
                 "relevant_status": {"qoder_desktop_command": "; ".join(loc["path"] for loc in locations)},
-                "repair_hint": None if ready else "未安装 Go Write 的 /gowrite 命令（或已安装位置不符合格式），可使用“安装/修复命令”。",
+                "repair_hint": None if ready else "未安装 Go Write 的 /gowrite:1 至 /gowrite:4 命令（或已安装位置不符合格式）；修复后在 Qoder 输入 /commands 刷新。",
             },
             "direct": {
                 "available": bool(cli_path and models),

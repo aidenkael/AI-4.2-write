@@ -487,25 +487,30 @@ def test_confirm_cross_project_rejected(isolated, real_project, fake_bridge, mon
 
 
 # ---------------------------------------------------------------------------
-# K. 两阶段 active 指针保持（/gowrite 激活与请求存储分离后的关键不变量）
+# K. 两阶段 slot / claim 保持（请求绑定命令的关键不变量）
 # ---------------------------------------------------------------------------
 
 def test_two_phase_keeps_same_active_request(isolated, real_project, fake_bridge, monkeypatch):
-    """交互桥两阶段：active.json 全程指向同一请求，绝不因阶段切换改变/丢失。"""
+    """交互桥两阶段：同一请求/slot/命令，Stage 2 可再次原子 claim。"""
     prepared = _interactive_prepare(real_project, monkeypatch)
     rid = prepared["request_id"]
-    assert bridge.get_active_request_id() == rid, "prepare 后 active 精确指向该请求"
+    request = bridge.get_request(rid)
+    slot, command = request["slot"], request["agent_command"]
+    assert bridge.claim_request_for_slot(slot)["request_id"] == rid
 
     _write_qoder_response(rid, _selection_json())
     got = sw_ops.get_story_write_request(rid)
     assert got["status"] == "pending" and got["phase"] == "pending_prose"
-    assert bridge.get_active_request_id() == rid, "Stage 1 → Stage 2 必须保持同一 active 请求"
+    request = bridge.get_request(rid)
+    assert request["slot"] == slot and request["agent_command"] == command
+    assert request["execution_phase"] == "waiting_agent"
+    assert bridge.claim_request_for_slot(slot)["request_id"] == rid
 
     _write_qoder_response(rid, _prose_output(rid))
     got = sw_ops.get_story_write_request(rid)
     assert got["status"] == "completed", got.get("error")
-    # 候选完成 = 请求终态清理：active 指针不再指向已完成任务
-    assert bridge.get_active_request_id() is None
+    assert bridge.get_request(rid) is None
+    assert bridge._slot_request_id(slot) is None
 
 
 def test_second_interactive_write_busy_until_cancel(isolated, real_project, fake_bridge, monkeypatch):
@@ -514,15 +519,14 @@ def test_second_interactive_write_busy_until_cancel(isolated, real_project, fake
     rid = prepared["request_id"]
     with pytest.raises(sw_ops.StoryWritingError) as ei:
         _interactive_prepare(real_project, monkeypatch)
-    assert "Qoder /gowrite" in str(ei.value)
-    assert bridge.get_active_request_id() == rid
+    assert "并行任务已达上限" in str(ei.value)
+    assert bridge.get_request(rid)["state"] == "pending"
 
     # 取消第一个后，新一轮 Interactive 可以正常开始
     sw_ops.cancel_story_write_request(rid)
-    assert bridge.get_active_request_id() is None
     prepared2 = _interactive_prepare(real_project, monkeypatch)
     assert prepared2["request_id"] != rid
-    assert bridge.get_active_request_id() == prepared2["request_id"]
+    assert bridge.get_request(prepared2["request_id"])["slot"] == 1
 
 
 # ---------------------------------------------------------------------------

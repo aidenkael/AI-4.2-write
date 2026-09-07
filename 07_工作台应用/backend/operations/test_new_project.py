@@ -115,14 +115,14 @@ def test_prepare_creates_unique_request(isolated):
     assert "想法A" in req_a["task"] and "请求A" in req_a["task"], "完整 Agent task 必须保存在请求中"
     resp_parts = Path(req_a["response_path"]).parts
     assert "responses" in resp_parts and resp_parts[-1] == f"{a['request_id']}.json"
-    # Interactive 显式激活：active.json 精确指向该请求
-    assert bridge.get_active_request_id() == a["request_id"], "active 精确指向当前请求"
+    # Interactive 显式分配：命令与固定 slot 精确绑定该请求。
+    assert req_a["slot"] == 1 and req_a["agent_command"] == "/gowrite:1"
 
     # 第二个 Interactive 请求不能覆盖第一个：稳定忙碌错误，绝不静默覆盖
     with pytest.raises(np_ops.NewProjectError) as ei:
         np_ops.prepare_new_project(name="请求B", idea="想法B")
-    assert "Qoder /gowrite" in str(ei.value)
-    assert bridge.get_active_request_id() == a["request_id"], "active 仍指向第一个请求"
+    assert "并行任务已达上限" in str(ei.value)
+    assert bridge.get_request(a["request_id"])["slot"] == 1
 
     # response 目录尚无任何文件（pending）
     assert not bridge.response_path(a["request_id"]).exists()
