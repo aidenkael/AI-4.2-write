@@ -57,8 +57,12 @@ import xml.etree.ElementTree as ET
 
 # MaterialIntake canonical catalog：ledger 是 SP 的唯一素材真源（不复制第二套 registry）
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "MaterialIntake"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import catalog as material_catalog  # noqa: E402
 import post_action  # noqa: E402
+# §7：EPUB 原生结构（OPF spine + nav/NCX）是分章的首要来源；与 MethodPrepare 共享同一
+# 确定性 helper，避免出现两套不一致的 EPUB 解析器（Markdown 标题正则只是兜底）。
+import epub_structure  # noqa: E402
 
 # SP 动作允许进 Git 的 tracked 面（Phase 2B2.1 收窄为最小必要面：仅三份 material state files；
 # README / .gitkeep 属 Phase 2B2 安装时一次性 commit，动作期间意外修改 → STOP_UNEXPECTED_DIFF）
@@ -122,6 +126,9 @@ class Candidate:
     notes: list[str] | None = None
     temp_md: Optional[str] = None
     epub_checks: list[dict] | None = None
+    # §7：EPUB 原生结构派生的有序非空内容单元 [(label|None, cleaned_markdown)]；
+    # 非 EPUB / 结构不可靠走标题兜底时保持 None（process_book 据此决定分章来源）。
+    epub_units_md: Optional[list] = None
 
     def __post_init__(self) -> None:
         self.warnings = self.warnings or []
@@ -205,6 +212,33 @@ def split_chapters(text: str, out_dir: Path) -> int:
 
 def safe_name(s: str) -> str:
     return re.sub(r'[\\/:*?"<>|]', "_", s).strip() or "unnamed"
+
+
+def _unit_markdown(label: Optional[str], text: str) -> str:
+    """把一个 EPUB 原生单元渲染为章节 Markdown（委托共享 helper，与 MethodPrepare 一致）。
+
+    nav/NCX 标签只在“不会与正文首行重复”时作为 `# 标签` 标题前置（命名单元，
+    绝不虚构内容/层级）；无标签时原样返回。
+    """
+    return epub_structure.render_unit_markdown(label, text)
+
+
+def _write_epub_chapters(units_md: list, out_dir: Path) -> int:
+    """把 EPUB 原生有序单元写为 chapters/（稳定编号文件名）；返回实际写入章数。
+
+    每个非空单元 = 一章（最小可靠 spine 文档边界）；不使用标题正则猜测。
+    """
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    count = 0
+    for label, text in units_md:
+        block = _unit_markdown(label, text)
+        if not block.strip():
+            continue
+        count += 1
+        (out_dir / f"{count:04d}.md").write_text(block + "\n", encoding="utf-8")
+    return count
 
 
 # --------------------------------------------------------------------------- #
@@ -389,30 +423,58 @@ def convert_epub(path: Path, pandoc: str, work_dir: Path) -> Candidate:
     if not ok:
         cand.warnings.append("EPUB 关键结构检测未通过（见 conversion_report 明细）")
         return cand
+
+    # §7：EPUB 原生结构优先（container.xml → OPF → manifest + spine，nav/NCX 命名）。
+    # spine 文档逐个 Pandoc html→gfm 得到有序内容单元；空/非内容单元按可见字符确定性跳过。
+    # 绝不把“合成 MD 无可识别 # 标题”当作“本 EPUB 无章节”的证据。
+    units_md: list[tuple] = []
+    structure = epub_structure.parse_epub_structure(path)
+    if structure is not None and structure.has_units:
+        for label, raw in epub_structure.convert_units_to_markdown(
+                path, structure.units, pandoc, work_dir):
+            cleaned = clean_markdown(raw)
+            if visible_char_count(cleaned) <= 0:
+                continue
+            units_md.append((label, cleaned))
+        cand.notes.append(
+            f"EPUB 原生结构：spine={structure.spine_items} 内容单元={len(structure.units)} "
+            f"非空单元={len(units_md)} nav/NCX标签={structure.nav_label_count}")
+
     out = work_dir / f"{cand.sha256[:12]}.epub.md"
-    proc = subprocess.run(
-        [pandoc, str(path), "-f", "epub", "-t", "gfm", "--wrap=none", "-o", str(out)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
-    if proc.returncode != 0 or not out.exists():
-        cand.warnings.append("Pandoc EPUB→Markdown 失败")
-        if proc.stderr:
-            cand.notes.append(proc.stderr[-2000:])
-        # 把第 13/14 项标记为 fail
-        cand.epub_checks = (cand.epub_checks or []) + [
-            _c(13, "Pandoc 转换执行", "fail", "转换失败"),
-            _c(14, "转换后正文质量", "skip", "转换失败未产出"),
-        ]
-        return cand
-    text = clean_markdown(out.read_text(encoding="utf-8", errors="replace"))
-    out.write_text(text, encoding="utf-8")
-    cand.temp_md = str(out)
+    if units_md:
+        # full.md 由有序单元拼接（§7.1 步骤 6）；chapters/ 由同一批单元在 process_book 写出。
+        text = "\n\n".join(_unit_markdown(lab, tx) for lab, tx in units_md).strip() + "\n"
+        out.write_text(text, encoding="utf-8")
+        cand.temp_md = str(out)
+        cand.epub_units_md = units_md
+        cand.chapter_count = len(units_md)
+        pandoc_detail = "EPUB 原生结构逐单元转换"
+    else:
+        # 兜底：无可靠 EPUB 结构单元 → 整本 Pandoc 合成 + Markdown 标题正则（现有行为）。
+        proc = subprocess.run(
+            [pandoc, str(path), "-f", "epub", "-t", "gfm", "--wrap=none", "-o", str(out)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+        if proc.returncode != 0 or not out.exists():
+            cand.warnings.append("Pandoc EPUB→Markdown 失败")
+            if proc.stderr:
+                cand.notes.append(proc.stderr[-2000:])
+            cand.epub_checks = (cand.epub_checks or []) + [
+                _c(13, "Pandoc 转换执行", "fail", "转换失败"),
+                _c(14, "转换后正文质量", "skip", "转换失败未产出"),
+            ]
+            return cand
+        text = clean_markdown(out.read_text(encoding="utf-8", errors="replace"))
+        out.write_text(text, encoding="utf-8")
+        cand.temp_md = str(out)
+        cand.chapter_count = len(chapter_starts(text.splitlines()))
+        pandoc_detail = "成功"
+
     cand.char_count = visible_char_count(text)
     cand.garbled = text.count("\ufffd")
-    cand.chapter_count = len(chapter_starts(text.splitlines()))
     # 补 13/14 项
     cand.epub_checks = (cand.epub_checks or []) + [
-        _c(13, "Pandoc 转换执行", "pass", "成功"),
+        _c(13, "Pandoc 转换执行", "pass", pandoc_detail),
         _c(14, "转换后正文质量",
            "pass" if (cand.char_count >= MIN_VISIBLE_CHARS and cand.garbled <= GARBLE_WARN)
            else "warn",
@@ -769,7 +831,12 @@ def process_book(root: Path, work_name: str, asset_type: str,
         text = Path(selected.temp_md).read_text(encoding="utf-8")
         out_dir.mkdir(parents=True, exist_ok=True)
         full_md.write_text(text, encoding="utf-8")
-        split_count = split_chapters(text, chapters_dir)
+        # §7：EPUB 原生结构单元存在 → chapters/ 由同一批有序单元写出（不靠标题正则）；
+        # 否则回退到 Markdown 标题分章（非 EPUB / 结构不可靠）。
+        if getattr(selected, "epub_units_md", None):
+            split_count = _write_epub_chapters(selected.epub_units_md, chapters_dir)
+        else:
+            split_count = split_chapters(text, chapters_dir)
         overall = selected.status
         if cross_warnings or split_count == 0:
             overall = "REVIEW"
@@ -813,6 +880,7 @@ def _no_pandoc_epub(p: Path) -> Candidate:
 def _cand_json(c: Candidate) -> dict:
     d = asdict(c)
     d["temp_md"] = None
+    d["epub_units_md"] = None
     return d
 
 

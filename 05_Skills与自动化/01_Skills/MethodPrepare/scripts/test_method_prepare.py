@@ -12,6 +12,7 @@
 """
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -23,6 +24,49 @@ import method_prepare as mp  # noqa: E402
 _SKILLS_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_SKILLS_ROOT / "MaterialIntake"))
 import catalog  # noqa: E402
+
+_REPO = Path(__file__).resolve().parents[4]
+_REAL_PANDOC = _REPO / "05_Skills与自动化" / "pandoc" / ("pandoc.exe" if os.name == "nt" else "pandoc")
+
+
+def _method_epub_bytes(n: int = 3) -> bytes:
+    """构造最小合法方法 EPUB：章节标题用 <p class="title"> 而非 <h1>，
+    因此 Pandoc 合成 Markdown 无 ATX # 标题（旧逻辑会因 linear_no_heading 误判 REVIEW）。"""
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    container = ('<?xml version="1.0"?><container version="1.0" '
+                 'xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+                 '<rootfiles><rootfile full-path="content.opf" '
+                 'media-type="application/oebps-package+xml"/></rootfiles></container>')
+    items = "".join(f'<item id="s{i}" href="s{i}.xhtml" media-type="application/xhtml+xml"/>'
+                    for i in range(1, n + 1))
+    refs = "".join(f'<itemref idref="s{i}"/>' for i in range(1, n + 1))
+    opf = ('<?xml version="1.0" encoding="utf-8"?><package xmlns="http://www.idpf.org/2007/opf" '
+           'version="2.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
+           '<dc:title>Method</dc:title><dc:creator>Author</dc:creator>'
+           '<dc:identifier id="id">mid</dc:identifier><dc:language>en</dc:language></metadata>'
+           f'<manifest>{items}<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/></manifest>'
+           f'<spine toc="ncx">{refs}</spine></package>')
+    navpoints = "".join(
+        f'<navPoint id="np{i}" playOrder="{i}"><navLabel><text>Method {i}</text></navLabel>'
+        f'<content src="s{i}.xhtml"/></navPoint>' for i in range(1, n + 1))
+    ncx = ('<?xml version="1.0" encoding="utf-8"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" '
+           'version="2005-1"><head><meta name="dtb:uid" content="mid"/></head>'
+           f'<docTitle><text>Method</text></docTitle><navMap>{navpoints}</navMap></ncx>')
+    with zipfile.ZipFile(buf, 'w') as z:
+        z.writestr('mimetype', 'application/epub+zip', compress_type=zipfile.ZIP_STORED)
+        z.writestr('META-INF/container.xml', container)
+        z.writestr('content.opf', opf)
+        for i in range(1, n + 1):
+            body = (f'<p class="title">Method {i}</p>'
+                    + '<p>Method guidance text long enough to count as visible content. </p>' * 20)
+            z.writestr(f's{i}.xhtml', (
+                '<?xml version="1.0" encoding="utf-8"?><!DOCTYPE html>'
+                '<html xmlns="http://www.w3.org/1999/xhtml"><head>'
+                f'<title>s{i}</title></head><body>{body}</body></html>').encode('utf-8'))
+        z.writestr('toc.ncx', ncx.encode('utf-8'))
+    return buf.getvalue()
 
 
 HEADINGS_TXT = """# 第一章 开场的方法
@@ -221,6 +265,50 @@ def test_missing_asset_rejected(tmp_path):
     root, _ = _make_repo(tmp_path, "方法书", "方法书.txt", b"x")
     with pytest.raises(mp.MethodPrepareError):
         _run(root, asset_id="book_9999")
+
+
+# ---------- §8：EPUB 原生结构（OPF spine + nav/NCX）优先，ATX 标题只是兜底 ----------
+
+def test_epub_native_structure_produces_sections_and_pass(tmp_path, monkeypatch):
+    """§8/§15：有效 EPUB 原生结构但合成 MD 无 ATX 标题 → 产出分节并可 PASS（不再误判 REVIEW）。"""
+    if not _REAL_PANDOC.exists():
+        pytest.skip("pandoc not available")
+    monkeypatch.setattr(mp, "find_pandoc", lambda root: str(_REAL_PANDOC))
+    root, sha = _make_repo(tmp_path, "方法书", "方法书.epub", _method_epub_bytes(n=3))
+    result = _run(root)
+    assert result["status"] == "PASS", result
+    assert result["section_count"] >= 3
+    out = _out_dir(root)
+    meta = json.loads((out / "metadata.json").read_text(encoding="utf-8"))
+    assert meta["parser"] == "epub:native-spine+nav"
+    assert meta["selected_source"]["sha256"] == sha
+    assert meta["section_count"] >= 3
+    assert "linear_no_heading" not in meta["limitations"]
+    structure = json.loads((out / "structure.json").read_text(encoding="utf-8"))
+    assert structure["heading_structure_known"] is True
+    secs = list((out / "sections").glob("S*.md"))
+    assert len(secs) == meta["section_count"], "sections/ 非空且与 metadata 一致"
+    # 行稳定：sections 文件行与 full.md 对应行一致
+    full = (out / "full.md").read_text(encoding="utf-8")
+    assert full.strip()
+    full_lines = full.split("\n")
+    for sec in structure["sections"]:
+        sec_lines = (out / sec["file"]).read_text(encoding="utf-8").split("\n")
+        start = sec["start_line"] - 1
+        assert sec_lines[:sec["line_count"]] == full_lines[start:start + sec["line_count"]], sec["id"]
+
+
+def test_epub_native_deterministic_repeated_output(tmp_path, monkeypatch):
+    """§8：EPUB 原生结构分节同输入重复运行逐字节一致（确定性）。"""
+    if not _REAL_PANDOC.exists():
+        pytest.skip("pandoc not available")
+    monkeypatch.setattr(mp, "find_pandoc", lambda root: str(_REAL_PANDOC))
+    root, _ = _make_repo(tmp_path, "方法书", "方法书.epub", _method_epub_bytes(n=3))
+    _run(root)
+    first = _read_outputs(_out_dir(root))
+    _run(root)
+    second = _read_outputs(_out_dir(root))
+    assert first == second, "同输入重复运行必须逐字节一致"
 
 
 if __name__ == "__main__":

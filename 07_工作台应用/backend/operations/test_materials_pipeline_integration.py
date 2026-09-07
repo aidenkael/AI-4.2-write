@@ -137,5 +137,96 @@ def test_full_material_pipeline_closed_loop(tmp_path, monkeypatch):
     assert detail["workflow_stage"] == "writing" and detail["writing_callable"] is True
 
 
+def test_full_method_pipeline_closed_loop(tmp_path, monkeypatch):
+    """§12/§15 方法垂直路径：METHOD_SOURCE 当前 PASS Prepare → fake Agent 方法 staging(06)
+    → 确定性 finalize → 正式 02 发布 → KnowledgeRetrieve 真实可发现 → writing（零真实模型）。"""
+    root = tmp_path / "root"
+    (root / "01_原始素材" / "00_待入库").mkdir(parents=True)
+    for d in ("01_原著", "02_技巧类", "03_其他"):
+        (root / "01_原始素材" / d).mkdir(parents=True)
+    (root / "01_原始素材" / "素材资产.json").write_text(
+        json.dumps({"schema_version": "1.0", "assets": [], "containers": []}, ensure_ascii=False),
+        encoding="utf-8")
+    monkeypatch.setattr(materials, "get_repo_root", lambda: root)
+    monkeypatch.setenv("AI_WRITE_CONFIG_DIR", str(tmp_path / "cfg"))
+
+    # 1) source → inbox → METHOD_SOURCE 入库
+    content = b"integration-method-bytes"
+    sha = hashlib.sha256(content).hexdigest()
+    src = tmp_path / "方法书.epub"
+    src.write_bytes(content)
+    materials.import_material_files([{"path": str(src)}])
+    built = materials.build_intake_plan_from_inbox("METHOD_SOURCE")
+    intake_result = materials.apply_material_intake(built["plan"])
+    assert intake_result["ok"] is True and len(intake_result["new_ids"]) == 1
+    asset_id = intake_result["new_ids"][0]
+    mats = {m["id"]: m for m in materials.list_materials()["materials"]}
+    assert mats[asset_id]["workflow_stage"] == "new" and mats[asset_id]["state"] == "pending_prepare"
+
+    # 2) fake MethodPrepare PASS 包（当前来源 SHA 匹配）→ refresh → purified
+    name = mats[asset_id]["name"]
+    mp = root / "06_工作区" / "MethodPrepare" / f"{asset_id}_{name}"
+    (mp / "sections").mkdir(parents=True)
+    (mp / "full.md").write_text("# 方法全文\n", encoding="utf-8")
+    (mp / "sections" / "S0001.md").write_text("# 方法全文\n", encoding="utf-8")
+    (mp / "metadata.json").write_text(json.dumps({
+        "asset_id": asset_id, "status": "PASS",
+        "selected_source": {"format": ".epub", "sha256": sha},
+    }, ensure_ascii=False), encoding="utf-8")
+    materials.refresh_materials()
+    mats = {m["id"]: m for m in materials.list_materials()["materials"]}
+    assert mats[asset_id]["workflow_stage"] == "purified"
+    assert mats[asset_id]["state"] == "pending_distill" and mats[asset_id]["prepared_available"] is True
+
+    # 3) fake Agent 方法蒸馏：只写 06 staging → finalize → 受控发布到 02/method
+    _use_direct(cfg=tmp_path)
+    monkeypatch.setattr(materials.sys, "executable", "python")
+    md_script = tmp_path / "fakescripts" / "method_distill.py"
+    md_script.parent.mkdir(parents=True, exist_ok=True)
+    md_script.write_text("", encoding="utf-8")
+    monkeypatch.setattr(materials, "_MD_SCRIPT", md_script)
+
+    class _FakeAdapter:
+        name = "fake_method_agent"
+        def run(self, request):
+            return AgentResult(status="completed", output='{"status":"completed","card_count":1}',
+                               agent=self.name)
+        def cancel(self):
+            return True
+    monkeypatch.setattr(agent_runner, "_build_adapter",
+                        lambda: (_FakeAdapter(), AgentRequest(task="")))
+
+    def fake_run(cmd, **kw):
+        cmd = [str(c) for c in cmd]
+        if any("method_distill.py" in c for c in cmd) and "finalize" in cmd:
+            out = Path(cmd[cmd.index("--output") + 1])  # stage_method_dir
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "identity.json").write_text(json.dumps({
+                "schema_version": "gowrite_method_knowledge/v1",
+                "schema_status": "FINALIZED_RETRIEVAL_READY",
+                "source_id": asset_id, "title": name, "author": "",
+                "source_snapshot": {"source_sha256": sha},
+            }, ensure_ascii=False), encoding="utf-8")
+            (out / "method_profile.md").write_text("# 方法档案\n可调用。\n", encoding="utf-8")
+            (out / "knowledge").mkdir(parents=True, exist_ok=True)
+            (out / "knowledge" / "cards.md").write_text(
+                "## M0001｜方法\n- statement: 示例方法\n", encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+    monkeypatch.setattr(materials.subprocess, "run", fake_run)
+
+    distill = materials.run_method_distill(asset_id)
+    assert distill["status"] == "completed"
+    published = root / "02_素材知识库" / f"{asset_id}_{name}" / "method" / "identity.json"
+    assert published.exists()
+
+    # 4) KnowledgeRetrieve 真实可发现 → writing（写作素材库，METHOD 包）
+    mats = {m["id"]: m for m in materials.list_materials()["materials"]}
+    assert mats[asset_id]["workflow_stage"] == "writing"
+    assert mats[asset_id]["state"] == "ready" and mats[asset_id]["writing_callable"] is True
+    assert mats[asset_id]["knowledge_package_kind"] == "METHOD"
+    detail = materials.get_material_detail(asset_id)
+    assert detail["workflow_stage"] == "writing" and detail["writing_callable"] is True
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

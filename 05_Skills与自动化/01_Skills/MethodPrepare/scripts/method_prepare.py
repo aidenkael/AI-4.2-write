@@ -47,6 +47,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "MaterialIntake"))
 import catalog  # noqa: E402  MaterialIntake canonical ledger（只读消费）
+# §8：与 SourcePrepare 共享同一确定性 EPUB 结构 helper（只导入 helper，绝不调用
+# SourcePrepare 整个 Skill），避免两套不一致的 EPUB 解析器；ATX 标题只是兜底。
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "SourcePrepare" / "scripts"))
+import epub_structure  # noqa: E402
 
 SKILL_VERSION = "method_prepare/v1"
 OUTPUT_ROOT_REL = Path("06_工作区") / "MethodPrepare"
@@ -79,7 +83,9 @@ def sha256_text(text: str) -> str:
 
 def safe_name(name: str) -> str:
     s = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "", name).strip().strip(".")
-    return (s or "未命名")[:80]
+    # 截断到 80 后必须再次 rstrip 空格/点：Windows 会静默剥离目录名尾部空格/点，
+    # 否则代码引用的路径与实际创建的目录不一致 → FileNotFoundError / WinError 3。
+    return (s or "未命名")[:80].rstrip(" .") or "未命名"
 
 
 def visible_char_count(text: str) -> int:
@@ -267,6 +273,66 @@ def _select_source(asset: dict) -> dict | None:
     return supported[0]
 
 
+def _epub_native_prepare(path: Path, root: Path) -> tuple[str, dict, list[str]] | None:
+    """§8：EPUB 原生结构（container.xml → OPF → spine，nav/NCX 命名）→ 有序分节。
+
+    返回 (full_text, structure, limitations)；无 Pandoc / 非有效 EPUB / 无可靠 spine
+    内容单元 → None（调用方回退到 ATX 标题兜底）。分节边界 = 最小可靠 spine 文档；
+    行号稳定（sections/S####.md 可由 full.md 精确切片）；nav/NCX 标签仅命名单元，不虚构层级。
+    """
+    pandoc = find_pandoc(root)
+    if not pandoc:
+        return None
+    info = epub_structure.parse_epub_structure(path)
+    if info is None or not info.has_units:
+        return None
+    with tempfile.TemporaryDirectory() as td:
+        raw_units = epub_structure.convert_units_to_markdown(path, info.units, pandoc, Path(td))
+    blocks: list[tuple[str | None, str]] = []
+    for label, raw in raw_units:
+        text = normalize_text(raw)
+        if visible_char_count(text) <= 0:
+            continue  # 空/非内容单元确定性跳过
+        blocks.append((label, epub_structure.render_unit_markdown(label, text)))
+    if not blocks:
+        return None
+    all_lines: list[str] = []
+    sections: list[dict] = []
+    labels_known = False
+    for i, (label, block) in enumerate(blocks):
+        block_lines = block.split("\n")
+        start_line = len(all_lines) + 1
+        all_lines.extend(block_lines)
+        lab = (label or "").strip()
+        if lab:
+            labels_known = True
+        sections.append({
+            "id": f"S{i + 1:04d}",
+            "file": f"sections/S{i + 1:04d}.md",
+            "title": lab or f"S{i + 1:04d}",
+            "level": 1,
+            "order": i + 1,
+            "start_line": start_line,
+            "line_count": len(block_lines),
+            "parent": None,
+        })
+        all_lines.append("")  # 分节间空行分隔（不属于任何分节切片）
+    if all_lines and all_lines[-1] == "":
+        all_lines.pop()
+    full_text = "\n".join(all_lines)
+    if full_text and not full_text.endswith("\n"):
+        full_text += "\n"
+    structure = {
+        "heading_structure_known": True,
+        "section_count": len(sections),
+        "sections": sections,
+    }
+    limitations: list[str] = []
+    if not labels_known:
+        limitations.append("epub_native_no_nav_labels: 分节来自 OPF spine 文档边界，无 nav/NCX 标题")
+    return full_text, structure, limitations
+
+
 def prepare_asset(root: Path, asset_id: str) -> dict:
     """对单个 METHOD_SOURCE 资产运行确定性预处理。返回 result dict。"""
     mat_dir = root / catalog.MATERIAL_DIR_NAME
@@ -287,6 +353,7 @@ def prepare_asset(root: Path, asset_id: str) -> dict:
     full_text = ""
     selected = _select_source(asset)
     file_shas = {f["sha256"] for f in asset.get("files") or []}
+    native_structure: dict | None = None
 
     if selected is None:
         status = "REVIEW"
@@ -299,15 +366,26 @@ def prepare_asset(root: Path, asset_id: str) -> dict:
         if sha != selected.get("sha256"):
             raise MethodPrepareError(
                 f"来源文件 SHA256 与台账不一致（{selected['path']}），请先刷新素材状态")
-        try:
-            full_text, parser_id, conv_limits = convert_to_markdown(src_path, root)
-            limitations.extend(conv_limits)
-        except MethodPrepareError as exc:
-            status = "REVIEW"
-            limitations.append(f"conversion_unavailable: {exc}")
-        except Exception as exc:  # noqa: BLE001 — 转换异常一律不假 PASS
-            status = "REVIEW"
-            limitations.append(f"conversion_error: {exc}")
+        # §8：EPUB 优先用原生结构（OPF spine + nav/NCX）派生有序分节；ATX 标题只是兜底。
+        if src_path.suffix.lower() == ".epub":
+            try:
+                native = _epub_native_prepare(src_path, root)
+            except Exception:  # noqa: BLE001 — 原生结构不可用一律回退标题兜底
+                native = None
+            if native is not None:
+                full_text, native_structure, conv_limits = native
+                parser_id = "epub:native-spine+nav"
+                limitations.extend(conv_limits)
+        if native_structure is None:
+            try:
+                full_text, parser_id, conv_limits = convert_to_markdown(src_path, root)
+                limitations.extend(conv_limits)
+            except MethodPrepareError as exc:
+                status = "REVIEW"
+                limitations.append(f"conversion_unavailable: {exc}")
+            except Exception as exc:  # noqa: BLE001 — 转换异常一律不假 PASS
+                status = "REVIEW"
+                limitations.append(f"conversion_error: {exc}")
 
     structure = {"heading_structure_known": False, "section_count": 0, "sections": []}
     if status == "PASS":
@@ -318,11 +396,15 @@ def prepare_asset(root: Path, asset_id: str) -> dict:
             status = "REVIEW"
             limitations.append("garbled_content: 大量替换字符，疑似编码损坏")
     if status == "PASS":
-        structure, struct_limits = extract_structure(full_text)
-        limitations.extend(struct_limits)
-        if "linear_no_heading" in struct_limits:
-            # 无法可靠恢复结构：保留线性内容、标注限制、用 REVIEW（绝不虚构层级）
-            status = "REVIEW"
+        if native_structure is not None:
+            # §8：EPUB 原生结构已是可靠分节来源，绝不因合成 Markdown 缺 # 标题而判 REVIEW。
+            structure = native_structure
+        else:
+            structure, struct_limits = extract_structure(full_text)
+            limitations.extend(struct_limits)
+            if "linear_no_heading" in struct_limits:
+                # 无法可靠恢复结构：保留线性内容、标注限制、用 REVIEW（绝不虚构层级）
+                status = "REVIEW"
         section_count = structure["section_count"]
 
     # --- 写产物（确定性：覆盖式写入，无时间戳） ---
