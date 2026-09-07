@@ -30,7 +30,7 @@ asset.type 处理策略：
 
 支持的源格式：
 
-- EPUB（用 Pandoc 转换）
+- EPUB（原生 nav/NCX + OPF spine 优先确定章节结构，再用 Pandoc 转换内容）
 - TXT（编码转换 + 最小清理）
 - PDF（仅提取已有文本层；无文本层不自动 OCR；**依赖 `pypdf`（Python 包）或系统 `pdftotext`（poppler），二者皆无时标记 `FAIL`**）
 - ZIP / AZW3 / MOBI 暂不支持自动转换，标记为 `FAIL` 并提示人工处理
@@ -77,7 +77,7 @@ asset.type 处理策略：
 ## 核心原则
 
 1. **原始素材只读。** 不覆盖、不重命名、不删除、不在 `01_原始素材` 内就地转换。
-2. **机械转换优先。** EPUB 用 Pandoc；TXT 只做编码转换与最小清理；PDF 只提取现有文本层。
+2. **机械转换优先。** EPUB 以原生 nav/NCX + OPF spine 确定章节结构、用 Pandoc 转换内容；TXT 只做编码转换与最小清理；PDF 只提取现有文本层。Markdown 标题识别仅作 fallback，Pandoc 合成 Markdown 没有 `#` 标题不表示 EPUB 没有章节。
 3. **不使用大模型改写原文。** 不润色、不补句、不修正文风、不“智能纠错”。
 4. **不自动 OCR。** PDF 无文本层时直接标记 `FAIL`/`REVIEW`，留给人工处理。
 5. **EPUB-first 选源。** 有 EPUB 先只评估 EPUB；至少一个 EPUB PASS 就直接用 EPUB，不再读/转 TXT/PDF 来比长度；只有没有任何 EPUB PASS 才 fallback 到 TXT/PDF；没有 EPUB 的作品继续按 TXT/PDF 现有逻辑处理。TXT 保留为兜底来源，不删除。

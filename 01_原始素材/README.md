@@ -21,7 +21,7 @@
 ## 作者的两个交互面：Workbench 与文件夹
 
 - **Workbench**：导入 `EPUB/PDF/TXT` → `00_待入库` → 选批次类型（原著/技巧类/其他）→「入库」（确定性 intake，**不自动提纯**）；原著/技巧类入库后为「待提纯」，作者在详情里逐本显式「提纯」。
-- **文件夹**：作者可直接在 Explorer 移动/改名/新建素材文件夹。这些手动编辑**只在点「刷新状态」时**由 MaterialIntake reconcile 按**精确内容身份**并入 canonical ledger（manual sync unit = 一个素材文件夹）：保留 asset id、更新路径/类型/名称；歧义或重复身份 fail closed（不写盘）；来源缺失保留登记为可读 attention，绝不静默删除。无实时文件监听。
+- **文件夹**：作者可直接在 Explorer 移动/改名/新建/删除素材文件夹。这些手动编辑**只在点「刷新状态」时**由 MaterialIntake reconcile 按**精确内容身份**并入 canonical ledger（manual sync unit = 一个素材文件夹）：移动/改名保留 asset id 并更新路径/类型/名称；部分来源删除只移除缺失文件记录并确定 primary；全部来源删除移除 canonical asset、清理可重建的 06 Prepare，并使正式 02 知识按 recovery 规则不再可发现。歧义或重复身份 fail closed（不写盘）。无实时文件监听。
 
 ## Git 安全
 

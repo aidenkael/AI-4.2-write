@@ -36,7 +36,7 @@
 |---|---|---|
 | `.md` / `.markdown` | 直通 + 归一化 | 编码异常 → REVIEW |
 | `.txt` | 多编码确定性解码（utf-8-sig/utf-8/gb18030/big5） | 不可解码 → REVIEW；无标题 → REVIEW（线性保留） |
-| `.epub` | 仓库 Pandoc（epub → gfm） | Pandoc 缺失/转换失败 → REVIEW |
+| `.epub` | 原生 nav/NCX + OPF spine 优先确定分节结构，再用仓库 Pandoc 转换（epub → gfm） | Pandoc 缺失/转换失败 → REVIEW |
 | `.pdf` | 仅文本层（pypdf / pdftotext） | 无文本层 → REVIEW（绝不 OCR） |
 | 其他 | 不支持 | REVIEW（需人工确认） |
 

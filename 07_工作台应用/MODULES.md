@@ -133,7 +133,7 @@ backend/materials/
 └─ distill.py
 ```
 
-实际核心仍复用 `MaterialIntake / SourcePrepare / BookDistill / MethodPrepare / MethodDistill`，应用层只做作者操作编排与状态投影。
+实际核心仍复用 `MaterialIntake / SourcePrepare / BookDistill / MethodPrepare / MethodDistill`，应用层只做作者操作编排与状态投影：入库只结算文件夹与 canonical ledger，提纯才按类型分派 Prepare，学习才按类型分派 Distill；作者界面使用「提纯」「原著学习」「方法学习」，不显示「蒸馏」。
 
 ### G. `infra/` —— 应用基础设施
 

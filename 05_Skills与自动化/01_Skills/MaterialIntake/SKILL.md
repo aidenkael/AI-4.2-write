@@ -150,7 +150,7 @@ containers 按 id 排序；不含时间戳等 volatile 字段。**同一输入�
 - 文件夹指纹唯一匹配一个既有 asset → 保留 id，更新 `files[].path` + canonical type（按角色目录）+ 名称（文件夹改名且唯一时）。
 - 文件夹指纹不匹配任何 asset → 注册为新 asset（类型按角色目录，名字按文件夹名）。
 - 指纹匹配多个 asset / 同一指纹出现在多个角色位置 / 映射歧义 → **fail closed（不写盘）**。
-- 既有 asset 登记来源在磁盘缺失 → 保留记录（绝不静默删除），记入 `missing_sources` 供上层投影为可读 attention。
+- 既有 asset 的来源发生删除：若剩余 SHA 唯一归属于该 asset，则保留同一 id、移除缺失文件记录并确定 primary；全部来源删除且无不歧义移动替代时，移除 canonical asset，清理可重建 06 Prepare，并将正式 02 包按 recovery 规则移出可发现状态。多 asset 重叠仍 fail closed。
 - asset 类型变更导致 02 已定稿包不兼容 → 把该包移入 `06_工作区/BookDistill/_incompatible_recovery/`（不再可检索，不删除）。
 - 事务性：snapshot 三份 metadata → 写 reconciled ledger → `catalog.refresh_and_render(tolerate_missing=True)` → 失败回滚。
   廉价结构快检（零 SHA）：无结构变化时直接返回 changed=False，交给常规刷新。
