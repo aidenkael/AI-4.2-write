@@ -746,6 +746,17 @@ class AppApi:
         except Exception as exc:  # noqa: BLE001
             return _err(CODE_BRIDGE_INTERNAL, str(exc))
 
+    def open_material_folder(self, payload: dict) -> dict:
+        """按 canonical 素材 id 打开真实当前阶段文件夹；不接受调用方路径。"""
+        try:
+            return _ok(materials_ops.open_material_folder(
+                asset_id=str(payload.get("asset_id") or ""),
+            ))
+        except MaterialsError as exc:
+            return _err(CODE_MATERIALS_ERROR, str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _err(CODE_BRIDGE_INTERNAL, str(exc))
+
     def prepare_material(self, payload: dict) -> dict:
         """作者面通用「提纯」：UI 只传素材 id，后端按类型分派
         （REFERENCE_WORK → SourcePrepare；METHOD_SOURCE → MethodPrepare）。"""

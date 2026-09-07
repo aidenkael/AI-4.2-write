@@ -502,7 +502,7 @@ def test_interactive_finalize_rejects_canceled_request(isolated, monkeypatch):
     monkeypatch.setattr(bridge, "cleanup_request", lambda rid: cleaned.append(rid))
     finalized = []
     monkeypatch.setattr(materials, "_finalize_reference_distill", lambda *args: finalized.append(args))
-    with pytest.raises(materials.MaterialsError, match="蒸馏已取消"):
+    with pytest.raises(materials.MaterialsError, match="原著学习已取消"):
         materials._finalize_distill(
             "request-canceled", "book_0035",
             isolated / "06_工作区" / "SourcePrepare" / "book_0035_x",

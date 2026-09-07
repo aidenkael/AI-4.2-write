@@ -10,12 +10,18 @@ import {
   countMaterialsByType,
   deriveWorkflowStage,
   inboxPrimaryAction,
+  learningActionLabel,
+  learningBusyLabel,
+  learningExplanation,
   MATERIAL_TOP_NAVIGATION,
   MATERIAL_TYPE_FILTERS,
+  presentationFormatLabel,
+  PURIFIED_TYPE_FILTERS,
   matchesMaterialFilter,
   materialCardMeta,
   materialsForStage,
   needsAttentionMaterials,
+  visibleMaterialSelection,
   workflowStageLabel,
   type MaterialTab,
 } from '../features/materials/materialsModel'
@@ -25,19 +31,34 @@ export function MaterialsPage() {
   const controller = useMaterialsController({ notify: actions.notify })
   const [tab, setTab] = useState<MaterialTab>('新增素材')
   const [typeFilter, setTypeFilter] = useState('全部')
+  const [purifiedTypeFilter, setPurifiedTypeFilter] = useState('全部')
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const newItems = useMemo(() => materialsForStage(controller.materials, 'new'), [controller.materials])
   const purifiedItems = useMemo(() => materialsForStage(controller.materials, 'purified'), [controller.materials])
   const writingItems = useMemo(() => materialsForStage(controller.materials, 'writing'), [controller.materials])
+  const filteredPurified = useMemo(() => purifiedItems.filter((m) => matchesMaterialFilter(m, purifiedTypeFilter)), [purifiedItems, purifiedTypeFilter])
   const filteredWriting = useMemo(() => writingItems.filter((m) => matchesMaterialFilter(m, typeFilter)), [writingItems, typeFilter])
   const attentionItems = useMemo(() => needsAttentionMaterials(controller.materials), [controller.materials])
   const typeCounts = useMemo(() => countMaterialsByType(controller.materials), [controller.materials])
 
-  const selected = controller.materials.find((m) => m.id === selectedId) ?? null
-  const detail = controller.detail?.id === selectedId ? controller.detail : null
+  const visibleItems = tab === '新增素材' ? newItems
+    : tab === '已提纯素材库' ? filteredPurified
+      : tab === '写作素材库' ? filteredWriting : []
+  const selected = visibleMaterialSelection(selectedId, visibleItems)
+  const detail = selected && controller.detail?.id === selected.id ? controller.detail : null
   const hasInboxFiles = controller.inbox.some((file) => !file.unsupported)
   const primaryAction = inboxPrimaryAction(controller.batchType, controller.processingInbox)
+  const changeTab = (label: MaterialTab) => {
+    setTab(label)
+    setSelectedId(null)
+    if (label === '新增素材') void controller.scanInbox()
+  }
+  const changeTypeFilter = (filter: string, stage: 'purified' | 'writing') => {
+    if (stage === 'purified') setPurifiedTypeFilter(filter)
+    else setTypeFilter(filter)
+    if (selected && !matchesMaterialFilter(selected, filter)) setSelectedId(null)
+  }
 
   const tabIcons: Record<MaterialTab, typeof FileUp> = {
     '新增素材': FileUp,
@@ -57,7 +78,7 @@ export function MaterialsPage() {
     <div className="filterbar panel materials-toolbar">
       {MATERIAL_TOP_NAVIGATION.map((label) => {
         const Icon = tabIcons[label]
-        return <button key={label} className={tab === label ? 'active' : ''} onClick={() => { setTab(label); if (label === '新增素材') void controller.scanInbox() }}>
+        return <button key={label} className={tab === label ? 'active' : ''} onClick={() => changeTab(label)}>
           <Icon size={15} /> {label}<small className="group-count">{tabCounts[label]}</small>
         </button>
       })}
@@ -115,7 +136,7 @@ export function MaterialsPage() {
       </div>
       <div className="materials-right">
         <section className="panel material-detail">
-          <h3><FolderSearch /> 资料详情</h3>
+          <MaterialDetailHeading selected={selected} controller={controller} />
           {selected && (controller.detailLoading || !detail) && <p className="muted-note">正在加载…</p>}
           {detail && <MaterialDetailPanel detail={detail} controller={controller} />}
           {!selected && <p className="muted-note">选择一份资料查看详情。</p>}
@@ -124,8 +145,11 @@ export function MaterialsPage() {
     </section>}
 
     {tab === '已提纯素材库' && <MaterialStagePanel
-      items={purifiedItems}
+      items={filteredPurified}
       title="已提纯素材库"
+      filters={PURIFIED_TYPE_FILTERS}
+      activeFilter={purifiedTypeFilter}
+      onFilter={(filter) => changeTypeFilter(filter, 'purified')}
       selectedId={selectedId}
       selected={selected}
       detail={detail}
@@ -136,7 +160,7 @@ export function MaterialsPage() {
     {tab === '写作素材库' && <section className="materials-workflow">
       <div className="materials-left">
         <div className="materials-secondary-filter">
-          {MATERIAL_TYPE_FILTERS.map((filter) => <button key={filter} className={typeFilter === filter ? 'active' : ''} onClick={() => setTypeFilter(filter)}>{filter}</button>)}
+          {MATERIAL_TYPE_FILTERS.map((filter) => <button key={filter} className={typeFilter === filter ? 'active' : ''} onClick={() => changeTypeFilter(filter, 'writing')}>{filter}</button>)}
         </div>
         <section className="panel material-list">
           <h3>写作素材库 <small>（{filteredWriting.length}）</small></h3>
@@ -152,7 +176,7 @@ export function MaterialsPage() {
       </div>
       <div className="materials-right">
         <section className="panel material-detail">
-          <h3><FolderSearch /> 资料详情</h3>
+          <MaterialDetailHeading selected={selected} controller={controller} />
           {selected && (controller.detailLoading || !detail) && <p className="muted-note">正在加载…</p>}
           {detail && <MaterialDetailPanel detail={detail} controller={controller} />}
           {!selected && <p className="muted-note">选择一份资料查看详情。</p>}
@@ -164,9 +188,9 @@ export function MaterialsPage() {
       <h3>素材总览</h3>
       <div className="overview-grid">
         <div className="overview-card"><h4>新素材 / 未提纯</h4><span className="overview-count">{controller.inbox.length + newItems.length}</span><p className="muted-note">收件箱 + 待提纯</p></div>
-        <div className="overview-card"><h4>已提纯 / 待蒸馏</h4><span className="overview-count">{purifiedItems.length}</span><p className="muted-note">等待蒸馏</p></div>
-        <div className="overview-card"><h4>可用于写作</h4><span className="overview-count">{writingItems.length}</span><p className="muted-note">蒸馏完成</p></div>
-        <div className="overview-card"><h4>需要重新处理</h4><span className="overview-count">{attentionItems.length}</span><p className="muted-note">提纯 / 蒸馏失败</p></div>
+        <div className="overview-card"><h4>已提纯 / 待学习</h4><span className="overview-count">{purifiedItems.length}</span><p className="muted-note">等待学习</p></div>
+        <div className="overview-card"><h4>可用于写作</h4><span className="overview-count">{writingItems.length}</span><p className="muted-note">学习完成</p></div>
+        <div className="overview-card"><h4>需要重新处理</h4><span className="overview-count">{attentionItems.length}</span><p className="muted-note">提纯 / 学习失败</p></div>
       </div>
       <div className="overview-types">
         <span className="soft-tag">原著 {typeCounts.reference}</span>
@@ -199,7 +223,7 @@ function MaterialDetailPanel({ detail, controller }: {
     <p className="muted-note">{detail.type_label}{detail.author ? ` · ${detail.author}` : ''}</p>
     <p className="muted-note material-facts">
       {detail.source_formats.length ? <span>原始来源：{detail.source_formats.join(' / ')}</span> : null}
-      {detail.prepared_available && detail.prepared_format ? <span>提纯结果：{detail.prepared_format}</span> : null}
+      {detail.prepared_available && detail.prepared_format ? <span>提纯结果：{presentationFormatLabel(detail.prepared_format)}</span> : null}
       {detail.knowledge_package_kind ? <span>知识包：{detail.knowledge_package_kind === 'METHOD' ? '方法知识' : '参考知识'}</span> : null}
     </p>
     {detail.state === 'pending_prepare' && <>
@@ -209,17 +233,19 @@ function MaterialDetailPanel({ detail, controller }: {
       </button>
     </>}
     {detail.state === 'pending_distill' && <>
-      <p>原文已整理，可以开始学习。</p>
+      <p>{learningExplanation(detail.type)}</p>
       <button className="primary" disabled={controller.busyAssetId !== null} onClick={() => void controller.runDistill(detail.id)}>
-        {controller.busyAssetId === detail.id ? '正在蒸馏…' : '蒸馏'}
+        {controller.busyAssetId === detail.id ? learningBusyLabel(detail.type) : learningActionLabel(detail.type)}
       </button>
     </>}
     {detail.state === 'needs_attention' && <>
       <h3>需要检查</h3>
       <p>{detail.attention_message}</p>
-      {attentionRetryLabel(detail.workflow_stage) && <button className="primary" disabled={controller.busyAssetId !== null}
+      {attentionRetryLabel(detail.workflow_stage, detail.type) && <button className="primary" disabled={controller.busyAssetId !== null}
         onClick={() => void (detail.workflow_stage === 'purified' ? controller.runDistill(detail.id) : controller.runPrepare(detail.id))}>
-        {controller.busyAssetId === detail.id ? '处理中…' : attentionRetryLabel(detail.workflow_stage)}
+        {controller.busyAssetId === detail.id
+          ? (detail.workflow_stage === 'purified' ? learningBusyLabel(detail.type) : '正在提纯…')
+          : attentionRetryLabel(detail.workflow_stage, detail.type)}
       </button>}
     </>}
     {detail.state === 'ready' && <>
@@ -231,7 +257,7 @@ function MaterialDetailPanel({ detail, controller }: {
   </div>
 }
 
-function MaterialStagePanel({ items, title, selectedId, selected, detail, controller, onSelect }: {
+function MaterialStagePanel({ items, title, selectedId, selected, detail, controller, onSelect, filters, activeFilter, onFilter }: {
   items: ReturnType<typeof useMaterialsController>['materials']
   title: string
   selectedId: string | null
@@ -239,9 +265,15 @@ function MaterialStagePanel({ items, title, selectedId, selected, detail, contro
   detail: ReturnType<typeof useMaterialsController>['detail']
   controller: ReturnType<typeof useMaterialsController>
   onSelect: (id: string) => void
+  filters?: readonly string[]
+  activeFilter?: string
+  onFilter?: (filter: string) => void
 }) {
   return <section className="materials-workflow">
     <div className="materials-left">
+      {filters && <div className="materials-secondary-filter">
+        {filters.map((filter) => <button key={filter} className={activeFilter === filter ? 'active' : ''} onClick={() => onFilter?.(filter)}>{filter}</button>)}
+      </div>}
       <section className="panel material-list">
         <h3>{title} <small>（{items.length}）</small></h3>
         <div className="material-grid">
@@ -256,11 +288,26 @@ function MaterialStagePanel({ items, title, selectedId, selected, detail, contro
     </div>
     <div className="materials-right">
       <section className="panel material-detail">
-        <h3><FolderSearch /> 资料详情</h3>
+        <MaterialDetailHeading selected={selected} controller={controller} />
         {selected && (controller.detailLoading || !detail) && <p className="muted-note">正在加载…</p>}
         {detail && <MaterialDetailPanel detail={detail} controller={controller} />}
         {!selected && <p className="muted-note">选择一份资料查看详情。</p>}
       </section>
     </div>
   </section>
+}
+
+function MaterialDetailHeading({ selected, controller }: {
+  selected: ReturnType<typeof useMaterialsController>['materials'][number] | null
+  controller: ReturnType<typeof useMaterialsController>
+}) {
+  return <button
+    type="button"
+    className="material-detail-folder"
+    disabled={!selected || controller.openingFolderId !== null}
+    onClick={() => selected && void controller.openFolder(selected.id)}
+    title={selected ? '打开当前阶段文件夹' : undefined}
+  >
+    <FolderSearch /> 资料详情
+  </button>
 }

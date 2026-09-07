@@ -22,6 +22,8 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import shutil
 import subprocess
 import sys
@@ -134,6 +136,104 @@ def _list_prepare_dir_names(base: Path) -> list[str]:
     return []
 
 
+def _prepare_package_path(asset: dict[str, Any], *,
+                          sp_names: list[str] | None = None,
+                          mp_names: list[str] | None = None) -> Path | None:
+    """Resolve the existing Prepare package by canonical asset id."""
+    asset_id = str(asset.get("id") or "").strip()
+    asset_type = str(asset.get("type") or "")
+    if not asset_id or asset_type not in ("REFERENCE_WORK", "METHOD_SOURCE"):
+        return None
+    if asset_type == "METHOD_SOURCE":
+        base = get_repo_root() / "06_工作区" / "MethodPrepare"
+        names = mp_names if mp_names is not None else _list_prepare_dir_names(base)
+    else:
+        base = get_repo_root() / "06_工作区" / "SourcePrepare"
+        names = sp_names if sp_names is not None else _list_prepare_dir_names(base)
+    name = next((item for item in names if item.startswith(f"{asset_id}_")), None)
+    return base / name if name else None
+
+
+def _known_prepare_reason(text: str) -> str | None:
+    """Map known Prepare diagnostics to concise author language; never echo raw text."""
+    value = str(text or "")
+    if not value:
+        return None
+    if "container.xml" in value or "OPF" in value or "关键结构" in value:
+        return "EPUB 结构检查未通过：container.xml / OPF 无效。"
+    if "章节边界" in value or "未生成 chapters" in value or "linear_no_heading" in value:
+        return "未识别到足够的正文或章节。"
+    if "正文字符数过少" in value or "too_few_visible_chars" in value or "可见内容过少" in value:
+        return "正文可见字符过少。"
+    if "PDF 无可用文本层" in value or "PDF 无有用文本层" in value:
+        return "PDF 没有可读取的文字层。"
+    if "Pandoc" in value or "conversion_unavailable" in value or "conversion_error" in value \
+            or "转换失败" in value or "无法转换" in value:
+        return "文件转换失败。"
+    if "garbled" in value or "替换字符" in value or "编码损坏" in value:
+        return "正文可能存在编码损坏。"
+    if "no_supported_source" in value or "不支持" in value:
+        return "没有可提纯的受支持来源文件。"
+    return None
+
+
+def _prepare_artifact_reasons(pkg: Path, meta: dict[str, Any]) -> list[str]:
+    """Project at most three safe, concrete reasons from an existing Prepare artifact."""
+    raw_reasons: list[str] = []
+    for key in ("cross_source_warnings", "limitations", "warnings", "notes"):
+        values = meta.get(key)
+        if isinstance(values, list):
+            raw_reasons.extend(str(item) for item in values)
+    candidates = meta.get("candidates")
+    if isinstance(candidates, list):
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            for key in ("warnings", "limitations"):
+                values = candidate.get(key)
+                if isinstance(values, list):
+                    raw_reasons.extend(str(item) for item in values)
+            checks = candidate.get("epub_checks")
+            if isinstance(checks, list):
+                failed = [str(check.get("title") or "") for check in checks
+                          if isinstance(check, dict) and check.get("status") == "fail"]
+                if failed:
+                    raw_reasons.insert(0, "EPUB 关键结构检测未通过：" + "、".join(failed))
+
+    reasons: list[str] = []
+    for raw in raw_reasons:
+        reason = _known_prepare_reason(raw)
+        if reason and reason not in reasons:
+            reasons.append(reason)
+        if len(reasons) == 3:
+            return reasons
+
+    if reasons:
+        return reasons
+
+    # Historical artifacts may only retain the human-readable report.  Parse only
+    # known phrases and never surface report text verbatim.
+    try:
+        report = (pkg / "conversion_report.md").read_text(encoding="utf-8")
+    except OSError:
+        report = ""
+    in_reason_section = False
+    for line in report.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            in_reason_section = any(label in stripped for label in ("需要注意", "限制与不确定性", "单文件备注"))
+            continue
+        is_failed_check = bool(re.search(r"\|\s*fail\s*\|", stripped, flags=re.IGNORECASE))
+        if not is_failed_check and not (in_reason_section and (stripped.startswith("-") or "⚠" in stripped)):
+            continue
+        reason = _known_prepare_reason(re.sub(r"^[\s#>*\-]+", "", stripped))
+        if reason and reason not in reasons:
+            reasons.append(reason)
+        if len(reasons) == 3:
+            break
+    return reasons
+
+
 def _prepare_package_current(asset: dict[str, Any],
                              sp_names: list[str] | None = None,
                              mp_names: list[str] | None = None) -> dict[str, Any]:
@@ -151,33 +251,30 @@ def _prepare_package_current(asset: dict[str, Any],
     if not asset_id or mtype not in ("REFERENCE_WORK", "METHOD_SOURCE"):
         return none
     if mtype == "METHOD_SOURCE":
-        base = get_repo_root() / "06_工作区" / "MethodPrepare"
-        names = mp_names if mp_names is not None else _list_prepare_dir_names(base)
         required_subdir = "sections"
     else:
-        base = get_repo_root() / "06_工作区" / "SourcePrepare"
-        names = sp_names if sp_names is not None else _list_prepare_dir_names(base)
         required_subdir = "chapters"
-    prefix = f"{asset_id}_"
-    pkg_name = next((n for n in names if n.startswith(prefix)), None)
-    if pkg_name is None:
+    pkg = _prepare_package_path(asset, sp_names=sp_names, mp_names=mp_names)
+    if pkg is None:
         return none
-    pkg = base / pkg_name
     if not (pkg / "full.md").is_file() or not (pkg / required_subdir).is_dir() \
             or not (pkg / "metadata.json").is_file():
-        return {"available": False, "format": None, "reason": "提纯结果不完整，请重新提纯。"}
+        return {"available": False, "format": None, "reason": "提纯结果文件不完整。"}
     try:
         meta = json.loads((pkg / "metadata.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {"available": False, "format": None, "reason": "提纯结果无法读取，请重新提纯。"}
-    if meta.get("status") != "PASS":
         return {"available": False, "format": None,
-                "reason": "提纯结果未通过检查，请重新提纯或更换来源文件。"}
+                "reason": "历史提纯记录未保存具体失败原因，请重新提纯以生成新的检查结果。"}
+    if meta.get("status") != "PASS":
+        reasons = _prepare_artifact_reasons(pkg, meta)
+        return {"available": False, "format": None, "reason": " ".join(reasons) if reasons else
+                "历史提纯记录未保存具体失败原因，请重新提纯以生成新的检查结果。"}
     sel = meta.get("selected_source") or {}
     sha = sel.get("sha256") if isinstance(sel, dict) else None
     file_shas = {f.get("sha256") for f in (asset.get("files") or []) if isinstance(f, dict)}
     if not sha or sha not in file_shas:
-        return {"available": False, "format": None, "reason": "提纯结果已过期，请重新提纯。"}
+        return {"available": False, "format": None,
+                "reason": "提纯结果与当前来源文件不一致，需要重新提纯。"}
     return {"available": True, "format": "MD", "reason": None}
 
 
@@ -771,10 +868,10 @@ def _distill_error_message(detail: str) -> str:
     """把蒸馏子进程的内部输出映射为作者可读中文（§12）。"""
     low = (detail or "").lower()
     if "markdown" in low or "full.md" in low or "chapters" in low or "sections" in low:
-        return "蒸馏输入不是当前有效的 Markdown，请先重新提纯。"
+        return "学习输入不是当前有效的 Markdown，请先重新提纯。"
     if "timeout" in low or "超时" in (detail or ""):
-        return "蒸馏超时，请重试。"
-    return "蒸馏失败，请重试。"
+        return "学习超时，请重试。"
+    return "学习失败，请重试。"
 
 
 class _PublishTransaction:
@@ -860,7 +957,7 @@ def _rollback_publish_or_fail(tx: _PublishTransaction, request_id: str, componen
     except Exception as exc:  # noqa: BLE001 - rollback diagnostics stay in audit
         audit.append_event(request_id, audit.EVENT_SKILL_FAILED, component,
                            details={"step": "publish_rollback", "error": str(exc)[:400]})
-        raise MaterialsError("蒸馏结果暂不能用于写作，自动恢复未完成，请查看运行记录。") from exc
+        raise MaterialsError("学习结果暂不能用于写作，自动恢复未完成，请查看运行记录。") from exc
 
 
 def run_source_prepare(asset_id: str) -> dict[str, Any]:
@@ -1000,7 +1097,7 @@ def _mark_reference_acceptance_pending(bd_dir: Path) -> None:
     try:
         identity = json.loads(identity_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise MaterialsError("BKP 身份文件缺失，无法完成蒸馏。") from exc
+        raise MaterialsError("原著学习结果不完整，请重试。") from exc
     identity["acceptance"] = {
         "schema": "gowrite_bkp_acceptance/v1", "required": True, "status": "PENDING",
         "report": "BKP_ACCEPTANCE_REPORT.md",
@@ -1029,7 +1126,7 @@ def _run_reference_acceptance(request_id: str, stage_dir: Path) -> None:
         detail = (proc.stderr or proc.stdout or "")[:800]
         audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "book_distill",
                            details={"skill": "BookDistill", "stage": "acceptance", "detail": detail})
-        raise MaterialsError("原著学习结果未通过全书验收检查，请重新蒸馏。")
+        raise MaterialsError("原著学习结果未通过检查，请重新原著学习。")
 
 
 def _finalize_reference_distill(request_id: str, asset: dict[str, Any], sp_dir: Path, stage_dir: Path) -> dict[str, Any]:
@@ -1038,7 +1135,7 @@ def _finalize_reference_distill(request_id: str, asset: dict[str, Any], sp_dir: 
     重新执行所有确定性边界；Agent 输出从不直接构成完成信任。未全部通过则绝不发布到 02。
     """
     for sub_args, label in (
-        (["assemble", "--input", str(sp_dir), "--output", str(stage_dir)], "蒸馏校验"),
+        (["assemble", "--input", str(sp_dir), "--output", str(stage_dir)], "原著学习检查"),
         (["profile", "--output", str(stage_dir)], "资料整理"),
         (["bkp", "--output", str(stage_dir)], "学习资料整理"),
     ):
@@ -1068,7 +1165,7 @@ def _finalize_reference_distill(request_id: str, asset: dict[str, Any], sp_dir: 
         audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "book_distill",
                            details={"step": "post_publish_verification", "error": str(exc)[:300]})
         _rollback_publish_or_fail(tx, request_id, "book_distill")
-        raise MaterialsError("蒸馏结果暂不能用于写作，已保留原知识包，请重试。") from exc
+        raise MaterialsError("原著学习结果暂不能用于写作，已保留原知识包，请重试。") from exc
     return {"output_dir": str(target_dir)}
 
 
@@ -1085,7 +1182,7 @@ def run_book_distill(asset_id: str) -> dict[str, Any]:
         raise MaterialsError("缺少素材标识（asset_id）。")
     asset = _ledger_asset(asset_id)
     if asset.get("type") == "LOOSE_MATERIAL":
-        raise MaterialsError("其他类素材不适用蒸馏（BookDistill）。")
+        raise MaterialsError("其他类素材不适用原著学习。")
     if asset.get("type") == "METHOD_SOURCE":
         raise MaterialsError("技巧类资料请走通用入口（后端会自动改用 MethodDistill）。")
 
@@ -1097,7 +1194,7 @@ def run_book_distill(asset_id: str) -> dict[str, Any]:
     prep = _prepare_package_current(asset)
     if not prep["available"]:
         audit.finish_file(request_id, audit.STATUS_FAILED, error="prepare-not-current")
-        raise MaterialsError(prep["reason"] or "蒸馏输入不是当前有效的 Markdown，请先重新提纯。")
+        raise MaterialsError(prep["reason"] or "原著学习输入不是当前有效的 Markdown，请先重新提纯。")
 
     # 1) 定位 SP PASS 包 + validate
     sp_dir = _find_sp_dir(asset_id, asset.get("name") or "")
@@ -1105,7 +1202,7 @@ def run_book_distill(asset_id: str) -> dict[str, Any]:
         proc = _run_bd_cli(["validate", "--input", str(sp_dir)], request_id)
     except subprocess.TimeoutExpired:
         audit.finish_file(request_id, audit.STATUS_FAILED, error="蒸馏校验超时")
-        raise MaterialsError("蒸馏校验超时，请重试。")
+        raise MaterialsError("原著学习检查超时，请重试。")
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "")[:800]
         audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "book_distill", details={"skill": "BookDistill", "detail": detail})
@@ -1119,7 +1216,7 @@ def run_book_distill(asset_id: str) -> dict[str, Any]:
         proc = _run_bd_cli(["prepare", "--input", str(sp_dir), "--output", str(stage_dir)], request_id)
     except subprocess.TimeoutExpired:
         audit.finish_file(request_id, audit.STATUS_FAILED, error="蒸馏准备超时")
-        raise MaterialsError("蒸馏准备超时，请重试。")
+        raise MaterialsError("原著学习准备超时，请重试。")
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "")[:800]
         audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "book_distill", details={"skill": "BookDistill", "detail": detail})
@@ -1134,7 +1231,7 @@ def run_book_distill(asset_id: str) -> dict[str, Any]:
             "asset_id": asset_id,
             "status": "pending",
             "request_id": pending.request_id,
-            "message": "等待 Qoder /gowrite：正在蒸馏（Base Scan + 收敛），完成后将自动封装 BKP",
+            "message": "等待 Qoder /gowrite：正在原著学习，完成后将自动整理参考知识",
         }
 
     # 4) 确定性完成门 + 受控发布到 02 + discovery + 刷新
@@ -1150,7 +1247,7 @@ def run_book_distill(asset_id: str) -> dict[str, Any]:
         "asset_id": asset_id,
         "status": "completed",
         "output_dir": fin["output_dir"],
-        "message": "蒸馏完成（已生成 BKP 知识包并刷新素材状态）",
+        "message": "原著学习完成（已整理参考知识并刷新素材状态）",
     }
 
 
@@ -1199,7 +1296,7 @@ def _run_distill_agent_stage(request_id: str, asset_id: str, sp_dir: Path, stage
         adapter, agent_request = runner._build_adapter()
     except Exception as exc:  # noqa: BLE001
         audit.finish_file(request_id, audit.STATUS_FAILED, error=str(exc))
-        raise MaterialsError(f"蒸馏执行配置不可用：{exc}") from exc
+        raise MaterialsError("原著学习执行配置不可用，请检查设置后重试。") from exc
     agent_request.task = task
     agent_request.cwd = str(get_repo_root())
     audit.append_event(
@@ -1211,11 +1308,11 @@ def _run_distill_agent_stage(request_id: str, asset_id: str, sp_dir: Path, stage
     except Exception as exc:  # noqa: BLE001
         audit.append_event(request_id, audit.EVENT_AGENT_FAILED, "book_distill", details={"error": str(exc)[:200]})
         audit.finish_file(request_id, audit.STATUS_FAILED, error=f"蒸馏执行失败：{exc}")
-        raise MaterialsError(f"蒸馏执行失败：{exc}") from exc
+        raise MaterialsError("原著学习失败，请重试。") from exc
     if result.status != "completed":
         audit.append_event(request_id, audit.EVENT_AGENT_FAILED, "book_distill", details={"error": (result.error or "")[:200]})
         audit.finish_file(request_id, audit.STATUS_FAILED, error=result.error or "蒸馏未完成")
-        raise MaterialsError(result.error or "蒸馏未完成，请重试。")
+        raise MaterialsError("原著学习未完成，请重试。")
     audit.append_event(request_id, audit.EVENT_AGENT_COMPLETED, "book_distill")
 
 
@@ -1237,7 +1334,7 @@ def _finalize_distill(request_id: str, asset_id: str, sp_dir: Path, stage_dir: P
     if req is None or req.get("state") == "canceled":
         bridge.cleanup_request(request_id)
         audit.finish_file(request_id, audit.STATUS_CANCELED)
-        raise MaterialsError("蒸馏已取消。")
+        raise MaterialsError("原著学习已取消。")
     try:
         fin = _finalize_reference_distill(request_id, _ledger_asset(asset_id), sp_dir, stage_dir)
     except MaterialsError as exc:
@@ -1252,7 +1349,7 @@ def _finalize_distill(request_id: str, asset_id: str, sp_dir: Path, stage_dir: P
         "asset_id": asset_id,
         "status": "completed",
         "output_dir": fin["output_dir"],
-        "message": "蒸馏完成（已生成 BKP 知识包并刷新素材状态）",
+        "message": "原著学习完成（已整理参考知识并刷新素材状态）",
     }
 
 
@@ -1281,12 +1378,12 @@ def get_book_distill_request(request_id: str) -> dict[str, Any]:
         return {"request_id": request_id, "status": "expired", "error": "任务已超时，请重新发起。"}
     response = bridge.read_response(request_id)
     if response is None:
-        return {"request_id": request_id, "status": "pending", "message": "等待 Qoder /gowrite：正在蒸馏（Base Scan + 收敛），完成后将自动封装 BKP"}
+        return {"request_id": request_id, "status": "pending", "message": "等待 Qoder /gowrite：正在原著学习，完成后将自动整理参考知识"}
     if response.get("request_id") != request_id:
         bridge.cleanup_request(request_id)
         return {"request_id": request_id, "status": "failed", "error": "返回结果与任务不匹配，已丢弃。"}
     if response.get("status") != "completed":
-        error = response.get("error") or "蒸馏执行失败"
+        error = "原著学习失败，请重试。"
         bridge.cleanup_request(request_id)
         audit.finish_file(request_id, audit.STATUS_FAILED, error=error)
         return {"request_id": request_id, "status": "failed", "error": error}
@@ -1295,7 +1392,7 @@ def get_book_distill_request(request_id: str) -> dict[str, Any]:
     if not isinstance(asset_id, str) or not asset_id.strip():
         bridge.cleanup_request(request_id)
         audit.finish_file(request_id, audit.STATUS_FAILED, error="蒸馏任务缺少素材标识")
-        return {"request_id": request_id, "status": "failed", "error": "蒸馏任务缺少素材标识，请重新发起。"}
+        return {"request_id": request_id, "status": "failed", "error": "原著学习任务缺少素材标识，请重新发起。"}
     try:
         result = _finalize_distill(
             request_id, asset_id.strip(), Path(meta["sp_dir"]), Path(meta["stage_dir"]),
@@ -1467,7 +1564,7 @@ def run_method_distill(asset_id: str) -> dict[str, Any]:
     prep = _prepare_package_current(asset)
     if not prep["available"]:
         audit.finish_file(request_id, audit.STATUS_FAILED, error="prepare-not-current")
-        raise MaterialsError(prep["reason"] or "蒸馏输入不是当前有效的 Markdown，请先重新提纯。")
+        raise MaterialsError(prep["reason"] or "方法学习输入不是当前有效的 Markdown，请先重新提纯。")
 
     # 1) 定位 MethodPrepare PASS 包并 validate
     mp_dir = _find_mp_dir(asset_id)
@@ -1475,7 +1572,7 @@ def run_method_distill(asset_id: str) -> dict[str, Any]:
         proc = _run_md_cli(["validate", "--input", str(mp_dir)], request_id)
     except subprocess.TimeoutExpired:
         audit.finish_file(request_id, audit.STATUS_FAILED, error="方法蒸馏校验超时")
-        raise MaterialsError("方法蒸馏校验超时，请重试。")
+        raise MaterialsError("方法学习检查超时，请重试。")
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "")[:800]
         audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "method_distill", details={"skill": "MethodDistill", "detail": detail})
@@ -1489,7 +1586,7 @@ def run_method_distill(asset_id: str) -> dict[str, Any]:
         proc = _run_md_cli(["prepare", "--input", str(mp_dir), "--output", str(stage_method_dir)], request_id)
     except subprocess.TimeoutExpired:
         audit.finish_file(request_id, audit.STATUS_FAILED, error="方法蒸馏准备超时")
-        raise MaterialsError("方法蒸馏准备超时，请重试。")
+        raise MaterialsError("方法学习准备超时，请重试。")
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "")[:800]
         audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "method_distill", details={"skill": "MethodDistill", "detail": detail})
@@ -1504,7 +1601,7 @@ def run_method_distill(asset_id: str) -> dict[str, Any]:
             "asset_id": asset_id,
             "status": "pending",
             "request_id": pending.request_id,
-            "message": "等待 Qoder /gowrite：正在蒸馏方法知识，完成后将自动定稿",
+            "message": "等待 Qoder /gowrite：正在方法学习，完成后将自动整理方法知识",
         }
 
     # 4) Direct 路径直接调用无 bridge 依赖的确定性核心。
@@ -1522,7 +1619,7 @@ def run_method_distill(asset_id: str) -> dict[str, Any]:
         "asset_id": asset_id,
         "status": "completed",
         "output_dir": fin["output_dir"],
-        "message": "方法知识蒸馏完成（已定稿并可被知识检索调用）",
+        "message": "方法学习完成（已整理为可调用的方法知识）",
     }
 
 
@@ -1551,7 +1648,7 @@ def _finalize_method_distill_core(request_id: str, asset_id: str,
         audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "method_distill",
                            details={"step": "post_publish_verification", "error": str(exc)[:300]})
         _rollback_publish_or_fail(tx, request_id, "method_distill")
-        raise MaterialsError("蒸馏结果暂不能用于写作，已保留原知识包，请重试。") from exc
+        raise MaterialsError("方法学习结果暂不能用于写作，已保留原知识包，请重试。") from exc
     return {"output_dir": str(target_method_dir)}
 
 
@@ -1573,7 +1670,7 @@ def _finalize_method_distill_interactive(request_id: str, asset_id: str,
             bridge.cleanup_request(request_id)
         audit.finish_file(request_id, audit.STATUS_CANCELED,
                           error="interactive request missing/canceled/expired")
-        raise MaterialsError("蒸馏已取消。")
+        raise MaterialsError("方法学习已取消。")
     try:
         fin = _finalize_method_distill_core(
             request_id, asset_id, mp_dir, stage_method_dir)
@@ -1591,7 +1688,7 @@ def _finalize_method_distill_interactive(request_id: str, asset_id: str,
         "asset_id": asset_id,
         "status": "completed",
         "output_dir": fin["output_dir"],
-        "message": "方法知识蒸馏完成（已定稿并可被知识检索调用）",
+        "message": "方法学习完成（已整理为可调用的方法知识）",
     }
 
 
@@ -1641,7 +1738,7 @@ def _run_method_distill_agent_stage(request_id: str, asset_id: str,
         adapter, agent_request = runner._build_adapter()
     except Exception as exc:  # noqa: BLE001
         audit.finish_file(request_id, audit.STATUS_FAILED, error=str(exc))
-        raise MaterialsError(f"方法蒸馏执行配置不可用：{exc}") from exc
+        raise MaterialsError("方法学习执行配置不可用，请检查设置后重试。") from exc
     agent_request.task = task
     agent_request.cwd = str(get_repo_root())
     audit.append_event(
@@ -1653,11 +1750,11 @@ def _run_method_distill_agent_stage(request_id: str, asset_id: str,
     except Exception as exc:  # noqa: BLE001
         audit.append_event(request_id, audit.EVENT_AGENT_FAILED, "method_distill", details={"error": str(exc)[:200]})
         audit.finish_file(request_id, audit.STATUS_FAILED, error=f"方法蒸馏执行失败：{exc}")
-        raise MaterialsError(f"方法蒸馏执行失败：{exc}") from exc
+        raise MaterialsError("方法学习失败，请重试。") from exc
     if result.status != "completed":
         audit.append_event(request_id, audit.EVENT_AGENT_FAILED, "method_distill", details={"error": (result.error or "")[:200]})
         audit.finish_file(request_id, audit.STATUS_FAILED, error=result.error or "方法蒸馏未完成")
-        raise MaterialsError(result.error or "方法蒸馏未完成，请重试。")
+        raise MaterialsError("方法学习未完成，请重试。")
     audit.append_event(request_id, audit.EVENT_AGENT_COMPLETED, "method_distill")
 
 
@@ -1684,12 +1781,12 @@ def get_method_distill_request(request_id: str) -> dict[str, Any]:
     response = bridge.read_response(request_id)
     if response is None:
         return {"request_id": request_id, "status": "pending",
-                "message": "等待 Qoder /gowrite：正在蒸馏方法知识，完成后将自动定稿"}
+                "message": "等待 Qoder /gowrite：正在方法学习，完成后将自动整理方法知识"}
     if response.get("request_id") != request_id:
         bridge.cleanup_request(request_id)
         return {"request_id": request_id, "status": "failed", "error": "返回结果与任务不匹配，已丢弃。"}
     if response.get("status") != "completed":
-        error = response.get("error") or "方法蒸馏执行失败"
+        error = "方法学习失败，请重试。"
         bridge.cleanup_request(request_id)
         audit.finish_file(request_id, audit.STATUS_FAILED, error=error)
         return {"request_id": request_id, "status": "failed", "error": error}
@@ -1772,6 +1869,61 @@ def cancel_material_distill_request(request_id: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# 当前阶段文件夹（作者显式点击；调用方只能提供 canonical asset_id）
+# ---------------------------------------------------------------------------
+
+_FOLDER_ERROR = "找不到这份资料对应的文件夹，请刷新状态后重试。"
+
+
+def _canonical_source_folder(asset: dict[str, Any]) -> Path | None:
+    material_root = get_repo_root() / "01_原始素材"
+    for entry in asset.get("files") or []:
+        if not isinstance(entry, dict) or not entry.get("path"):
+            continue
+        source = material_root / str(entry["path"])
+        if source.exists():
+            return source.parent
+    return None
+
+
+def _current_material_folder(asset: dict[str, Any]) -> Path | None:
+    stage = _classify_author_group(asset)["workflow_stage"]
+    asset_id = str(asset.get("id") or "").strip()
+    if stage in ("new", "other"):
+        return _canonical_source_folder(asset)
+    if stage == "purified":
+        return _prepare_package_path(asset)
+    if stage == "writing":
+        knowledge_root = get_repo_root() / "02_素材知识库"
+        return next((path for path in sorted(knowledge_root.glob(f"{asset_id}_*"))
+                     if path.is_dir()), None)
+    return None
+
+
+def _launch_folder(path: Path) -> None:
+    """Windows desktop launcher kept as one mockable boundary for tests."""
+    os.startfile(str(path))  # type: ignore[attr-defined]
+
+
+def open_material_folder(asset_id: str) -> dict[str, Any]:
+    """Open the selected material's real current-stage folder without exposing paths."""
+    asset = _ledger_asset((asset_id or "").strip())
+    target = _current_material_folder(asset)
+    try:
+        root = get_repo_root().resolve(strict=True)
+        resolved = target.resolve(strict=True) if target is not None else None
+    except OSError as exc:
+        raise MaterialsError(_FOLDER_ERROR) from exc
+    if resolved is None or not resolved.is_dir() or not resolved.is_relative_to(root):
+        raise MaterialsError(_FOLDER_ERROR)
+    try:
+        _launch_folder(resolved)
+    except OSError as exc:
+        raise MaterialsError(_FOLDER_ERROR) from exc
+    return {"asset_id": str(asset.get("id") or ""), "opened": True}
+
+
+# ---------------------------------------------------------------------------
 # 素材详情语义（写作时能否调用 + 当前阶段 + 下一步；页面加载零模型）
 # ---------------------------------------------------------------------------
 
@@ -1781,7 +1933,7 @@ def get_material_detail(asset_id: str) -> dict[str, Any]:
     classified = _classify_author_group(asset)
     summary, sections = _learning_projection(asset) if classified["state"] == "ready" else (None, [])
     labels = {
-        "pending_prepare": "待提纯", "pending_distill": "待蒸馏",
+        "pending_prepare": "待提纯", "pending_distill": "待学习",
         "needs_attention": "需要检查", "ready": "可用于写作",
     }
     return {

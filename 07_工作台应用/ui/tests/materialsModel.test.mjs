@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs'
 import {
   MATERIAL_TOP_NAVIGATION,
   MATERIAL_TYPE_FILTERS,
+  PURIFIED_TYPE_FILTERS,
   BATCH_TYPE_CHOICES,
   DEFAULT_BATCH_TYPE,
   inboxPrimaryAction,
@@ -24,6 +25,10 @@ import {
   materialsForStage,
   materialCardMeta,
   cardFormatLabel,
+  presentationFormatLabel,
+  learningActionLabel,
+  learningBusyLabel,
+  learningExplanation,
   attentionRetryLabel,
   workflowStageLabel,
   countMaterialsByType,
@@ -31,6 +36,7 @@ import {
   needsAttentionMaterials,
   pendingInboxBadgeCount,
   attachedMaterialName,
+  visibleMaterialSelection,
 } from '../.test-build/features/materials/materialsModel.js'
 
 // 后端投影形态的 MaterialItem：workflow_stage 由后端权威派生（前端消费，不再自造第二状态）。
@@ -46,6 +52,8 @@ const controllerSrc = readFileSync(new URL('../src/features/materials/useMateria
 test('一级导航恰好四个：新增素材 / 已提纯素材库 / 写作素材库 / 素材总览', () => {
   assert.deepEqual([...MATERIAL_TOP_NAVIGATION], ['新增素材', '已提纯素材库', '写作素材库', '素材总览'])
   assert.deepEqual([...MATERIAL_TYPE_FILTERS], ['全部', '原著', '技巧类', '其他'])
+  assert.deepEqual([...PURIFIED_TYPE_FILTERS], ['全部', '原著', '技巧类'])
+  assert.equal(PURIFIED_TYPE_FILTERS.includes('其他'), false)
 })
 
 test('batch type 映射正确：原著/技巧类/其他 → REFERENCE_WORK/METHOD_SOURCE/LOOSE_MATERIAL', () => {
@@ -150,9 +158,10 @@ test('workflow_stage 支持 other：其他（LOOSE_MATERIAL；历史 RESEARCH）
   assert.deepEqual(countMaterialsByType(all), { reference: 1, method: 0, other: 2 })
 })
 
-test('attentionRetryLabel：new→重新提纯、purified→重新蒸馏、writing→无', () => {
+test('attentionRetryLabel：new→重新提纯、purified→按类型重新学习、writing→无', () => {
   assert.equal(attentionRetryLabel('new'), '重新提纯')
-  assert.equal(attentionRetryLabel('purified'), '重新蒸馏')
+  assert.equal(attentionRetryLabel('purified', 'REFERENCE_WORK'), '重新原著学习')
+  assert.equal(attentionRetryLabel('purified', 'METHOD_SOURCE'), '重新方法学习')
   assert.equal(attentionRetryLabel('writing'), null)
   assert.equal(attentionRetryLabel(null), null)
 })
@@ -168,15 +177,16 @@ test('素材总览：类型分布（原著/技巧类/其他）+ 阶段区域名'
   assert.equal(workflowStageLabel(null), '')
 })
 
-test('列表使用阶段对应格式（§8）：new=来源、purified=MD、writing=知识包（不混用）', () => {
+test('列表使用阶段对应格式（§8）：new=来源、purified=Markdown、writing=知识包（不混用）', () => {
   // new（待入库/待提纯）：原始来源格式
   assert.equal(materialCardMeta(item({ type_label: '原著', source_formats: ['EPUB'], author: '马伯庸', workflow_stage: 'new' })), '原著 · EPUB · 马伯庸')
   assert.equal(materialCardMeta(item({ type_label: '原著', source_formats: ['EPUB', 'TXT'], author: '', workflow_stage: 'new' })), '原著 · EPUB / TXT')
   assert.equal(materialCardMeta(item({ type_label: '技巧类', source_formats: ['PDF'], author: '', workflow_stage: 'new' })), '技巧类 · PDF')
-  // purified（已提纯）：提纯结果 MD，不显示来源格式
+  // purified（已提纯）：作者面显示 Markdown，不显示来源格式
   const purified = item({ type_label: '原著', source_formats: ['EPUB', 'TXT'], author: '', workflow_stage: 'purified', state: 'pending_distill', prepared_format: 'MD', prepared_available: true })
-  assert.equal(cardFormatLabel(purified), 'MD')
-  assert.equal(materialCardMeta(purified), '原著 · MD')
+  assert.equal(cardFormatLabel(purified), 'Markdown')
+  assert.equal(materialCardMeta(purified), '原著 · Markdown')
+  assert.equal(presentationFormatLabel('MD'), 'Markdown')
   // writing（写作素材库）：知识包表示，绝不混来源+MD
   const writing = item({ type_label: '原著', source_formats: ['EPUB', 'TXT'], author: '', workflow_stage: 'writing', state: 'ready', prepared_format: 'MD', knowledge_package_kind: 'BKP' })
   assert.equal(cardFormatLabel(writing), '知识包')
@@ -194,6 +204,41 @@ test('matchesMaterialFilter 二级筛选按真实 canonical 类型', () => {
   assert.equal(matchesMaterialFilter(item({ type: 'RESEARCH' }), '其他'), true)
   assert.equal(matchesMaterialFilter(item({ type: 'REFERENCE_WORK' }), '技巧类'), false)
   assert.equal(matchesMaterialFilter(item({ type: 'REFERENCE_WORK' }), '全部'), true)
+})
+
+test('已提纯筛选严格为全部/原著/技巧类并按 canonical 类型生效', () => {
+  const reference = item({ id: 'ref', type: 'REFERENCE_WORK', workflow_stage: 'purified' })
+  const method = item({ id: 'method', type: 'METHOD_SOURCE', workflow_stage: 'purified' })
+  const all = [reference, method]
+  assert.deepEqual(all.filter((entry) => matchesMaterialFilter(entry, '全部')), all)
+  assert.deepEqual(all.filter((entry) => matchesMaterialFilter(entry, '原著')), [reference])
+  assert.deepEqual(all.filter((entry) => matchesMaterialFilter(entry, '技巧类')), [method])
+})
+
+test('切换顶层阶段或筛选排除当前项时，隐藏素材详情不可见', () => {
+  const attention = item({ id: 'attention', state: 'needs_attention', workflow_stage: 'new' })
+  const purified = item({ id: 'purified', state: 'pending_distill', workflow_stage: 'purified' })
+  assert.equal(visibleMaterialSelection('attention', materialsForStage([attention, purified], 'new'))?.id, 'attention')
+  assert.equal(visibleMaterialSelection('attention', materialsForStage([attention, purified], 'purified')), null)
+  assert.equal(visibleMaterialSelection('purified', [purified].filter((entry) => matchesMaterialFilter(entry, '技巧类'))), null)
+  assert.ok(pageSrc.includes('setSelectedId(null)'), '顶层 tab / 类型筛选会清空失效选择')
+})
+
+test('原著学习/方法学习动作、重试、忙碌与说明均按类型显示', () => {
+  assert.equal(learningActionLabel('REFERENCE_WORK'), '原著学习')
+  assert.equal(learningActionLabel('METHOD_SOURCE'), '方法学习')
+  assert.equal(learningActionLabel('REFERENCE_WORK', true), '重新原著学习')
+  assert.equal(learningActionLabel('METHOD_SOURCE', true), '重新方法学习')
+  assert.equal(learningBusyLabel('REFERENCE_WORK'), '正在原著学习…')
+  assert.equal(learningBusyLabel('METHOD_SOURCE'), '正在方法学习…')
+  assert.equal(learningExplanation('REFERENCE_WORK'), '将从 Markdown 学习作品中的可迁移机制，形成参考知识。')
+  assert.equal(learningExplanation('METHOD_SOURCE'), '将从 Markdown 提炼可调用的写作方法知识。')
+})
+
+test('资料详情打开文件夹只发送 asset_id，作者面不显示路径', () => {
+  assert.ok(controllerSrc.includes('openMaterialFolder(assetId)'))
+  assert.ok(pageSrc.includes('controller.openFolder(selected.id)'))
+  assert.equal(pageSrc.includes('path:'), false)
 })
 
 test('导入 UI 无 AI 分类 / 识别 running 状态；改为批次机械入库计划', () => {
@@ -268,7 +313,15 @@ test('needs_attention 计入待处理徽标；attachment 名称回退安全', ()
 
 test('state labels 保持作者可读', () => {
   assert.equal(authorStateLabel('pending_prepare'), '待提纯')
-  assert.equal(authorStateLabel('pending_distill'), '待蒸馏')
+  assert.equal(authorStateLabel('pending_distill'), '待学习')
   assert.equal(authorStateLabel('needs_attention'), '需要检查')
   assert.equal(authorStateLabel('ready'), '可用于写作')
+})
+
+test('Materials 作者可见页面不再包含蒸馏，格式不显示 standalone MD', () => {
+  for (const src of [pageSrc, controllerSrc]) {
+    const withoutComments = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
+    assert.equal(withoutComments.includes('蒸馏'), false)
+  }
+  assert.equal(materialCardMeta(item({ workflow_stage: 'purified', prepared_format: 'MD' })).includes(' · MD'), false)
 })

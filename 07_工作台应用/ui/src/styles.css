@@ -404,6 +404,10 @@ p{line-height:1.65}
 .material-card em.wait{color:var(--muted)}
 .material-card em.warn{color:var(--amber)}
 .material-detail{padding:20px}
+.material-detail-folder{display:flex;align-items:center;gap:8px;border:0;background:transparent;padding:0;color:var(--text);font:inherit;font-size:18px;font-weight:700}
+.material-detail-folder:not(:disabled){cursor:pointer;color:var(--blue)}
+.material-detail-folder:not(:disabled):hover{text-decoration:underline}
+.material-detail-folder:disabled{cursor:default;opacity:1}
 .material-detail h2{margin:0;display:flex;align-items:center;gap:8px}
 .material-detail>p{margin:6px 0;color:var(--muted)}
 .learning{border:1px solid var(--line);border-radius:12px;padding:16px;margin:16px 0}

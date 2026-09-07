@@ -18,6 +18,7 @@ import {
   getMaterialDetail,
   importMaterialFiles,
   listMaterials,
+  openMaterialFolder,
   pickMaterialFiles,
   prepareMaterial,
   refreshMaterials,
@@ -47,6 +48,7 @@ export interface MaterialsController {
   busyKind: 'prepare' | 'distill' | null
   detail: MaterialDetail | null
   detailLoading: boolean
+  openingFolderId: string | null
   reload(): Promise<void>
   refresh(): Promise<boolean>
   scanInbox(): Promise<void>
@@ -55,6 +57,7 @@ export interface MaterialsController {
   /** 唯一作者批次动作：机械 build plan → apply intake → reload+scan（§4：绝不自动提纯）。 */
   processInboxBatch(): Promise<boolean>
   selectDetail(assetId: string): Promise<void>
+  openFolder(assetId: string): Promise<boolean>
   runPrepare(assetId: string): Promise<boolean>
   runDistill(assetId: string): Promise<boolean>
 }
@@ -79,6 +82,7 @@ export function useMaterialsController(options?: { notify?: (message: string) =>
   const [prepareBusyAssetId, setPrepareBusyAssetId] = useState<string | null>(null)
   const [detail, setDetail] = useState<MaterialDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [openingFolderId, setOpeningFolderId] = useState<string | null>(null)
 
   // ---------------- 只读数据：挂载加载素材目录 + 一次确定性收件箱扫描 ----------------
 
@@ -145,14 +149,14 @@ export function useMaterialsController(options?: { notify?: (message: string) =>
     const assetId = typeof distillTask.meta?.asset_id === 'string' ? distillTask.meta.asset_id : null
     if (distillTask.status === 'candidate' && distillTask.result) {
       const result = distillTask.result as { message?: string }
-      notify?.(result.message ?? '蒸馏完成')
+      notify?.(result.message ?? '学习完成')
       void reload()
       if (detail?.id && detail.id === assetId) void selectDetail(detail.id)
       consume()
       return
     }
     if (distillTask.status === 'failed') {
-      setError(distillTask.error ?? '蒸馏失败，请重试。')
+      setError(distillTask.error ?? '学习失败，请重试。')
       consume()
       return
     }
@@ -267,13 +271,27 @@ export function useMaterialsController(options?: { notify?: (message: string) =>
     return true
   }, [start])
 
+  const openFolder = useCallback(async (assetId: string) => {
+    setOpeningFolderId(assetId)
+    setError(null)
+    try {
+      await openMaterialFolder(assetId)
+      return true
+    } catch (e) {
+      setError(toMessage(e))
+      return false
+    } finally {
+      setOpeningFolderId(null)
+    }
+  }, [])
+
   return {
     materials, loading, error, refreshing,
     inbox, inboxLoading, inboxError, processingInbox,
     batchType, importResult, importing,
-    busyAssetId, busyKind, detail, detailLoading,
+    busyAssetId, busyKind, detail, detailLoading, openingFolderId,
     reload, refresh, scanInbox, pickAndImport,
     setBatchType, processInboxBatch,
-    selectDetail, runPrepare, runDistill,
+    selectDetail, openFolder, runPrepare, runDistill,
   }
 }

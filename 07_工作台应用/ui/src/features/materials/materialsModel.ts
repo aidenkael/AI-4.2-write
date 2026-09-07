@@ -4,6 +4,7 @@ export const MATERIAL_TOP_NAVIGATION = ['新增素材', '已提纯素材库', '�
 export type MaterialTab = typeof MATERIAL_TOP_NAVIGATION[number]
 
 export const MATERIAL_TYPE_FILTERS = ['全部', '原著', '技巧类', '其他'] as const
+export const PURIFIED_TYPE_FILTERS = ['全部', '原著', '技巧类'] as const
 
 export const BATCH_TYPE_CHOICES = [
   { value: 'REFERENCE_WORK', label: '原著' },
@@ -25,7 +26,26 @@ export function inboxPrimaryAction(batchType: string, processing: boolean): { la
 }
 
 export function authorStateLabel(state: MaterialAuthorState): string {
-  return { pending_prepare: '待提纯', pending_distill: '待蒸馏', needs_attention: '需要检查', ready: '可用于写作' }[state]
+  return { pending_prepare: '待提纯', pending_distill: '待学习', needs_attention: '需要检查', ready: '可用于写作' }[state]
+}
+
+export function presentationFormatLabel(format: string | null | undefined): string {
+  return format === 'MD' ? 'Markdown' : (format || '')
+}
+
+export function learningActionLabel(type: string, retry = false): string {
+  const action = type === 'METHOD_SOURCE' ? '方法学习' : '原著学习'
+  return retry ? `重新${action}` : action
+}
+
+export function learningBusyLabel(type: string): string {
+  return type === 'METHOD_SOURCE' ? '正在方法学习…' : '正在原著学习…'
+}
+
+export function learningExplanation(type: string): string {
+  return type === 'METHOD_SOURCE'
+    ? '将从 Markdown 提炼可调用的写作方法知识。'
+    : '将从 Markdown 学习作品中的可迁移机制，形成参考知识。'
 }
 
 /** 素材工作流阶段以后端投影的 workflow_stage 为准：后端拥有 purification/knowledge/
@@ -47,6 +67,10 @@ export function materialsForStage(items: MaterialItem[], stage: MaterialWorkflow
   return items.filter((item) => deriveWorkflowStage(item) === stage)
 }
 
+export function visibleMaterialSelection(selectedId: string | null, visibleItems: MaterialItem[]): MaterialItem | null {
+  return visibleItems.find((item) => item.id === selectedId) ?? null
+}
+
 /** 卡片格式标签（§8）：按工作流阶段选择展示格式，绝不混用来源/提纯/知识格式。
  *  new/other（待入库/待提纯）→ 原始来源（EPUB/PDF/TXT）；purified（已提纯）→ 提纯结果 MD；
  *  writing（写作素材库）→ 知识包表示（不混来源+MD）。 */
@@ -57,7 +81,7 @@ export function cardFormatLabel(item: MaterialItem): string {
     if (item.knowledge_package_kind === 'BKP') return '知识包'
     return ''
   }
-  if (stage === 'purified') return item.prepared_format || 'MD'
+  if (stage === 'purified') return presentationFormatLabel(item.prepared_format) || 'Markdown'
   return item.source_formats?.length ? item.source_formats.join(' / ') : ''
 }
 
@@ -74,9 +98,9 @@ export function materialCardMeta(item: MaterialItem): string {
 
 /** needs_attention 的重试动作标签：由失败前阶段决定重试类型（CP3.5）。
  *  new → 重新提纯；purified → 重新蒸馏；writing 不应处于 needs_attention。 */
-export function attentionRetryLabel(stage: MaterialWorkflowStage | null | undefined): string | null {
+export function attentionRetryLabel(stage: MaterialWorkflowStage | null | undefined, type = 'REFERENCE_WORK'): string | null {
   if (stage === 'new') return '重新提纯'
-  if (stage === 'purified') return '重新蒸馏'
+  if (stage === 'purified') return learningActionLabel(type, true)
   return null
 }
 

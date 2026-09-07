@@ -17,7 +17,7 @@ import {
 
 test('taskLabel covers all kinds', () => {
   assert.equal(taskLabel('story_write'), '正文写作')
-  assert.equal(taskLabel('material_distill'), '素材蒸馏')
+  assert.equal(taskLabel('material_distill'), '素材学习')
 })
 
 test('taskTarget maps to owning page/section', () => {
