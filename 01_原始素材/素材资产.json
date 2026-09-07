@@ -1145,7 +1145,7 @@
         "evidence": "sourceprepare_metadata",
         "input_fingerprint": "5001d3fc2e6cff5daddbdfc54ea4103106832ff1f4acb4379b5a6f6672e1fe81",
         "source_sha256": "a4fb5a0a9decd147d4dd01e1ca0f6447ef9c976c7a89ccaf563f7ac1e409abcd",
-        "status": "需复核"
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1169,7 +1169,7 @@
         "evidence": "sourceprepare_metadata",
         "input_fingerprint": "47cd1e75126b87d9765e7f394e7ae73f771356f42d7595d387a69bf0aa9eb5a2",
         "source_sha256": "d86c3d4fb3acc303a4bace6109ca7366cbe11736c453a4e7c964505048ab1bca",
-        "status": "需复核"
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1313,7 +1313,7 @@
         "evidence": "sourceprepare_metadata",
         "input_fingerprint": "27cbf2099c27439da40ea15df2a41ccca2f2fd70c038eaf71b04ce1d89737604",
         "source_sha256": "cd34d78854e5dca47a718c318c589e8da4e488904574d42c39483052b18c850c",
-        "status": "需复核"
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1385,7 +1385,7 @@
         "evidence": "sourceprepare_metadata",
         "input_fingerprint": "13b53e225eec6245d3b84899c1d389aa44e2e5a51f07f0c3f3f346bb07ff5d6a",
         "source_sha256": "e5751000da1770ac55cc6a2136956ae3e380a22333251a6ca63d90d913ff513c",
-        "status": "需复核"
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1481,7 +1481,7 @@
         "evidence": "sourceprepare_metadata",
         "input_fingerprint": "aad478990ffa836468475e0c9cb3f75253b90dfe20f36beaeecf9af7a56c649d",
         "source_sha256": "53aaf3e3ad1086147f369341cb319f8593c3351cea51cb26dabc8463ec0d7b55",
-        "status": "需复核"
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1699,7 +1699,7 @@
         "evidence": "sourceprepare_metadata",
         "input_fingerprint": "c80618638f6d1aa564eb7213bc58d82f4743a30e3428b3fcdb274afdc9dbe13f",
         "source_sha256": "892da74862697b4535a72aa868b24236effd78bd7ac11b9dcf86062fee0df7c3",
-        "status": "需复核"
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -1780,13 +1780,8 @@
       "author": "钱锺书",
       "files": [
         {
-          "path": "01_原著/围城/围城 (出版七十周年纪念版) (钱锺书) (z-library.sk, 1lib.sk, z-lib.sk).epub",
-          "primary": true,
-          "sha256": "af1202c7de06755d34a57112ff9af75653e98ee46c8230c19ecd9c0d5fd163d5"
-        },
-        {
           "path": "01_原著/围城/围城 (锺书·钱, 钱钟书) (z-library.sk, 1lib.sk, z-lib.sk).mobi",
-          "primary": false,
+          "primary": true,
           "sha256": "0c95d4415cdc7b7fb3c6c2cf4be848d5fd815918f183302361ef2d1f0bd433b1"
         }
       ],
@@ -1797,10 +1792,10 @@
       "name": "围城",
       "notes": "",
       "purification": {
-        "evidence": "sourceprepare_metadata",
+        "evidence": "sourceprepare_metadata_sha_mismatch",
         "input_fingerprint": "4ba10de47d9c60f555c36e0f4b3808db060f5c394b106c036023d3c0a2df89a1",
         "source_sha256": "af1202c7de06755d34a57112ff9af75653e98ee46c8230c19ecd9c0d5fd163d5",
-        "status": "可用"
+        "status": "需更新"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2127,7 +2122,7 @@
         "evidence": "sourceprepare_metadata",
         "input_fingerprint": "3c0bce2cc55a56e9a1d80216701d8d419c1704efbff968eba5ab1ab714fb5cd7",
         "source_sha256": "ff3045161098750a15ecc2a8cffc7b0c74278188d934531304ed32f88d185ef4",
-        "status": "需复核"
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -2939,7 +2934,7 @@
         "evidence": "sourceprepare_metadata",
         "input_fingerprint": "b55297c78a5ebdd831a35e9bbc7cce13db4e3d7bd1c90352d57f2394c4d3aa64",
         "source_sha256": "27beabb4283e1ff478a551edd781dae4a6f44f865961f9d37123eee5a2c297ec",
-        "status": "需复核"
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -3443,7 +3438,7 @@
         "evidence": "sourceprepare_metadata",
         "input_fingerprint": "99105da8bea538eab844107de669f5eead8346a3540eac76e8e63ddcb8e5d13a",
         "source_sha256": "16d9e53b5982e030ca5f71e83134abe963783a8f5789f9c7df0d6b481f712e8a",
-        "status": "需复核"
+        "status": "可用"
       },
       "tags": [],
       "type": "REFERENCE_WORK"
@@ -3495,6 +3490,78 @@
       },
       "tags": [],
       "type": "REFERENCE_WORK"
+    },
+    {
+      "author": "",
+      "files": [
+        {
+          "path": "02_技巧类/Anatomy A Love Story/Anatomy A Love Story.epub",
+          "primary": true,
+          "sha256": "97a9bbac89d9408bae626404c342a7cb674eee66661a85e0d7ba78d2e79e7dc7"
+        }
+      ],
+      "id": "book_0143",
+      "knowledge": {
+        "status": "未开始"
+      },
+      "name": "Anatomy A Love Story",
+      "notes": "",
+      "purification": {
+        "evidence": "methodprepare_metadata",
+        "input_fingerprint": "18964abec7696a7d32204b73960b63f7c4860cc74f2cb7eff36c9fc6fbb6c246",
+        "source_sha256": "97a9bbac89d9408bae626404c342a7cb674eee66661a85e0d7ba78d2e79e7dc7",
+        "status": "可用"
+      },
+      "tags": [],
+      "type": "METHOD_SOURCE"
+    },
+    {
+      "author": "",
+      "files": [
+        {
+          "path": "02_技巧类/Art Of Dramatic Writing Its Basis in the Creative Interpretation of Human Motives/Art Of Dramatic Writing Its Basis in the Creative Interpretation of Human Motives.epub",
+          "primary": true,
+          "sha256": "173976277865ee2e3084a4bf6ae4392d69c7efd3b91ee26bf7f78418eb991050"
+        }
+      ],
+      "id": "book_0144",
+      "knowledge": {
+        "status": "未开始"
+      },
+      "name": "Art Of Dramatic Writing Its Basis in the Creative Interpretation of Human Motives",
+      "notes": "",
+      "purification": {
+        "evidence": "methodprepare_metadata",
+        "input_fingerprint": "6b03be8360388b8997b2d4cfc0acc190ee0860004e6b60327a2ae0daa1fae95e",
+        "source_sha256": "173976277865ee2e3084a4bf6ae4392d69c7efd3b91ee26bf7f78418eb991050",
+        "status": "可用"
+      },
+      "tags": [],
+      "type": "METHOD_SOURCE"
+    },
+    {
+      "author": "",
+      "files": [
+        {
+          "path": "02_技巧类/Creating Character Arcs The Masterful Authors Guide to Uniting Story Structure, Plot, and Character Development/Creating Character Arcs The Masterful Authors Guide to Uniting Story Structure, Plot, and Character Development.epub",
+          "primary": true,
+          "sha256": "faf4557cd6dd0c12fb00b02f7d60d832ccbfd28d62f84e46a216981c770baabe"
+        }
+      ],
+      "id": "book_0145",
+      "knowledge": {
+        "status": "未开始"
+      },
+      "name": "Creating Character Arcs The Masterful Authors Guide to Uniting Story Structure, Plot, and Character Development",
+      "notes": "",
+      "purification": {
+        "evidence": "methodprepare_metadata",
+        "input_fingerprint": "ab77117b5bf09a21549c2bbe238499aa25c8e98f29bc3d1ef04e33da0389adbd",
+        "source_sha256": "faf4557cd6dd0c12fb00b02f7d60d832ccbfd28d62f84e46a216981c770baabe",
+        "status": "可用"
+      },
+      "tags": [],
+      "type": "METHOD_SOURCE"
     }
   ],
   "containers": [

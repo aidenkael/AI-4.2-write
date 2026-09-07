@@ -62,8 +62,9 @@ BKP_SHA_EXPECT = {
     "book_0065": "0fb3cde2dc4f8c9f4e5a2ba612f3d3d3eb049d67928cce4fcc8b2c94ea20c6a8",
 }
 
-# 全部 book_id（book_0057-0061 五个已废弃 RESEARCH 资产已正式注销，不复用、不重排）
-ALL_IDS = [f"book_{i:04d}" for i in range(1, 142) if i not in (57, 58, 59, 60, 61)]
+# 全部 book_id（book_0057-0061 五个已废弃 RESEARCH 资产已正式注销；book_0142 围城重复登记
+# 已按 §5.2 全来源删除结算移除；book_0143-0145 为三本 METHOD_SOURCE 方法书。均不复用、不重排）
+ALL_IDS = [f"book_{i:04d}" for i in range(1, 146) if i not in (57, 58, 59, 60, 61, 142)]
 
 CSV_HEADER = ["素材ID", "名称", "类型", "作者", "标签", "位置", "提纯", "知识", "备注"]
 
@@ -160,8 +161,8 @@ def _read_ledger(root: Path) -> dict:
 
 def test_bootstrap_counts(ledger):
     assert ledger["schema_version"] == "1.0"
-    assert len(ledger["assets"]) == 136
-    assert sum(len(a["files"]) for a in ledger["assets"]) == 177
+    assert len(ledger["assets"]) == 139
+    assert sum(len(a["files"]) for a in ledger["assets"]) == 179
     assert len(ledger["containers"]) == 1
 
 
@@ -185,10 +186,14 @@ def test_multi_source_0035(ledger):
     assert any(f["path"].endswith(".txt") for f in a["files"])
 
 
-def test_multi_source_0072(ledger):
+def test_partial_deletion_settled_0072(ledger):
+    # §5.1/§5.4 真实数据：围城 EPUB 来源被作者删除后，reconcile 结算为单来源
+    # （保留同一 asset id、.mobi 幸存并升为 primary、账本不再指向已删 EPUB）
     a = _asset(ledger, "book_0072")
-    assert len(a["files"]) == 2
-    assert {f["primary"] for f in a["files"]} == {True, False}
+    assert len(a["files"]) == 1
+    assert a["files"][0]["primary"] is True
+    assert a["files"][0]["path"].endswith(".mobi")
+    assert all(".epub" not in f["path"] for f in a["files"])
 
 
 # ---------- D. BKP_RECOVERY ----------
@@ -273,7 +278,7 @@ def test_fake_tree_recovery(tmp_path):
 def test_view_parity(ledger):
     rows = catalog.render_catalog_csv(ledger)
     assert rows[0] == CSV_HEADER
-    assert len(rows) == 137  # 1 表头 + 136 数据行
+    assert len(rows) == 140  # 1 表头 + 139 数据行
     assert all(len(r) == 9 for r in rows)
     assert [r[0] for r in rows[1:]] == ALL_IDS
 
@@ -290,7 +295,7 @@ def test_csv_excludes_legacy_fields(ledger):
 
 def test_index_generation(ledger):
     text = catalog.render_index_md(ledger)
-    assert "素材总数：136" in text
+    assert "素材总数：139" in text
     # §2/§14：三个作者类型 section（原著/技巧类/其他）
     assert "## 原著（REFERENCE_WORK）" in text
     assert "## 技巧类（METHOD_SOURCE）" in text
@@ -394,10 +399,10 @@ def test_unregistered_file(tmp_path):
 
 
 def test_csv_view(ledger):
-    # F. CSV_VIEW：正式 CSV 9 列、一 asset 一行（真实数据 136 数据行）
+    # F. CSV_VIEW：正式 CSV 9 列、一 asset 一行（真实数据 139 数据行）
     rows = catalog.render_catalog_csv(ledger)
     assert rows[0] == CSV_HEADER
-    assert len(rows) == 137
+    assert len(rows) == 140
     assert all(len(r) == 9 for r in rows)
     # book_0035 单 asset 仅一行
     assert sum(1 for r in rows[1:] if r[0] == "book_0035") == 1
@@ -620,11 +625,15 @@ def test_real_ledger_refresh_compat(ledger):
         ledger, mat, ROOT / catalog.DISTILL_DIR_NAME, ROOT / "06_工作区" / "SourcePrepare")
     assert report["missing"] == []
     assert [a["id"] for a in new_ledger["assets"]] == ALL_IDS
-    assert sum(len(a["files"]) for a in new_ledger["assets"]) == 177
+    assert sum(len(a["files"]) for a in new_ledger["assets"]) == 179
     assert len(new_ledger["containers"]) == 1
     statuses = [a["purification"]["status"] for a in new_ledger["assets"]]
-    assert statuses.count("可用") == 127  # 全部已提纯作品（BKP 0035/0038/0065 + SP PASS）
+    # 135 原著可用（BKP 0035/0038/0065 + 九本 SP 重处理 PASS + 其余 SP PASS）+ 3 方法书可用
+    assert statuses.count("可用") == 138
     assert statuses.count("未处理") == 0
+    # 围城 book_0072 的 EPUB 来源被删 → 其 SP 包 stale → 需更新（不再被当作 current）
+    assert statuses.count("需更新") == 1
+    assert _asset(new_ledger, "book_0072")["purification"]["status"] == "需更新"
     for bid, expect_sha in BKP_SHA_EXPECT.items():
         p = _asset(new_ledger, bid)["purification"]
         assert p["status"] == "可用"  # 0035/0038/0065 不得降级
