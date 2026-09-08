@@ -179,10 +179,10 @@ export function WritingPage() {
                 <>{state.phaseMessage ?? '等待 Qoder /gowrite：正在选择本次写作上下文'}</>
               )}
               {state.status === 'waiting_prose_gowrite' && (
-                <>{state.phaseMessage ?? '上下文已准备好，请再次执行 /gowrite 生成正文'}</>
+                <>{state.phaseMessage ?? '上下文已准备好，Agent 正在自动生成正文'}</>
               )}
               {state.status === 'running' && (
-                <>{state.execution?.execution_mode === 'interactive_bridge' ? '请到 Qoder 执行 /gowrite' : 'AI 正在写作'}</>
+                <>{state.phaseMessage ?? (state.execution?.execution_mode === 'interactive_bridge' ? '请到 Qoder 执行 /gowrite' : 'AI 正在写作')}</>
               )}
             </div>
             <div className="candidate-actions">

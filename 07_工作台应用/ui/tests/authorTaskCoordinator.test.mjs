@@ -61,12 +61,21 @@ test('waiting/running HCI and backend command are request-specific', () => {
   assert.match(taskStripView({ ...waiting, status: 'running' }).stateText, /^Agent 正在执行/)
 })
 
-test('auto-copy key is stable per waiting phase and StoryWrite phase 2 gets a new key', () => {
+test('waiting phase keys remain request-and-phase bound', () => {
   const phase1 = exclusive('write-1', 'story_write', 'waiting_author', 'pending_selection')
   const rerender = { ...phase1 }
   const phase2 = { ...phase1, phase: 'pending_prose' }
   assert.equal(waitingPhaseKey(phase1), waitingPhaseKey(rerender))
   assert.notEqual(waitingPhaseKey(phase1), waitingPhaseKey(phase2))
+})
+
+test('layout CSS avoids page-wide blank-height floors while retaining bounded workspaces', () => {
+  const styles = fs.readFileSync(path.join(src, 'styles.css'), 'utf8')
+  assert.doesNotMatch(styles, /main\.workspace-shell\{min-height:/)
+  assert.doesNotMatch(styles, /\.empty-state\{min-height:/)
+  assert.match(styles, /\.foundation-workspace\{[^}]*height:clamp\(/)
+  assert.match(styles, /\.writing-layout\{[^}]*height:clamp\(/)
+  assert.match(styles, /\.materials-workflow\{[^}]*height:clamp\(/)
 })
 
 test('left Agent rail maps independent request cards and legacy bottom strip is absent', () => {

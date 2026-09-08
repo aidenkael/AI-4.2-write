@@ -98,8 +98,9 @@ export function deriveTaskStatus(
   if (pollStatus === 'canceled') return 'canceled'
   if (pollStatus === 'failed' || pollStatus === 'expired') return 'failed'
   if (pollStatus !== 'pending') return 'failed'
+  if (phase === 'pending_prose') return 'running'
   if (executionMode === 'interactive_bridge') return 'waiting_author'
-  if (phase === 'pending_selection' || phase === 'pending_prose') return 'waiting_author'
+  if (phase === 'pending_selection') return 'waiting_author'
   return 'running'
 }
 

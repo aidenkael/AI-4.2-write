@@ -22,7 +22,7 @@ p{line-height:1.65}
 .soft-tag,.status{font-size:13px;border-radius:14px;padding:4px 10px;background:#eef4ff;color:var(--blue);white-space:nowrap}
 .muted-note{color:var(--muted);font-size:13px;line-height:1.6}
 .error-text{color:var(--red);background:#fff0f0;border:1px solid #f5c6c9;border-radius:8px;padding:10px 12px;margin:10px 0 0;line-height:1.5;font-size:13px}
-.empty-state{min-height:200px;display:grid;place-items:center;align-content:center;gap:10px;color:var(--muted);padding:20px;text-align:center}
+.empty-state{display:grid;place-items:center;align-content:center;gap:10px;color:var(--muted);padding:28px 20px;text-align:center}
 .empty-state p{margin:0}
 .link-button{border:0;background:transparent;color:var(--blue);padding:5px 0}
 .icon-button{padding:5px;border:0;background:transparent}
@@ -50,7 +50,7 @@ p{line-height:1.65}
 
 /* ============ 应用壳：顶栏 / 全局导航 / 搜索工具 ============ */
 .app-shell{--workspace-max:1560px;--agent-rail-width:260px;--workspace-content-max:1280px;--workspace-gap:18px}
-.app-shell>main.workspace-shell{min-height:calc(100vh - 82px);max-width:var(--workspace-max);margin:0 auto;padding:18px 24px 42px;display:grid;grid-template-columns:var(--agent-rail-width) minmax(0,1fr);gap:var(--workspace-gap)}
+.app-shell>main.workspace-shell{max-width:var(--workspace-max);margin:0 auto;padding:18px 24px 42px;display:grid;grid-template-columns:var(--agent-rail-width) minmax(0,1fr);align-items:start;gap:var(--workspace-gap)}
 .workspace-content{min-width:0;max-width:var(--workspace-content-max);width:100%}
 .agent-task-rail{position:sticky;top:100px;align-self:start;max-height:calc(100vh - 120px);overflow:auto;padding:14px;border:1px solid var(--line);border-radius:10px;background:#fafcff}
 .agent-task-rail h2{margin:0 0 12px;font-size:15px}.agent-rail-empty{margin:0;color:var(--muted);font-size:13px}.agent-task-list{display:grid;gap:10px}.agent-task-card{display:grid;gap:7px;padding:10px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:13px}.agent-task-card>span,.agent-task-card>small{color:var(--muted);line-height:1.45}.agent-task-actions{display:flex;gap:6px;align-items:center}.agent-task-actions button{padding:6px 8px;font-size:12px;display:inline-flex;align-items:center;gap:4px}
@@ -73,7 +73,7 @@ p{line-height:1.65}
 
 /* ============ 通用页面容器（一致的页头高度与内容宽度） ============ */
 .page{max-width:var(--workspace-content-max);margin:0 auto;padding:24px 0 42px}
-.page-heading{min-height:88px;display:flex;align-items:center;justify-content:space-between;gap:18px;padding:6px 4px 14px;border-bottom:1px solid var(--line);margin-bottom:18px}
+.page-heading{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:6px 4px 14px;border-bottom:1px solid var(--line);margin-bottom:18px}
 .page-heading h1{font-size:28px;margin:0 4px 4px;letter-spacing:.02em}
 .page-heading p{margin:0;color:var(--muted);font-size:15px}
 
@@ -142,7 +142,7 @@ p{line-height:1.65}
 .foundation-toolbar{min-height:74px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 20px}
 .foundation-toolbar h2,.foundation-toolbar p{margin:0}
 .foundation-toolbar h2{font-size:18px}
-.foundation-workspace{display:grid;grid-template-columns:180px minmax(260px,320px) minmax(0,1fr);height:min(660px,calc(100vh - 180px));min-height:480px}
+.foundation-workspace{display:grid;grid-template-columns:180px minmax(260px,320px) minmax(0,1fr);height:clamp(360px,calc(100vh - 250px),620px);min-height:0}
 .foundation-category-nav{min-width:0;padding:14px 10px;border-right:1px solid var(--line);overflow-y:auto;background:#fbfdff}
 .foundation-category-nav section{display:grid;gap:3px;margin-bottom:14px}
 .foundation-category-nav h3{margin:0 8px 5px;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
@@ -205,7 +205,7 @@ p{line-height:1.65}
 .length-overview input,.stage-row input{border:1px solid var(--line);border-radius:8px;padding:8px;background:#fff}
 .length-overview strong{font-size:20px}
 .length-overview span{font-size:12px;color:var(--muted)}
-.planning-structure-grid{display:grid;grid-template-columns:1fr 1.5fr;gap:16px;min-height:420px;max-height:min(620px,calc(100vh - 330px))}
+.planning-structure-grid{display:grid;grid-template-columns:1fr 1.5fr;gap:16px;min-height:0;max-height:min(620px,calc(100vh - 330px))}
 .stage-planning,.chapter-planning{border:1px solid var(--line);border-radius:10px;padding:14px;display:flex;flex-direction:column;min-height:0}
 .stage-planning>header,.chapter-planning>header{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .stage-planning h3,.chapter-planning h3{display:flex;align-items:center;gap:7px;margin:0;font-size:15px}
@@ -237,7 +237,7 @@ p{line-height:1.65}
 .planning-list{margin:0;padding-left:18px;display:grid;gap:6px;font-size:14px;line-height:1.6}
 
 /* ============ 正文管理：左章节 / 中正文 / 右唯一 AI 协作区 ============ */
-.writing-layout{display:grid;grid-template-columns:280px minmax(420px,1fr) 400px;gap:16px;height:calc(100vh - 194px);min-height:640px}
+.writing-layout{display:grid;grid-template-columns:280px minmax(420px,1fr) 400px;gap:16px;height:clamp(480px,calc(100vh - 230px),760px);min-height:0}
 .chapters{overflow:hidden;display:flex;flex-direction:column;background:linear-gradient(180deg,#fff 60%,#f2f7ff)}
 .chapters header{display:flex;padding:16px 20px;justify-content:space-between;border-bottom:1px solid var(--line)}
 .chapters header h2{margin:0;font-size:17px}
@@ -276,16 +276,16 @@ p{line-height:1.65}
 .status-failed{background:#fff0f0;color:var(--red)}
 
 /* ============ 故事地图：派生只读视图（关系图 / 时间事件 / 未解决线索） ============ */
-.map-page{overflow:hidden;min-height:480px}
+.map-page{overflow:hidden}
 .map-tabs{height:56px;border-bottom:1px solid var(--line);display:flex;align-items:stretch;padding:0 26px}
 .map-tabs button{border:0;border-radius:0;background:transparent;position:relative}
 .map-tabs button.active{color:var(--blue)}
 .map-tabs button.active:after{content:"";position:absolute;bottom:0;left:12px;right:12px;height:3px;background:var(--blue)}
-.map-graph-wrap{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:0;min-height:560px}
+.map-graph-wrap{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:0}
 .map-graph-main{padding:18px 22px;min-width:0}
 .map-author-actions{display:flex;align-items:center;gap:8px;min-height:36px;margin-bottom:10px;flex-wrap:wrap}
 .map-author-actions .muted-note{font-size:12px}
-.map-graph{height:480px;border:1px solid var(--line);border-radius:10px;background:linear-gradient(135deg,#f7fbff,#fff)}
+.map-graph{height:clamp(340px,calc(100vh - 330px),480px);border:1px solid var(--line);border-radius:10px;background:linear-gradient(135deg,#f7fbff,#fff)}
 .map-graph-stage{position:relative}
 .map-tooltip{position:absolute;z-index:12;pointer-events:none;width:min(260px,70vw);display:grid;grid-template-columns:auto 1fr;gap:4px 10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.97);box-shadow:0 12px 30px rgba(33,59,102,.16);font-size:12px}
 .map-tooltip .character-avatar-image,.map-tooltip .character-avatar-placeholder{width:38px;height:38px}
@@ -429,10 +429,10 @@ p{line-height:1.65}
 .material-facts{display:flex;flex-wrap:wrap;gap:4px 14px}
 
 /* ============ 素材四区互斥工作流（§13：稳定两栏、无横向滚动、左右各自纵向滚动） ============ */
-.materials-workflow{display:grid;grid-template-columns:minmax(0,68%) minmax(0,1fr);gap:16px;height:calc(100vh - 300px);min-height:440px;overflow-x:hidden}
+.materials-workflow{display:grid;grid-template-columns:minmax(0,68%) minmax(0,1fr);gap:16px;height:clamp(320px,calc(100vh - 330px),620px);min-height:0;overflow-x:hidden}
 .materials-left{min-height:0;min-width:0;overflow-y:auto;overflow-x:hidden;padding-right:4px}
 .materials-right{min-height:0;min-width:0;overflow-y:auto;overflow-x:hidden}
-.materials-right .material-detail{min-height:320px}
+.materials-right .material-detail{min-height:0}
 .batch-type-selector{display:grid;gap:10px;margin-top:12px}
 .batch-type-selector h4{margin:0;font-size:14px}
 .type-choices{display:flex;gap:8px;flex-wrap:wrap}
@@ -512,7 +512,7 @@ p{line-height:1.65}
 .settings-notice.success{background:#e9f8f2;color:#13815f}
 .settings-notice.error{background:#fff0f0;color:#b14950}
 .settings-notice.info{background:#eef4ff;color:var(--blue)}
-.settings-loading{min-height:320px;display:flex;align-items:center;justify-content:center;gap:12px;color:var(--muted)}
+.settings-loading{min-height:96px;display:flex;align-items:center;justify-content:center;gap:12px;color:var(--muted)}
 .settings-loading span{width:18px;height:18px;border:2px solid #b8cdfc;border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite}
 .agent-discovery-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 .agent-card{border:1px solid var(--line);border-radius:12px;padding:18px}
@@ -577,7 +577,7 @@ p{line-height:1.65}
 .search{display:none}
 .works-grid{grid-template-columns:1fr}
 .writing-layout{grid-template-columns:250px 1fr;height:auto}
-.ai-collab{grid-column:1/-1;min-height:420px}
+.ai-collab{grid-column:1/-1;min-height:320px}
 .planning-page{grid-template-columns:1fr}
 .overview-facts,.foundation-direction{grid-template-columns:1fr}
 .foundation-workspace{grid-template-columns:150px minmax(240px,290px) minmax(0,1fr)}
@@ -597,14 +597,14 @@ p{line-height:1.65}
 .global-nav button{height:44px;white-space:nowrap}
 .settings-link{margin-left:auto}
 .app-shell>main.workspace-shell{display:block;padding:12px 14px}.agent-task-rail{position:static;max-height:none;margin-bottom:12px}.page{padding:18px 0}
-.page-heading{min-height:72px}
+.page-heading{min-height:0}
 .works-grid,.ideas-grid,.review-columns,.planning-page,.overview-facts,.foundation-direction{grid-template-columns:1fr}
 .foundation-profile{grid-template-columns:1fr}
 .foundation-profile h3{grid-column:auto}
 .foundation-toolbar{align-items:flex-start;flex-direction:column}
 .foundation-workspace{grid-template-columns:130px minmax(0,1fr);height:auto;min-height:0}
 .foundation-category-nav{max-height:520px}
-.foundation-record-column{min-height:420px;border-right:0}
+.foundation-record-column{min-height:300px;border-right:0}
 .foundation-detail-pane{grid-column:1/-1;min-height:360px;border-top:1px solid var(--line)}
 .foundation-inline-editor{height:min(620px,calc(100vh - 120px))}
 .projectbar{height:auto;flex-wrap:wrap;padding:8px}
@@ -612,7 +612,7 @@ p{line-height:1.65}
 .projectbar nav button{height:45px;white-space:nowrap}
 .project-content{padding:12px}
 .writing-layout{grid-template-columns:1fr;height:auto}
-.chapters,.editor,.ai-collab{min-height:480px}
+.chapters,.editor,.ai-collab{min-height:320px}
 .review-head{flex-wrap:wrap}
 .review-head-actions{margin-left:0}
 .settings-layout{grid-template-columns:1fr}

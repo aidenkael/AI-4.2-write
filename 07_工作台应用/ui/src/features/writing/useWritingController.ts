@@ -82,7 +82,7 @@ function taskViewForProject(
     requestId: task.requestId || null,
     writingToken: null as string | null,
     candidate: null as ProposeStoryWriteResult | null,
-    phase: null as WritingPhase,
+    phase: task.phase as WritingPhase,
     phaseMessage: task.message,
     error: task.error,
     execution: task.execution

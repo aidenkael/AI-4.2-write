@@ -31,7 +31,7 @@ test('taskTarget maps to owning page/section', () => {
 test('deriveTaskStatus: interactive pending → waiting_author; direct → running', () => {
   assert.equal(deriveTaskStatus('story_plan', 'pending', null, 'interactive_bridge'), 'waiting_author')
   assert.equal(deriveTaskStatus('story_plan', 'pending', null, 'direct'), 'running')
-  assert.equal(deriveTaskStatus('story_write', 'pending', 'pending_prose', 'interactive_bridge'), 'waiting_author')
+  assert.equal(deriveTaskStatus('story_write', 'pending', 'pending_prose', 'interactive_bridge'), 'running')
   // 交互阶段即使 execution_mode 缺失也按阶段识别（resume 场景）
   assert.equal(deriveTaskStatus('story_write', 'pending', 'pending_selection', null), 'waiting_author')
   assert.equal(deriveTaskStatus('story_write', 'completed', null, 'direct'), 'candidate')
@@ -51,10 +51,10 @@ test('candidateReadyMessage is truthful per kind', () => {
   assert.equal(candidateReadyMessage('review'), '检查报告已生成 · 返回查看')
 })
 
-test('taskStripView: waiting_author → gowrite primary action', () => {
+test('taskStripView: initial waiting_author → gowrite primary action', () => {
   const view = taskStripView({
     kind: 'story_write', requestId: 'r', projectId: 'p', status: 'waiting_author',
-    phase: 'pending_prose', message: '上下文已准备好，请再次执行 /gowrite 生成正文',
+    phase: 'pending_selection', message: '等待 Agent 选择本次写作上下文',
     execution: { execution_mode: 'interactive_bridge' }, result: null, error: null,
   })
   assert.equal(view.label, '正文写作')
@@ -62,6 +62,16 @@ test('taskStripView: waiting_author → gowrite primary action', () => {
   assert.equal(view.primaryLabel, '前往 Qoder')
   assert.equal(view.stateText, '等待 Agent')
   assert.equal(view.canCancel, true)
+})
+
+test('taskStripView: pending prose auto-continuation never asks for gowrite again', () => {
+  const view = taskStripView({
+    kind: 'story_write', requestId: 'r', projectId: 'p', status: 'running',
+    phase: 'pending_prose', message: '上下文已准备好，Agent 正在自动生成正文',
+    execution: { execution_mode: 'interactive_bridge' }, result: null, error: null,
+  })
+  assert.equal(view.primaryAction, 'return')
+  assert.doesNotMatch(view.stateText, /Qoder|gowrite/)
 })
 
 test('taskStripView: running → return action with direct-mode secondary detail', () => {

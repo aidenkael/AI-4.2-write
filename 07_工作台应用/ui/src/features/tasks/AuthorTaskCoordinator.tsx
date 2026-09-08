@@ -253,12 +253,11 @@ export function AuthorTaskCoordinatorProvider({ children }: { children: ReactNod
         ? (await getActiveAuthorOperations().catch(() => [])).find((item) => item.request_id === prepared.request_id)
         : null
       const requestId = prepared.request_id ?? `local:${Date.now()}:${Math.random().toString(16).slice(2)}`
-      const interactive = prepared.execution_mode !== 'direct'
       const task: AuthorTask = {
         kind: payload.kind,
         requestId,
         projectId: prepared.project_id ?? ('project_id' in payload ? payload.project_id : null),
-        status: interactive ? (facts?.execution_phase === 'running' ? 'running' : 'waiting_author') : 'running',
+        status: deriveTaskStatus(payload.kind, 'pending', prepared.phase ?? facts?.phase ?? null, prepared.execution_mode),
         phase: prepared.phase ?? facts?.phase ?? null,
         message: prepared.message ?? facts?.message ?? null,
         execution: {
@@ -335,12 +334,11 @@ export function AuthorTaskCoordinatorProvider({ children }: { children: ReactNod
         const kind = facts.kind as AuthorTaskKind
         if (!facts.request_id || !pollers[kind]) continue
         const orphaned = facts.state === 'orphaned'
-        const interactive = facts.execution_mode === 'interactive_bridge'
         const task: AuthorTask = {
           kind,
           requestId: facts.request_id,
           projectId: facts.project_id,
-          status: orphaned ? 'failed' : (interactive ? (facts.execution_phase === 'running' ? 'running' : 'waiting_author') : 'running'),
+          status: orphaned ? 'failed' : deriveTaskStatus(kind, 'pending', facts.phase, facts.execution_mode),
           phase: facts.phase,
           message: facts.message,
           execution: { execution_mode: facts.execution_mode, agent_id: facts.agent_id, model: facts.model, agent_command: facts.agent_command },
