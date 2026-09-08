@@ -290,3 +290,9 @@ derived state / Snapshot / Story Map / next Context 刷新
 - 不为了“模块化”增加无业务价值的 interface/factory/service/repository 层。
 
 判断标准始终是：**是否让下一次真实维护更简单，同时不增加作者侧复杂度和模型消耗。**
+
+## 11. Agent task 与临时生命周期
+
+- 语义能力的规则源在 05 Skill；07 保留 Author Operation、请求级 P0 绑定、输出 schema 与调度。BookDistill 通过 `05_Skills与自动化/01_Skills/BookDistill/agent_task.py` 生成 Agent task，Workbench 不再持有缩减模板。
+- StoryWrite Interactive 是同一 request_id 的两阶段、一次作者命令；`qoder_bridge.await_next_stage` 只做确定性等待/重新 claim，模型阶段仍由两个全新独立子 Agent 执行。
+- 一切 cancel/discard 由各 Author Operation 清理候选工作区，并统一调用 `qoder_bridge.cleanup_request` 删除 request/response/claim/slot；`execution_audit` 提供幂等终态识别。素材学习额外删除当前 request 的 06 staging，不触碰已发布 02。

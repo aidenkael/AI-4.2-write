@@ -2,7 +2,7 @@
 
 Go Write 正式作者侧桌面应用。`PRODUCT_BASELINE = GO_WRITE_2_0_APPROVED`；UI 1.0 仅保留为历史技术纵切/实现参考。当前阶段：`REAL_WRITING_USAGE`。
 
-## 当前状态（2026-09-01）
+## 当前状态（2026-09-08）
 
 - M1–M4 真实运行时纵切已完成并合并至 main：NewProject、StoryPlan、StoryWrite、Foundation 设计与 Review 均有当前正式路径。
 - Agent 任务按既有任务合同走 Interactive `/gowrite` 或已配置的 Direct 路径；Daily AI 是独立、薄的 Direct-AI 路径，不取代需要工具/多步骤决策的 Agent。
@@ -111,10 +111,8 @@ Agent 执行可按既有任务合同使用 Qoder Desktop `/gowrite` 或已配置
   + 保存完整 Agent task + 指定结果写回位置（`06_工作区/应用开发/.qoder_bridge/`，
   Local Only，可删除）；对应的 `get_*_request` 轮询写回结果，校验 `request_id`
   后把模型最终结果交回现有严格 JSON/字段验证与 StoryDesign / StoryPlan。
-- Qoder 侧：用户级自定义命令 `~/.qoder/commands/gowrite.md`（官方 Custom
-  Command；模板见 `06_工作区/应用开发/.qoder_bridge/gowrite.md.template`）。
-  Qoder 读 `active.json` → 读请求文件 → 按 `task` 执行 → 只向该请求指定的
-  `response_path` 写回（必须携带相同 `request_id`）→ 给用户一句完成提示。
+- Qoder 侧：用户级固定槽命令为 `.qoder/commands/gowrite/1.md` … `4.md`（`.qoder-cn` 同步）。命令原子 claim 精确 slot 中的 request_id，把每个阶段的 `task` 委派给全新独立子 Agent，再用标准 JSON serializer 写入 `response_path`。
+- 单命令续行：请求声明 `auto_continue=true` 时，命令在写回当前阶段后调用 `qoder_bridge.py await-next <request_id> <slot>`；Go Write 验收并换入下一阶段任务后，同一命令会用另一个新子 Agent 自动继续。作者不需第二次输入 `/gowrite`。
 - 安全：`request_id` 防串任务；取消/超时/完成后清理桥文件，旧结果不可能被
   下一次请求接受；桥文件绝不在 03_作品工程 中；Qoder 会话历史不是记忆来源。
 - 已接入当前路径的作者链包括新建作品、故事规划、正文写作、Foundation 设计与检查；每项任务按其既有 Interactive/Direct 合同执行。

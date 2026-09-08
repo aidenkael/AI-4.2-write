@@ -185,6 +185,14 @@ BKP 长期保存作品身份、作品地图、BookProfile、Observation、Infere
 
 当前阶段允许的是：按 Go Write 2.0 正式产品基线、并参考 UI 1.0 技术纵切实现 07_工作台应用，以及由真实 UI 使用证明必要的最小底层补强。
 
+## 作者交互、能力接线与临时生命周期
+
+- 一个逻辑作者任务只允许一次 UI 发起；Interactive 最多要求作者输入一次 `/gowrite`。内部多阶段由桥自动续行，不把内部阶段暴露成第二次作者命令。
+- 需要阶段隔离时，每个阶段使用全新、独立 context 的 Agent invocation；后一阶段只消费确定性编译的精确上下文。
+- 05 Skill 是一项文学/语义能力的首要规则源。07 工作台只能拥有运行时包装、严格输出合同与生命周期；若确需 Agent task 文本，优先由 Skill 侧 canonical builder 生成，不在 Workbench 复制缩减版 Skill。
+- 取消/丢弃必须幂等地删除本 request 的临时工作区、bridge request/response/claim/slot 与进程内任务记录；持久审计可作终态真相，不为取消另建 tombstone store。
+- 页面壳、空状态、loading 和短内容不得用大块 viewport `min-height` 撑出假工作区；列表型三栏/双栏工作区仍保留有界高度与单一内部滚动责任。
+
 ## Git 安全
 
 无明确授权禁止：`reset / restore / clean / force push / rebase / merge`。
