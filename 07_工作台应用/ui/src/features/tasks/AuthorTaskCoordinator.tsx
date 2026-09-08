@@ -24,7 +24,7 @@ import {
   type AuthorTask, type AuthorTaskKind,
 } from './taskModel'
 import {
-  dropTask, isTaskExecuting, patchRequestTask, putTask, startConflict, waitingPhaseKey,
+  dropTask, isTaskExecuting, patchRequestTask, putTask, resolveTaskStartFacts, startConflict, waitingPhaseKey,
   type AuthorTasksByRequestId, type TaskStartDescriptor,
 } from './coordinatorModel'
 
@@ -53,7 +53,18 @@ export interface AuthorTaskController {
 
 export const AuthorTaskContext = createContext<AuthorTaskController | null>(null)
 
-type PollStatus = { status: string; phase?: string | null; execution_phase?: string | null; agent_command?: string | null; message?: string | null; result?: unknown | null; error?: string | null }
+type PollStatus = {
+  status: string
+  phase?: string | null
+  execution_phase?: string | null
+  execution_mode?: string | null
+  agent_id?: string | null
+  model?: string | null
+  agent_command?: string | null
+  message?: string | null
+  result?: unknown | null
+  error?: string | null
+}
 
 const pollers: Record<AuthorTaskKind, (requestId: string) => Promise<PollStatus>> = {
   new_project: async (rid) => (await getNewProjectRequest(rid)) as NewProjectRequestStatus,
@@ -150,7 +161,9 @@ export function AuthorTaskCoordinatorProvider({ children }: { children: ReactNod
     if (command && !copiedWaitingRef.current.has(key)) {
       copiedWaitingRef.current.add(key)
       void copyExactCommand(command).then((copied) => {
-        if (copied) actions.notify(`已复制 ${command}，请前往 Qoder。`)
+        actions.notify(copied
+          ? `已复制 ${command}，请在 Qoder 中执行。`
+          : '自动复制失败，请点击复制')
       })
     }
     if (!notifiedWaitingRef.current.has(key)) {
@@ -162,12 +175,18 @@ export function AuthorTaskCoordinatorProvider({ children }: { children: ReactNod
   const handlePollResult = useCallback((requestId: string, poll: PollStatus) => {
     const current = tasksRef.current[requestId]
     if (!current || !isTaskExecuting(current)) return
+    const executionMode = poll.execution_mode ?? current.execution?.execution_mode
     const status = poll.execution_phase === 'running'
       ? 'running'
-      : deriveTaskStatus(current.kind, poll.status, poll.phase ?? null, current.execution?.execution_mode)
-    const execution = poll.agent_command
-      ? { ...(current.execution ?? {}), agent_command: poll.agent_command }
-      : current.execution
+      : deriveTaskStatus(current.kind, poll.status, poll.phase ?? null, executionMode)
+    const execution = {
+      ...(current.execution ?? {}),
+      execution_mode: executionMode ?? null,
+      agent_id: poll.agent_id ?? current.execution?.agent_id ?? null,
+      model: poll.model ?? current.execution?.model ?? null,
+      agent_command: poll.agent_command ?? current.execution?.agent_command ?? null,
+      execution_phase: poll.execution_phase ?? current.execution?.execution_phase ?? null,
+    }
     if (status === 'waiting_author') {
       const next: AuthorTask = {
         ...current,
@@ -239,6 +258,7 @@ export function AuthorTaskCoordinatorProvider({ children }: { children: ReactNod
       let prepared: {
         request_id?: string | null; project_id?: string | null; execution_mode?: string | null
         agent_id?: string | null; model?: string | null; phase?: string | null
+        execution_phase?: string | null; agent_command?: string | null
         message?: string | null; status?: string | null
       }
       switch (payload.kind) {
@@ -253,19 +273,15 @@ export function AuthorTaskCoordinatorProvider({ children }: { children: ReactNod
         ? (await getActiveAuthorOperations().catch(() => [])).find((item) => item.request_id === prepared.request_id)
         : null
       const requestId = prepared.request_id ?? `local:${Date.now()}:${Math.random().toString(16).slice(2)}`
+      const startFacts = resolveTaskStartFacts(payload.kind, prepared, facts)
       const task: AuthorTask = {
         kind: payload.kind,
         requestId,
         projectId: prepared.project_id ?? ('project_id' in payload ? payload.project_id : null),
-        status: deriveTaskStatus(payload.kind, 'pending', prepared.phase ?? facts?.phase ?? null, prepared.execution_mode),
-        phase: prepared.phase ?? facts?.phase ?? null,
+        status: startFacts.status,
+        phase: startFacts.phase,
         message: prepared.message ?? facts?.message ?? null,
-        execution: {
-          execution_mode: prepared.execution_mode,
-          agent_id: prepared.agent_id ?? null,
-          model: prepared.model ?? null,
-          agent_command: facts?.agent_command ?? null,
-        },
+        execution: startFacts.execution,
         result: null,
         error: null,
         meta: payload.kind === 'material_distill' ? { asset_id: payload.asset_id, target_label: payload.asset_name ?? facts?.target_label ?? null } : null,
@@ -338,10 +354,14 @@ export function AuthorTaskCoordinatorProvider({ children }: { children: ReactNod
           kind,
           requestId: facts.request_id,
           projectId: facts.project_id,
-          status: orphaned ? 'failed' : deriveTaskStatus(kind, 'pending', facts.phase, facts.execution_mode),
+          status: orphaned
+            ? 'failed'
+            : facts.execution_phase === 'running'
+              ? 'running'
+              : deriveTaskStatus(kind, 'pending', facts.phase, facts.execution_mode),
           phase: facts.phase,
           message: facts.message,
-          execution: { execution_mode: facts.execution_mode, agent_id: facts.agent_id, model: facts.model, agent_command: facts.agent_command },
+          execution: { execution_mode: facts.execution_mode, agent_id: facts.agent_id, model: facts.model, agent_command: facts.agent_command, execution_phase: facts.execution_phase },
           result: null,
           error: orphaned ? (facts.message ?? '直连任务已失效，请重新发起。') : null,
           meta: kind === 'material_distill' ? { asset_id: facts.asset_id, target_label: facts.target_label } : null,

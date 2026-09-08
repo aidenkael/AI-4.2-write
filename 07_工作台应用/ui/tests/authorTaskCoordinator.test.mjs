@@ -3,9 +3,12 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import React from 'react'
+import { create } from 'react-test-renderer'
 import {
-  dropTask, patchRequestTask, putTask, startConflict, taskList, waitingPhaseKey,
+  dropTask, patchRequestTask, putTask, resolveTaskStartFacts, startConflict, taskList, waitingPhaseKey,
 } from '../.test-build/features/tasks/coordinatorModel.js'
+import { AgentTaskRailView } from '../.test-build/features/tasks/AgentTaskRailView.js'
 import { taskStripView } from '../.test-build/features/tasks/taskModel.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -61,6 +64,59 @@ test('waiting/running HCI and backend command are request-specific', () => {
   assert.match(taskStripView({ ...waiting, status: 'running' }).stateText, /^Agent 正在执行/)
 })
 
+test('material start trusts backend execution facts when prepare omits them', () => {
+  const waiting = resolveTaskStartFacts('material_distill', {}, {
+    execution_mode: 'interactive_bridge',
+    execution_phase: 'waiting_agent',
+    agent_command: '/gowrite:2',
+    agent_id: 'qoder',
+  })
+  assert.equal(waiting.status, 'waiting_author')
+  assert.equal(waiting.execution.agent_command, '/gowrite:2')
+  assert.equal(waiting.execution.execution_mode, 'interactive_bridge')
+
+  const running = resolveTaskStartFacts('material_distill', {}, {
+    execution_mode: 'interactive_bridge',
+    execution_phase: 'running',
+    agent_command: '/gowrite:2',
+  })
+  assert.equal(running.status, 'running')
+})
+
+test('AgentTaskRail waiting material renders exact command and author-readable actions only while waiting', () => {
+  const waiting = material('r1', 'book-a', 'waiting_author', null, '/gowrite:2')
+  waiting.meta.target_label = '将夜'
+  const copied = []
+  const focused = []
+  const renderer = create(React.createElement(AgentTaskRailView, {
+    tasks: [waiting],
+    onCopy: (command) => copied.push(command),
+    onFocus: (command) => focused.push(command),
+    onCancel: () => {},
+    onNavigate: () => {},
+  }))
+  const waitingText = JSON.stringify(renderer.toJSON())
+  assert.match(waitingText, /素材学习/)
+  assert.match(waitingText, /将夜/)
+  assert.match(waitingText, /\/gowrite:2/)
+  assert.match(waitingText, /复制/)
+  assert.match(waitingText, /前往 Qoder/)
+  const buttons = renderer.root.findAllByType('button')
+  buttons.find((button) => String(button.props['aria-label'] ?? '').startsWith('复制 ')).props.onClick()
+  buttons.find((button) => button.children.some((child) => child === '前往 Qoder')).props.onClick()
+  assert.deepEqual(copied, ['/gowrite:2'])
+  assert.deepEqual(focused, ['/gowrite:2'])
+
+  renderer.update(React.createElement(AgentTaskRailView, {
+    tasks: [{ ...waiting, status: 'running' }],
+    onCopy: () => {}, onFocus: () => {}, onCancel: () => {}, onNavigate: () => {},
+  }))
+  const runningText = JSON.stringify(renderer.toJSON())
+  assert.doesNotMatch(runningText, /\/gowrite:2/)
+  assert.doesNotMatch(runningText, /前往 Qoder/)
+  renderer.unmount()
+})
+
 test('waiting phase keys remain request-and-phase bound', () => {
   const phase1 = exclusive('write-1', 'story_write', 'waiting_author', 'pending_selection')
   const rerender = { ...phase1 }
@@ -78,14 +134,34 @@ test('layout CSS avoids page-wide blank-height floors while retaining bounded wo
   assert.match(styles, /\.materials-workflow\{[^}]*height:clamp\(/)
 })
 
+test('1920px desktop workspace has 24px outer gutters and no legacy outer width cap', () => {
+  const styles = fs.readFileSync(path.join(src, 'styles.css'), 'utf8')
+  assert.doesNotMatch(styles, /--workspace-(?:max|content-max)/)
+  assert.match(styles, /\.app-shell>main\.workspace-shell\{[^}]*width:100%;[^}]*max-width:none;[^}]*margin:0;[^}]*padding:18px 24px 42px/)
+  assert.match(styles, /grid-template-columns:var\(--agent-rail-width\) minmax\(0,1fr\)/)
+  assert.match(styles, /\.workspace-content\{[^}]*min-width:0;[^}]*width:100%;[^}]*max-width:none/)
+  assert.match(styles, /\.page\{[^}]*width:100%;[^}]*max-width:none;[^}]*margin:0/)
+  assert.match(styles, /\.project-content\{[^}]*width:100%;[^}]*max-width:none;[^}]*margin:0/)
+  assert.doesNotMatch(styles, /\.(?:overview-page|foundation-page|planning-page|review-page)\{[^}]*max-width:/)
+  const viewport = 1920
+  const gutter = 24
+  const rail = 260
+  const gap = 18
+  assert.equal(viewport - (2 * gutter) - rail - gap, 1594)
+})
+
 test('left Agent rail maps independent request cards and legacy bottom strip is absent', () => {
   const rail = fs.readFileSync(path.join(src, 'features', 'tasks', 'AgentTaskRail.tsx'), 'utf8')
+  const railView = fs.readFileSync(path.join(src, 'features', 'tasks', 'AgentTaskRailView.tsx'), 'utf8')
   const shell = fs.readFileSync(path.join(src, 'layouts', 'AppShell.tsx'), 'utf8')
   const styles = fs.readFileSync(path.join(src, 'styles.css'), 'utf8')
-  assert.match(rail, /tasks\.map\(\(task\)/)
-  assert.match(rail, /key=\{task\.requestId\}/)
-  assert.doesNotMatch(rail, /`\/gowrite:/)
+  assert.match(railView, /tasks\.map\(\(task\)/)
+  assert.match(railView, /key=\{task\.requestId\}/)
+  assert.doesNotMatch(`${rail}\n${railView}`, /`\/gowrite:/)
   assert.match(shell, /<AgentTaskRail/)
   assert.doesNotMatch(shell, /TaskStrip/)
   assert.doesNotMatch(styles, /\.task-strip/)
+  const coordinator = fs.readFileSync(path.join(src, 'features', 'tasks', 'AuthorTaskCoordinator.tsx'), 'utf8')
+  assert.match(coordinator, /已复制 \$\{command\}，请在 Qoder 中执行。/)
+  assert.match(coordinator, /自动复制失败，请点击复制/)
 })

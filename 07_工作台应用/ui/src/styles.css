@@ -49,11 +49,11 @@ p{line-height:1.65}
 .form-dialog textarea,.new-project-dialog textarea{min-height:90px;resize:vertical}
 
 /* ============ 应用壳：顶栏 / 全局导航 / 搜索工具 ============ */
-.app-shell{--workspace-max:1560px;--agent-rail-width:260px;--workspace-content-max:1280px;--workspace-gap:18px}
-.app-shell>main.workspace-shell{max-width:var(--workspace-max);margin:0 auto;padding:18px 24px 42px;display:grid;grid-template-columns:var(--agent-rail-width) minmax(0,1fr);align-items:start;gap:var(--workspace-gap)}
-.workspace-content{min-width:0;max-width:var(--workspace-content-max);width:100%}
+.app-shell{--agent-rail-width:260px;--workspace-gap:18px}
+.app-shell>main.workspace-shell{width:100%;max-width:none;margin:0;padding:18px 24px 42px;display:grid;grid-template-columns:var(--agent-rail-width) minmax(0,1fr);align-items:start;gap:var(--workspace-gap)}
+.workspace-content{min-width:0;width:100%;max-width:none}
 .agent-task-rail{position:sticky;top:100px;align-self:start;max-height:calc(100vh - 120px);overflow:auto;padding:14px;border:1px solid var(--line);border-radius:10px;background:#fafcff}
-.agent-task-rail h2{margin:0 0 12px;font-size:15px}.agent-rail-empty{margin:0;color:var(--muted);font-size:13px}.agent-task-list{display:grid;gap:10px}.agent-task-card{display:grid;gap:7px;padding:10px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:13px}.agent-task-card>span,.agent-task-card>small{color:var(--muted);line-height:1.45}.agent-task-actions{display:flex;gap:6px;align-items:center}.agent-task-actions button{padding:6px 8px;font-size:12px;display:inline-flex;align-items:center;gap:4px}
+.agent-task-rail h2{margin:0 0 12px;font-size:15px}.agent-rail-empty{margin:0;color:var(--muted);font-size:13px}.agent-task-list{display:grid;gap:10px}.agent-task-card{display:grid;gap:7px;padding:10px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:13px}.agent-task-card>span,.agent-task-card>small{color:var(--muted);line-height:1.45}.agent-task-command-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center}.agent-task-command{display:block;min-width:0;padding:7px 9px;border:1px solid #cddcf4;border-radius:7px;background:#f2f7ff;color:#174da8;font-size:13px;overflow-wrap:anywhere}.agent-task-command-row button,.agent-task-actions button{padding:6px 8px;font-size:12px;display:inline-flex;align-items:center;gap:4px}.agent-task-actions{display:flex;gap:6px;align-items:center;justify-content:space-between}
 .topbar{height:82px;background:rgba(255,255,255,.96);border-bottom:1px solid var(--line);display:flex;align-items:stretch;padding:0 36px;gap:28px;position:sticky;top:0;z-index:50}
 .brand{border:0;border-radius:0;background:transparent;color:#18356d;padding:0 8px;font-size:30px;min-width:220px;justify-content:flex-start}
 .brand strong{color:#172545}
@@ -72,7 +72,7 @@ p{line-height:1.65}
 /* ============ 全局运行任务条（App 级协调器 HCI） ============ */
 
 /* ============ 通用页面容器（一致的页头高度与内容宽度） ============ */
-.page{max-width:var(--workspace-content-max);margin:0 auto;padding:24px 0 42px}
+.page{width:100%;max-width:none;margin:0;padding:24px 0 42px}
 .page-heading{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:6px 4px 14px;border-bottom:1px solid var(--line);margin-bottom:18px}
 .page-heading h1{font-size:28px;margin:0 4px 4px;letter-spacing:.02em}
 .page-heading p{margin:0;color:var(--muted);font-size:15px}
@@ -99,7 +99,7 @@ p{line-height:1.65}
 .projectbar nav button{border:0;border-radius:0;background:transparent;position:relative;padding:0 18px}
 .projectbar nav button.active{color:var(--blue)}
 .projectbar nav button.active:after{content:"";position:absolute;left:10px;right:10px;bottom:0;height:4px;background:var(--blue);border-radius:4px}
-.project-content{padding:18px 0 28px;max-width:var(--workspace-content-max);margin:0 auto}
+.project-content{width:100%;max-width:none;margin:0;padding:18px 0 28px}
 .project-state-refresh.compact{align-self:center;border:1px solid #cbd9ef;background:#f7faff;color:#315aab;padding:7px 10px;font-size:13px;white-space:nowrap}
 .project-state-refresh.compact.failed{border-color:#efcaca;background:#fff7f7;color:var(--red)}
 .project-state-refresh-drawer{z-index:40}
@@ -108,7 +108,7 @@ p{line-height:1.65}
 .project-state-consequences span{color:var(--muted)}
 
 /* ============ 作品概览：紧凑状态 + 下一步动作 ============ */
-.overview-page{display:grid;gap:16px;max-width:1280px;margin:0 auto}
+.overview-page{display:grid;gap:16px;width:100%;margin:0}
 .overview-status{padding:22px 26px}
 .overview-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:14px}
 .overview-card{border:1px solid var(--line);border-radius:8px;background:#fafcff;padding:14px 16px;min-width:0}
@@ -129,7 +129,7 @@ p{line-height:1.65}
 .overview-footnote{display:flex;align-items:center;gap:6px;margin:0}
 
 /* ============ 作品地基：当前已确定事实的可读投影 ============ */
-.foundation-page{display:grid;gap:16px;max-width:1280px;margin:0 auto}
+.foundation-page{display:grid;gap:16px;width:100%;margin:0}
 .foundation-direction{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 .foundation-direction section{padding:16px 20px}
 .foundation-direction h3{margin:0 0 6px;font-size:15px;color:var(--blue)}
@@ -196,7 +196,7 @@ p{line-height:1.65}
 .sync-warning-action{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
 
 /* ============ 大纲与规划：唯一自然语言入口 ============ */
-.planning-page{display:grid;grid-template-columns:1.55fr 1fr;gap:16px;align-items:start;max-width:1440px;margin:0 auto}
+.planning-page{display:grid;grid-template-columns:1.55fr 1fr;gap:16px;align-items:start;width:100%;margin:0}
 .planning-structure{grid-column:1/-1;padding:18px 22px}
 .planning-structure-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}
 .planning-structure-head h2{display:flex;align-items:center;gap:8px;margin:0;font-size:18px}
@@ -325,7 +325,7 @@ p{line-height:1.65}
 .map-note p{margin:0;display:flex;align-items:center;gap:6px}
 
 /* ============ 作品检查：聚焦审阅，不做分析仪表盘 ============ */
-.review-page{max-width:1280px;margin:0 auto;display:grid;gap:16px}
+.review-page{width:100%;margin:0;display:grid;gap:16px}
 .review-head{display:flex;align-items:center;gap:20px;padding:18px 24px}
 .review-head>svg{width:52px;height:52px;padding:12px;border-radius:50%;background:#dfeaff;color:var(--blue);flex:none}
 .review-head h1{font-size:22px;margin:0}

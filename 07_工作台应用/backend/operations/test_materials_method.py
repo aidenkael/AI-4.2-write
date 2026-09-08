@@ -202,6 +202,93 @@ def test_material_distill_cancel_dispatch_by_kind(isolated, monkeypatch):
     assert calls == [("md", rid_md)]
 
 
+@pytest.mark.parametrize(("bridge_kind", "getter"), [
+    ("book_distill_propose", materials.get_book_distill_request),
+    ("method_distill_propose", materials.get_method_distill_request),
+])
+def test_interactive_distill_pending_exposes_exact_execution_facts(isolated, monkeypatch, bridge_kind, getter):
+    """BookDistill and MethodDistill pending paths preserve backend bridge truth."""
+    from operations import execution_audit as audit
+    from operations import qoder_bridge as bridge
+    monkeypatch.setattr(bridge, "get_bridge_root", lambda: isolated / ".bridge")
+    monkeypatch.setattr(audit, "finish_file", lambda *args, **kwargs: None)
+    rid = bridge.create_request(
+        task="internal-task", kind=bridge_kind,
+        meta={
+            "asset_id": "book_9001",
+            "execution": {
+                "execution_mode": "interactive_bridge",
+                "agent_id": "qoder",
+                "model": None,
+            },
+        },
+        activate_for_gowrite=True,
+    )
+
+    waiting = getter(rid)
+    assert waiting["status"] == "pending"
+    assert waiting["execution_mode"] == "interactive_bridge"
+    assert waiting["agent_id"] == "qoder"
+    assert waiting["model"] is None
+    assert waiting["agent_command"] == "/gowrite:1"
+    assert waiting["execution_phase"] == "waiting_agent"
+    assert "internal-task" not in json.dumps(waiting, ensure_ascii=False)
+
+    assert bridge.claim_request_for_slot(1) is not None
+    running = getter(rid)
+    assert running["status"] == "pending"
+    assert running["execution_phase"] == "running"
+    assert running["agent_command"] == "/gowrite:1"
+    bridge.cleanup_request(rid)
+
+
+@pytest.mark.parametrize(("asset_type", "runner", "stage_name", "pending_type", "bridge_kind"), [
+    ("REFERENCE_WORK", materials.run_book_distill, "_run_distill_agent_stage", materials._PendingDistill, "book_distill_propose"),
+    ("METHOD_SOURCE", materials.run_method_distill, "_run_method_distill_agent_stage", materials._PendingMethodDistill, "method_distill_propose"),
+])
+def test_interactive_distill_start_result_includes_execution_facts(
+        isolated, monkeypatch, asset_type, runner, stage_name, pending_type, bridge_kind):
+    """The immediate pending result used by AuthorTaskCoordinator is complete for both distillers."""
+    from operations import execution_audit as audit
+    from operations import qoder_bridge as bridge
+    asset_id = "book_9002"
+    _write_ledger(isolated, [_asset(asset_id, asset_type, pur="可用")])
+    monkeypatch.setattr(bridge, "get_bridge_root", lambda: isolated / ".bridge")
+    monkeypatch.setattr(audit, "AuditRecorder", lambda *args, **kwargs: None)
+    monkeypatch.setattr(audit, "append_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(audit, "finish_file", lambda *args, **kwargs: None)
+    monkeypatch.setattr(materials, "_prepare_package_current", lambda asset: {"available": True})
+    monkeypatch.setattr(materials, "_find_sp_dir", lambda *args: isolated / "prepared-book")
+    monkeypatch.setattr(materials, "_find_mp_dir", lambda *args: isolated / "prepared-method")
+    completed = subprocess.CompletedProcess([], 0, "", "")
+    monkeypatch.setattr(materials, "_run_bd_cli", lambda *args, **kwargs: completed)
+    monkeypatch.setattr(materials, "_run_md_cli", lambda *args, **kwargs: completed)
+
+    def wait_for_agent(request_id, *args):
+        bridge.create_request(
+            task="internal-task", kind=bridge_kind, request_id=request_id,
+            meta={
+                "asset_id": asset_id,
+                "execution": {
+                    "execution_mode": "interactive_bridge",
+                    "agent_id": "qoder",
+                    "model": None,
+                },
+            },
+            activate_for_gowrite=True,
+        )
+        raise pending_type(request_id)
+
+    monkeypatch.setattr(materials, stage_name, wait_for_agent)
+    result = runner(asset_id)
+    assert result["status"] == "pending"
+    assert result["execution_mode"] == "interactive_bridge"
+    assert result["agent_id"] == "qoder"
+    assert result["agent_command"] == "/gowrite:1"
+    assert result["execution_phase"] == "waiting_agent"
+    bridge.cleanup_request(result["request_id"])
+
+
 def test_cancel_method_distill_removes_request_slot_response_and_staging(isolated, monkeypatch):
     from operations import execution_audit as audit
     from operations import qoder_bridge as bridge

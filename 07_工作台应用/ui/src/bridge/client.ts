@@ -838,6 +838,11 @@ export interface BookDistillResult {
   request_id?: string | null
   output_dir?: string | null
   message: string
+  execution_mode?: 'interactive_bridge' | 'direct' | null
+  agent_id?: string | null
+  model?: string | null
+  agent_command?: string | null
+  execution_phase?: 'waiting_agent' | 'running' | null
 }
 
 export interface BookDistillRequestStatus {
@@ -846,6 +851,11 @@ export interface BookDistillRequestStatus {
   result?: BookDistillResult | null
   message?: string | null
   error?: string | null
+  execution_mode?: 'interactive_bridge' | 'direct' | null
+  agent_id?: string | null
+  model?: string | null
+  agent_command?: string | null
+  execution_phase?: 'waiting_agent' | 'running' | null
 }
 
 export interface MaterialDetail {

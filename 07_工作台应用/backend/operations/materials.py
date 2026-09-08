@@ -1212,12 +1212,10 @@ def run_book_distill(asset_id: str) -> dict[str, Any]:
     try:
         _run_distill_agent_stage(request_id, asset_id, sp_dir, stage_dir)
     except _PendingDistill as pending:
-        return {
-            "asset_id": asset_id,
-            "status": "pending",
-            "request_id": pending.request_id,
-            "message": "等待 Qoder /gowrite：正在原著学习，完成后将自动整理参考知识",
-        }
+        return _pending_material_distill_result(
+            asset_id, pending.request_id,
+            "等待 Qoder /gowrite：正在原著学习，完成后将自动整理参考知识",
+        )
 
     # 4) 确定性完成门 + 受控发布到 02 + discovery + 刷新
     try:
@@ -1317,6 +1315,31 @@ class _PendingDistill(Exception):
         self.request_id = request_id
 
 
+def _material_execution_facts(request: dict[str, Any]) -> dict[str, Any]:
+    """Expose only the existing request's author-safe execution facts."""
+    meta = request.get("meta") or {}
+    execution = meta.get("execution") or {}
+    return {
+        "execution_mode": execution.get("execution_mode"),
+        "agent_id": execution.get("agent_id"),
+        "model": execution.get("model"),
+        "agent_command": request.get("agent_command"),
+        "execution_phase": request.get("execution_phase"),
+    }
+
+
+def _pending_material_distill_result(asset_id: str, request_id: str, message: str) -> dict[str, Any]:
+    from operations import qoder_bridge as bridge
+    request = bridge.get_request(request_id) or {}
+    return {
+        "asset_id": asset_id,
+        "status": "pending",
+        "request_id": request_id,
+        "message": message,
+        **_material_execution_facts(request),
+    }
+
+
 def _finalize_distill(request_id: str, asset_id: str, sp_dir: Path, stage_dir: Path) -> dict[str, Any]:
     """Interactive 蒸馏的确定性完成门；与 Direct 路径严格一致。
 
@@ -1372,8 +1395,13 @@ def get_book_distill_request(request_id: str) -> dict[str, Any]:
     response = bridge.read_response(request_id)
     if response is None:
         if request.get("execution_phase") == "running":
-            return {"request_id": request_id, "status": "pending", "execution_phase": "running", "message": "Agent 正在执行素材学习"}
-        return {"request_id": request_id, "status": "pending", "message": "等待 Qoder /gowrite：正在原著学习，完成后将自动整理参考知识"}
+            message = "Agent 正在执行素材学习"
+        else:
+            message = "等待 Qoder /gowrite：正在原著学习，完成后将自动整理参考知识"
+        return {
+            "request_id": request_id, "status": "pending", "message": message,
+            **_material_execution_facts(request),
+        }
     if response.get("request_id") != request_id:
         bridge.cleanup_request(request_id)
         return {"request_id": request_id, "status": "failed", "error": "返回结果与任务不匹配，已丢弃。"}
@@ -1600,12 +1628,10 @@ def run_method_distill(asset_id: str) -> dict[str, Any]:
     try:
         _run_method_distill_agent_stage(request_id, asset_id, mp_dir, stage_method_dir)
     except _PendingMethodDistill as pending:
-        return {
-            "asset_id": asset_id,
-            "status": "pending",
-            "request_id": pending.request_id,
-            "message": "等待 Qoder /gowrite：正在方法学习，完成后将自动整理方法知识",
-        }
+        return _pending_material_distill_result(
+            asset_id, pending.request_id,
+            "等待 Qoder /gowrite：正在方法学习，完成后将自动整理方法知识",
+        )
 
     # 4) Direct 路径直接调用无 bridge 依赖的确定性核心。
     try:
@@ -1786,9 +1812,13 @@ def get_method_distill_request(request_id: str) -> dict[str, Any]:
     response = bridge.read_response(request_id)
     if response is None:
         if request.get("execution_phase") == "running":
-            return {"request_id": request_id, "status": "pending", "execution_phase": "running", "message": "Agent 正在执行素材学习"}
-        return {"request_id": request_id, "status": "pending",
-                "message": "等待 Qoder /gowrite：正在方法学习，完成后将自动整理方法知识"}
+            message = "Agent 正在执行素材学习"
+        else:
+            message = "等待 Qoder /gowrite：正在方法学习，完成后将自动整理方法知识"
+        return {
+            "request_id": request_id, "status": "pending", "message": message,
+            **_material_execution_facts(request),
+        }
     if response.get("request_id") != request_id:
         bridge.cleanup_request(request_id)
         return {"request_id": request_id, "status": "failed", "error": "返回结果与任务不匹配，已丢弃。"}

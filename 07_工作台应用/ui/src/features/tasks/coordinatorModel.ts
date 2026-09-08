@@ -1,10 +1,47 @@
-import { isTaskActive, type AuthorTask, type AuthorTaskKind } from './taskModel'
+import { deriveTaskStatus, isTaskActive, type AuthorTask, type AuthorTaskKind, type AuthorTaskStatus } from './taskModel'
 
 export type AuthorTasksByRequestId = Record<string, AuthorTask>
 
 export interface TaskStartDescriptor {
   kind: AuthorTaskKind
   assetId?: string | null
+}
+
+export interface TaskExecutionFacts {
+  execution_mode?: string | null
+  agent_id?: string | null
+  model?: string | null
+  agent_command?: string | null
+  phase?: string | null
+  execution_phase?: string | null
+}
+
+/** Merge a prepare response with the request facts written by the backend bridge. */
+export function resolveTaskStartFacts(
+  kind: AuthorTaskKind,
+  prepared: TaskExecutionFacts,
+  facts?: TaskExecutionFacts | null,
+): {
+  status: AuthorTaskStatus
+  phase: string | null
+  execution: TaskExecutionFacts
+} {
+  const executionMode = prepared.execution_mode ?? facts?.execution_mode ?? null
+  const phase = prepared.phase ?? facts?.phase ?? null
+  const executionPhase = facts?.execution_phase ?? prepared.execution_phase ?? null
+  return {
+    status: executionPhase === 'running'
+      ? 'running'
+      : deriveTaskStatus(kind, 'pending', phase, executionMode),
+    phase,
+    execution: {
+      execution_mode: executionMode,
+      agent_id: prepared.agent_id ?? facts?.agent_id ?? null,
+      model: prepared.model ?? facts?.model ?? null,
+      agent_command: prepared.agent_command ?? facts?.agent_command ?? null,
+      execution_phase: executionPhase,
+    },
+  }
 }
 
 export const taskList = (tasks: AuthorTasksByRequestId): AuthorTask[] => Object.values(tasks)

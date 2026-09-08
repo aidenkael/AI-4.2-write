@@ -29,6 +29,7 @@ export interface AuthorTaskExecution {
   agent_id?: string | null
   model?: string | null
   agent_command?: string | null
+  execution_phase?: string | null
 }
 
 export interface AuthorTask {
