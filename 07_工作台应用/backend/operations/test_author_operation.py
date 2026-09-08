@@ -65,7 +65,7 @@ def test_interactive_pending_resumable(isolated):
     assert facts["model"] is None  # 交互模式未经执行验证：不编造模型
     assert facts["phase"] == "pending_selection"
     assert facts["state"] == "pending"
-    assert "再次执行 /gowrite" in facts["message"] or "正在选择" in facts["message"]
+    assert "自动生成正文" in facts["message"] or "正在选择" in facts["message"]
     # 绝不暴露任务文本 / token / 凭据 / 输出
     assert facts.get("task") is None
     assert "SECRET_TASK_TEXT" not in json.dumps(facts, ensure_ascii=False)
@@ -75,7 +75,7 @@ def test_story_write_pending_prose_message(isolated):
     rid = _interactive_request(phase="pending_prose")
     facts = ao.get_active_author_operation()
     assert facts["phase"] == "pending_prose"
-    assert "再次执行 /gowrite" in facts["message"]
+    assert "自动生成正文" in facts["message"]
 
 
 def test_no_active_returns_none(isolated):

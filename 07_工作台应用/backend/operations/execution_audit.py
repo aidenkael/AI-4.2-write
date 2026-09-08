@@ -518,6 +518,12 @@ def get_execution_audit(request_id: str) -> Optional[dict[str, Any]]:
     return None
 
 
+def was_canceled(request_id: str) -> bool:
+    """Whether durable execution audit records this request as canceled."""
+    record = get_execution_audit(request_id)
+    return bool(record and record.get("status") == STATUS_CANCELED)
+
+
 def clear_execution_audits() -> dict[str, Any]:
     """显式清理：只删除 06_工作区/运行审计（绝不触碰其他目录）。"""
     root = get_audit_root()

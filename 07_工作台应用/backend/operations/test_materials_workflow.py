@@ -805,6 +805,30 @@ def test_get_book_distill_request_canceled_never_finalizes(isolated, monkeypatch
     assert finalized == [], "取消的请求绝不进入 finalize/发布"
 
 
+def test_cancel_book_distill_removes_request_slot_response_and_staging(isolated, monkeypatch):
+    from operations import execution_audit as audit
+    from operations import qoder_bridge as bridge
+    monkeypatch.setattr(bridge, "get_bridge_root", lambda: isolated / ".bridge")
+    monkeypatch.setattr(audit, "finish_file", lambda *args, **kwargs: None)
+    rid = "book-cancel-1"
+    stage = isolated / "06_工作区" / "BookDistill" / f"{rid}_sample"
+    stage.mkdir(parents=True)
+    (stage / "partial.md").write_text("partial", encoding="utf-8")
+    bridge.create_request(
+        task="t", kind="book_distill_propose", request_id=rid,
+        meta={"stage_dir": str(stage)}, activate_for_gowrite=True,
+    )
+    bridge.write_response(rid, output="late")
+
+    result = materials.cancel_book_distill_request(rid)
+
+    assert result["status"] == "canceled"
+    assert not stage.exists()
+    assert bridge.get_request(rid) is None
+    assert not bridge.response_path(rid).exists()
+    assert not (bridge.get_bridge_root() / "slots" / "1.json").exists()
+
+
 def test_knowledge_retrieve_sees_only_published_02_package(isolated):
     """§9/§15E：06 staging 不可被 KnowledgeRetrieve 发现；受控发布到 02 后才发现。"""
     stage = isolated / "06_工作区" / "BookDistill" / "req_book_0001_样例作品"

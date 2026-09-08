@@ -370,7 +370,7 @@ def test_invalid_direct_config_fails_before_execution(isolated, real_project, fa
 
 
 # ---------------------------------------------------------------------------
-# E. interactive_bridge：两阶段交互桥（真实两次 /gowrite），绝不回退 Direct
+# E. interactive_bridge：两阶段交互桥（一次 /gowrite 自动续行），绝不回退 Direct
 # ---------------------------------------------------------------------------
 
 def test_interactive_bridge_no_direct_fallback(isolated, real_project, fake_bridge, monkeypatch):

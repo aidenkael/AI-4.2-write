@@ -116,17 +116,20 @@ _RETRIEVAL_SCRIPT = Path(__file__).resolve().parent / "retrieval_snapshot.py"
 # 单 round 允许注入的最大知识条数（与 E1 build_context 默认上限一致）
 _MAX_KNOWLEDGE_HITS = 3
 
-# Agent 任务模板：两阶段。第一阶段语义分析；第二阶段（仅 knowledge_needs
+# Agent 任务模板：先原创规划，再诊断缺口；仅 knowledge_needs
 # 非空）对每个 need 运行独立确定性检索命令查看真实候选，然后逐 round 选择 selection_ref。
 # 模型不得在见到检索结果前编造/选择知识 ref。
-_AGENT_TASK_TEMPLATE = """你是 Go Write 的规划执行器。必须严格按下列顺序执行：先完成语义分析；若 knowledge_needs 非空，必须在生成最终 JSON 之前先用本地命令/工具执行下面给出的检索命令并读取其结果；完成检索与选择后，才输出最终 JSON。本任务不是纯文本生成任务；中间的工具调用属于任务执行过程，不属于最终回复。
+_AGENT_TASK_TEMPLATE = """你是 Go Write 的规划执行器。必须严格按下列顺序执行：先在不借用外部知识的情况下形成原创规划，再诊断这一版的真实缺口；若 knowledge_needs 非空，才在生成最终 JSON 之前执行下面的只读检索命令。中间工具调用不属于最终回复。
 
-流程分两个阶段：
+流程分三个阶段：
 
-第一阶段：语义分析
-针对作者规划问题，先完成语义分析（objective / knowledge_needs / assumptions / deliberate_open_space），并给出规划目标（planning_target）与规划建议草稿（model_output）。knowledge_needs 为空列表是合法的。
+第一阶段：原创规划
+只根据 Author Intent、当前 Story State、已确认规划与作者本轮问题，自由形成 planning_target 和 model_output 草案。本阶段严禁先检索 BKP/方法知识，不得让参考作品先替作者搭规划骨架。
 
-第二阶段：知识检索与选择（仅当 knowledge_needs 非空；必须执行）
+第二阶段：诊断缺口
+审视第一版原创规划，再形成 objective / assumptions / deliberate_open_space，并只把无法靠当前项目真相稳妥解决的具体问题写入 knowledge_needs。没有真实缺口时 knowledge_needs=[] 合法，不得为了调用知识库而硬造需求。
+
+第三阶段：知识检索与选择（仅当 knowledge_needs 非空；必须执行）
 若 knowledge_needs 非空，在生成最终 JSON 之前，你必须先用可用的本地命令/工具执行以下确定性只读检索命令：
   python {retrieval_command} "<query>"
 对第一阶段列出的每一个 knowledge_need，分别用该 need 的具体 query 替换 <query> 并独立执行一次命令；严禁把多个 need 用分号、换行或其他方式合并成一个 query。每次命令把该 round 的检索包（RetrievalPackage，混合参考作品知识/方法知识/已验证知识）写入当前请求的临时 round 快照（不改动任何作品或业务文件），然后向终端输出 JSON，其中 package_fingerprint 是该 round 包的身份指纹，package.hits 数组内每个候选项含 selection_ref、source_kind、source_id、source_title、statement、scope、boundary、evidence 等字段；selection_ref 形如 "<source_kind>/<source_id>/<source_anchor>"（例如 reference_bkp/book_a/K001、method_source/book_0138/M0003、validated_knowledge/pkg_opening_hook/V0001）。
@@ -1635,6 +1638,9 @@ def get_story_plan_request(request_id: str) -> dict[str, Any]:
 
     request = bridge.get_request(request_id)
     if request is None:
+        if audit.was_canceled(request_id):
+            bridge.cleanup_request(request_id)
+            return {"request_id": request_id, "status": "canceled"}
         return {"request_id": request_id, "status": "failed", "error": "任务已失效，请重新发起。"}
 
     state = request.get("state")
@@ -1790,7 +1796,6 @@ def cancel_story_plan_request(request_id: str) -> dict[str, Any]:
             _cleanup_planning(project_id, planning_turn_id)
         if project_id and meta.get("impact_candidate_ids"):
             _restore_impact_candidate_statuses(project_id, meta)
-        bridge.clear_active_if(request_id)
         audit.finish_file(request_id, audit.STATUS_CANCELED)
     else:
         # 请求文件已不存在（已完成并轮询过 / 已取消过）：按持久化 request_id
@@ -1798,6 +1803,7 @@ def cancel_story_plan_request(request_id: str) -> dict[str, Any]:
         _cleanup_discarded_planning(request_id)
         # 审计记录（awaiting_confirmation）收尾为 canceled
         audit.finish_file(request_id, audit.STATUS_CANCELED)
+    bridge.cleanup_request(request_id)
     _exec_task_manager.remove(request_id)
     return {"request_id": request_id, "status": "canceled"}
 

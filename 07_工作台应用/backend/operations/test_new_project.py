@@ -38,6 +38,15 @@ from operations.projects import (  # noqa: E402
     open_project,
 )
 
+
+def test_story_design_task_is_original_first_then_gap_diagnosis_then_retrieval():
+    task = np_ops._AGENT_TASK_TEMPLATE
+    original = task.index("第一阶段：原创设计")
+    diagnosis = task.index("第二阶段：诊断缺口")
+    retrieval = task.index("第三阶段：知识检索与选择")
+    assert original < diagnosis < retrieval
+    assert "不得让参考作品先搭故事骨架" in task
+
 VALID_AGENT_RESULT = {
     "semantic_interpretation": {
         "scope": "story_design",

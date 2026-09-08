@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from operations import qoder_bridge as bridge
+from agents import qoder
 
 
 @pytest.fixture()
@@ -31,6 +32,33 @@ def test_create_request_writes_files_and_slot_command(isolated):
     resp_parts = Path(req["response_path"]).parts
     assert "responses" in resp_parts and resp_parts[-1] == f"{rid}.json"
     assert req["slot"] == 1 and req["agent_command"] == "/gowrite:1"
+
+
+def test_auto_continue_claims_next_stage_under_same_request(isolated):
+    rid = bridge.create_request(
+        task="STAGE 1", kind="story_write_propose", phase="pending_selection",
+        activate_for_gowrite=True, auto_continue=True,
+    )
+    first = bridge.claim_request_for_slot(1)
+    assert first["request_id"] == rid and first["task"] == "STAGE 1"
+    bridge.write_response(rid, result={"stage": 1})
+    assert bridge.set_request_task(rid, "STAGE 2", phase="pending_prose") is True
+    assert not bridge.response_path(rid).exists()
+
+    second = bridge.await_next_stage(rid, 1, timeout_seconds=0.2)
+
+    assert second["request_id"] == rid
+    assert second["phase"] == "pending_prose"
+    assert second["task"] == "STAGE 2"
+    assert second["execution_phase"] == "running"
+
+
+def test_qoder_command_uses_fresh_subagent_and_no_second_author_command():
+    definition = qoder.command_definition(3)
+    assert "newly created subagent with an independent context" in definition
+    assert "different newly created subagent" in definition
+    assert "await-next <exact request id> 3" in definition
+    assert "must never need to invoke this slash command a second time" in definition
 
 
 def test_create_request_does_not_activate_by_default(isolated):

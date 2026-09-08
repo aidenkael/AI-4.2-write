@@ -9,11 +9,11 @@
                conflicts_or_tensions；knowledge_needs 走精确检索包 P0 规则）
       → frozen StoryWrite.prepare_creation_brief / prepare_context（绑定检索包）
       → Stage 2：正文生成（context_ref + draft_text）
-  → Interactive：两阶段交互桥（真实的两次 /gowrite，绝不回退 Direct）：
+  → Interactive：两阶段交互桥（作者只需一次 /gowrite，绝不回退 Direct）：
       Stage 1：作者在 Qoder 输入 /gowrite 执行上下文选择（任务 = 选择任务）
       → Go Write 验收 Stage 1 输出 → P0 绑定 + 编译精确 Context 快照 →
         请求文件原地换成 Stage 2 正文生成任务（fresh Agent invocation）
-      → 作者再次输入 /gowrite 执行 ONLY Stage 2 → context_ref 校验
+      → 桥在同一 request_id 下自动续行全新 Stage 2 子 Agent → context_ref 校验
   → 两种模式都写回同一响应信封 → get_story_write_request 持久化候选 → UI 展示
   → 作者明确"保留这段" → ProjectWorkspace.accept_prose（frozen gate）
   → 正文落盘 + accepted_text_index + Story State → 刷新概览
@@ -22,7 +22,7 @@
 - Stage 1 可以看到完整 Story State 候选目录，以便选择本场需要的少量条目；
 - Stage 2 只看到编译后的选定 Context Package + recent prose，绝不含未选中的
   全量 State 目录。二者是两次独立 Agent 运行（Direct 两次 run；Interactive
-  两次 /gowrite 各自 fresh invocation），不合并为一次会话。
+  两阶段各自 fresh invocation），不合并为一次会话。
 
 知识选择绑定（Knowledge Selection Binding，同 StoryPlan P0）：
 - knowledge_needs = []：不调用 KnowledgeRetrieve，不要求快照，selected BKP
@@ -87,7 +87,7 @@ _exec_task_manager = execution_tasks.manager
 PHASE_PENDING_SELECTION = "pending_selection"
 PHASE_PENDING_PROSE = "pending_prose"
 
-# 交互桥两次 /gowrite 的总超时（作者可能 Alt+Tab 后才执行，给足时间）
+# 交互桥两阶段的总超时（作者可能 Alt+Tab 后才执行，给足时间）
 _INTERACTIVE_TIMEOUT_SECONDS = 60 * 60
 
 # ---------------------------------------------------------------------------
@@ -970,6 +970,7 @@ def prepare_story_write(
             phase=PHASE_PENDING_SELECTION if interactive else None,
             timeout_seconds=_INTERACTIVE_TIMEOUT_SECONDS if interactive else None,
             activate_for_gowrite=interactive,
+            auto_continue=interactive,
         )
     except bridge.BridgeBusyError as exc:
         # 已有等待 /gowrite 的交互任务：绝不清除/覆盖它；回滚本轮临时工作区
@@ -1040,7 +1041,7 @@ def get_story_write_request(request_id: str) -> dict[str, Any]:
     - Interactive：两阶段交互桥（同一请求生命周期，无第二个前端 API）：
         phase=pending_selection：等待第一次 /gowrite（Stage 1 选择）；收到后
         验收 → 编译精确 Context → 请求原地换成 Stage 2 任务 → pending_prose；
-        phase=pending_prose：等待第二次 /gowrite（正文生成）；收到后校验
+        phase=pending_prose：唯一一次 /gowrite 内自动续行正文子 Agent；收到后校验
         context_ref → 候选。
     返回 status：pending（继续等；含 phase 与作者可读提示）/ completed（含候选）
     / failed / expired / canceled。completed 时持久化 writing_meta.json
@@ -1052,6 +1053,9 @@ def get_story_write_request(request_id: str) -> dict[str, Any]:
 
     request = bridge.get_request(request_id)
     if request is None:
+        if audit.was_canceled(request_id):
+            bridge.cleanup_request(request_id)
+            return {"request_id": request_id, "status": "canceled"}
         audit.finish_file(request_id, audit.STATUS_FAILED, error="任务已失效，请重新发起。")
         return {"request_id": request_id, "status": "failed", "error": "任务已失效，请重新发起。"}
 
@@ -1164,7 +1168,7 @@ def _get_interactive_story_write_request(
     """交互桥阶段验收（在 get_story_write_request 轮询内执行；同一生命周期）。
 
     - pending_selection：验收 Stage 1 选择 → P0 绑定 + 编译精确 Context →
-      请求文件换成 Stage 2 任务 → 返回 pending_prose 提示再次 /gowrite；
+      请求文件换成 Stage 2 任务 → Qoder 命令在同一逻辑任务内自动续行；
     - pending_prose：验收 Stage 2 正文 → context_ref 校验 → 候选。
     晚到/重复/不匹配响应一律丢弃且不推进阶段；任一阶段取消都使整轮失效。
     """
@@ -1182,7 +1186,7 @@ def _get_interactive_story_write_request(
             }
         return {
             "request_id": request_id, "status": "pending", "phase": phase,
-            "message": "上下文已准备好，请再次执行 /gowrite 生成正文",
+            "message": "上下文已准备好，Agent 正在自动生成正文",
         }
 
     if response.get("request_id") != request_id:
@@ -1190,7 +1194,6 @@ def _get_interactive_story_write_request(
             request_id, audit.EVENT_BRIDGE_RESPONSE_DISCARDED, "story_write",
             details={"reason": "request_id mismatch"},
         )
-        bridge.clear_response(request_id)
         return {
             "request_id": request_id, "status": "pending", "phase": phase,
             "message": "检测到不匹配的返回结果，已丢弃，请重试 /gowrite。",
@@ -1280,7 +1283,7 @@ def _get_interactive_story_write_request(
         bridge.clear_response(request_id)
         return {
             "request_id": request_id, "status": "pending", "phase": PHASE_PENDING_PROSE,
-            "message": "上下文已准备好，请再次执行 /gowrite 生成正文",
+            "message": "上下文已准备好，Agent 正在自动生成正文",
         }
 
     # ---- Stage 2 验收：正文生成 → 候选 ----
@@ -1305,7 +1308,7 @@ def _get_interactive_story_write_request(
             bridge.clear_response(request_id)
             return {
                 "request_id": request_id, "status": "pending", "phase": phase,
-                "message": "收到的是第一阶段的结果，请再次执行 /gowrite 生成正文",
+                "message": "收到过期的第一阶段结果，桥已丢弃并继续等待自动正文阶段",
             }
         _cleanup_writing(project_id, writing_turn_id)
         bridge.cleanup_request(request_id)
@@ -1404,7 +1407,6 @@ def cancel_story_write_request(request_id: str) -> dict[str, Any]:
         writing_turn_id = str(meta.get("writing_turn_id") or "")
         if project_id and writing_turn_id:
             _cleanup_writing(project_id, writing_turn_id)
-        bridge.clear_active_if(request_id)
         audit.finish_file(request_id, audit.STATUS_CANCELED)
     else:
         # 请求文件已不存在（已完成并轮询过 / 已取消过）：按持久化 request_id
@@ -1412,6 +1414,7 @@ def cancel_story_write_request(request_id: str) -> dict[str, Any]:
         _cleanup_discarded_candidate(request_id)
         # 审计记录（awaiting_confirmation）收尾为 canceled
         audit.finish_file(request_id, audit.STATUS_CANCELED)
+    bridge.cleanup_request(request_id)
     _exec_task_manager.remove(request_id)
     return {"request_id": request_id, "status": "canceled"}
 

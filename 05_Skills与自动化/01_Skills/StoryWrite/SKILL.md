@@ -1,17 +1,22 @@
-# StoryWrite Thin Entry（最薄 StoryWrite 操作层）
+# StoryWrite（Go Write 2.0 当前合同）
 
-> 状态：`THIN_STORYWRITE_CONSUMER_SLICE` 实验阶段（2026-08-16）。获批口径：
-> `THIN_ORCHESTRATION_BUILD_ALLOWED`——只复用现有合同的薄操作层；不是 Writer
-> runtime / Writer platform，不新增 Final Schema，不重开 StoryPlan / Context
-> Compiler / BookDistill / KnowledgeRetrieve。
+> 状态：`KEEP_AND_FREEZE` primitives + Go Write 2.0 作者操作接线（2026-09-08）。
+> 不新增第二份 Story State、Context 或结算 runtime。
 
 ## 职责边界
 
-模型负责语义判断；本层只负责机械合同。作者侧仍只有近似三个动作：
+模型负责语义判断；本层只负责机械合同。当前作者路径是：
 
 1. 说想写什么；
 2. 读正文 / 给反馈；
-3. 明确接受正文。
+3. 明确接受正文；接受只做 durable 正文写入与作者变更记账，不自动调 AI；
+4. 作者显式点击「更新作品状态」后，才对 pending author changes 做有界 Direct AI 语义整合；含糊后果仍由作者确认。
+
+`operations/author_edit` + `operations/change_settlement` 是当前统一作者变更账本/结算路径。下文的 `apply_settlement()` 是冻结的历史薄 primitive，用于合同测试与兼容，不是当前工作台的日常主路径。
+
+## Interactive 执行预算
+
+一次正文写作是一个逻辑任务：一次 UI 动作，最多一次 `/gowrite`。Interactive Stage 1 选择上下文后，桥在同一 request_id 下自动续行 Stage 2；两阶段必须由两个全新、独立上下文的子 Agent 执行。Stage 2 只能看见确定性编译后的精确 Context，不得承接 Stage 1 会话。
 
 ## 三个自动化摇柄（按优先级）
 

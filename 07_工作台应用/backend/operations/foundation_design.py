@@ -751,6 +751,9 @@ def get_foundation_design_request(request_id: str) -> dict[str, Any]:
         raise FoundationDesignError("缺少任务标识（request_id）。")
     request = bridge.get_request(request_id)
     if request is None:
+        if audit.was_canceled(request_id):
+            bridge.cleanup_request(request_id)
+            return {"request_id": request_id, "status": "canceled"}
         return {"request_id": request_id, "status": "failed", "error": "任务已失效，请重新发起。"}
     state = request.get("state")
     project_id = str((request.get("meta") or {}).get("project_id") or "")
@@ -816,7 +819,6 @@ def cancel_foundation_design_request(request_id: str) -> dict[str, Any]:
         project_id = str((request.get("meta") or {}).get("project_id") or "")
         if project_id:
             _cleanup_proposal(project_id)
-        bridge.clear_active_if(request_id)
         audit.finish_file(request_id, audit.STATUS_CANCELED)
     else:
         root = get_proposals_root()
@@ -830,6 +832,7 @@ def cancel_foundation_design_request(request_id: str) -> dict[str, Any]:
                     _cleanup_proposal(str(meta.get("project_id") or ""))
                     break
         audit.finish_file(request_id, audit.STATUS_CANCELED)
+    bridge.cleanup_request(request_id)
     _exec_task_manager.remove(request_id)
     return {"request_id": request_id, "status": "canceled"}
 

@@ -176,8 +176,10 @@ def command_definition(slot: int = 1) -> str:
         f"description: Execute Go Write task slot {slot} and write its response\n"
         "---\n"
         f"First run `python 07_工作台应用/backend/operations/qoder_bridge.py claim {slot}` from the Go Write repository. "
-        "If it exits non-zero, stop: this slot has no waiting task or it was already claimed. Read only the returned request JSON, then "
-        "Execute only its `task`. Write one UTF-8 JSON response file to the request's `response_path` "
+        "If it exits non-zero, stop: this slot has no waiting task or it was already claimed. Read only the returned request JSON. "
+        "For every returned request, use Qoder's Agent tool to execute only its `task` in a newly created subagent with an independent context. "
+        "The parent command is only a coordinator: it must not solve the task itself, and it must never pass an earlier stage's task, result, "
+        "or conversation into a later-stage subagent. Write one UTF-8 JSON response file to the request's `response_path` "
         "with schema `gowrite_response/v1`, using a real JSON serializer (never hand-concatenate JSON). "
         "The response must be a JSON object with the exact same `request_id` as the request file, and "
         "one of these shapes:\n"
@@ -191,7 +193,11 @@ def command_definition(slot: int = 1) -> str:
         "object; never place an object or array under `output` (`output` is raw plain text only); "
         "preserve the exact request_id; set unused fields to null; before finishing, parse the written "
         "response back and verify it is valid JSON. Do not invent or alter Go Write business rules; "
-        "the request task is authoritative.\n"
+        "the request task is authoritative. After validating the response file, inspect the returned request's `auto_continue`. "
+        f"If it is true, run `python 07_工作台应用/backend/operations/qoder_bridge.py await-next <exact request id> {slot}` and wait for Go Write. "
+        "If that command returns another request JSON, repeat the same response procedure with a different newly created subagent; "
+        "if it exits non-zero, stop. If `auto_continue` is false, stop after the first response. The author must never need to invoke "
+        "this slash command a second time for the same logical task.\n"
     )
 
 

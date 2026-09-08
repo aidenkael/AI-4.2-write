@@ -202,6 +202,31 @@ def test_material_distill_cancel_dispatch_by_kind(isolated, monkeypatch):
     assert calls == [("md", rid_md)]
 
 
+def test_cancel_method_distill_removes_request_slot_response_and_staging(isolated, monkeypatch):
+    from operations import execution_audit as audit
+    from operations import qoder_bridge as bridge
+    monkeypatch.setattr(bridge, "get_bridge_root", lambda: isolated / ".bridge")
+    monkeypatch.setattr(audit, "finish_file", lambda *args, **kwargs: None)
+    rid = "method-cancel-1"
+    stage = isolated / "06_工作区" / "MethodDistill" / f"{rid}_sample"
+    method_dir = stage / "method"
+    method_dir.mkdir(parents=True)
+    (method_dir / "partial.md").write_text("partial", encoding="utf-8")
+    bridge.create_request(
+        task="t", kind="method_distill_propose", request_id=rid,
+        meta={"stage_method_dir": str(method_dir)}, activate_for_gowrite=True,
+    )
+    bridge.write_response(rid, output="late")
+
+    result = materials.cancel_method_distill_request(rid)
+
+    assert result["status"] == "canceled"
+    assert not stage.exists()
+    assert bridge.get_request(rid) is None
+    assert not bridge.response_path(rid).exists()
+    assert not (bridge.get_bridge_root() / "slots" / "1.json").exists()
+
+
 def _method_finalize_fixture(isolated):
     asset_id = "book_9101"
     _write_ledger(isolated, [_asset(asset_id, "METHOD_SOURCE")])

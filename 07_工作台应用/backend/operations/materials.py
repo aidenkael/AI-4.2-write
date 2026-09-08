@@ -1049,41 +1049,10 @@ def run_source_prepare(asset_id: str) -> dict[str, Any]:
 
 _BD_SCRIPT = _REPO_ROOT / "05_Skills与自动化" / "01_Skills" / "BookDistill" / "scripts" / "book_distill.py"
 _ACCEPTANCE_GATE_SCRIPT = _REPO_ROOT / "05_Skills与自动化" / "01_Skills" / "BookDistill" / "scripts" / "acceptance_gate.py"
-
-_DISTILL_TASK_TEMPLATE = """你是 Go Write 的原著蒸馏执行器（BookDistill Base Scan + 收敛阶段）。
-
-输入：
-- SourcePrepare PASS 包：{sp_dir}
-- 蒸馏输出目录：{bd_dir}
-（validate 与 prepare 已由 Go Write 完成，模板已生成。）
-
-你的任务（按顺序）：
-1. 逐章阅读 {sp_dir}/chapters/ 下的正文章节（NNNN.md；0000_*.md 是卷首，不蒸馏）。
-2. 在 {bd_dir}/evidence/ch_NNNN.md 中填写 MAP 与 FACT / INFERENCE / OBSERVATION /
-   MECHANISM / BOUNDARY 条目：每条必须带原文引用（chapters/NNNN.md#L起-L止），
-   置信度 高/中/低；一条结论一句话 + 行号引用，不大量复制原文。
-3. 完成至少两个互补观察 Pass：长篇运行/读者动力 与 Reader/Page Craft。
-4. 跨章收敛：从充分支撑的 Observation / MECHANISM 中合并同质、降级单章小技巧，
-   产出 {bd_dir}/mechanisms.md（10–20 条高价值可迁移机制，附反证/边界）。
-5. 生成 {bd_dir}/evidence.md（精选支撑最终结论的证据）与 {bd_dir}/model.md
-   （作者第一阅读入口）。
-6. 完成 {bd_dir}/bd_report.md：来源身份 + 覆盖范围与置信度 + 边界与不确定性。
-7. 运行 BookDistill 的 assemble 与 profile 命令后，依据 {bd_dir}/book_profile.md、全部
-   evidence、model.md、mechanisms.md 和 BKP_protocol.md，创建完整 {bd_dir}/bkp_prototype/：
-   identity.json、README.md、profile.md、work_map.md、author_view.md、knowledge/cards.md 以及
-   协议要求的 curated 文件。cards 必须是可追溯的 canonical 知识卡，author_view 必须是可读投影。
-8. 在 {bd_dir}/BKP_ACCEPTANCE_REPORT.md 写入全书综合验收报告，必须含
-   BKP_protocol.md §5 所要求的 acceptance_data JSON 块。只针对当前冻结来源范围下结论；
-   连载、节选或未完结不是 blocking gap，不能假称尚未出现的终局或完整人物弧。
-
-纪律：
-- 原著始终是最高事实源；不经过二手摘要逐层压缩；
-- coverage 不是价值判断；发现阶段可以宽，BKP 必须克制；
-- 不做原作者风格模仿器；不随意外推；反证与边界不省略。
-
-全部写入完成后，在最终回复中输出一行 JSON：{{"status": "completed", "evidence_files": <填写数量>, "mechanisms_count": <填写数量>}}
-不要修改 {sp_dir} 中的任何文件。"""
-
+_BOOK_DISTILL_AGENT_TASK_BUILDER = (
+    Path(__file__).resolve().parents[3]
+    / "05_Skills与自动化" / "01_Skills" / "BookDistill" / "agent_task.py"
+)
 
 def _find_sp_dir(asset_id: str, name: str) -> Path:
     root = get_repo_root() / "06_工作区" / "SourcePrepare"
@@ -1278,7 +1247,14 @@ def _run_distill_agent_stage(request_id: str, asset_id: str, sp_dir: Path, stage
     """
     from config.settings import EXECUTION_MODE_DIRECT, SettingsStore
     settings = SettingsStore().load()
-    task = _DISTILL_TASK_TEMPLATE.format(sp_dir=str(sp_dir), bd_dir=str(stage_dir))
+    import importlib.util
+    builder_path = _BOOK_DISTILL_AGENT_TASK_BUILDER
+    spec = importlib.util.spec_from_file_location("gowrite_bookdistill_agent_task", builder_path)
+    if spec is None or spec.loader is None:
+        raise MaterialsError("BookDistill Agent 任务构建器缺失。")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    task = module.build_distill_agent_task(sp_dir, stage_dir)
 
     if settings.default_execution_mode != EXECUTION_MODE_DIRECT:
         from operations import qoder_bridge as bridge
@@ -1334,7 +1310,7 @@ def _run_distill_agent_stage(request_id: str, asset_id: str, sp_dir: Path, stage
 
 
 class _PendingDistill(Exception):
-    """Interactive 蒸馏等待第二次 /gowrite（内部控制流）。"""
+    """Interactive 蒸馏等待唯一一次 /gowrite（内部控制流）。"""
 
     def __init__(self, request_id: str) -> None:
         super().__init__(request_id)
@@ -1429,7 +1405,14 @@ def cancel_book_distill_request(request_id: str) -> dict[str, Any]:
     request = bridge.get_request(request_id)
     if request is not None:
         bridge.mark_canceled(request_id)
-        bridge.clear_active_if(request_id)
+        stage_dir = Path(str((request.get("meta") or {}).get("stage_dir") or ""))
+        allowed_root = (get_repo_root() / "06_工作区" / "BookDistill").resolve()
+        try:
+            resolved = stage_dir.resolve()
+            if resolved.parent == allowed_root and resolved.name.startswith(f"{request_id}_"):
+                shutil.rmtree(resolved, ignore_errors=True)
+        except (OSError, ValueError):
+            pass
         audit.finish_file(request_id, audit.STATUS_CANCELED)
     bridge.cleanup_request(request_id)
     return {"request_id": request_id, "status": "canceled"}
@@ -1833,7 +1816,15 @@ def cancel_method_distill_request(request_id: str) -> dict[str, Any]:
     request = bridge.get_request(request_id)
     if request is not None:
         bridge.mark_canceled(request_id)
-        bridge.clear_active_if(request_id)
+        stage_method_dir = Path(str((request.get("meta") or {}).get("stage_method_dir") or ""))
+        stage_dir = stage_method_dir.parent
+        allowed_root = (get_repo_root() / "06_工作区" / "MethodDistill").resolve()
+        try:
+            resolved = stage_dir.resolve()
+            if resolved.parent == allowed_root and resolved.name.startswith(f"{request_id}_"):
+                shutil.rmtree(resolved, ignore_errors=True)
+        except (OSError, ValueError):
+            pass
         audit.finish_file(request_id, audit.STATUS_CANCELED)
     bridge.cleanup_request(request_id)
     return {"request_id": request_id, "status": "canceled"}

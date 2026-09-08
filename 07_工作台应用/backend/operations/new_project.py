@@ -97,17 +97,20 @@ _PROPOSALS_ROOT = (
 # 请求级检索快照 CLI（Agent 在执行内运行；唯一确定性检索入口）
 _RETRIEVAL_SCRIPT = Path(__file__).resolve().parent / "retrieval_snapshot.py"
 
-# Agent 任务模板：两阶段。第一阶段语义分析；第二阶段（仅 knowledge_needs 非空）
+# Agent 任务模板：先原创设计，再诊断缺口；仅存在真实缺口时
 # 运行确定性检索命令查看真实候选，然后从该候选中选择 scoped ref。模型不得在
 # 见到检索结果前编造/选择 BKP id。作者想法放在最后，避免模型先回应角色设定。
-_AGENT_TASK_TEMPLATE = """你是 Go Write 的故事设计执行器。必须严格按下列顺序执行：先完成语义分析；若 knowledge_needs 非空，必须在生成最终 JSON 之前先用本地命令/工具执行下面给出的检索命令并读取其结果；完成检索与选择后，才输出最终 JSON。本任务不是纯文本生成任务；中间的工具调用属于任务执行过程，不属于最终回复。
+_AGENT_TASK_TEMPLATE = """你是 Go Write 的故事设计执行器。必须严格按下列顺序执行：先完成不依赖外部知识的原创设计，再诊断这一版的真实缺口；若 knowledge_needs 非空，才在生成最终 JSON 之前执行下面的只读检索命令。本任务不是纯文本生成任务；中间的工具调用不属于最终回复。
 
-流程分两个阶段：
+流程分三个阶段：
 
-第一阶段：语义分析
-针对作者想法，先完成语义分析（objective / knowledge_needs / assumptions）。knowledge_needs 为空列表是合法的。
+第一阶段：原创设计
+只根据作者作品名与想法，自由形成第一版故事方向、故事引擎、读者期待、约束与开放空间。本阶段严禁先检索 BKP/方法知识，不得让参考作品先搭故事骨架。
 
-第二阶段：知识检索与选择（仅当 knowledge_needs 非空；必须执行）
+第二阶段：诊断缺口
+审视第一版原创设计，只把无法靠当前输入稳妥解决的具体问题写入 knowledge_needs，同时形成 objective 与 assumptions。没有真实缺口时 knowledge_needs=[] 是正常结果，不得为了使用知识库而硬造需求。
+
+第三阶段：知识检索与选择（仅当 knowledge_needs 非空；必须执行）
 若 knowledge_needs 非空，在生成最终 JSON 之前，你必须先用可用的本地命令/工具执行以下确定性只读检索命令：
   python {retrieval_command} --request {request_id} "<query>"
 其中 <query> 是把你第一阶段列出的全部 knowledge_needs 用中文分号（；）连接成的单个字符串。
@@ -817,6 +820,9 @@ def get_new_project_request(request_id: str) -> dict[str, Any]:
 
     request = bridge.get_request(request_id)
     if request is None:
+        if audit.was_canceled(request_id):
+            bridge.cleanup_request(request_id)
+            return {"request_id": request_id, "status": "canceled"}
         return {"request_id": request_id, "status": "failed", "error": "任务已失效，请重新发起。"}
 
     state = request.get("state")
@@ -920,13 +926,13 @@ def cancel_new_project_request(request_id: str) -> dict[str, Any]:
         project_id = str((request.get("meta") or {}).get("project_id") or "")
         if project_id:
             _cleanup_proposal(project_id)
-        bridge.clear_active_if(request_id)
         audit.finish_file(request_id, audit.STATUS_CANCELED)
     else:
         _cleanup_discarded_proposal(request_id)
         # 已完成但未确认候选被丢弃：审计记录（awaiting_confirmation）收尾为
         # canceled（已是 completed 等终态时 finish_file 幂等 no-op）
         audit.finish_file(request_id, audit.STATUS_CANCELED)
+    bridge.cleanup_request(request_id)
     _exec_task_manager.remove(request_id)
     return {"request_id": request_id, "status": "canceled"}
 

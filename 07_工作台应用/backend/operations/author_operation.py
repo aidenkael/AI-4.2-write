@@ -43,7 +43,7 @@ _KIND_TO_OPERATION: dict[str, str] = {
 # 交互等待时的作者可读消息（阶段相关）
 _WAITING_MESSAGES: dict[tuple[str, str], str] = {
     ("story_write_propose", "pending_selection"): "等待 Qoder /gowrite：正在选择本次写作上下文",
-    ("story_write_propose", "pending_prose"): "上下文已准备好，请再次执行 /gowrite 生成正文",
+    ("story_write_propose", "pending_prose"): "上下文已准备好，Agent 正在自动生成正文",
 }
 
 

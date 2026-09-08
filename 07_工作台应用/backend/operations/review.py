@@ -717,6 +717,9 @@ def get_review_request(request_id: str) -> dict[str, Any]:
 
     request = bridge.get_request(request_id)
     if request is None:
+        if audit.was_canceled(request_id):
+            bridge.cleanup_request(request_id)
+            return {"request_id": request_id, "status": "canceled"}
         return {"request_id": request_id, "status": "failed", "error": "任务已失效，请重新发起。"}
 
     state = request.get("state")
@@ -815,12 +818,12 @@ def cancel_review_request(request_id: str) -> dict[str, Any]:
         review_turn_id = str(meta.get("review_turn_id") or "")
         if project_id and review_turn_id:
             _cleanup_review(project_id, review_turn_id)
-        bridge.clear_active_if(request_id)
         audit.finish_file(request_id, audit.STATUS_CANCELED)
     else:
         _cleanup_discarded_review(request_id)
         # 已完成报告的记录已是 completed 终态：finish_file 幂等 no-op；
         # awaiting_confirmation 状态（如有）收尾为 canceled
         audit.finish_file(request_id, audit.STATUS_CANCELED)
+    bridge.cleanup_request(request_id)
     _exec_task_manager.remove(request_id)
     return {"request_id": request_id, "status": "canceled"}

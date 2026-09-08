@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""正文写作交互桥（Interactive two-phase /gowrite）targeted tests。
+"""正文写作交互桥（Interactive one-command, two-stage）targeted tests。
 
 覆盖（全部文件协议 + 假 adapter，无真实模型/API 调用）：
 A. prepare 两阶段请求生命周期：phase=pending_selection，无 Direct runner
-B. Stage 1 → 精确 Context 编译 → Stage 2（两次 /gowrite 响应）→ 候选
+B. Stage 1 → 精确 Context 编译 → Stage 2（同一命令自动续行的两阶段响应）→ 候选
 C. Stage 2 任务只含编译 Context + recent prose，绝不含未选中 State 目录
 D. 阶段 1 取消
 E. 阶段 2 取消
@@ -203,9 +203,10 @@ def _complete_two_phase(real_project, monkeypatch, selection=None):
     _write_qoder_response(rid, selection or _selection_json())
     got = sw_ops.get_story_write_request(rid)
     assert got["status"] == "pending" and got["phase"] == "pending_prose", got
-    assert "再次执行 /gowrite" in got["message"]
+    assert "自动生成正文" in got["message"]
     # 请求文件已换成 Stage 2 任务
     request = bridge.get_request(rid)
+    assert request["auto_continue"] is True
     assert "当前 Story State 候选条目" not in request["task"]
     assert "Context Package" in request["task"]
 
@@ -380,10 +381,13 @@ def test_cancel_in_phase2(isolated, real_project, fake_bridge, monkeypatch):
     _write_qoder_response(rid, _selection_json())
     got = sw_ops.get_story_write_request(rid)
     assert got["status"] == "pending" and got["phase"] == "pending_prose"
+    late_output = _prose_output(rid)
 
     canceled = sw_ops.cancel_story_write_request(rid)
     assert canceled["status"] == "canceled"
-    _write_qoder_response(rid, _prose_output(rid))
+    assert bridge.get_request(rid) is None
+    assert not bridge.response_path(rid).exists()
+    _write_qoder_response(rid, late_output)
     got = sw_ops.get_story_write_request(rid)
     assert got["status"] == "canceled"
     assert "writing_meta.json" not in [p.name for p in (isolated.parent / ".writing" / real_project["project_id"]).rglob("*") if p.is_file()] if (isolated.parent / ".writing" / real_project["project_id"]).exists() else True
@@ -404,7 +408,7 @@ def test_late_stage1_response_discarded_after_transition(isolated, real_project,
     _write_qoder_response(rid, _selection_json())
     got = sw_ops.get_story_write_request(rid)
     assert got["status"] == "pending" and got["phase"] == "pending_prose"
-    assert "再次执行 /gowrite" in got["message"]
+    assert "自动正文阶段" in got["message"]
 
     # 正确的 Stage 2 响应仍可完成
     _write_qoder_response(rid, _prose_output(rid))

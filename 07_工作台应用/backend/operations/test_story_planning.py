@@ -61,6 +61,15 @@ from operations.projects import (  # noqa: E402
 )
 from config.settings import SettingsStore, AppSettings  # noqa: E402
 
+
+def test_story_plan_task_is_original_first_then_gap_diagnosis_then_retrieval():
+    task = sp_ops._AGENT_TASK_TEMPLATE
+    original = task.index("第一阶段：原创规划")
+    diagnosis = task.index("第二阶段：诊断缺口")
+    retrieval = task.index("第三阶段：知识检索与选择")
+    assert original < diagnosis < retrieval
+    assert "不得让参考作品先替作者搭规划骨架" in task
+
 # 合法 Agent 输出（用于 propose 测试；knowledge_needs 为空时 package_ref 为空串）
 VALID_AGENT_JSON = json.dumps({
     "semantic_interpretation": {

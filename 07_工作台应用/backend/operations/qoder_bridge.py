@@ -36,6 +36,7 @@ import os
 import shutil
 import subprocess
 import threading
+import time
 import uuid
 import sys
 from datetime import datetime, timedelta, timezone
@@ -128,6 +129,7 @@ def create_request(
     request_id: Optional[str] = None,
     phase: Optional[str] = None,
     activate_for_gowrite: bool = False,
+    auto_continue: bool = False,
 ) -> str:
     """生成唯一 request_id 并保存完整 Agent task。
 
@@ -160,6 +162,7 @@ def create_request(
         "task": task,        # 完整 Agent task（业务规则全部在这里）
         "response_path": str(response_path(request_id)),
         "meta": meta or {},
+        "auto_continue": bool(auto_continue),
     }
     if phase is not None:
         request["phase"] = phase
@@ -472,7 +475,7 @@ def clear_active_if(request_id: str) -> None:
 
 
 def clear_response(request_id: str) -> None:
-    """只删除 response 文件（两阶段交互桥：阶段间消费后清除，等第二次 /gowrite）。"""
+    """只删除 response 文件（两阶段交互桥：阶段间消费后清除）。"""
     try:
         response_path(request_id).unlink(missing_ok=True)
     except OSError:
@@ -496,11 +499,40 @@ def set_request_task(request_id: str, task: str, *, phase: Optional[str] = None)
         req["phase"] = phase
     if isinstance(req.get("slot"), int):
         release_claim(request_id)
+        # Consume the previous-stage response before exposing waiting_agent.
+        # Otherwise auto-continuation could write Stage 2 while the backend is
+        # still deleting the Stage 1 response.
+        clear_response(request_id)
         req["execution_phase"] = "waiting_agent"
         timeout = int(req.get("wait_timeout_seconds") or DEFAULT_TASK_TIMEOUT_SECONDS)
         req["expires_at"] = (datetime.now(timezone.utc) + timedelta(seconds=timeout)).isoformat(timespec="seconds")
     _write_json_atomic(request_path(request_id), req)
     return True
+
+
+def await_next_stage(request_id: str, slot: int, *, timeout_seconds: float = 120.0) -> Optional[dict[str, Any]]:
+    """Wait for an auto-continuing request to expose its next task, then claim it.
+
+    The author invokes the slot command once.  After the command writes one
+    stage response, Go Write validates it and may replace the task in the same
+    request.  This deterministic wait only observes that transition; it never
+    runs a model or carries one stage's context into another.
+    """
+    if slot not in range(1, INTERACTIVE_SLOT_COUNT + 1):
+        return None
+    deadline = time.monotonic() + max(0.0, timeout_seconds)
+    while time.monotonic() <= deadline:
+        req = get_request(request_id)
+        if req is None or req.get("state") != "pending":
+            return None
+        if req.get("slot") != slot or _slot_request_id(slot) != request_id:
+            return None
+        if not req.get("auto_continue"):
+            return None
+        if req.get("execution_phase") == "waiting_agent":
+            return claim_request_for_slot(slot)
+        time.sleep(0.1)
+    return None
 
 
 def cleanup_request(request_id: str) -> None:
@@ -565,5 +597,13 @@ if __name__ == "__main__":
             claimed = None
         if claimed is not None:
             print(json.dumps(claimed, ensure_ascii=False))
+            raise SystemExit(0)
+    if len(sys.argv) == 4 and sys.argv[1] == "await-next":
+        try:
+            next_request = await_next_stage(sys.argv[2], int(sys.argv[3]))
+        except ValueError:
+            next_request = None
+        if next_request is not None:
+            print(json.dumps(next_request, ensure_ascii=False))
             raise SystemExit(0)
     raise SystemExit(1)
