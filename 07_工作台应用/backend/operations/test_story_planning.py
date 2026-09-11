@@ -1226,6 +1226,14 @@ def test_task_requires_selection_only_from_returned_package():
     assert "<source_kind>/<source_id>/<source_anchor>" in task
 
 
+def test_task_requires_selected_knowledge_to_change_final_planning():
+    """已选知识必须影响最终规划内容，不能只留下 provenance。"""
+    task = _render_task_template()
+    assert "实际修订最终 model_output 与 planning_projection" in task
+    assert "只记录 selected_knowledge_refs" in task
+    assert "不能带来可说明的规划改进，就不要选择它" in task
+
+
 def test_task_has_no_text_only_framing():
     """F. 不再残留会抑制中间工具调用的"纯文本输出"式表述。"""
     task = _render_task_template()

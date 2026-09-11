@@ -15,3 +15,7 @@ def test_agent_task_consumes_formal_observer_contracts_and_full_pipeline(tmp_pat
     assert "0 次 Deep Dive 合法" in task
     assert "Editorial Convergence" in task
     assert "BKP_ACCEPTANCE_REPORT.md" in task
+    assert "acceptance_gate.py" in task
+    assert "acceptance.status 为 PASS" in task
+    assert "最多进行 2 轮有界修复" in task
+    assert "REVIEW / PENDING" in task

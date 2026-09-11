@@ -415,6 +415,7 @@ def test_run_book_distill_deterministic_stages(isolated, monkeypatch):
 
     monkeypatch.setattr(materials.subprocess, "run", fake_run)
     monkeypatch.setattr(materials, "_knowledge_is_discoverable", lambda asset: True)
+    monkeypatch.setattr(materials, "_workbench_projection_is_writing_ready", lambda asset_id: True)
     monkeypatch.setattr(catalog, "refresh_and_render", lambda root, check_only=False, tolerate_missing=False: 0)
 
     result = materials.run_book_distill("book_0001")
@@ -848,10 +849,10 @@ def test_knowledge_retrieve_sees_only_published_02_package(isolated):
     tx.commit()
 
 
-@pytest.mark.parametrize("failure", ["discovery", "catalog"])
+@pytest.mark.parametrize("failure", ["discovery", "catalog", "workbench_projection"])
 def test_book_publish_rolls_back_through_post_publish_verification(
         isolated, monkeypatch, failure):
-    """Discovery/catalog 任一失败都恢复旧 02 包，新 candidate 回到 06 staging。"""
+    """Discovery/catalog/作者投影任一失败都恢复旧 02 包，新 candidate 回到 06 staging。"""
     _write_ledger(isolated, _fake_asset_ledger())
     sp_dir = isolated / "06_工作区" / "SourcePrepare" / "book_0001_样例作品"
     stage = isolated / "06_工作区" / "BookDistill" / "req_book_0001_样例作品"
@@ -866,12 +867,21 @@ def test_book_publish_rolls_back_through_post_publish_verification(
     monkeypatch.setattr(materials, "_run_reference_acceptance", lambda *a, **k: None)
     monkeypatch.setattr(materials, "_knowledge_is_discoverable",
                         lambda asset: failure != "discovery")
+    monkeypatch.setattr(
+        materials, "_workbench_projection_is_writing_ready",
+        lambda asset_id: failure != "workbench_projection",
+    )
     catalog, _, _ = materials._load_materialintake()
     if failure == "catalog":
         def fail_after_partial_metadata(*args, **kwargs):
             (isolated / "01_原始素材" / "素材资产.json").write_bytes(b"partial\n")
             return 1
         monkeypatch.setattr(catalog, "refresh_and_render", fail_after_partial_metadata)
+    elif failure == "workbench_projection":
+        monkeypatch.setattr(
+            catalog, "refresh_and_render",
+            lambda root, check_only=False, tolerate_missing=False: 0,
+        )
 
     with pytest.raises(materials.MaterialsError, match="已保留原知识包"):
         materials._finalize_reference_distill(

@@ -135,6 +135,7 @@ _AGENT_TASK_TEMPLATE = """你是 Go Write 的规划执行器。必须严格按�
 对第一阶段列出的每一个 knowledge_need，分别用该 need 的具体 query 替换 <query> 并独立执行一次命令；严禁把多个 need 用分号、换行或其他方式合并成一个 query。每次命令把该 round 的检索包（RetrievalPackage，混合参考作品知识/方法知识/已验证知识）写入当前请求的临时 round 快照（不改动任何作品或业务文件），然后向终端输出 JSON，其中 package_fingerprint 是该 round 包的身份指纹，package.hits 数组内每个候选项含 selection_ref、source_kind、source_id、source_title、statement、scope、boundary、evidence 等字段；selection_ref 形如 "<source_kind>/<source_id>/<source_anchor>"（例如 reference_bkp/book_a/K001、method_source/book_0138/M0003、validated_knowledge/pkg_opening_hook/V0001）。
 你必须读取每个命令实际输出的 package，并把结果逐项写入 semantic_interpretation.knowledge_rounds：每项有 need、query、package_ref、selected_knowledge_refs；本 round 只能从自己的输出选择 0 到 {max_knowledge_hits} 个 selection_ref。严禁编造不存在的 selection_ref 或 package_fingerprint；无合适候选时本 round selected_knowledge_refs 保持空列表。
 semantic_interpretation.selected_knowledge_refs 必须严格等于全部 round 按声明顺序、round 内顺序首次去重后的聚合；全请求最多 8 个 unique ref。knowledge_needs 非空时顶层 package_ref 必须为空字符串 ""，不得用一个包冒充多个 round。若 knowledge_needs 为空：不要运行检索命令，knowledge_rounds 与 selected_knowledge_refs 都必须为 []，package_ref 必须为空字符串 ""。
+每个被选中的知识条目都必须只按其 statement / scope / boundary 提取有用机制，并实际修订最终 model_output 与 planning_projection；只记录 selected_knowledge_refs、却让最终规划仍停留在第一阶段草案，视为未完成。若某候选不能带来可说明的规划改进，就不要选择它。不得迁移参考作品的具体人物、组织、情节或措辞。
 
 最终回复
 最终回复必须只有合法 JSON 对象（不要任何额外文字、不要 markdown 代码块标记）。结构必须如下：

@@ -477,6 +477,21 @@ def list_materials() -> dict[str, Any]:
     return {"materials": materials}
 
 
+def _workbench_projection_is_writing_ready(asset_id: str) -> bool:
+    """Re-read the author-facing projection after settlement; no cached completion claims."""
+    try:
+        material = next(
+            item for item in list_materials()["materials"]
+            if item.get("id") == asset_id
+        )
+    except (KeyError, StopIteration, TypeError):
+        return False
+    return (
+        material.get("workflow_stage") == "writing"
+        and material.get("writing_callable") is True
+    )
+
+
 # ---------------------------------------------------------------------------
 # 显式动作（只有作者明确点击才执行）
 # ---------------------------------------------------------------------------
@@ -1145,6 +1160,8 @@ def _finalize_reference_distill(request_id: str, asset: dict[str, Any], sp_dir: 
             rc = catalog.refresh_and_render(get_repo_root(), check_only=False)
             if rc != 0:
                 raise MaterialsError(f"catalog settlement rc={rc}")
+            if not _workbench_projection_is_writing_ready(str(asset.get("id") or "")):
+                raise MaterialsError("workbench projection is not writing-ready")
             tx.commit()
         except Exception as exc:  # noqa: BLE001 - technical detail stays in audit
             audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "book_distill",

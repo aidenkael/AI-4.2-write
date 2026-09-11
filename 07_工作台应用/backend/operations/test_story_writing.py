@@ -27,6 +27,7 @@ T. StoryPlan 回归（由 test_story_planning.py 全量覆盖）
 真实 author acceptance → accepted_text → production Story State
 必须由作者本人在工作台实际点击"保留这段"才算验证；自动化测试只验证机械胶水。
 """
+import importlib.util
 import json
 import os
 import re
@@ -509,6 +510,83 @@ def test_stage1_knowledge_exact_package_binding(isolated, real_project, fake_bri
     assert snapshot["writing_turn_id"] == turn_dir.name
     assert snapshot["query"] == "信息层次"
     assert snapshot["package_fingerprint"] == sw_ops._package_fingerprint(package)
+
+
+def test_real_reference_identity_survives_retrieval_context_and_stage2(
+        isolated, real_project, fake_bridge, monkeypatch):
+    """真实 KnowledgeRetrieve fixture 的通用身份必须原样进入 Context 与 Stage 2。"""
+    fixture_root = isolated.parent / "knowledge-fixture"
+    bkp = fixture_root / "02_素材知识库" / "book_test_测试原著" / "bkp"
+    (bkp / "knowledge").mkdir(parents=True)
+    (bkp / "identity.json").write_text(json.dumps({
+        "bkp_version": "0.3",
+        "book": {"book_id": "book_test", "title": "测试原著", "author": "测试作者"},
+        "schema_status": "FINALIZED",
+        "bkp_contents": {"cards": {"file": "knowledge/cards.md"}},
+        "acceptance": {
+            "schema": "gowrite_bkp_acceptance/v1", "required": True, "status": "PASS",
+        },
+    }, ensure_ascii=False), encoding="utf-8")
+    (bkp / "knowledge" / "cards.md").write_text("""# Cards
+
+## K001｜信息差维持局部张力
+
+- knowledge_level: Work-specific Pattern
+- dimension: 信息管理
+- use_stages: longform_plan, chapter_plan, scene_write
+- problem_types: information_gap
+- scale: scene
+- statement: 让角色只掌握完成当前行动所需的信息，保留下一步判断的不确定性。
+- scope: 角色刚进入陌生环境的场景。
+- boundary: 不得隐瞒角色理应知道的既有事实。
+- confidence: 高
+- evidence:
+  - chapters/0001.md#L1-L3
+- tags: 信息差, 张力
+""", encoding="utf-8")
+
+    kr_path = Path(__file__).resolve().parents[3] / "05_Skills与自动化" / "01_Skills" / "KnowledgeRetrieve" / "run.py"
+    spec = importlib.util.spec_from_file_location("test_real_knowledge_retrieve_runtime", kr_path)
+    assert spec is not None and spec.loader is not None
+    runtime = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runtime)
+    runtime.BASE_DIR = str(fixture_root)
+    runtime.reset_catalog()
+    monkeypatch.setattr(sw_ops, "_retrieve_package", runtime.retrieve)
+
+    state_file = real_project["project_dir"] / "_工作台状态" / "story_state.json"
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    state["canon_facts"].append({
+        "id": "fact-unselected", "fact": "UNSELECTED_STATE_SENTINEL",
+        "authority": "manual_import:test", "occurred": True,
+    })
+    state["state_rev"] += 1
+    state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    expected_ref = "reference_bkp/book_test/K001"
+
+    def _stage1(request):
+        rid = re.search(r"--request ([0-9a-f]{32})", request.task).group(1)
+        shown = sw_ops.execute_request_scoped_retrieval("信息差 张力", rid)
+        assert [hit.selection_ref for hit in shown.hits] == [expected_ref]
+        return AgentResult(status="completed", output=_selection_json(
+            knowledge_needs=["信息差 张力"], selected_knowledge_refs=[expected_ref],
+            package_ref=sw_ops._package_fingerprint(shown), state_selections=[],
+        ), agent="fake_storywrite_agent")
+
+    adapter = _TwoStageAdapter(on_stage1=_stage1)
+    prepared = _sw_prepare(real_project, adapter, monkeypatch)
+    assert _wait_worker(prepared["request_id"])
+    result = sw_ops.get_story_write_request(prepared["request_id"])
+    assert result["status"] == "completed", result.get("error")
+
+    context = _writing_meta(real_project, isolated)["context"]
+    assert [hit["selection_ref"] for hit in context["selected_knowledge_hits"]] == [expected_ref]
+    assert len(adapter.calls) == 2
+    stage2_task = adapter.calls[1].task
+    assert expected_ref in stage2_task
+    assert "让角色只掌握完成当前行动所需的信息" in stage2_task
+    assert "UNSELECTED_STATE_SENTINEL" not in stage2_task
 
 
 # ---------------------------------------------------------------------------
