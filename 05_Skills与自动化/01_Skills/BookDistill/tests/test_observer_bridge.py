@@ -19,7 +19,7 @@ def make_fake_pass_pkg(root: Path, chapter_files: int = 2) -> Path:
     chapters = sp / "chapters"
     chapters.mkdir(parents=True, exist_ok=True)
     meta = {
-        "skill_version": "0.2.1",
+        "skill_version": "0.4.0",
         "book_id": "book_0001",
         "book": "测试之书",
         "status": "PASS",
@@ -29,6 +29,8 @@ def make_fake_pass_pkg(root: Path, chapter_files: int = 2) -> Path:
             "sha256": "a" * 64,
         },
         "chapter_files": chapter_files,
+        "unit_semantics": "chapter",
+        "unit_boundary_source": "epub_heading",
     }
     (sp / "metadata.json").write_text(
         json.dumps(meta, ensure_ascii=False), encoding="utf-8"
@@ -41,6 +43,17 @@ def make_fake_pass_pkg(root: Path, chapter_files: int = 2) -> Path:
             encoding="utf-8",
         )
     return sp
+
+
+def mark_scanned(out: Path, observer_id: str) -> None:
+    for path in (out / "discovery" / observer_id / "chapters").glob("ch_*.md"):
+        chapter = path.stem.removeprefix("ch_")
+        text = path.read_text(encoding="utf-8")
+        text = text.replace(
+            f"- scan_refs: （完整阅读后填写 chapters/{chapter}.md#L...；超大 reading unit 须覆盖前/中/后）",
+            f"- scan_refs: chapters/{chapter}.md#L3-L5",
+        )
+        path.write_text(text, encoding="utf-8")
 
 
 class ObserverBridgeTests(unittest.TestCase):
@@ -94,6 +107,7 @@ class ObserverBridgeTests(unittest.TestCase):
             out = root / "out"
             bd.prepare(sp, out)
             ob.init_workspace(sp, out)
+            mark_scanned(out, "reader_page_craft")
 
             observer_id = "reader_page_craft"
             path = out / "discovery" / observer_id / "chapters" / "ch_0001.md"
@@ -122,6 +136,7 @@ class ObserverBridgeTests(unittest.TestCase):
             out = root / "out"
             bd.prepare(sp, out)
             ob.init_workspace(sp, out)
+            mark_scanned(out, "longform_reader_dynamics")
 
             observer_id = "longform_reader_dynamics"
             path = out / "discovery" / observer_id / "chapters" / "ch_0001.md"

@@ -77,16 +77,38 @@ def _make_asset(root: Path, *, data: dict | None = None, card_count: int = 2,
     asset_dir = root / "02_素材知识库" / "book_9001_测试书"
     bkp = asset_dir / "bkp"
     (bkp / "knowledge").mkdir(parents=True)
+    snapshot = {"book_id": "book_9001", "sp_version": "0.4.0",
+                "source_sha256": source_sha256, "chapter_count": 2,
+                "chapter_content_fingerprint": "c" * 64,
+                "unit_semantics": "chapter", "unit_boundary_source": "epub_heading"}
     identity = {
         "bkp_version": "0.2",
         "book": {"book_id": "book_9001", "title": "测试书", "author": "作者",
                  "category": "", "language": "zh-CN", "chapter_count": 2},
-        "source_snapshot": {"book_id": "book_9001", "source_sha256": source_sha256,
-                            "chapter_count": 2},
+        "source_snapshot": snapshot,
         "schema_status": "FINALIZED",
     }
     (bkp / "identity.json").write_text(json.dumps(identity, ensure_ascii=False, indent=2), encoding="utf-8")
     (bkp / "knowledge" / "cards.md").write_text(_cards_md(card_count), encoding="utf-8")
+    stats = {"FACT": 1, "INFERENCE": 0, "OBSERVATION": 0, "MECHANISM": 0, "BOUNDARY": 0}
+    manifest = {
+        "source_snapshot": snapshot, "unit_semantics": "chapter",
+        "unit_boundary_source": "epub_heading", "total_entries": 1,
+        "stats_by_kind": stats, "scan_coverage": {"ok": True, "blocking": []},
+    }
+    (asset_dir / "distill_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    (asset_dir / "bd_report.md").write_text(
+        "\n".join(["# 蒸馏报告", "", "- 输入单元语义：chapter",
+                    "- 证据条目总数：1", f"- 分类统计：{json.dumps(stats, ensure_ascii=False)}",
+                    "- 扫描覆盖门：PASS", ""]), encoding="utf-8")
+    validation = {
+        observer: {"ok": True, "coverage": {"ok": True, "blocking": []}}
+        for observer in ("longform_reader_dynamics", "reader_page_craft")
+    }
+    discovery = asset_dir / "discovery"
+    discovery.mkdir()
+    (discovery / "merge_report.json").write_text(
+        json.dumps({"validation": validation}, ensure_ascii=False), encoding="utf-8")
     sp_chapters = root / "06_工作区" / "SourcePrepare" / "book_9001_测试书" / "chapters"
     sp_chapters.mkdir(parents=True)
     (sp_chapters / "0001.md").write_text("第一章正文", encoding="utf-8")
@@ -214,6 +236,28 @@ class AcceptanceGateTest(unittest.TestCase):
             result = validate_acceptance(asset_dir, root)
             self.assertFalse(result["ok"])
             self.assertTrue(any(REPORT_NAME in e for e in result["errors"]))
+
+    def test_scan_coverage_blocking_rejects_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            asset_dir = _make_asset(root)
+            path = asset_dir / "distill_manifest.json"
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+            manifest["scan_coverage"] = {"ok": False, "blocking": ["head only"]}
+            path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+            result = validate_acceptance(asset_dir, root)
+            self.assertFalse(result["ok"])
+            self.assertTrue(any("Base Scan" in error for error in result["errors"]))
+
+    def test_bd_report_manifest_mismatch_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            asset_dir = _make_asset(root)
+            report = asset_dir / "bd_report.md"
+            report.write_text(report.read_text(encoding="utf-8").replace("证据条目总数：1", "证据条目总数：0"), encoding="utf-8")
+            result = validate_acceptance(asset_dir, root)
+            self.assertFalse(result["ok"])
+            self.assertTrue(any("bd_report" in error for error in result["errors"]))
 
 
 if __name__ == "__main__":

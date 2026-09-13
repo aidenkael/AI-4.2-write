@@ -84,6 +84,7 @@ def render_observer_chapter_template(observer_id: str, chapter: dict) -> str:
             f"- observer_id: `{observer_id}`",
             f"- source: `{source_ref}`",
             f"- title: {chapter.get('title') or '（未识别）'}",
+            f"- scan_refs: （完整阅读后填写 {source_ref}#L...；超大 reading unit 须覆盖前/中/后）",
             "",
             "## 使用规则",
             "",
@@ -290,6 +291,7 @@ def validate_observer(
     warnings: list[str] = list(validation["warnings"])
     stats = {kind: 0 for kind in ALLOWED_KINDS}
     files_with_entries = 0
+    scan_positions: dict[str, list[float]] = {ref: [] for ref in valid_files}
 
     if not manifest_path.exists():
         errors.append(f"缺少 observer_manifest.json: {manifest_path}")
@@ -316,6 +318,16 @@ def validate_observer(
             if source_chapter is None:
                 continue
             seen_chapters.add(source_chapter)
+            for line in read_text(path).splitlines():
+                if not re.match(r"^\s*-\s*scan_refs\s*:", line, re.IGNORECASE):
+                    continue
+                for ref in bd.SCAN_REF_RE.findall(line):
+                    parsed = bd._ref_position(ref, line_bounds)
+                    if parsed:
+                        if parsed[0] != canonical_chapter_ref(source_chapter):
+                            errors.append(f"{path}: scan_refs 只能引用同一输入单元：{ref}")
+                        else:
+                            scan_positions[parsed[0]].append(parsed[1])
             entries, parse_errors = parse_entries(path, observer_id)
             errors.extend(parse_errors)
             if entries:
@@ -345,6 +357,22 @@ def validate_observer(
     if files_with_entries == 0:
         warnings.append("observer 当前没有任何可桥接条目；可能仍是空模板。")
 
+    unit_semantics = validation["info"].get("unit_semantics")
+    coverage_units: dict[str, dict] = {}
+    coverage_blocking: list[str] = []
+    for ref in valid_files:
+        positions = scan_positions[ref]
+        buckets = sorted({"front" if p < 1 / 3 else "middle" if p < 2 / 3 else "back" for p in positions})
+        if not positions:
+            coverage_blocking.append(f"{ref}: observer 未填写 scan_refs。")
+        elif unit_semantics == "reading_unit" and line_bounds.get(ref, 0) >= bd.LARGE_UNIT_MIN_LINES \
+                and not {"front", "middle", "back"}.issubset(set(buckets)):
+            coverage_blocking.append(f"{ref}: 超大 reading unit 未覆盖前/中/后。")
+        coverage_units[ref] = {"lines": line_bounds.get(ref, 0), "scan_ref_count": len(positions), "buckets": buckets}
+    errors.extend(coverage_blocking)
+    coverage = {"ok": not coverage_blocking, "unit_semantics": unit_semantics,
+                "units": coverage_units, "blocking": coverage_blocking}
+
     return {
         "ok": not errors,
         "errors": errors,
@@ -352,6 +380,7 @@ def validate_observer(
         "stats": stats,
         "files_with_entries": files_with_entries,
         "observer_id": observer_id,
+        "coverage": coverage,
     }
 
 

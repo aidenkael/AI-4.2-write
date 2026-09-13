@@ -179,6 +179,45 @@ def validate_acceptance(
     if report_data.get("protocol") != ACCEPTANCE_SCHEMA:
         errors.append("报告协议版本非法（必须为 gowrite_bkp_acceptance/v1）。")
 
+    manifest = _read_json(asset_dir / "distill_manifest.json")
+    if manifest is None:
+        errors.append("缺少或无法解析 distill_manifest.json。")
+    else:
+        if manifest.get("source_snapshot") != snapshot:
+            errors.append("distill_manifest source_snapshot 与 BKP identity 不一致。")
+        if manifest.get("unit_semantics") not in {"chapter", "reading_unit"}:
+            errors.append("distill_manifest 缺少可信 unit_semantics。")
+        coverage = manifest.get("scan_coverage")
+        if not isinstance(coverage, dict) or not coverage.get("ok"):
+            errors.append("Base Scan 覆盖门未通过；未证明全部单元已检查。")
+        try:
+            report_text = (asset_dir / "bd_report.md").read_text(encoding="utf-8")
+        except OSError:
+            report_text = ""
+        expected_stats = [
+            f"- 证据条目总数：{manifest.get('total_entries', 0)}",
+            f"- 分类统计：{json.dumps(manifest.get('stats_by_kind', {}), ensure_ascii=False)}",
+            f"- 输入单元语义：{manifest.get('unit_semantics')}",
+            f"- 扫描覆盖门：{'PASS' if (coverage or {}).get('ok') else 'BLOCKED'}",
+        ]
+        if not report_text or any(line not in report_text for line in expected_stats):
+            errors.append("bd_report.md 的关键统计与最终 manifest 不一致。")
+
+    merge_report = _read_json(asset_dir / "discovery" / "merge_report.json")
+    expected_observers = {"longform_reader_dynamics", "reader_page_craft"}
+    if merge_report is None:
+        errors.append("缺少 discovery/merge_report.json，无法证明两个 Observer 的全书阅读分布。")
+    else:
+        validation = merge_report.get("validation") or {}
+        if set(validation) != expected_observers:
+            errors.append("Discovery merge 未同时包含两个正式 Observer。")
+        for observer_id in sorted(expected_observers):
+            observer = validation.get(observer_id) if isinstance(validation, dict) else None
+            if not isinstance(observer, dict) or not observer.get("ok") \
+                    or not isinstance(observer.get("coverage"), dict) \
+                    or not observer["coverage"].get("ok"):
+                errors.append(f"Observer {observer_id} 的全单元阅读覆盖未通过。")
+
     status = report_data.get("status")
     if status not in {"PASS", "REVIEW"}:
         errors.append("acceptance status 必须是 PASS 或 REVIEW。")

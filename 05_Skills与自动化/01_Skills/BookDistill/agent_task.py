@@ -37,13 +37,13 @@ def build_distill_agent_task(sp_dir: Path, bd_dir: Path) -> str:
 输入：
 - SourcePrepare PASS 包：{sp}
 - BookDistill staging：{bd}
-- 原著章节：{sp}/chapters/（NNNN.md；0000_*.md 是卷首，不蒸馏）
+- 原著输入单元：{sp}/chapters/（NNNN.md；单元语义以 metadata.unit_semantics 为准；0000_*.md 是前置）
 
 严格执行顺序：
 1. BookProfile Scout：运行 `python "{scout}" init --input "{sp}" --output "{bd}"`；直接阅读生成的锚点原文，填写 `{bd}/book_profile_initial.md`，保持 HYPOTHESIS / NAVIGATION ONLY；再运行对应 `validate`。它只导航，不能过滤后续观察。
 2. 初始化观察工作区：运行 `python "{observer_bridge}" init --input "{sp}" --output "{bd}"`。
-3. Base Scan：逐章直接阅读原著，在 `{bd}/evidence/ch_NNNN.md` 填写可追溯 MAP 与 FACT / INFERENCE / OBSERVATION / MECHANISM / BOUNDARY；每条引用 `chapters/NNNN.md#L起-L止`，含置信度，不大量复制原文。
-4. 两个独立 Discovery Pass：分别严格按 `longform_reader_dynamics` 与 `reader_page_craft` 合同直接读原著并填写其 discovery/chapter 工件。不要从另一观察者摘要二次总结，不为覆盖率硬填。
+3. Base Scan：按顺序直接阅读全部 chapter/reading unit，在每个 `{bd}/evidence/ch_NNNN.md` 填写 `scan_refs`；超大 reading unit 必须覆盖前/中/后。再按实际价值填写 MAP 与 FACT / INFERENCE / OBSERVATION / MECHANISM / BOUNDARY；允许某单元检查后无高价值发现，不为指标硬填。
+4. 两个独立 Discovery Pass：分别严格按 `longform_reader_dynamics` 与 `reader_page_craft` 合同直接读全部输入单元，并在每个 observer chapter 工件填写真实 `scan_refs`。两个 Pass 均不得只读超大单元首部。不要从另一观察者摘要二次总结，不为覆盖率硬造知识。
 5. 分别运行 observer_bridge.py `validate --observer <observer_id>`；两者都通过后运行 `merge`。桥只合并 OBSERVATION / INFERENCE / BOUNDARY，不会自动晋升 MECHANISM。
 6. 只在初始 profile、观察合同或 Discovery 证据暴露真实专项问题时，运行 `python "{book_distill}" deepdive --output "{bd}" --dimension "<维度>" --topic "<问题>" --input "{sp}"`，直接读相关原文章节并填写、校验。没有真实触发器时 0 次 Deep Dive 合法，禁止为了流程完整硬造。
 7. Editorial Convergence：跨章交叉验证、合并同质项、降级单章小技巧，保留反证/边界；形成 `{bd}/mechanisms.md`（10–20 条高价值可迁移机制）、`evidence.md`、`model.md` 与 `bd_report.md`。Discovery 可以宽，BKP 必须克制；不模仿原作者风格。

@@ -1,9 +1,9 @@
-# BookDistill —— 原著蒸馏纪律工作台（vNext Base Scan 升级）
+# BookDistill —— 原著蒸馏纪律工作台（runtime 0.4.0）
 
 ## 定位
 
 C19（原著蒸馏 / 能力发现）的最小可运行实现，当前属于能力地图方法论层（M4）。
-v0.2 在 v0.1.1 确定性 Core 基础上，增加 Base Scan 升级、BookProfile、专项深挖支持。
+runtime 0.4.0 在既有 Base Scan、BookProfile、专项深挖上增加结构语义和真实阅读 coverage 门；BKP 包协议版本仍按其独立合同管理。
 目标是：对 SourcePrepare PASS 的真实作品，产出**可追溯、分类清晰、边界明示、全维度覆盖**的蒸馏证据，
 供作者审阅并沉淀可迁移写作机制。不是剧情复述，不是风格模仿器，不是批量蒸馏流水线。
 
@@ -13,12 +13,13 @@ v0.2 在 v0.1.1 确定性 Core 基础上，增加 Base Scan 升级、BookProfile
 
 必须存在且校验通过：
 
-- `metadata.json`：`status == "PASS"`、`book_id`、`selected_source.sha256`（源指纹）
+- `metadata.json`：`status == "PASS"`、当前 `skill_version == 0.4.0`、`book_id`、`selected_source.sha256`、`unit_semantics`、`unit_boundary_source`
 - `full.md`、`conversion_report.md`
 - `chapters/NNNN.md`：正文章节（`0000_*.md` 视为卷首前置，不参与正文蒸馏）
 - 磁盘正文章节数（仅 `NNNN.md`）与 `metadata.chapter_files` **精确相等**；
   `0000_前置内容.md` 不计入正文计数，任何 ±1 一律 FAIL（防止实际缺章被静默放过）
 - 输入目录名必须形如 `<book_id>_<书名>`，前缀与 `metadata.book_id` 精确一致
+- 旧版或缺少结构语义的 Prepare 一律 fail closed，不得以 warning 继续。`chapter` 按真实章扫描；`reading_unit` 可处理，但索引/报告/任务必须明示其语义。
 
 BookDistill 不读取 `01_原始素材` 作为正文输入；不修改 SourcePrepare 输出。
 
@@ -56,7 +57,7 @@ BookDistill 不读取 `01_原始素材` 作为正文输入；不修改 SourcePre
 2. **分层**：FACT（原文可直接支持）/ INFERENCE（推断，不直接出现在字面）/ **OBSERVATION**（v0.2：作品内观察，按维度标记，不强制收口为 MECHANISM）/ MECHANISM（可迁移机制）/ BOUNDARY（本条边界与不确定性）。
 3. **MAP 独立**：MAP 是结构性作品地图，不属于 Evidence kind；填写场景/人物/时间线/信息状态/冲突等结构信息。
 4. **维度标记**：OBSERVATION 条目须携带 `dimension:维度名` 标签（如人物、关系、信息控制、POV、情绪、Scene Turn 等）。维度框架为可扩展 v0.1 观察列表，不是永久冻结的封闭枚举。
-5. **coverage 明示**：报告必须写明哪些章节覆盖充分、哪些局部、哪些未覆盖；空证据模板 = 未分析章节，在 manifest 记警告。assemble 新增 `dimension_stats` 字段统计各维度覆盖。
+5. **coverage 明示**：每个 Base Scan 与 Observer 工件填写真实 `scan_refs`。超大 reading unit 必须分布到前/中/后；两个 Observer 都必须完整走过所有单元。允许“已检查但无高价值发现”，coverage 不要求固定 evidence/知识数。
 6. **confidence 标记**：每条条目标记置信度 高/中/低。
 7. **counterevidence / boundary**：BOUNDARY 不省略；反证、译本影响、样本局限必须记录。
 8. **不大量复制原文**：条目为一句话结论 + 行号引用，不摘抄大段原文。
@@ -66,6 +67,7 @@ BookDistill 不读取 `01_原始素材` 作为正文输入；不修改 SourcePre
 12. **不做原作者风格模仿器**：产出是分析性证据，不是模仿奥威尔文风的仿写样本。
 13. **重要发现可跨尺度、跨位置聚合**：一条高价值 Observation / Pattern 可以由多个不相邻句子、场景或章节共同支撑；不得为了“一条结论只配一个局部证据”而拆散真实效果链。
 14. **保留未命名价值**：发现“重要但暂时难以命名”的创作智慧时，允许先以 Observation / Inference 保存，不得因为暂时不属于现有 taxonomy 而丢弃。
+15. **报告统计单一真源**：`bd_report.md` 的条目/分类/单元语义/覆盖门统计由最终 `distill_manifest.json` 重建，acceptance 前必须一致。
 
 ## 原著 Discovery：多视角直接阅读（G3 closeout 方法修正）
 

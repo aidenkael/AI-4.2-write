@@ -51,8 +51,12 @@ from pathlib import Path
 # ---- 常量 ---------------------------------------------------------------
 
 SP_STATUS_PASS = "PASS"
-SP_EXPECTED_VERSION = "0.2.1"
-BD_VERSION = "0.3.0"
+SP_EXPECTED_VERSION = "0.4.0"
+BD_VERSION = "0.4.0"
+UNIT_SEMANTICS = {"chapter", "reading_unit"}
+UNIT_BOUNDARY_SOURCES = {"epub_nav_anchor", "epub_heading", "text_heading", "epub_spine_fallback"}
+LARGE_UNIT_MIN_LINES = 1000
+SCAN_REF_RE = re.compile(r"chapters/\d{4}\.md#L\d+(?:-L\d+)?")
 
 # 证据记录允许的分类（evidence-first 分层，v0.2 扩展 OBSERVATION）
 EVIDENCE_KINDS = ["FACT", "INFERENCE", "OBSERVATION", "MECHANISM", "BOUNDARY"]
@@ -200,6 +204,8 @@ def build_source_snapshot(meta: dict, chapters_dir: Path) -> dict | None:
         "source_sha256": sha256,
         "chapter_count": int(meta.get("chapter_files", -1)),
         "chapter_content_fingerprint": compute_chapter_fingerprint(chapters_dir),
+        "unit_semantics": str(meta.get("unit_semantics", "")),
+        "unit_boundary_source": str(meta.get("unit_boundary_source", "")),
     }
 
 
@@ -242,8 +248,19 @@ def validate_input(sp_dir: Path) -> dict:
     # 2. SP 版本
     version = str(meta.get("skill_version", ""))
     if version != SP_EXPECTED_VERSION:
-        warnings.append(f"SP 版本 {version} 与期望 {SP_EXPECTED_VERSION} 不一致，仅记录，不阻塞。")
+        errors.append(f"SP 版本 {version or '（缺失）'} 与当前合同 {SP_EXPECTED_VERSION} 不一致，请重新提纯。")
     info["skill_version"] = version
+
+    unit_semantics = str(meta.get("unit_semantics", ""))
+    boundary_source = str(meta.get("unit_boundary_source", ""))
+    if unit_semantics not in UNIT_SEMANTICS:
+        errors.append("metadata.json 缺少或包含非法 unit_semantics，旧 Prepare 不得继续蒸馏。")
+    if boundary_source not in UNIT_BOUNDARY_SOURCES:
+        errors.append("metadata.json 缺少或包含非法 unit_boundary_source。")
+    if unit_semantics == "reading_unit" and boundary_source != "epub_spine_fallback":
+        errors.append("reading_unit 只能来自 epub_spine_fallback。")
+    info["unit_semantics"] = unit_semantics
+    info["unit_boundary_source"] = boundary_source
 
     # 3. book_id 与书名
     book_id = str(meta.get("book_id", ""))
@@ -330,10 +347,13 @@ def build_chapter_index(sp_dir: Path) -> list[dict]:
         p = chapters_dir / name
         text = read_text(p)
         lines = text.splitlines()
-        # 章节标题：首行形如 "> 一" 的引用行
+        # 章节/阅读单元标题：优先 Markdown heading，兼容旧 blockquote 章号。
         title = ""
         for line in lines[:5]:
             s = line.strip()
+            if s.startswith("#") and s.lstrip("#").strip():
+                title = s.lstrip("#").strip()
+                break
             if s.startswith(">") and len(s) > 1:
                 title = s.lstrip(">").strip()
                 break
@@ -374,6 +394,7 @@ def render_evidence_template(e: dict, book: str, book_id: str) -> str:
         f"- 作品：{book}（{book_id}）",
         f"- 来源文件：`{e['ref_prefix']}`（{e['chars']} 字符，{e['lines']} 行）",
         f"- 标题：{e['title'] or '（未识别）'}",
+        "- scan_refs: （完整检查后填写本单元实际读取位置；超大 reading unit 需覆盖前/中/后）",
         "",
         "## 填写说明",
         "",
@@ -407,6 +428,44 @@ def render_evidence_template(e: dict, book: str, book_id: str) -> str:
         "",
     ]
     return "\n".join(lines)
+
+
+def _ref_position(ref: str, line_bounds: dict[str, int]) -> tuple[str, float] | None:
+    match = re.match(r"(chapters/\d{4}\.md)#L(\d+)(?:-L(\d+))?$", ref)
+    if not match or match.group(1) not in line_bounds:
+        return None
+    total = max(1, line_bounds[match.group(1)])
+    start = int(match.group(2))
+    end = int(match.group(3) or start)
+    return match.group(1), min(1.0, max(0.0, (((start + end) / 2) - 1) / total))
+
+
+def compute_scan_coverage(evidence_dir: Path, valid_files: list[str], line_bounds: dict[str, int],
+                          unit_semantics: str) -> dict:
+    """读取 evidence 模板的 scan_refs，只证明检查位置，不要求产出知识。"""
+    refs_by_file: dict[str, list[float]] = {name: [] for name in valid_files}
+    for ev_file in sorted(evidence_dir.glob("ch_*.md")) if evidence_dir.is_dir() else []:
+        for line in read_text(ev_file).splitlines():
+            if not re.match(r"^\s*-\s*scan_refs\s*:", line, re.IGNORECASE):
+                continue
+            for ref in SCAN_REF_RE.findall(line):
+                parsed = _ref_position(ref, line_bounds)
+                if parsed:
+                    refs_by_file[parsed[0]].append(parsed[1])
+    blocking: list[str] = []
+    units: dict[str, dict] = {}
+    for name in valid_files:
+        positions = refs_by_file[name]
+        buckets = sorted({"front" if pos < 1 / 3 else "middle" if pos < 2 / 3 else "back" for pos in positions})
+        required = {"front", "middle", "back"} if (
+            unit_semantics == "reading_unit" and line_bounds.get(name, 0) >= LARGE_UNIT_MIN_LINES
+        ) else set()
+        if not positions:
+            blocking.append(f"{name}: 未记录 scan_refs，无法证明已检查。")
+        elif required and not required.issubset(set(buckets)):
+            blocking.append(f"{name}: 超大 reading unit 的 scan_refs 未覆盖前/中/后。")
+        units[name] = {"lines": line_bounds.get(name, 0), "scan_ref_count": len(positions), "buckets": buckets}
+    return {"ok": not blocking, "unit_semantics": unit_semantics, "units": units, "blocking": blocking}
 
 
 # ---- assemble：校验证据 + 汇总 ------------------------------------------
@@ -631,6 +690,17 @@ def assemble(output_dir: Path, sp_dir: Path | None = None) -> dict:
 
     # 维度覆盖统计（v0.2 Base Scan 升级）
     dimension_stats = compute_dimension_coverage(evidence_dir, valid_files)
+    unit_semantics = ""
+    unit_boundary_source = ""
+    source_book = ""
+    source_book_id = ""
+    if sp_dir is not None and (sp_dir / "metadata.json").exists():
+        source_meta = json.loads(read_text(sp_dir / "metadata.json"))
+        unit_semantics = str(source_meta.get("unit_semantics", ""))
+        unit_boundary_source = str(source_meta.get("unit_boundary_source", ""))
+        source_book = str(source_meta.get("book", ""))
+        source_book_id = str(source_meta.get("book_id", ""))
+    scan_coverage = compute_scan_coverage(evidence_dir, valid_files, line_bounds, unit_semantics)
 
     # manifest
     manifest = {
@@ -641,6 +711,11 @@ def assemble(output_dir: Path, sp_dir: Path | None = None) -> dict:
         "entries_per_file": per_file,
         "stats_by_kind": stats,
         "dimension_stats": dimension_stats,
+        "unit_semantics": unit_semantics,
+        "unit_boundary_source": unit_boundary_source,
+        "book": source_book,
+        "book_id": source_book_id,
+        "scan_coverage": scan_coverage,
         "total_entries": sum(stats.values()),
         "ok": len(errors) == 0,
         "errors": errors,
@@ -650,6 +725,7 @@ def assemble(output_dir: Path, sp_dir: Path | None = None) -> dict:
         output_dir / "distill_manifest.json",
         json.dumps(manifest, ensure_ascii=False, indent=2),
     )
+    refresh_report_from_manifest(output_dir, manifest)
     return manifest
 
 
@@ -685,13 +761,33 @@ def render_report_skeleton(book: str, book_id: str, manifest: dict) -> str:
         f"# 蒸馏报告：{book}（{book_id}）\n\n"
         f"- BookDistill 版本：{BD_VERSION}\n"
         f"- source snapshot：{json.dumps(manifest.get('source_snapshot'), ensure_ascii=False)}\n"
+        f"- 输入单元语义：{manifest.get('unit_semantics') or '（待 assemble）'}\n"
+        f"- 边界来源：{manifest.get('unit_boundary_source') or '（待 assemble）'}\n"
         f"- 证据条目总数：{manifest['total_entries']}\n"
         f"- 分类统计：{json.dumps(manifest['stats_by_kind'], ensure_ascii=False)}\n"
-        f"- 覆盖章节：{len(manifest['entries_per_file'])} 个证据文件\n\n"
+        f"- 覆盖单元：{len(manifest['entries_per_file'])} 个证据文件\n"
+        f"- 扫描覆盖门：{'PASS' if (manifest.get('scan_coverage') or {}).get('ok') else 'BLOCKED'}\n\n"
         "## 方法\n\n（填写：阅读范围、分析方式、译本说明）\n\n"
         "## 覆盖范围与置信度\n\n（填写：哪些部分覆盖充分、哪些局部、哪些未覆盖）\n\n"
         "## 边界与不确定性\n\n（填写：译本影响、样本局限、不随意外推声明）\n\n"
     )
+
+
+def refresh_report_from_manifest(output_dir: Path, manifest: dict) -> None:
+    """bd_report 的机械统计只来自最终 manifest；保留 Agent 维护的说明段。"""
+    book = str(manifest.get("book") or "")
+    book_id = str(manifest.get("book_id") or (manifest.get("source_snapshot") or {}).get("book_id") or "")
+    report_path = output_dir / "bd_report.md"
+    tail = ""
+    if report_path.exists():
+        old = read_text(report_path)
+        marker = "## 方法"
+        if marker in old:
+            tail = old[old.index(marker):].strip() + "\n"
+    generated = render_report_skeleton(book, book_id, manifest)
+    if tail:
+        generated = generated[:generated.index("## 方法")] + tail
+    write_text(report_path, generated)
 
 
 # ---- BKP Finalize：校验 + 封装 -------------------------------------------
@@ -1347,6 +1443,11 @@ def cmd_prepare(args) -> int:
         "entries_per_file": {},
         "stats_by_kind": {k: 0 for k in EVIDENCE_KINDS},
         "dimension_stats": {},
+        "unit_semantics": info.get("unit_semantics"),
+        "unit_boundary_source": info.get("unit_boundary_source"),
+        "book": info.get("book"),
+        "book_id": info.get("book_id"),
+        "scan_coverage": {"ok": False, "blocking": ["尚未运行最终扫描覆盖校验。"]},
         "total_entries": 0,
         "ok": False,
         "errors": [],
@@ -1363,6 +1464,9 @@ def cmd_prepare(args) -> int:
         "stats_by_kind": {k: 0 for k in EVIDENCE_KINDS},
         "entries_per_file": {},
         "source_snapshot": info.get("source_snapshot"),
+        "unit_semantics": info.get("unit_semantics"),
+        "unit_boundary_source": info.get("unit_boundary_source"),
+        "scan_coverage": initial_manifest["scan_coverage"],
     }
     write_text(out_dir / "bd_report.md", render_report_skeleton(info["book"], info["book_id"], empty_manifest))
 

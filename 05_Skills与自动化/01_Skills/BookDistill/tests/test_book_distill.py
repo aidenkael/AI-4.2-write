@@ -36,7 +36,7 @@ def make_fake_pass_pkg(
     chapters.mkdir(parents=True, exist_ok=True)
 
     meta = {
-        "skill_version": "0.2.1",
+        "skill_version": "0.4.0",
         "book_id": book_id,
         "book": "测试之书",
         "category": "外国文学",
@@ -48,6 +48,8 @@ def make_fake_pass_pkg(
             "char_count": 1000,
         },
         "chapter_files": chapter_files,
+        "unit_semantics": "chapter",
+        "unit_boundary_source": "epub_heading",
         "cross_source_warnings": [],
         "candidates": [],
     }
@@ -297,6 +299,69 @@ class ValidateTest(unittest.TestCase):
             r = bd.validate_input(sp)
             self.assertFalse(r["ok"])
             self.assertTrue(any("不是 PASS" in e for e in r["errors"]))
+
+    def test_old_sourceprepare_contract_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sp = make_fake_pass_pkg(Path(tmp))
+            meta_path = sp / "metadata.json"
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            meta["skill_version"] = "0.3.0"
+            meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+            r = bd.validate_input(sp)
+            self.assertFalse(r["ok"])
+            self.assertTrue(any("重新提纯" in error for error in r["errors"]))
+
+    def test_missing_unit_semantics_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sp = make_fake_pass_pkg(Path(tmp))
+            meta_path = sp / "metadata.json"
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            meta.pop("unit_semantics")
+            meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+            self.assertFalse(bd.validate_input(sp)["ok"])
+
+
+class CoverageGateTest(unittest.TestCase):
+    def _large_reading_unit(self, root: Path) -> tuple[Path, Path]:
+        sp = make_fake_pass_pkg(root, chapter_files=1)
+        chapter = sp / "chapters" / "0001.md"
+        chapter.write_text("\n".join(f"第{i}行" for i in range(1, 1201)) + "\n", encoding="utf-8")
+        meta_path = sp / "metadata.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta["unit_semantics"] = "reading_unit"
+        meta["unit_boundary_source"] = "epub_spine_fallback"
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+        out = root / "out"
+        self.assertEqual(bd.prepare(sp, out), 0)
+        return sp, out
+
+    def test_large_reading_unit_head_only_blocks_coverage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sp, out = self._large_reading_unit(Path(tmp))
+            evidence = out / "evidence" / "ch_0001.md"
+            text = evidence.read_text(encoding="utf-8").replace(
+                "- scan_refs: （完整检查后填写本单元实际读取位置；超大 reading unit 需覆盖前/中/后）",
+                "- scan_refs: chapters/0001.md#L10-L20",
+            )
+            evidence.write_text(text, encoding="utf-8")
+            manifest = bd.assemble(out, sp)
+            self.assertFalse(manifest["scan_coverage"]["ok"])
+            self.assertIn("前/中/后", manifest["scan_coverage"]["blocking"][0])
+
+    def test_large_reading_unit_distributed_scan_passes_and_report_matches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sp, out = self._large_reading_unit(Path(tmp))
+            evidence = out / "evidence" / "ch_0001.md"
+            text = evidence.read_text(encoding="utf-8").replace(
+                "- scan_refs: （完整检查后填写本单元实际读取位置；超大 reading unit 需覆盖前/中/后）",
+                "- scan_refs: chapters/0001.md#L10-L20, chapters/0001.md#L590-L610, chapters/0001.md#L1180-L1200",
+            )
+            evidence.write_text(text, encoding="utf-8")
+            manifest = bd.assemble(out, sp)
+            self.assertTrue(manifest["scan_coverage"]["ok"])
+            report = (out / "bd_report.md").read_text(encoding="utf-8")
+            self.assertIn("- 扫描覆盖门：PASS", report)
+            self.assertIn(f"- 证据条目总数：{manifest['total_entries']}", report)
 
     def test_missing_file_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:

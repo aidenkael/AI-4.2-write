@@ -18,7 +18,7 @@ def make_fake_pass_pkg(root: Path, chapter_files: int = 20) -> Path:
     chapters = sp / "chapters"
     chapters.mkdir(parents=True, exist_ok=True)
     meta = {
-        "skill_version": "0.2.1",
+        "skill_version": "0.4.0",
         "book_id": "book_0001",
         "book": "测试之书",
         "status": "PASS",
@@ -28,6 +28,8 @@ def make_fake_pass_pkg(root: Path, chapter_files: int = 20) -> Path:
             "sha256": "b" * 64,
         },
         "chapter_files": chapter_files,
+        "unit_semantics": "chapter",
+        "unit_boundary_source": "epub_heading",
     }
     (sp / "metadata.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
     (sp / "conversion_report.md").write_text("# PASS\n", encoding="utf-8")
