@@ -118,6 +118,8 @@ METHOD_SOURCE  → MethodPrepare → MethodDistill → 02_素材知识库/<asset
 
 参考作品链：`SourcePrepare → BookProfile → 多视角 Discovery → 按需 Deep Dive → BookDistill 收敛 → BKP → KnowledgeRetrieve`
 
+EPUB 结构长期不变量：`spine != chapter`。SourcePrepare 依次使用可靠 nav/NCX fragment anchor、强章标题恢复真实章界；无法可靠恢复时必须标记 `reading_unit / epub_spine_fallback`，不得冒称章节。装饰性 SVG/image/cover/logo/资源链接 markup 在 Prepare 确定性清理；`full.md` 与 `chapters/` 同源。Distill 不重新解析 EPUB 补偿上游错误，旧 Prepare 合同必须 fail closed 并显示需重新提纯。BookDistill whole-book PASS 不得以“文件数都有 evidence”代替真实阅读分布；超大单元及两个 Observer 的前/中/后 coverage 必须机械可验。Coverage 只证明“检查过”，不要求“必须产知识”；不得用下游复杂度掩盖上游错误结构。
+
 方法/技巧资料链：`MethodPrepare（确定性，无模型）→ MethodDistill（语义抽取 + 确定性定稿）→ 方法知识包 → KnowledgeRetrieve`
 
 检索是统一多源入口：一次 `KnowledgeRetrieve.retrieve(query)` 加载并搜索全部已启用来源（`reference_bkp` / `method_source` / `validated_knowledge`），返回单一混合 RetrievalPackage；模型不选择“先查哪个库”，命中统一用 `selection_ref = <source_kind>/<source_id>/<source_anchor>`；生产请求/Context 使用 `selected_knowledge_refs / selected_knowledge_hits`。不建 KnowledgeRouter / 向量库 / embedding / KG / 新模型调用。
@@ -194,6 +196,7 @@ BKP 长期保存作品身份、作品地图、BookProfile、Observation、Infere
 - BookDistill 的作者完成门固定为：全套正式 observer 语义工件齐备、BKP acceptance 为 PASS、正式包已事务发布、KnowledgeRetrieve 可发现、catalog 已刷新且 Workbench 复读为 `workflow_stage=writing / writing_callable=true`。REVIEW / PENDING 只能在同一任务内修复或失败退出，绝不是作者终态。
 - 选中知识必须保留精确 `selection_ref = <source_kind>/<source_id>/<source_anchor>` 并真实进入消费者内容；StoryPlan 先独立原创再按需吸收机制，StoryWrite Stage 2 只消费确定性编译的选定 Context 与短期正文，不得带入未选择的完整 Story State 或上一阶段会话。
 - 取消/丢弃必须幂等地删除本 request 的临时工作区、bridge request/response/claim/slot 与进程内任务记录；持久审计可作终态真相，不为取消另建 tombstone store。
+- Qoder `running` 不按普通 `expires_at` 中断长任务，但必须有保守 hard-stale 上限，最终通过现有幂等 cleanup 释放失联 claim/slot/request；不建 heartbeat service。
 - 页面壳、空状态、loading 和短内容不得用大块 viewport `min-height` 撑出假工作区；列表型三栏/双栏工作区仍保留有界高度与单一内部滚动责任。
 
 ## Git 安全
