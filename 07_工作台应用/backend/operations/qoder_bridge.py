@@ -60,6 +60,9 @@ _ALLOWED_RESPONSE_STATUSES = frozenset({"completed", "failed"})
 
 # 默认任务超时：作者可能 Alt+Tab 后稍晚才执行 /gowrite，给 30 分钟
 DEFAULT_TASK_TIMEOUT_SECONDS = 30 * 60
+# running 不受普通等待 TTL 影响；但连续 24 小时无续阶的 claim 视为失联。
+# 这一上限高于当前单部长篇蒸馏的预期运行时间，且不需要 heartbeat service。
+RUNNING_HARD_STALE_SECONDS = 24 * 60 * 60
 INTERACTIVE_SLOT_COUNT = 4
 _MATERIAL_KINDS = frozenset({"book_distill_propose", "method_distill_propose"})
 _INTERACTIVE_ALLOCATION_LOCK = threading.RLock()
@@ -281,6 +284,7 @@ def claim_request_for_slot(slot: int) -> Optional[dict[str, Any]]:
             _claim_path(request_id).unlink(missing_ok=True)
             return None
         req["execution_phase"] = "running"
+        req["claimed_at"] = _now_iso()
         _write_json_atomic(request_path(request_id), req)
         return req
     except Exception:
@@ -326,7 +330,14 @@ def get_request(request_id: str) -> Optional[dict[str, Any]]:
 def is_expired(request: dict[str, Any]) -> bool:
     """请求是否已超时（现在 > expires_at）。"""
     if request.get("execution_phase") == "running":
-        return False
+        raw = request.get("claimed_at") or request.get("created_at")
+        if not raw:
+            return False
+        try:
+            started = datetime.fromisoformat(str(raw))
+        except ValueError:
+            return False
+        return datetime.now(timezone.utc) > started + timedelta(seconds=RUNNING_HARD_STALE_SECONDS)
     raw = request.get("expires_at")
     if not raw:
         return False

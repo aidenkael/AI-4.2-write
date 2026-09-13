@@ -42,6 +42,7 @@ _MI_DIR = _REPO_ROOT / "05_Skills与自动化" / "01_Skills" / "MaterialIntake"
 _SUPPORTED_IMPORT_SUFFIXES = {".epub", ".txt", ".pdf"}
 # 单文件导入上限（200 MB；防误选超大文件）
 _MAX_IMPORT_BYTES = 200 * 1024 * 1024
+_SOURCEPREPARE_EXPECTED_VERSION = "0.4.0"
 
 
 class MaterialsError(Exception):
@@ -112,6 +113,24 @@ def _bkp_acceptance_view(a: dict[str, Any]) -> str | None:
     if status == "PASS":
         return "ready"
     return "review" if status == "REVIEW" else "pending"
+
+
+def _reference_knowledge_contract_current(a: dict[str, Any]) -> bool:
+    """参考作品正式 BKP 必须来自当前 SourcePrepare 结构合同。"""
+    if a.get("type") != "REFERENCE_WORK":
+        return True
+    asset_id = str(a.get("id") or "")
+    root = get_repo_root() / "02_素材知识库"
+    asset_dir = next((p for p in sorted(root.glob(f"{asset_id}_*")) if p.is_dir()), None)
+    if asset_dir is None:
+        return False
+    try:
+        identity = json.loads((asset_dir / "bkp" / "identity.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    snapshot = identity.get("source_snapshot") or {}
+    return snapshot.get("sp_version") == _SOURCEPREPARE_EXPECTED_VERSION \
+        and snapshot.get("unit_semantics") in {"chapter", "reading_unit"}
 
 
 # 作者可见类型只有三种（§2）：原著 / 技巧类 / 其他。历史 RESEARCH / NEEDS_REVIEW
@@ -270,6 +289,15 @@ def _prepare_package_current(asset: dict[str, Any],
         reasons = _prepare_artifact_reasons(pkg, meta)
         return {"available": False, "format": None, "reason": " ".join(reasons) if reasons else
                 "历史提纯记录未保存具体失败原因，请重新提纯以生成新的检查结果。"}
+    if mtype == "REFERENCE_WORK" and (
+        meta.get("skill_version") != _SOURCEPREPARE_EXPECTED_VERSION
+        or meta.get("unit_semantics") not in {"chapter", "reading_unit"}
+        or meta.get("unit_boundary_source") not in {
+            "epub_nav_anchor", "epub_heading", "text_heading", "epub_spine_fallback"
+        }
+    ):
+        return {"available": False, "format": None,
+                "reason": "提纯结果来自旧结构合同，需要重新提纯。"}
     sel = meta.get("selected_source") or {}
     sha = sel.get("sha256") if isinstance(sel, dict) else None
     file_shas = {f.get("sha256") for f in (asset.get("files") or []) if isinstance(f, dict)}
@@ -409,7 +437,8 @@ def _classify_author_group(a: dict[str, Any], *, sp_names: list[str] | None = No
     # 1) 写作阶段：knowledge 已定稿可用（优先于来源/提纯检查；BKP 已冻结可检索）。
     if know == "可用":
         view = _bkp_acceptance_view(a)
-        if view not in ("review", "pending") and _knowledge_is_discoverable(a):
+        if view not in ("review", "pending") and _reference_knowledge_contract_current(a) \
+                and _knowledge_is_discoverable(a):
             kind = "METHOD" if mtype == "METHOD_SOURCE" else "BKP"
             return {"author_group": "usable", "state": "ready", "workflow_stage": "writing",
                     "writing_callable": True, "attention_message": None,

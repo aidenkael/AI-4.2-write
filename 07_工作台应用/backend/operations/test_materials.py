@@ -43,6 +43,7 @@ def _write_ledger(root):
 
 def test_list_materials_reads_real_ledger(isolated, monkeypatch):
     monkeypatch.setattr(materials, "_knowledge_is_discoverable", lambda asset: True)
+    monkeypatch.setattr(materials, "_reference_knowledge_contract_current", lambda asset: True)
     _write_ledger(isolated)
     result = materials.list_materials()
     assert len(result["materials"]) == 1
@@ -64,6 +65,7 @@ def test_list_materials_missing_ledger_rejected(isolated):
 def test_author_group_classification_mapping(monkeypatch):
     """作者面状态只来自真实生命周期投影。"""
     monkeypatch.setattr(materials, "_knowledge_is_discoverable", lambda asset: True)
+    monkeypatch.setattr(materials, "_reference_knowledge_contract_current", lambda asset: True)
     cases = [
         # (purification, knowledge, expected_group, callable)
         ("可用", "可用", "usable", True),
@@ -81,6 +83,7 @@ def test_author_group_classification_mapping(monkeypatch):
 
 def test_list_materials_includes_author_facing_fields(isolated, monkeypatch):
     monkeypatch.setattr(materials, "_knowledge_is_discoverable", lambda asset: True)
+    monkeypatch.setattr(materials, "_reference_knowledge_contract_current", lambda asset: True)
     ledger = _ledger()
     # 第二个素材：有素材但还没提炼知识
     ledger["assets"].append({

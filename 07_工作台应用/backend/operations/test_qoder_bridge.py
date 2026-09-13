@@ -397,3 +397,17 @@ def test_claim_is_atomic_and_running_request_does_not_expire(isolated):
     req = bridge.get_request(rid)
     req["expires_at"] = "2000-01-01T00:00:00+00:00"
     assert bridge.is_expired(req) is False
+
+
+def test_running_request_hard_stale_can_expire_and_cleanup_is_scoped(isolated):
+    rid = bridge.create_request(task="T", kind="k", activate_for_gowrite=True)
+    bridge.claim_request_for_slot(1)
+    req = bridge.get_request(rid)
+    req["expires_at"] = "2999-01-01T00:00:00+00:00"
+    req["claimed_at"] = "2000-01-01T00:00:00+00:00"
+    assert bridge.is_expired(req) is True
+    bridge.cleanup_request(rid)
+    bridge.cleanup_request(rid)
+    assert bridge.get_request(rid) is None
+    assert not bridge._claim_path(rid).exists()
+    assert not bridge._slot_path(1).exists()

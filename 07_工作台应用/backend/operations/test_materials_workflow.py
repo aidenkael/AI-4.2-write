@@ -90,7 +90,8 @@ def _write_sp_package(root, asset_id="book_0001", name="样例作品", sha="a" *
     if with_md:
         (sp / "full.md").write_text("# full\n", encoding="utf-8")
     (sp / "metadata.json").write_text(json.dumps({
-        "book_id": asset_id, "status": status,
+        "book_id": asset_id, "status": status, "skill_version": "0.4.0",
+        "unit_semantics": "chapter", "unit_boundary_source": "epub_heading",
         "selected_source": {"format": ".epub", "sha256": sha},
     }, ensure_ascii=False), encoding="utf-8")
     return sp
@@ -581,6 +582,7 @@ def _ref_asset(pur="可用", know="未开始", files=None):
 def test_workflow_stage_ready_is_writing(isolated, monkeypatch):
     monkeypatch.setattr(materials, "_bkp_acceptance_view", lambda a: "ready")
     monkeypatch.setattr(materials, "_knowledge_is_discoverable", lambda a: True)
+    monkeypatch.setattr(materials, "_reference_knowledge_contract_current", lambda a: True)
     c = materials._classify_author_group(_ref_asset(pur="可用", know="可用"))
     assert c["state"] == "ready" and c["workflow_stage"] == "writing" and c["writing_callable"] is True
 
@@ -673,6 +675,7 @@ def test_finalized_package_writing_ready_without_prepare(isolated, monkeypatch):
     _write_ledger(isolated, _fake_asset_ledger(pur="可用", know="可用"))
     monkeypatch.setattr(materials, "_bkp_acceptance_view", lambda a: "ready")
     monkeypatch.setattr(materials, "_knowledge_is_discoverable", lambda a: True)
+    monkeypatch.setattr(materials, "_reference_knowledge_contract_current", lambda a: True)
     c = materials._classify_author_group(materials._ledger_asset("book_0001"))
     assert c["workflow_stage"] == "writing" and c["writing_callable"] is True
     assert c["knowledge_package_kind"] == "BKP"
