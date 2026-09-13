@@ -1,6 +1,6 @@
 # SourcePrepare（SP）Skill
 
-版本：0.4.0（Phase 2B2.1：production preflight + 收窄 allowlist）
+版本：0.4.0（EPUB 真实章节语义 + 资源噪声清理）
 
 ## 目标
 
@@ -30,7 +30,7 @@ asset.type 处理策略：
 
 支持的源格式：
 
-- EPUB（原生 nav/NCX + OPF spine 优先确定章节结构，再用 Pandoc 转换内容）
+- EPUB（OPF spine 只决定阅读顺序；可靠 nav/NCX fragment anchor 优先确定章界，其次使用强章标题）
 - TXT（编码转换 + 最小清理）
 - PDF（仅提取已有文本层；无文本层不自动 OCR；**依赖 `pypdf`（Python 包）或系统 `pdftotext`（poppler），二者皆无时标记 `FAIL`**）
 - ZIP / AZW3 / MOBI 暂不支持自动转换，标记为 `FAIL` 并提示人工处理
@@ -62,7 +62,9 @@ asset.type 处理策略：
 ```
 
 > `full.md` 与 `chapters/*.md` 是后续 BookDistill 的标准正文输入；
-> `metadata.json` 与 `conversion_report.md` 只是溯源与质检记录。
+> `metadata.json` 使用 `unit_semantics=chapter|reading_unit` 与
+> `unit_boundary_source=epub_nav_anchor|epub_heading|text_heading|epub_spine_fallback`
+> 明示边界可信性；`conversion_report.md` 是人类可读质检记录。
 > 这些文件都在 `06_工作区/**` 下，被 `.gitignore` 排除，**绝不上传 GitHub**。
 
 ## 运行依赖
@@ -77,12 +79,13 @@ asset.type 处理策略：
 ## 核心原则
 
 1. **原始素材只读。** 不覆盖、不重命名、不删除、不在 `01_原始素材` 内就地转换。
-2. **机械转换优先。** EPUB 以原生 nav/NCX + OPF spine 确定章节结构、用 Pandoc 转换内容；TXT 只做编码转换与最小清理；PDF 只提取现有文本层。Markdown 标题识别仅作 fallback，Pandoc 合成 Markdown 没有 `#` 标题不表示 EPUB 没有章节。
+2. **机械转换优先，spine != chapter。** EPUB spine 只提供有序容器；章界依次取可靠 nav/NCX fragment anchor、正文强章标题。两者均不可靠时保留有序 `reading_unit`，绝不冒称文学章节。
 3. **不使用大模型改写原文。** 不润色、不补句、不修正文风、不“智能纠错”。
 4. **不自动 OCR。** PDF 无文本层时直接标记 `FAIL`/`REVIEW`，留给人工处理。
 5. **EPUB-first 选源。** 有 EPUB 先只评估 EPUB；至少一个 EPUB PASS 就直接用 EPUB，不再读/转 TXT/PDF 来比长度；只有没有任何 EPUB PASS 才 fallback 到 TXT/PDF；没有 EPUB 的作品继续按 TXT/PDF 现有逻辑处理。TXT 保留为兜底来源，不删除。
 6. **输出必须可追溯。** 保存源文件路径、SHA256、格式、字符数、章节识别数、异常信息和最终选源理由。
 7. **后续蒸馏只读取 PASS。** `REVIEW` 需要人工检查；`FAIL` 不得进入 BookDistill；`NOT_APPLICABLE` 表示本 Skill 不适用。
+8. **结构与清洁同源。** 在分章前确定性去除 SVG/img/cover/logo/纯资源链接 markup，保留有意义 alt/caption/链接文字与代码块；`full.md` 与 `chapters/` 必须来自同一清洁后有序正文。
 
 ## 来源选择规则：EPUB-first
 
@@ -131,7 +134,7 @@ EPUB 是容器格式，ZIP 能打开 ≠ 正文完整。SP 对 EPUB 跑 14 项�
 
 ## 文本清理边界
 
-允许：转 UTF-8、统一换行、去 BOM、清除纯图片 Markdown 行、清除明显空 HTML 包装标签、
+允许：转 UTF-8、统一换行、去 BOM、清除 SVG/img/封面/logo/image-only/资源链接 markup（保留有意义 alt/caption/链接文字与代码块）、清除明显空 HTML 包装标签、
 去行尾空格、压缩异常连续空行、根据章节标题拆分章节、识别 blockquote 形式的章号
 （如 `> 五`、`> 第一部`）。
 

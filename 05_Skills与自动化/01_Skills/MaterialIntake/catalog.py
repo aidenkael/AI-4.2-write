@@ -57,6 +57,7 @@ LEDGER_FILENAME = "素材资产.json"
 INDEX_FILENAME = "素材总索引.md"
 MANIFEST_FILENAME = "collection_manifest.json"
 SCHEMA_VERSION = "1.0"
+SOURCEPREPARE_EXPECTED_VERSION = "0.4.0"
 
 # 已知系统文件：不算未登记新素材
 SYSTEM_FILES = {
@@ -173,6 +174,7 @@ def find_bkp(distill_dir: Path, book_id: str) -> dict | None:
         return {
             "finalized": schema_status.startswith("FINALIZED"),
             "source_sha256": ss.get("source_sha256") or "",
+            "sp_version": ss.get("sp_version") or "",
             "dir_rel": f"{DISTILL_DIR_NAME}/{d.name}",
             "author": (data.get("book", {}) or {}).get("author") or "",
         }
@@ -338,8 +340,25 @@ def derive_purification(sp_meta: dict | None, bkp: dict | None, file_shas: set,
                         "source_sha256": prev.get("source_sha256"),
                         "input_fingerprint": prev["input_fingerprint"]}
             return {"status": "需更新", "evidence": f"{evidence_prefix}_metadata_sha_mismatch"}
+        if evidence_prefix == "sourceprepare" and sp_meta.get("skill_version") != SOURCEPREPARE_EXPECTED_VERSION:
+            rec = {"status": "需更新", "evidence": "sourceprepare_metadata_version_stale",
+                   "source_sha256": sha}
+            if input_fp is not None:
+                rec["input_fingerprint"] = input_fp
+            return rec
         status = {"PASS": "可用", "REVIEW": "需复核", "FAIL": "失败"}[sp_status]
         rec = {"status": status, "evidence": f"{evidence_prefix}_metadata", "source_sha256": sha}
+        if input_fp is not None:
+            rec["input_fingerprint"] = input_fp
+        return rec
+
+    # 旧 SourcePrepare 合同不能被“指纹仍相同”的持久 record 遮蔽。
+    # 当前无 SP metadata、仅有旧 BKP snapshot 时，先于 prev fail closed。
+    if evidence_prefix == "sourceprepare" and bkp is not None and bkp["finalized"] \
+            and bkp.get("sp_version") != SOURCEPREPARE_EXPECTED_VERSION:
+        rec = {"status": "需更新", "evidence": "bkp_sourceprepare_version_stale"}
+        if isinstance(prev, dict) and prev.get("source_sha256"):
+            rec["source_sha256"] = prev["source_sha256"]
         if input_fp is not None:
             rec["input_fingerprint"] = input_fp
         return rec
@@ -373,6 +392,8 @@ def derive_purification(sp_meta: dict | None, bkp: dict | None, file_shas: set,
 
     # 3. FINALIZED BKP = 历史恢复证据（可补写长期 record）
     if bkp is not None and bkp["finalized"]:
+        if evidence_prefix == "sourceprepare" and bkp.get("sp_version") != SOURCEPREPARE_EXPECTED_VERSION:
+            return {"status": "需更新", "evidence": "bkp_sourceprepare_version_stale"}
         if bkp["source_sha256"] and bkp["source_sha256"] in file_shas:
             rec = {"status": "可用", "evidence": "bkp_source_snapshot",
                    "source_sha256": bkp["source_sha256"]}
@@ -385,13 +406,17 @@ def derive_purification(sp_meta: dict | None, bkp: dict | None, file_shas: set,
     return {"status": "未处理", "evidence": None}
 
 
-def derive_knowledge(package_evidence: dict | None, file_shas: set) -> dict:
+def derive_knowledge(package_evidence: dict | None, file_shas: set,
+                     *, require_current_sourceprepare: bool = False) -> dict:
     """知识状态推导（参考作品 BKP / 方法知识包共用）：无 FINALIZED 知识包 → 未开始；
     FINALIZED 且 SHA 匹配 → 可用；否则 → 需更新。"""
     bkp = package_evidence
     if bkp is None or not bkp["finalized"]:
         return {"status": "未开始"}
-    base = {"status": "可用" if bkp["source_sha256"] in file_shas else "需更新",
+    current = bkp["source_sha256"] in file_shas
+    if require_current_sourceprepare:
+        current = current and bkp.get("sp_version") == SOURCEPREPARE_EXPECTED_VERSION
+    base = {"status": "可用" if current else "需更新",
             "path": bkp["dir_rel"], "source_sha256": bkp["source_sha256"]}
     return base
 
@@ -446,7 +471,7 @@ def refresh_ledger(ledger: dict, mat_dir: Path, distill_dir: Path, sp_dir: Path,
             else:
                 purif = derive_purification(sp_meta, bkp, file_shas, input_fp,
                                             a.get("purification"), legacy_fp)
-            knowledge = derive_knowledge(bkp, file_shas)
+            knowledge = derive_knowledge(bkp, file_shas, require_current_sourceprepare=True)
         new_assets.append({
             "id": a["id"],
             "name": a["name"],
@@ -763,7 +788,7 @@ def build_assets(rows: list, scanned: dict, distill_dir: Path, sp_dir: Path) -> 
             "notes": (primary["备注"] or "").strip(),
             "files": files,
             "purification": derive_purification(sp_meta, bkp, file_shas, input_fp),
-            "knowledge": derive_knowledge(bkp, file_shas),
+            "knowledge": derive_knowledge(bkp, file_shas, require_current_sourceprepare=True),
         })
     return assets
 

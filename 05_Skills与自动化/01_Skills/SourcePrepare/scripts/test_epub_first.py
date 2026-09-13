@@ -12,6 +12,7 @@
 """
 import json
 from pathlib import Path
+import zipfile
 
 import pytest
 
@@ -109,7 +110,81 @@ def test_epub_native_spine_only_no_nav_produces_chapters(tmp_path):
     pkg = tmp_path / "06_工作区" / "SourcePrepare" / "book_0001_Synthetic"
     meta = json.loads((pkg / "metadata.json").read_text(encoding="utf-8"))
     assert meta["chapter_files"] == 4
+    assert meta["unit_semantics"] == "reading_unit"
+    assert meta["unit_boundary_source"] == "epub_spine_fallback"
     assert len(list((pkg / "chapters").glob("*.md"))) == 4
+
+
+def _single_document_epub(path: Path, body: str, navpoints: list[tuple[str, str]] | None = None) -> Path:
+    container = ('<?xml version="1.0"?><container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+                 '<rootfiles><rootfile full-path="content.opf"/></rootfiles></container>')
+    nav_item = '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>' if navpoints else ''
+    opf = ('<package xmlns="http://www.idpf.org/2007/opf"><metadata/>'
+           f'<manifest><item id="body" href="body.xhtml" media-type="application/xhtml+xml"/>{nav_item}</manifest>'
+           f'<spine><itemref idref="body"/></spine></package>')
+    xhtml = (f'<html xmlns="http://www.w3.org/1999/xhtml"><body>{body}</body></html>')
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
+        archive.writestr("META-INF/container.xml", container)
+        archive.writestr("content.opf", opf)
+        archive.writestr("body.xhtml", xhtml)
+        if navpoints:
+            points = "".join(
+                f'<navPoint><navLabel><text>{label}</text></navLabel><content src="body.xhtml#{fragment}"/></navPoint>'
+                for label, fragment in navpoints
+            )
+            archive.writestr("toc.ncx", f'<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/"><navMap>{points}</navMap></ncx>')
+    return path
+
+
+def test_same_xhtml_strong_headings_become_real_chapters(tmp_path):
+    pandoc = _real_pandoc()
+    if not pandoc:
+        pytest.skip("pandoc not available")
+    body = '<h3>第一章</h3><p>' + ('甲正文。' * 800) + '</p><h3>第二章</h3><p>' + ('乙正文。' * 800) + '</p>'
+    epub = _single_document_epub(tmp_path / "headings.epub", body)
+    out = sp.process_book(tmp_path, "Headings", "REFERENCE_WORK", [epub], "book_0003", pandoc, False)
+    assert out.startswith("PASS Headings"), out
+    pkg = tmp_path / "06_工作区" / "SourcePrepare" / "book_0003_Headings"
+    meta = json.loads((pkg / "metadata.json").read_text(encoding="utf-8"))
+    assert meta["chapter_files"] == 2
+    assert meta["unit_semantics"] == "chapter"
+    assert meta["unit_boundary_source"] == "epub_heading"
+
+
+def test_same_xhtml_ncx_fragments_are_preserved_and_split(tmp_path):
+    pandoc = _real_pandoc()
+    if not pandoc:
+        pytest.skip("pandoc not available")
+    body = ('<h3 id="c1">第一章</h3><p>' + ('甲正文。' * 800) + '</p>'
+            '<h3 id="c2">第二章</h3><p>' + ('乙正文。' * 800) + '</p>')
+    epub = _single_document_epub(tmp_path / "anchors.epub", body, [("第一章", "c1"), ("第二章", "c2")])
+    structure = sp.epub_structure.parse_epub_structure(epub)
+    assert structure and [t.fragment for t in structure.toc_targets] == ["c1", "c2"]
+    out = sp.process_book(tmp_path, "Anchors", "REFERENCE_WORK", [epub], "book_0004", pandoc, False)
+    assert out.startswith("PASS Anchors"), out
+    meta = json.loads((tmp_path / "06_工作区" / "SourcePrepare" / "book_0004_Anchors" / "metadata.json").read_text(encoding="utf-8"))
+    assert meta["chapter_files"] == 2
+    assert meta["unit_boundary_source"] == "epub_nav_anchor"
+
+
+def test_resource_noise_cleaning_preserves_meaningful_text_and_code():
+    raw = '''<svg><image xlink:href="cover.jpg"/></svg>
+![cover](cover.jpg)
+![有意义图说](figure.png)
+[正文文字](https://example.test/page)
+<img src="logo.png" alt="logo"/>
+<img src="scene.png" alt="场景图说"/>
+```html
+<img src="code.png" alt="code sample">
+```
+'''
+    cleaned = sp.clean_markdown(raw)
+    assert "<svg" not in cleaned and "xlink:href" not in cleaned
+    assert "cover.jpg" not in cleaned and "logo.png" not in cleaned
+    assert "有意义图说" in cleaned and "正文文字" in cleaned and "场景图说" in cleaned
+    assert "https://example.test" not in cleaned
+    assert '<img src="code.png" alt="code sample">' in cleaned
 
 
 def test_non_epub_txt_heading_fallback_still_works(tmp_path):

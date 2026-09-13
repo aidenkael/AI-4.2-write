@@ -6,7 +6,7 @@ MaterialIntake catalog builder 测试（CANONICAL_CATALOG，Phase 2B1）。
   A. BOOTSTRAP_COUNTS       136 assets / 177 registered files / 1 container
   B. ID_PRESERVATION        全部 book_xxxx ID 稳定（book_0057-0061 已注销，不复用/不重排）
   C. MULTI_SOURCE           book_0035 单 asset 双 file（含 source_container）；book_0072 双 file
-  D. BKP_RECOVERY           book_0035/0038/0065 knowledge=可用 且 BKP source_sha256 在 files 中
+  D. BKP_RECOVERY           旧 SP 合同的 book_0035/0038/0065 自然 stale，BKP SHA 仍可追溯
   E. EVIDENCE_PRIORITY      无证据 → 未处理；FINALIZED BKP 优先于无证据
   F. IDEMPOTENCY            同输入重建 byte-for-byte（真实 serialize + tmp_path 端到端两次）
   G. VIEW_PARITY            9 列 CSV（137 行）/ 索引不含易变与敏感字段
@@ -129,7 +129,8 @@ def _make_fake_tree(root: Path) -> str:
         "bkp_version": "0.2",
         "schema_status": "FINALIZED",
         "book": {"book_id": "book_0001", "title": "Alpha", "author": "作者A"},
-        "source_snapshot": {"source_sha256": epub_sha},
+        "source_snapshot": {"source_sha256": epub_sha, "sp_version": "0.4.0",
+                            "unit_semantics": "chapter"},
     }
     (bkp_dir / "identity.json").write_text(
         json.dumps(identity, ensure_ascii=False), encoding="utf-8")
@@ -202,12 +203,12 @@ def test_bkp_recovery(ledger):
     for bid, expect_sha in BKP_SHA_EXPECT.items():
         a = _asset(ledger, bid)
         k = a["knowledge"]
-        assert k["status"] == "可用"
+        assert k["status"] == "需更新"
         assert k["source_sha256"] == expect_sha
         assert k["path"].startswith("02_素材知识库/book_")
         assert expect_sha in {f["sha256"] for f in a["files"]}
-        assert a["purification"]["status"] == "可用"
-        assert a["purification"]["evidence"] == "bkp_source_snapshot"
+        assert a["purification"]["status"] == "需更新"
+        assert a["purification"]["evidence"] == "bkp_sourceprepare_version_stale"
 
 
 # ---------- E. EVIDENCE_PRIORITY ----------
@@ -789,6 +790,7 @@ def _write_sp_metadata(sp_dir: Path, book_id: str, status: str, sha: str,
     d = sp_dir / f"{book_id}{suffix}"
     d.mkdir(parents=True, exist_ok=True)
     meta = {
+        "skill_version": "0.4.0",
         "status": status,
         "book_id": meta_book_id if meta_book_id is not None else book_id,
         "selected_source": {"sha256": sha},
@@ -811,6 +813,32 @@ def test_sp_contract_pass_sha_match(tmp_path):
     assert meta is not None and meta["status"] == "PASS"
     assert catalog.derive_purification(meta, None, {sha}) == \
         {"status": "可用", "evidence": "sourceprepare_metadata", "source_sha256": sha}
+
+
+def test_sp_contract_old_version_is_stale(tmp_path):
+    sp_dir = tmp_path / "06_工作区" / "SourcePrepare"
+    sha = "9" * 64
+    _write_sp_metadata(sp_dir, "book_0001", "PASS", sha)
+    metadata_path = next(sp_dir.glob("book_0001_*/metadata.json"))
+    meta = json.loads(metadata_path.read_text(encoding="utf-8"))
+    meta["skill_version"] = "0.3.0"
+    metadata_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    assert catalog.derive_purification(_sp_meta(sp_dir, "book_0001"), None, {sha}) == {
+        "status": "需更新", "evidence": "sourceprepare_metadata_version_stale",
+        "source_sha256": sha,
+    }
+
+
+def test_old_bkp_version_overrides_matching_persisted_record():
+    sha = "8" * 64
+    fp = "f" * 64
+    old_bkp = {"finalized": True, "sp_version": "0.3.0", "source_sha256": sha}
+    prev = {"status": "可用", "evidence": "bkp_source_snapshot",
+            "source_sha256": sha, "input_fingerprint": fp}
+    assert catalog.derive_purification(None, old_bkp, {sha}, fp, prev) == {
+        "status": "需更新", "evidence": "bkp_sourceprepare_version_stale",
+        "source_sha256": sha, "input_fingerprint": fp,
+    }
 
 
 def test_sp_contract_review_sha_match(tmp_path):
