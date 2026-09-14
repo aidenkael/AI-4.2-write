@@ -1,11 +1,26 @@
-# BookDistill —— 原著蒸馏纪律工作台（runtime 0.4.0）
+# BookDistill —— 原著蒸馏纪律工作台（runtime 0.5.0）
 
 ## 定位
 
 C19（原著蒸馏 / 能力发现）的最小可运行实现，当前属于能力地图方法论层（M4）。
-runtime 0.4.0 在既有 Base Scan、BookProfile、专项深挖上增加结构语义和真实阅读 coverage 门；BKP 包协议版本仍按其独立合同管理。
+runtime 0.5.0 在既有结构语义门上增加**可恢复的全书真实遍历**（reading manifest +
+ledger + batch 循环）与**确定性 completion receipt**；whole-book 阅读完成度的权威
+是当前 source-bound manifest/ledger + 确定性 acceptance，不再是 Agent 自报的
+`scan_refs`。BKP 包协议版本仍按其独立合同管理。
 目标是：对 SourcePrepare PASS 的真实作品，产出**可追溯、分类清晰、边界明示、全维度覆盖**的蒸馏证据，
 供作者审阅并沉淀可迁移写作机制。不是剧情复述，不是风格模仿器，不是批量蒸馏流水线。
+
+## 长篇执行合同（根不变量）
+
+- 作者仍只点一次“原著学习”，仍只在同一个 Qoder Agent 窗口发送一次 `/gowrite`；
+  BookDistill 内部把完整来源拆成有界批次，Agent 在同一会话中逐批直接读取原文、
+  逐批落盘，聊天上下文可以自然压缩，长期状态只依赖磁盘工件。
+- 不要求 Agent 自动开新窗口/新会话，不增加作者步骤。
+- Observer 是**独立分析视角**，不是额外两遍物理全文扫描；需要反证/边界/疑难判断时定向回读原文。
+- Agent 自报 `scan_refs`/coverage/`identity PASS` 不能单独证明完成；whole-book completion
+  的权威是当前 source-bound reading manifest/ledger + 确定性 acceptance。
+- Qoder response 丢失时可由合法 deterministic completion receipt 恢复结算，但绝不从
+  Agent 自报 PASS 推断成功；backend finalize 仍独立重跑全部确定性门。
 
 ## 输入契约（SourcePrepare PASS 包）
 
@@ -38,7 +53,21 @@ BookDistill 不读取 `01_原始素材` 作为正文输入；不修改 SourcePre
 | `chapters_index.md` | 章节索引（章节/标题/字符数/行数）与引用规范 |
 | `evidence/ch_NNNN.md` | 每章证据底稿（FACT / INFERENCE / OBSERVATION / MECHANISM / BOUNDARY）+ MAP |
 | `distill_manifest.json` | assemble 校验清单 + source snapshot + dimension_stats |
-| `bkp/` | BKP v0.2 正式知识包：`knowledge/cards.md` 为 canonical 知识层，`author_view.md` 为非权威八区投影；旧 v0.1 split files 仍可读取，依据 `BKP_protocol.md`。 |
+| `bkp/` | BKP v0.2 正式知识包：`knowledge/cards.md` 为 canonical 知识层，`author_view.md` 为非权威八区投影；`knowledge/supporting.md`（v0.5）为非默认检索层的来源绑定 supporting findings；旧 v0.1 split files 仍可读取，依据 `BKP_protocol.md`。 |
+
+### 过程工件（仅 06_工作区，绝不进入 02）
+
+蒸馏过程在 `06_工作区/BookDistill/<request_id>_<书名>/` staging 内进行，以下过程工件
+**绝不进入正式 02**（发布时由显式 allowlist projection 排除）：
+
+- `_work/reading_manifest.json`：run-bound 阅读计划（绑定 request/run/source snapshot/
+  章节内容指纹；全部 span 无遗漏/无重叠/顺序稳定）；
+- `_work/reading_ledger.json`：逐批 pending/completed 状态（原子/幂等；可 resume）；
+- `_work/batch_notes/B####.md`：每批直接阅读笔记（六域 checked + 来源绑定 findings）；
+- `_work/completion_receipt.json`：确定性完成回执（仅 ledger 完整 + acceptance PASS 后写）；
+- `discovery/`、`evidence/ch_*.md`、`bkp_prototype/`、临时脚本：raw/调试产物。
+
+正式发布只把 allowlist 正式产物投影到 `02_素材知识库/<book_id>_<书名>/`。
 
 ### source snapshot（固化在 distill_manifest.json / bd_report.md）
 
@@ -57,7 +86,11 @@ BookDistill 不读取 `01_原始素材` 作为正文输入；不修改 SourcePre
 2. **分层**：FACT（原文可直接支持）/ INFERENCE（推断，不直接出现在字面）/ **OBSERVATION**（v0.2：作品内观察，按维度标记，不强制收口为 MECHANISM）/ MECHANISM（可迁移机制）/ BOUNDARY（本条边界与不确定性）。
 3. **MAP 独立**：MAP 是结构性作品地图，不属于 Evidence kind；填写场景/人物/时间线/信息状态/冲突等结构信息。
 4. **维度标记**：OBSERVATION 条目须携带 `dimension:维度名` 标签（如人物、关系、信息控制、POV、情绪、Scene Turn 等）。维度框架为可扩展 v0.1 观察列表，不是永久冻结的封闭枚举。
-5. **coverage 明示**：每个 Base Scan 与 Observer 工件填写真实 `scan_refs`。超大 reading unit 必须分布到前/中/后；两个 Observer 都必须完整走过所有单元。允许“已检查但无高价值发现”，coverage 不要求固定 evidence/知识数。
+5. **coverage 明示（权威 = reading ledger）**：whole-book 阅读完成度的唯一权威是当前
+   source-bound reading manifest/ledger：每个 manifest batch 必须有 completed 记录与有效
+   batch note（六域 checked）。`scan_refs` 仅保留为调试信号，**绝不再作为 whole-book
+   reading completion 的权威证据**；仅填写全范围 `scan_refs`（如 `L1-LN`）、仅有完整行号
+   范围、仅有 Agent 自报“已读”都必须失败。允许“已检查但无高价值发现”，coverage 不要求固定 evidence/知识数。
 6. **confidence 标记**：每条条目标记置信度 高/中/低。
 7. **counterevidence / boundary**：BOUNDARY 不省略；反证、译本影响、样本局限必须记录。
 8. **不大量复制原文**：条目为一句话结论 + 行号引用，不摘抄大段原文。
@@ -125,17 +158,24 @@ Base / Discovery 暴露明显高价值问题时，可借鉴 Apodictic 的发展�
 
 Apodictic 式镜头用于诊断和发现，不自动覆盖为普遍写作规则；最终仍须回到本作品证据、scope、boundary、counterevidence 与 confidence。
 
-## 工作流（v0.2 vNext 流程）
+## 工作流（v0.5 可恢复全书真实遍历）
 
 1. `validate`：校验 SourcePrepare PASS 包（状态、版本、book_id、文件、章节一致性、SHA256、空章节）。
-2. 阅读 `chapters/` 原文（逐章阅读，不做抽样猜整书）。
-3. `prepare`：生成章节索引 + 每章证据模板（含 MAP 和 OBSERVATION 节）+ 报告骨架 + 初始 manifest。
-4. **Base Scan + 多视角 Discovery**：所有关键观察都以原文为一手来源。
-   - Base Scan 在 `evidence/ch_NNNN.md` 填写 MAP、FACT / INFERENCE / OBSERVATION / 少量 MECHANISM / BOUNDARY；
-   - 至少完成“长篇运行 / 读者动力”与“Reader / Page Craft”两个互补观察 Pass；
-   - 同一高价值效果允许跨多个句子、场景和章节聚合证据；
-   - 允许记录“重要但暂时难以命名”的 Observation / Inference；
-   - 不要求每个 Pass 机械覆盖所有分类，也不把维度数量当成质量指标。
+2. `prepare --input <SP> --output <staging> [--request-id <id>] [--run-id <id>]`：生成章节索引 +
+   每章证据模板 + 报告骨架 + 初始 manifest，并生成确定性 **reading manifest + ledger**
+   （`_work/`）：把冻结来源拆成无遗漏/无重叠/顺序稳定的 span，按保守内部上限聚合为有界 batch。
+3. **逐批真实阅读循环**（全书阅读完成度的唯一权威）：重复直到 ledger 全部 completed：
+   - `reading-next --output <staging>`：取下一个未完成 batch（含 span/原文行范围/batch note 模板）；
+   - **直接阅读该 batch 全部 span 的完整原文**（不抽样、不只读首部、不伪造 scan_refs）；
+   - 在原文仍处于当前上下文时，从三个语义视角同时分析（基础/全局叙事、longform reader
+     dynamics、reader/page craft）；Observer 是视角，不是额外两遍物理全文扫描；
+   - 写 batch note（`_work/batch_notes/B####.md`）：**六域 checked**（故事与大纲 / 人物与关系 /
+     章节与场景 / 冲突与节奏 / 世界与题材 / 语言与读者体验），每域 `0 findings` 合法、
+     “未检查”不合法；记录来源绑定 findings 与待跨批核对问题；
+   - `reading-commit --output <staging> --batch <id>`：原子/幂等标记 completed（绑定 batch id/
+     manifest hash/source fingerprint/note sha256）；中断后从第一个未完成 batch 恢复，不重做已完成批次。
+4. `reading-validate --input <SP> --output <staging>`：机械证明 manifest 覆盖完整来源范围、ledger 与当前
+   request/run/manifest hash/source fingerprint 一致、每 batch 有 completed 记录与有效 note。
 5. `assemble --input <SourcePrepare PASS> --output <BookDistill 输出>`：
    校验条目分类合法性、引用可追溯与**行号不越界**，
    重算输入 snapshot 并比对，计算**维度覆盖统计**，生成 `distill_manifest.json`。
@@ -144,9 +184,13 @@ Apodictic 式镜头用于诊断和发现，不自动覆盖为普遍写作规则�
 7. `deepdive --output <BookDistill 输出> --dimension <维度名> [--input <SourcePrepare PASS>]`：生成专项深挖模板。
    专项文学分析优先参考 Apodictic / ani-book / creative-writing-skills / oh-story 的分析框架。
    传入 `--input` 时复用 assemble 校验逻辑（引用格式、章节存在性、行号越界）校验已填写的深挖内容；不传 `--input` 时仅生成模板。文件已存在时不覆盖。
-8. **BookDistill 总编辑式收敛**：汇总 Base Scan、多视角 Discovery 与 Deep Dive，回原文核证；合并同质观察，识别多个普通细节形成的组合效果；区分 Observation / Inference；降级过度抽象；补充反证、scope、boundary 和 confidence。
+8. **BookDistill 总编辑式收敛**：汇总逐批 batch note 与 Deep Dive，回原文核证；合并同质观察，识别多个普通细节形成的组合效果；区分 Observation / Inference；降级过度抽象；补充反证、scope、boundary 和 confidence。
 9. 跨章收敛机制：从充分支撑的 Observation / MECHANISM 中合并同质、降级单章小技巧，
-   产出 `mechanisms.md`（10–20 条高价值机制，不设数量指标）。无法可靠抽象但很有价值的内容继续保留为 Observation / Inference，不强行机制化。
+   产出 `mechanisms.md`。**最终知识数量由来源决定，不设 10–20、20–40 等任何配额。**
+   归并只在 conditions / mechanism / scale / effect 四者语义实质等价时进行，绝不按文字相似去重；
+   归并后保留全部来源 evidence 与 `merged_from` 关系，不丢失 scope/boundary/counterevidence；无法确认等价时宁可分开。
+   全面阅读产生、但尚不足以晋升 canonical card 的来源绑定 finding 存入 `bkp/knowledge/supporting.md`
+   （非默认检索层），保留来源证据，绝不删除。无法可靠抽象但很有价值的内容继续保留为 Observation / Inference。
 10. 生成 `evidence.md`（精选支撑最终结论的证据）与 `model.md`（作者第一阅读入口）。
 11. 完成 `bd_report.md`：来源身份 + 覆盖范围与置信度 + 边界与不确定性 + Discovery / Deep Dive 覆盖状态。
 12. `bkp --output <BookDistill 输出> [--prototype <原型目录>]`：BKP Finalize——
@@ -170,12 +214,16 @@ Apodictic 式镜头用于诊断和发现，不自动覆盖为普遍写作规则�
 
 ```powershell
 python scripts/book_distill.py validate --input "06_工作区/SourcePrepare/<book_id>_<书名>"
-python scripts/book_distill.py prepare  --input "06_工作区/SourcePrepare/<book_id>_<书名>" --output "02_素材知识库/<book_id>_<书名>"
-python scripts/book_distill.py assemble --input "06_工作区/SourcePrepare/<book_id>_<书名>" --output "02_素材知识库/<book_id>_<书名>"
-python scripts/book_distill.py profile  --output "02_素材知识库/<book_id>_<书名>"
-python scripts/book_distill.py deepdive --output "02_素材知识库/<book_id>_<书名>" --dimension "人物" --input "06_工作区/SourcePrepare/<book_id>_<书名>"
-python scripts/book_distill.py bkp      --output "02_素材知识库/<book_id>_<书名>"  # 默认读取 <output>/bkp_prototype
-python scripts/acceptance_gate.py "02_素材知识库/<book_id>_<书名>" --write-identity  # 全书验收门（新协议必过）
+python scripts/book_distill.py prepare  --input "06_工作区/SourcePrepare/<book_id>_<书名>" --output "06_工作区/BookDistill/<request_id>_<book_id>_<书名>" --request-id <request_id>
+python scripts/book_distill.py reading-status  --output "<staging>"
+python scripts/book_distill.py reading-next    --output "<staging>"
+python scripts/book_distill.py reading-commit  --output "<staging>" --batch B0001
+python scripts/book_distill.py reading-validate --input "06_工作区/SourcePrepare/<book_id>_<书名>" --output "<staging>"
+python scripts/book_distill.py assemble --input "06_工作区/SourcePrepare/<book_id>_<书名>" --output "<staging>"
+python scripts/book_distill.py profile  --output "<staging>"
+python scripts/book_distill.py deepdive --output "<staging>" --dimension "人物" --input "06_工作区/SourcePrepare/<book_id>_<书名>"
+python scripts/book_distill.py bkp      --output "<staging>"  # 默认读取 <staging>/bkp_prototype
+python scripts/acceptance_gate.py "<staging>" --repo-root <repo> --write-identity  # 全书验收门 + 写 completion receipt
 ```
 
 测试：
@@ -207,7 +255,8 @@ python -m unittest discover -s tests -p "test_*.py"
 
 - 本技能只做 1 部作品的真实蒸馏；批量蒸馏、RAG、知识图谱、多 Agent、复杂长期状态不属于当前版本。
 - 脚本不调用大模型；分析内容由运行本 Skill 的 Agent / 作者填写。
-- **v0.1 不提供自动 resume**：中断时依赖已有文件人工继续，不实现断点/状态恢复。
+- **v0.5 提供磁盘 resume**：reading manifest/ledger 落盘，中断/上下文压缩/重新继续同一请求时
+  从第一个未完成 batch 恢复，不重做已完成批次；长期状态绝不依赖聊天窗口记忆。
 - BKP v0.2 只冻结知识卡职责/调用字段/证据边界；`bkp` 子命令只做最小 Finalize
   封装（校验 + 复制白名单知识文件 + 生成 identity.json），不新增 RAG/KG，
   不自动升级知识等级（单书 BKP 最高为 Work-specific Pattern）。

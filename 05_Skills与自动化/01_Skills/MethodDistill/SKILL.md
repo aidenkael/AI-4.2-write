@@ -12,11 +12,32 @@
 
 ```text
 06_工作区/MethodPrepare/<asset>_<名称>/（必须 PASS）
-  → validate（确定性）→ prepare（确定性脚手架）
-  → Agent 语义抽取（复用现有 Settings Direct/Interactive 任务设施，不建第二套 runtime）
-  → finalize（确定性定稿）
-  → 02_素材知识库/<asset>_<名称>/method/
+  → validate（确定性）→ prepare（确定性脚手架 + reading manifest/ledger）
+  → Agent 逐批语义抽取（复用现有 Settings Direct/Interactive 任务设施，不建第二套 runtime）
+  → finalize（确定性定稿：卡校验 + reading ledger 完整结算 + completion receipt）
+  → formal package allowlist projection → 02_素材知识库/<asset>_<名称>/method/
 ```
+
+## 长篇执行合同（与 BookDistill 同类根修）
+
+审计确认 MethodDistill 存在与 BookDistill 同类的四个问题，已复用 BookDistill 的最小
+deterministic batching/ledger/completion primitive 根修（保持方法取向语义合同，
+不加 BookDistill Observer，不做成 BookDistill 换标签）：
+
+- **大型技巧资料不再假设一次上下文吃完全文**：`prepare` 按 `sections/S####.md` 生成
+  确定性 reading manifest + ledger（`method/_work/`），拆成有界 batch；
+- **source-bound 全量覆盖 + 可恢复 reading ledger**：Agent 在同一 `/gowrite` 会话逐批
+  直接阅读原文（`reading-next` → 读原文 → 抽取方法卡 → 写 batch note → `reading-commit`）；
+  中断后从第一个未完成 batch 恢复；`finalize` 机械验证 ledger 完整结算，仅有 Agent
+  自报“已读全文”不得通过；
+- **Qoder response 丢失不再永久 pending**：`finalize` 在 ledger 完整 + 定稿全部通过后写
+  确定性 completion receipt；backend `get_method_distill_request` 在 response 缺失时只允许
+  验证严格匹配当前 active request/source/manifest/ledger 的有效 receipt 后才进入 finalize；
+- **publish 不再把临时 staging 带入 02**：正式发布前构建独立 formal candidate（allowlist
+  projection），`method/_work/` 等过程工件绝不进入 02。
+
+batch note 不强制叙事六域（方法取向）；方法语义合同仍为 principle / diagnostic /
+procedure / checklist / failure_mode，`finalize` 仍验证真实 section evidence。
 
 ## 输出
 
@@ -95,7 +116,10 @@ maturity       = source_bound
 
 ```bash
 python 05_Skills与自动化/01_Skills/MethodDistill/method_distill.py validate --input <mp_dir>
-python 05_Skills与自动化/01_Skills/MethodDistill/method_distill.py prepare  --input <mp_dir> --output <method_dir>
+python 05_Skills与自动化/01_Skills/MethodDistill/method_distill.py prepare  --input <mp_dir> --output <method_dir> --request-id <id>
+python 05_Skills与自动化/01_Skills/MethodDistill/method_distill.py reading-next   --output <method_dir>
+python 05_Skills与自动化/01_Skills/MethodDistill/method_distill.py reading-commit --output <method_dir> --batch B0001
+python 05_Skills与自动化/01_Skills/MethodDistill/method_distill.py reading-validate --input <mp_dir> --output <method_dir>
 python 05_Skills与自动化/01_Skills/MethodDistill/method_distill.py finalize --input <mp_dir> --output <method_dir>
 ```
 

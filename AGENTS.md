@@ -93,8 +93,8 @@ Context/Brief/recent prose 是 derivative，不得成为事实 authority。
 | MaterialIntake | CANONICAL_CATALOG_AVAILABLE + INTAKE_AND_WRITEBACK_AVAILABLE（素材资产.json = 唯一 canonical 真源；CSV/MD derived；类型含 METHOD_SOURCE） |
 | SourcePrepare | AVAILABLE（canonical ledger consumer；index_builder 已退役） |
 | MethodPrepare | AVAILABLE（METHOD_SOURCE 确定性预处理；无模型；产物 06_工作区 Local Only） |
-| BookDistill | AVAILABLE / FROZEN |
-| MethodDistill | AVAILABLE（方法知识蒸馏 + 确定性定稿；方法取向合同，非 BookDistill 换标签） |
+| BookDistill | AVAILABLE / FROZEN（0.5.0：可恢复全书真实遍历 reading manifest/ledger + 六域 checked + deterministic completion receipt + formal allowlist 发布） |
+| MethodDistill | AVAILABLE（方法知识蒸馏 + 确定性定稿；方法取向合同，非 BookDistill 换标签；0.5.0 复用 reading manifest/ledger/receipt + formal allowlist 发布） |
 | KnowledgeRetrieve | AVAILABLE（统一多源：参考 BKP / 方法知识 / 已验证知识一次调用混合检索；不再是旧版 BKP-only 冻结实现） |
 | StoryDesign | CLOSED / FROZEN |
 | StoryPlan | CLOSED / FROZEN |
@@ -116,9 +116,21 @@ REFERENCE_WORK → SourcePrepare → BookDistill → 02_素材知识库/<asset>/
 METHOD_SOURCE  → MethodPrepare → MethodDistill → 02_素材知识库/<asset>/method
 ```
 
-参考作品链：`SourcePrepare → BookProfile → 多视角 Discovery → 按需 Deep Dive → BookDistill 收敛 → BKP → KnowledgeRetrieve`
+参考作品链：`SourcePrepare → BookProfile Scout → 逐批真实阅读循环（reading manifest/ledger）→ 按需 Deep Dive → BookDistill 收敛 → BKP → KnowledgeRetrieve`
 
-EPUB 结构长期不变量：`spine != chapter`。SourcePrepare 依次使用可靠 nav/NCX fragment anchor、强章标题恢复真实章界；无法可靠恢复时必须标记 `reading_unit / epub_spine_fallback`，不得冒称章节。装饰性 SVG/image/cover/logo/资源链接 markup 在 Prepare 确定性清理；`full.md` 与 `chapters/` 同源。Distill 不重新解析 EPUB 补偿上游错误，旧 Prepare 合同必须 fail closed 并显示需重新提纯。BookDistill whole-book PASS 不得以“文件数都有 evidence”代替真实阅读分布；超大单元及两个 Observer 的前/中/后 coverage 必须机械可验。Coverage 只证明“检查过”，不要求“必须产知识”；不得用下游复杂度掩盖上游错误结构。
+EPUB 结构长期不变量：`spine != chapter`。SourcePrepare 依次使用可靠 nav/NCX fragment anchor、强章标题恢复真实章界；无法可靠恢复时必须标记 `reading_unit / epub_spine_fallback`，不得冒称章节。装饰性 SVG/image/cover/logo/资源链接 markup 在 Prepare 确定性清理；`full.md` 与 `chapters/` 同源。Distill 不重新解析 EPUB 补偿上游错误，旧 Prepare 合同必须 fail closed 并显示需重新提纯。Coverage 只证明“检查过”，不要求“必须产知识”；不得用下游复杂度掩盖上游错误结构。
+
+## 蒸馏子系统长期不变量（BookDistill / MethodDistill）
+
+- 作者侧仍是一键“原著学习 / 方法学习”；内部 batching 对作者不可见。真实运行环境是“一次按钮 + 人工进入同一个 Agent 窗口 + 一次 `/gowrite`”；不能假设 Agent 自动新开会话。
+- 上下文 compaction 是允许的；长期蒸馏状态必须落盘，不能依赖聊天窗口记忆。BookDistill/MethodDistill 对长文采用完整来源遍历 + 有界 batch + disk ledger + resume。
+- Observer 是语义视角，不再要求三遍物理全文读取。Agent 自报 `scan_refs`/coverage/`identity PASS` 不能单独证明完成；whole-book completion 的权威是当前 source-bound manifest/ledger + deterministic acceptance。
+- 全面学习不等于强迫固定数量知识；取消固定 card 配额。归并按 conditions/mechanism/scale/effect 的机制等价，不按文字相似，且必须保留来源与边界。
+- `06` 保存过程性/可恢复工件（reading manifest/ledger、batch notes、raw discovery/evidence、临时脚本），`02` 只保存正式来源绑定知识与必要 trace；发布用显式 allowlist projection，`_work`/raw/batch/临时脚本绝不进入 02。
+- default KnowledgeRetrieve surface 保持 canonical cards，过程/raw/supporting findings 不默认进入写作上下文。
+- Qoder response 丢失时可由合法 deterministic completion receipt 恢复结算，但绝不能从 Agent 自报 PASS 推断成功；receipt 必须绑定 schema/request/run/source/snapshot/manifest hash/ledger completion/acceptance，canceled/stale/fingerprint 已变化的 receipt 一律不触发 finalize，finalize 仍独立重跑全部确定性门。
+- 只有 finalize + publish + KnowledgeRetrieve discovery + catalog settlement 全部成功，作者侧才是“可用于写作”。
+- 不新增第二 Agent runtime、第二素材 registry、第二知识库、向量/RAG/KG、章节级作者进度系统。
 
 方法/技巧资料链：`MethodPrepare（确定性，无模型）→ MethodDistill（语义抽取 + 确定性定稿）→ 方法知识包 → KnowledgeRetrieve`
 
