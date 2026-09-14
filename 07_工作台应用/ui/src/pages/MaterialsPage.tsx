@@ -1,6 +1,8 @@
 import { CheckCircle2, FileUp, FolderSearch, RefreshCw, UploadCloud } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { PageHeader } from '../components/PageHeader'
+import { editorialIllustrations } from '../assets/editorialIllustrations'
+import { EditorialCover } from '../features/presentation/EditorialCover'
 import { useApp } from '../features/app/AppStore'
 import { useMaterialsController } from '../features/materials/useMaterialsController'
 import {
@@ -74,7 +76,7 @@ export function MaterialsPage() {
   }
 
   return <div className="page">
-    <PageHeader title="素材与学习" subtitle="把原著和写作技巧整理成写作时可以调用的知识。" />
+    <PageHeader title="素材与学习" subtitle="把原著和写作技巧整理成写作时可以调用的知识。" art={editorialIllustrations.materials} />
     <div className="filterbar panel materials-toolbar">
       {MATERIAL_TOP_NAVIGATION.map((label) => {
         const Icon = tabIcons[label]
@@ -103,6 +105,7 @@ export function MaterialsPage() {
             <h4>待入库 <small>（{controller.inbox.length}）</small></h4>
             <div className="material-grid">
               {controller.inbox.map((file) => <div className="material-card inbox-card" key={file.filename}>
+                <EditorialCover />
                 <span className="material-card-title">{file.display_name || file.filename}</span>
                 <span className="material-card-meta">{file.format || file.suffix}</span>
                 {file.unsupported
@@ -126,6 +129,7 @@ export function MaterialsPage() {
             <h4>待提纯 <small>（{newItems.length}）</small></h4>
             <div className="material-grid">
               {newItems.map((m) => <button key={m.id} className={selectedId === m.id ? 'material-card active' : 'material-card'} onClick={() => { setSelectedId(m.id); void controller.selectDetail(m.id) }}>
+                <EditorialCover />
                 <span className="material-card-title">{m.name}</span>
                 <span className="material-card-meta">{materialCardMeta(m)}</span>
                 <em className={m.state === 'needs_attention' ? 'warn' : 'wait'}>{authorStateLabel(m.state)}</em>
@@ -166,6 +170,7 @@ export function MaterialsPage() {
           <h3>写作素材库 <small>（{filteredWriting.length}）</small></h3>
           <div className="material-grid">
             {filteredWriting.map((material) => <button key={material.id} className={selectedId === material.id ? 'material-card active' : 'material-card'} onClick={() => { setSelectedId(material.id); void controller.selectDetail(material.id) }}>
+              <EditorialCover />
               <span className="material-card-title">{material.name}</span>
               <span className="material-card-meta">{materialCardMeta(material)}</span>
               <em className="ok">{authorStateLabel(material.state)}</em>
@@ -278,6 +283,7 @@ function MaterialStagePanel({ items, title, selectedId, selected, detail, contro
         <h3>{title} <small>（{items.length}）</small></h3>
         <div className="material-grid">
           {items.map((material) => <button key={material.id} className={selectedId === material.id ? 'material-card active' : 'material-card'} onClick={() => onSelect(material.id)}>
+            <EditorialCover />
             <span className="material-card-title">{material.name}</span>
             <span className="material-card-meta">{materialCardMeta(material)}</span>
             <em className={material.state === 'ready' ? 'ok' : material.state === 'needs_attention' ? 'warn' : 'wait'}>{authorStateLabel(material.state)}</em>

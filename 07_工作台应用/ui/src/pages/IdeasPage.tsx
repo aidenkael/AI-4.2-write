@@ -4,6 +4,7 @@ import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { useIdeasController } from '../features/ideas/useIdeasController'
 import { PageHeader } from '../components/PageHeader'
+import { editorialIllustrations } from '../assets/editorialIllustrations'
 import type { IdeaKind } from '../bridge/client'
 
 type Filter = '全部' | '尚未使用' | '已用于作品'
@@ -74,7 +75,7 @@ export function IdeasPage() {
 
   return (
     <div className="page">
-      <PageHeader title="灵感箱" subtitle="随时记录闪过的想法，为创作积蓄灵感能量。" />
+      <PageHeader title="灵感箱" subtitle="随时记录闪过的想法，为创作积蓄灵感能量。" art={editorialIllustrations.ideasSettings} />
       <section className="panel idea-composer">
         <h3><Lightbulb /> 快速记录灵感</h3>
         <textarea value={value} onChange={(e) => setValue(e.target.value)} placeholder="此刻的想法、场景或对白…" maxLength={1000} />

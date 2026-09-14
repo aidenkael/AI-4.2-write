@@ -5,6 +5,7 @@ import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { getProjectOverview, getStoryWriteSurface, updateStorySynopsis, type ProjectOverview, type StoryWriteSurface } from '../bridge/client'
 import { impactNoticeText } from '../features/planning/planningImpact'
 import { ProjectCoverControl } from '../features/presentation/ProjectCoverControl'
+import { editorialIllustrations } from '../assets/editorialIllustrations'
 
 const toMessage = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
@@ -101,6 +102,7 @@ export function ProjectOverviewPage() {
   return (
     <div className="overview-page">
       <section className="panel overview-status">
+        <img className="overview-editorial-art" src={editorialIllustrations.worksOverview} alt="" aria-hidden="true" draggable={false} />
         {loading && <p className="muted-note">正在加载正式数据…</p>}
         {error && (
           <div>
@@ -113,7 +115,15 @@ export function ProjectOverviewPage() {
         )}
         {!loading && !error && (
           <>
-            <ProjectCoverControl projectId={selected.project_id} name={selected.name}/>
+            <div className="overview-hero">
+              <ProjectCoverControl projectId={selected.project_id} name={selected.name}/>
+              <div className="overview-cta">
+                <button className="primary" onClick={runPrimaryAction}>
+                  {nextAction === 'foundation' ? <Sparkles /> : <PenLine />}
+                  {nextAction === 'foundation' ? '完善作品地基' : '继续正文'}
+                </button>
+              </div>
+            </div>
             <div className="overview-grid">
               <section className="overview-card overview-position">
                 <header>
@@ -186,12 +196,6 @@ export function ProjectOverviewPage() {
             })()}
           </>
         )}
-        <div className="overview-cta">
-          <button className="primary" onClick={runPrimaryAction}>
-            {nextAction === 'foundation' ? <Sparkles /> : <PenLine />}
-            {nextAction === 'foundation' ? '完善作品地基' : '继续正文'}
-          </button>
-        </div>
       </section>
 
       <p className="muted-note overview-footnote">

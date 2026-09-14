@@ -9,6 +9,7 @@ import { taskFor } from '../features/tasks/coordinatorModel'
 import { describeRecord } from '../features/storyMap/storyMapModel'
 import { authorSourceLabel, authorStatusLabel, compactCharacter } from '../features/presentation/authorPresentation'
 import { AvatarImage } from '../features/presentation/AvatarImage'
+import { editorialIllustrations } from '../assets/editorialIllustrations'
 import { useProjectPresentation } from '../features/presentation/useProjectPresentation'
 import { CharacterEditor, RelationshipEditor, SparseFieldEditor, recordObject, splitEditorData } from '../features/foundation/recordEditors'
 import { fieldTuplesForCategory, fieldsForCategory, primaryFoundationSections } from '../features/foundation/fieldPresentation'
@@ -592,6 +593,7 @@ export function FoundationPage() {
 
       <section className="panel foundation-main">
         <header className="foundation-toolbar">
+          <img className="foundation-editorial-art" src={editorialIllustrations.foundationPlanning} alt="" aria-hidden="true" draggable={false} />
           <div><h2>作品地基</h2><p className="muted-note">只记录这部作品真正需要的长期资料，未填写的可选信息不会阻碍创作。</p></div>
           <button onClick={() => { setDesignPrefill(undefined); setDesignOpen(true) }}><Sparkles /> 完善作品地基</button>
         </header>

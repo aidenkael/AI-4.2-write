@@ -115,7 +115,8 @@ function whenBridgeReady(timeoutMs = 10000): Promise<any> {
     const onReady = () => {
       if (settled) return
       const api = w.pywebview?.api
-      if (!api) return
+      // api 对象可能先于方法挂载出现（半注入竞态）；以真实方法存在作为就绪判定。
+      if (!api || typeof api.get_app_status !== 'function') return
       settled = true
       cleanup()
       resolve(api)

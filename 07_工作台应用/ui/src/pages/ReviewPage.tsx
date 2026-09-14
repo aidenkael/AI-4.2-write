@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react'
 import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { useReviewController } from '../features/review/useReviewController'
+import { editorialIllustrations } from '../assets/editorialIllustrations'
 
 const severityMeta = {
   priority: { label: '优先处理', Icon: TriangleAlert, cls: 'priority' },
@@ -54,6 +55,7 @@ export function ReviewPage() {
   return (
     <div className="review-page">
       <section className="panel review-head">
+        <img className="review-editorial-art" src={editorialIllustrations.storyMapReview} alt="" aria-hidden="true" draggable={false} />
         <ShieldCheck />
         <div>
           <h1>作品检查</h1>

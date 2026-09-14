@@ -35,7 +35,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <button className="brand" onClick={() => actions.navigate('works')}><Feather size={30} fill="currentColor" /><strong>AI-write</strong></button>
+        <button className="brand" onClick={() => actions.navigate('works')}><Feather size={30} fill="currentColor" /><strong>Go Write</strong></button>
         <nav className="global-nav" aria-label="全局导航">{nav.map(({ id, label, Icon }) => <button key={id} className={active === id ? 'active' : ''} onClick={() => actions.navigate(id)}><Icon /><span>{label}</span></button>)}</nav>
         <div className="search-wrap">
           <label className="search"><Search size={19} /><input aria-label="搜索" value={state.search} onChange={(e) => actions.setSearch(e.target.value)} placeholder={active === 'ideas' ? '搜索灵感' : '搜索'} /></label>
