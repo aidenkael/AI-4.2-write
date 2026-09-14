@@ -49,6 +49,10 @@ def _prepare(root: Path, asset, *, status="PASS", metadata=None, complete=True):
     payload = metadata if metadata is not None else {
         "status": status, "selected_source": {"sha256": asset["files"][0]["sha256"]},
     }
+    if metadata is None and asset["type"] != "METHOD_SOURCE":
+        # 版本门（_prepare_package_current）：REFERENCE_WORK 需当前 0.4.0 结构合同字段。
+        payload = {**payload, "skill_version": "0.4.0", "unit_semantics": "chapter",
+                   "unit_boundary_source": "epub_nav_anchor"}
     (package / "metadata.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     return package
 
@@ -74,7 +78,10 @@ def test_method_prepare_reason_uses_limitations(root):
 
 def test_prepare_stale_and_incomplete_reasons(root):
     stale = _asset()
-    _prepare(root, stale, metadata={"status": "PASS", "selected_source": {"sha256": "b" * 64}})
+    _prepare(root, stale, metadata={"status": "PASS", "skill_version": "0.4.0",
+                                    "unit_semantics": "chapter",
+                                    "unit_boundary_source": "epub_nav_anchor",
+                                    "selected_source": {"sha256": "b" * 64}})
     assert materials._prepare_package_current(stale)["reason"] == "提纯结果与当前来源文件不一致，需要重新提纯。"
 
     incomplete = _asset("book_0002", path="01_原著/缺页/缺页.epub")
@@ -118,7 +125,16 @@ def test_open_folder_routes_by_real_stage(root, monkeypatch):
     ref_package = _prepare(root, reference)
     method_package = _prepare(root, method)
     writing_package = root / "02_素材知识库" / "book_write_写作"
-    writing_package.mkdir()
+    (writing_package / "bkp").mkdir(parents=True)
+    # 版本门（_reference_knowledge_contract_current）+ 全书验收：writing 阶段正式包
+    # 必须含当前 0.4.0 结构合同与 acceptance PASS 的 identity.json。
+    (writing_package / "bkp" / "identity.json").write_text(json.dumps({
+        "book": {"book_id": "book_write", "title": "写作", "author": ""},
+        "schema_status": "FINALIZED",
+        "source_snapshot": {"sp_version": "0.4.0", "unit_semantics": "chapter",
+                            "source_sha256": "a" * 64, "chapter_count": 1},
+        "acceptance": {"schema": "gowrite_bkp_acceptance/v1", "required": True, "status": "PASS"},
+    }, ensure_ascii=False), encoding="utf-8")
     _write_ledger(root, assets)
     opened = []
     monkeypatch.setattr(materials, "_launch_folder", lambda path: opened.append(path))

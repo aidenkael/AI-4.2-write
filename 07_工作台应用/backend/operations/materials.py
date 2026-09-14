@@ -930,6 +930,108 @@ def _distill_error_message(detail: str) -> str:
     return "学习失败，请重试。"
 
 
+# ---------------------------------------------------------------------------
+# Formal package projection（显式 allowlist；06 过程工件绝不进入 02）
+# ---------------------------------------------------------------------------
+#
+# 发布边界根不变量：06_工作区 保存过程性/可恢复工件（reading manifest/ledger、
+# batch notes、raw discovery、raw per-chapter evidence、bkp_prototype、临时脚本）；
+# 02_素材知识库 只保存正式来源绑定知识与必要 trace。发布前先构建独立
+# publish candidate，再对 candidate 做最终校验并事务发布；绝不为发布而
+# 移动/破坏仍需调试的 staging。
+
+# REFERENCE_WORK / BKP 正式包根级 allowlist（相对 staging 根）。
+_REFERENCE_FORMAL_ROOT_FILES = frozenset({
+    "model.md",
+    "evidence.md",
+    "mechanisms.md",
+    "book_profile.md",
+    "bd_report.md",
+    "chapters_index.md",
+    "distill_manifest.json",
+    "BKP_ACCEPTANCE_REPORT.md",
+})
+# bkp/ 子树整体是正式知识包（由 finalize_bkp 从 curated prototype 封装）；
+# 但明确排除任何过程性/调试性子目录。
+_BKP_FORMAL_SUBDIR_EXCLUDE = frozenset({"_work", "discovery", "evidence", "bkp_prototype"})
+# 绝不进入 02 的 staging 根级过程目录/文件。
+_REFERENCE_STAGING_EXCLUDE = frozenset({
+    "_work", "discovery", "evidence", "bkp_prototype", "deepdive",
+    "book_profile_initial.md",
+})
+
+
+def _copy_formal_subtree(src: Path, dst: Path, *, exclude: frozenset[str]) -> list[str]:
+    """Copy a directory subtree excluding process-only subdirs. Returns copied rel paths."""
+    copied: list[str] = []
+    if not src.is_dir():
+        return copied
+    for path in sorted(src.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(src).as_posix()
+        top = rel.split("/", 1)[0]
+        if top in exclude:
+            continue
+        target = dst / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(path), str(target))
+        copied.append(rel)
+    return copied
+
+
+def _build_reference_formal_candidate(stage_dir: Path, candidate_dir: Path) -> dict[str, Any]:
+    """Project the formal BKP package out of the 06 staging dir (allowlist only).
+
+    Never copies ``_work/`` (reading manifest/ledger/batch notes), raw
+    ``discovery/`` observer tree, raw per-chapter ``evidence/`` staging,
+    ``bkp_prototype/``, or temporary scripts. The candidate is what gets
+    transaction-published into ``02_素材知识库``.
+    """
+    stage_dir = Path(stage_dir)
+    candidate_dir = Path(candidate_dir)
+    if candidate_dir.exists():
+        shutil.rmtree(candidate_dir, ignore_errors=True)
+    candidate_dir.mkdir(parents=True, exist_ok=True)
+    copied: list[str] = []
+    missing: list[str] = []
+    for rel in sorted(_REFERENCE_FORMAL_ROOT_FILES):
+        src = stage_dir / rel
+        if src.is_file():
+            dst = candidate_dir / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(src), str(dst))
+            copied.append(rel)
+        elif rel in {"model.md", "distill_manifest.json", "BKP_ACCEPTANCE_REPORT.md"}:
+            missing.append(rel)
+    # bkp/ subtree（正式知识包）整体复制，排除过程性子目录。
+    bkp_copied = _copy_formal_subtree(stage_dir / "bkp", candidate_dir / "bkp",
+                                      exclude=_BKP_FORMAL_SUBDIR_EXCLUDE)
+    copied.extend(f"bkp/{rel}" for rel in bkp_copied)
+    if not (candidate_dir / "bkp" / "identity.json").is_file():
+        missing.append("bkp/identity.json")
+    return {"ok": not missing, "copied": copied, "missing": missing,
+            "candidate_dir": str(candidate_dir)}
+
+
+def _build_method_formal_candidate(stage_method_dir: Path, candidate_dir: Path) -> dict[str, Any]:
+    """Project the formal method package out of the 06 staging dir (allowlist only)."""
+    stage_method_dir = Path(stage_method_dir)
+    candidate_dir = Path(candidate_dir)
+    if candidate_dir.exists():
+        shutil.rmtree(candidate_dir, ignore_errors=True)
+    candidate_dir.mkdir(parents=True, exist_ok=True)
+    copied = _copy_formal_subtree(stage_method_dir, candidate_dir,
+                                  exclude=frozenset({"_work", "discovery", "bkp_prototype"}))
+    missing: list[str] = []
+    if not (candidate_dir / "identity.json").is_file():
+        missing.append("identity.json")
+    if not (candidate_dir / "knowledge" / "cards.md").is_file():
+        missing.append("knowledge/cards.md")
+    return {"ok": not missing, "copied": copied, "missing": missing,
+            "candidate_dir": str(candidate_dir)}
+
+
 class _PublishTransaction:
     """Request-scoped 06 -> 02 publish held open through discovery/catalog settlement."""
 
@@ -1177,9 +1279,19 @@ def _finalize_reference_distill(request_id: str, asset: dict[str, Any], sp_dir: 
                                details={"skill": "BookDistill", "stage": label, "detail": detail})
             raise MaterialsError(f"{label}失败，请重试。")
     _run_reference_acceptance(request_id, stage_dir)
+    # 构建独立 formal publish candidate（显式 allowlist projection）。
+    # 06 过程工件（_work/discovery/evidence/bkp_prototype/临时脚本）绝不进入 02；
+    # staging 本体保留在 06 供调试，绝不为发布而移动/破坏它。
+    candidate_dir = stage_dir.parent / f"{stage_dir.name}.__formal_candidate__"
+    projection = _build_reference_formal_candidate(stage_dir, candidate_dir)
+    if not projection["ok"]:
+        shutil.rmtree(candidate_dir, ignore_errors=True)
+        audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "book_distill",
+                           details={"step": "formal_projection", "missing": projection["missing"]})
+        raise MaterialsError("原著学习正式包不完整，请重试。")
     # 发布事务保持开放，直到 discovery + catalog settlement 都成功。
     target_dir = get_repo_root() / "02_素材知识库" / sp_dir.name
-    tx = _PublishTransaction(stage_dir, target_dir, request_id)
+    tx = _PublishTransaction(candidate_dir, target_dir, request_id)
     with material_settlement.serialized():
         try:
             tx.begin()
@@ -1197,6 +1309,8 @@ def _finalize_reference_distill(request_id: str, asset: dict[str, Any], sp_dir: 
                                details={"step": "post_publish_verification", "error": str(exc)[:300]})
             _rollback_publish_or_fail(tx, request_id, "book_distill")
             raise MaterialsError("原著学习结果暂不能用于写作，已保留原知识包，请重试。") from exc
+    # 发布成功后清理临时 candidate（staging 保留在 06 供调试/审计）。
+    shutil.rmtree(candidate_dir, ignore_errors=True)
     return {"output_dir": str(target_dir)}
 
 
@@ -1298,9 +1412,20 @@ def _run_distill_agent_stage(request_id: str, asset_id: str, sp_dir: Path, stage
         raise MaterialsError("BookDistill Agent 任务构建器缺失。")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    task = module.build_distill_agent_task(sp_dir, stage_dir)
+    is_direct = settings.default_execution_mode == EXECUTION_MODE_DIRECT
+    if is_direct:
+        # Direct 路径由 adapter 直接捕获 result，不依赖 response envelope 文件。
+        task = module.build_distill_agent_task(sp_dir, stage_dir, request_id=request_id)
+    else:
+        # Interactive 路径必须把最终结果写回 bridge response envelope；
+        # task 文本显式命名 response_path，关闭“只在聊天输出 JSON”的根因。
+        from operations import qoder_bridge as bridge
+        task = module.build_distill_agent_task(
+            sp_dir, stage_dir, request_id=request_id,
+            response_path=str(bridge.response_path(request_id)),
+        )
 
-    if settings.default_execution_mode != EXECUTION_MODE_DIRECT:
+    if not is_direct:
         from operations import qoder_bridge as bridge
         try:
             bridge.create_request(
@@ -1415,6 +1540,65 @@ def _finalize_distill(request_id: str, asset_id: str, sp_dir: Path, stage_dir: P
     }
 
 
+def _load_book_distill_runtime():
+    """Load BookDistill deterministic runtime modules (book_distill + reading_ledger)."""
+    scripts_dir = _REPO_ROOT / "05_Skills与自动化" / "01_Skills" / "BookDistill" / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    import book_distill as bd  # noqa: PLC0415
+    import reading_ledger as rl  # noqa: PLC0415
+    return bd, rl
+
+
+def _book_distill_receipt_finalize(request_id: str, request: dict[str, Any],
+                                   meta: dict[str, Any]) -> dict[str, Any] | None:
+    """response 缺失回退：只允许验证当前 active request 对应的有效 deterministic
+    completion receipt 后进入 finalize。
+
+    绝不以 Agent 自写 JSON、identity.json PASS、文件存在时间等弱信号代替 receipt。
+    canceled / stale / source fingerprint 已变化的 receipt 一律不触发 finalize。
+    返回 finalize 结果 dict；无合法 receipt 时返回 None（保持 pending）。
+    finalize 仍独立重跑确定性门，receipt 只解决桥完成信号丢失。
+    """
+    stage_dir = Path(str(meta.get("stage_dir") or ""))
+    sp_dir = Path(str(meta.get("sp_dir") or ""))
+    asset_id = str(meta.get("asset_id") or "").strip()
+    if not asset_id or not stage_dir.is_dir() or not sp_dir.is_dir():
+        return None
+    if request.get("state") == "canceled":
+        return None
+    try:
+        bd, rl = _load_book_distill_runtime()
+    except Exception:  # noqa: BLE001 - runtime unavailable → stay pending
+        return None
+    # 独立重算当前 SourcePrepare snapshot，绝不信任 receipt/staging 自报。
+    check = bd.validate_input(sp_dir)
+    if not check.get("ok"):
+        return None
+    current_snapshot = check["info"].get("source_snapshot")
+    receipt = rl.read_completion_receipt(stage_dir)
+    if receipt is None:
+        return None
+    validation = rl.validate_completion_receipt(
+        receipt, stage_dir,
+        request_id=request_id, source_id=asset_id, source_snapshot=current_snapshot,
+    )
+    if not validation.get("ok"):
+        # 不合法/不匹配 receipt：保持 pending，绝不 finalize。
+        return None
+    audit.append_event(
+        request_id, audit.EVENT_BRIDGE_COMPLETION_RECEIPT_USED, "book_distill",
+        details={"step": "response_missing_receipt_fallback",
+                 "manifest_hash": receipt.get("manifest_hash"),
+                 "acceptance_status": receipt.get("acceptance_status")},
+    )
+    try:
+        result = _finalize_distill(request_id, asset_id, sp_dir, stage_dir)
+    except MaterialsError as exc:
+        return {"request_id": request_id, "status": "failed", "error": str(exc)}
+    return {"request_id": request_id, "status": "completed", "result": result}
+
+
 def get_book_distill_request(request_id: str) -> dict[str, Any]:
     """轮询 Interactive 蒸馏：pending / completed / failed / canceled。
 
@@ -1440,6 +1624,10 @@ def get_book_distill_request(request_id: str) -> dict[str, Any]:
         return {"request_id": request_id, "status": "expired", "error": "任务已超时，请重新发起。"}
     response = bridge.read_response(request_id)
     if response is None:
+        # response 缺失回退：验证合法 deterministic completion receipt 后才 finalize。
+        receipt_result = _book_distill_receipt_finalize(request_id, request, meta)
+        if receipt_result is not None:
+            return receipt_result
         if request.get("execution_phase") == "running":
             message = "Agent 正在执行素材学习"
         else:
@@ -1577,23 +1765,44 @@ _METHOD_DISTILL_TASK_TEMPLATE = """你是 Go Write 的方法知识蒸馏执行�
 输入：
 - MethodPrepare PASS 包：{mp_dir}（full.md 全文 + sections/ 分节 + structure.json）
 - 蒸馏输出目录：{method_dir}（脚手架已生成：identity.json / method_profile.md /
-  evidence.md / knowledge/cards.md 模板）
+  evidence.md / knowledge/cards.md 模板；reading manifest/ledger 在 {method_dir}/_work/）
+- 本次请求 request_id：{request_id}
 （validate 与 prepare 已由 Go Write 完成。）
 
-你的任务（按顺序）：
-1. 通读 {mp_dir}/full.md（需要精确行号时对照 sections/ 分节）。
-2. 抽取该书**明确教授**的可迁移创作方法，逐张写入 {method_dir}/knowledge/cards.md
-   （严格遵守模板中的规范卡格式：## M0001｜标题，字段齐全，id 从 M0001 起递增不重复）：
-   - statement 一句话方法陈述；method_kind 五选一；
-   - 适用条件/步骤/检查项/失效模式/边界只在原书明确给出时填写，绝不外推；
-   - evidence 必须是真实存在的 MethodPrepare 行号引用，形如 sections/S0001.md#L3-L12。
-3. 区分原书主张与 Go Write 已验证事实：未验证的一律写 source-bound，不得声明为普适真理。
-4. capability_candidate 只标记潜在可执行的方法知识；它绝不创建任何 Skill。
-5. 填写 {method_dir}/method_profile.md（身份/覆盖/边界）与 {method_dir}/evidence.md
-   （精选证据）。
-6. 不修改 {mp_dir} 与 identity.json 中的任何内容。
+核心纪律（大型技巧资料可恢复真实遍历）：
+- 本书可能很长。你**不需要**、也**不允许**一次性把全文读进上下文。
+- MethodDistill 已在 {method_dir}/_work/ 生成确定性 reading manifest 与 ledger，按 sections/ 分节拆成有界批次。
+- 你在**同一个 /gowrite 会话**中逐批直接阅读原文、逐批落盘。聊天上下文可以自然压缩；长期状态只依赖磁盘工件。
+- 中断后重新继续同一请求时，从第一个未完成批次恢复，绝不重做已完成批次。
 
-全部写入完成后，在最终回复中输出一行 JSON：{{"status": "completed", "card_count": <写入方法卡数>}}"""
+你的任务（按顺序）：
+
+1. 逐批真实阅读循环（这是全书阅读完成度的唯一权威来源）。重复直到 ledger 全部 completed：
+   a. 运行 `python "{md_script}" reading-next --output "{method_dir}"`，取得下一个未完成 batch（含 span 列表、原文行范围、batch note 模板与 note_path）。若返回 `complete:true`，跳到第 2 步。
+   b. **直接阅读该 batch 全部 span 的完整原文**（{mp_dir}/sections/S####.md 的对应行范围）。不得抽样、不得凭记忆或摘要替代真实阅读。
+   c. 抽取本节**明确教授**的可迁移创作方法，逐张写入 {method_dir}/knowledge/cards.md
+      （严格遵守规范卡格式：## M0001｜标题，字段齐全，id 从 M0001 起递增不重复）：
+      - statement 一句话方法陈述；method_kind 五选一（principle/diagnostic/procedure/checklist/failure_mode）；
+      - 适用条件/步骤/检查项/失效模式/边界只在原书明确给出时填写，绝不外推；
+      - evidence 必须是真实存在的 MethodPrepare 行号引用，形如 sections/S0001.md#L3-L12。
+   d. 区分原书主张与 Go Write 已验证事实：未验证的一律写 source-bound，不得声明为普适真理。
+      capability_candidate 只标记潜在可执行的方法知识；它绝不创建任何 Skill。
+   e. 按 batch note 模板写本批 {method_dir}/_work/batch_notes/<batch_id>.md：记录本批抽取的方法卡 id 与待跨批核对问题；保留模板末尾 JSON 块并填好 batch_id / finding_count（本批新增卡数，0 合法）。
+   f. 运行 `python "{md_script}" reading-commit --output "{method_dir}" --batch <batch_id>`。只有 commit 成功该批才算 completed。
+   g. 继续下一批。
+
+2. 全部批次 completed 后，填写 {method_dir}/method_profile.md（身份/覆盖/边界）与 {method_dir}/evidence.md（精选证据）。不修改 {mp_dir} 与 identity.json 中的任何内容。
+
+3. 运行确定性定稿：`python "{md_script}" finalize --input "{mp_dir}" --output "{method_dir}"`。
+   finalize 会机械验证阅读 ledger 完整结算、重复 id / 空 statement / 非法 kind / 断裂证据 / 过期指纹，并在全部通过后写出确定性 completion receipt。只有 finalize 成功（status=FINALIZED_RETRIEVAL_READY）才可进入第 4 步。
+
+4. 若 finalize 指出可修复缺口，回到对应原文和卡片修复后重跑；最多 2 轮有界修复，不得降低门槛或伪造证据。硬失败应停止并写 failed response。
+
+5. 【关键·任务结束的唯一标志】按 /gowrite 协议把最终结果写入 request 指定的 response_path：{response_path}
+   - 成功：写入 {{"schema":"gowrite_response/v1","request_id":"{request_id}","status":"completed","result":{{"card_count":<方法卡数>,"batches_completed":<数量>}}}}
+   - 硬失败或两轮修复后仍不通过：写入 {{"schema":"gowrite_response/v1","request_id":"{request_id}","status":"failed","error":"简短可读原因"}}
+   - 写入前先用标准 JSON parser 自验证；绝不把未通过验证的 JSON 写入 response_path。
+   - **只在聊天输出 JSON 不算完成任务**；必须把 response envelope 写入上述 response_path 文件。写入后立即停止。"""
 
 
 def _find_mp_dir(asset_id: str) -> Path:
@@ -1660,7 +1869,8 @@ def run_method_distill(asset_id: str) -> dict[str, Any]:
     stage_dir = get_repo_root() / "06_工作区" / "MethodDistill" / f"{request_id}_{mp_dir.name}"
     stage_method_dir = stage_dir / "method"
     try:
-        proc = _run_md_cli(["prepare", "--input", str(mp_dir), "--output", str(stage_method_dir)], request_id)
+        proc = _run_md_cli(["prepare", "--input", str(mp_dir), "--output", str(stage_method_dir),
+                            "--request-id", request_id], request_id)
     except subprocess.TimeoutExpired:
         audit.finish_file(request_id, audit.STATUS_FAILED, error="方法蒸馏准备超时")
         raise MaterialsError("方法学习准备超时，请重试。")
@@ -1712,7 +1922,17 @@ def _finalize_method_distill_core(request_id: str, asset_id: str,
         raise MaterialsError(_distill_error_message(detail))
 
     target_method_dir = get_repo_root() / "02_素材知识库" / mp_dir.name / "method"
-    tx = _PublishTransaction(stage_method_dir, target_method_dir, request_id)
+    # 构建独立 formal publish candidate（显式 allowlist projection）。
+    # 06 过程工件（_work/ reading manifest/ledger/batch notes）绝不进入 02；
+    # staging 本体保留在 06 供调试，绝不为发布而移动/破坏它。
+    candidate_dir = stage_method_dir.parent / f"{stage_method_dir.name}.__formal_candidate__"
+    projection = _build_method_formal_candidate(stage_method_dir, candidate_dir)
+    if not projection["ok"]:
+        shutil.rmtree(candidate_dir, ignore_errors=True)
+        audit.append_event(request_id, audit.EVENT_SKILL_FAILED, "method_distill",
+                           details={"step": "formal_projection", "missing": projection["missing"]})
+        raise MaterialsError("方法学习正式包不完整，请重试。")
+    tx = _PublishTransaction(candidate_dir, target_method_dir, request_id)
     with material_settlement.serialized():
         try:
             tx.begin()
@@ -1725,6 +1945,8 @@ def _finalize_method_distill_core(request_id: str, asset_id: str,
                                details={"step": "post_publish_verification", "error": str(exc)[:300]})
             _rollback_publish_or_fail(tx, request_id, "method_distill")
             raise MaterialsError("方法学习结果暂不能用于写作，已保留原知识包，请重试。") from exc
+    # 发布成功后清理临时 candidate（staging 保留在 06 供调试/审计）。
+    shutil.rmtree(candidate_dir, ignore_errors=True)
     return {"output_dir": str(target_method_dir)}
 
 
@@ -1781,9 +2003,22 @@ def _run_method_distill_agent_stage(request_id: str, asset_id: str,
     """方法蒸馏 Agent 抽取阶段：复用持久化 Settings 执行路由（一次 turn；只写 06 staging）。"""
     from config.settings import EXECUTION_MODE_DIRECT, SettingsStore
     settings = SettingsStore().load()
-    task = _METHOD_DISTILL_TASK_TEMPLATE.format(mp_dir=str(mp_dir), method_dir=str(stage_method_dir))
+    is_direct = settings.default_execution_mode == EXECUTION_MODE_DIRECT
+    if is_direct:
+        task = _METHOD_DISTILL_TASK_TEMPLATE.format(
+            mp_dir=str(mp_dir), method_dir=str(stage_method_dir),
+            md_script=str(_MD_SCRIPT), request_id=request_id,
+            response_path="<Direct 路径由 adapter 直接捕获 result，无需写 response 文件>",
+        )
+    else:
+        from operations import qoder_bridge as bridge
+        task = _METHOD_DISTILL_TASK_TEMPLATE.format(
+            mp_dir=str(mp_dir), method_dir=str(stage_method_dir),
+            md_script=str(_MD_SCRIPT), request_id=request_id,
+            response_path=str(bridge.response_path(request_id)),
+        )
 
-    if settings.default_execution_mode != EXECUTION_MODE_DIRECT:
+    if not is_direct:
         from operations import qoder_bridge as bridge
         try:
             bridge.create_request(
@@ -1835,6 +2070,70 @@ def _run_method_distill_agent_stage(request_id: str, asset_id: str,
     audit.append_event(request_id, audit.EVENT_AGENT_COMPLETED, "method_distill")
 
 
+def _load_method_distill_runtime():
+    """Load MethodDistill + shared reading_ledger runtime modules."""
+    md_dir = _REPO_ROOT / "05_Skills与自动化" / "01_Skills" / "MethodDistill"
+    bd_scripts = _REPO_ROOT / "05_Skills与自动化" / "01_Skills" / "BookDistill" / "scripts"
+    for p in (str(md_dir), str(bd_scripts)):
+        if p not in sys.path:
+            sys.path.insert(0, p)
+    import method_distill as md  # noqa: PLC0415
+    import reading_ledger as rl  # noqa: PLC0415
+    return md, rl
+
+
+def _method_distill_receipt_finalize(request_id: str, request: dict[str, Any],
+                                     meta: dict[str, Any]) -> dict[str, Any] | None:
+    """response 缺失回退：只允许验证当前 active request 对应的有效 deterministic
+    completion receipt 后进入 finalize。绝不以 identity FINALIZED、文件存在时间等
+    弱信号代替 receipt。canceled / stale / source fingerprint 已变化的 receipt 一律
+    不触发 finalize。返回 finalize 结果 dict；无合法 receipt 时返回 None（保持 pending）。
+    """
+    stage_method_dir = Path(str(meta.get("stage_method_dir") or ""))
+    mp_dir = Path(str(meta.get("mp_dir") or ""))
+    asset_id = str(meta.get("asset_id") or "").strip()
+    if not asset_id or not stage_method_dir.is_dir() or not mp_dir.is_dir():
+        return None
+    if request.get("state") == "canceled":
+        return None
+    try:
+        md, rl = _load_method_distill_runtime()
+    except Exception:  # noqa: BLE001 - runtime unavailable → stay pending
+        return None
+    # 独立重算当前 MethodPrepare snapshot，绝不信任 receipt/staging 自报。
+    try:
+        md_meta = md.validate_input(mp_dir)
+    except Exception:  # noqa: BLE001 - invalid input → stay pending
+        return None
+    sel = md_meta.get("selected_source") or {}
+    current_snapshot = {
+        "source_sha256": sel.get("sha256") or "",
+        "prepare_fingerprint": md_meta.get("content_fingerprint") or "",
+        "prepare_input_fingerprint": md_meta.get("input_fingerprint") or "",
+    }
+    receipt = rl.read_completion_receipt(stage_method_dir)
+    if receipt is None:
+        return None
+    validation = rl.validate_completion_receipt(
+        receipt, stage_method_dir,
+        request_id=request_id, source_id=asset_id, source_snapshot=current_snapshot,
+    )
+    if not validation.get("ok"):
+        return None
+    audit.append_event(
+        request_id, audit.EVENT_BRIDGE_COMPLETION_RECEIPT_USED, "method_distill",
+        details={"step": "response_missing_receipt_fallback",
+                 "manifest_hash": receipt.get("manifest_hash"),
+                 "acceptance_status": receipt.get("acceptance_status")},
+    )
+    try:
+        result = _finalize_method_distill_interactive(
+            request_id, asset_id, mp_dir, stage_method_dir)
+    except MaterialsError as exc:
+        return {"request_id": request_id, "status": "failed", "error": str(exc)}
+    return {"request_id": request_id, "status": "completed", "result": result}
+
+
 def get_method_distill_request(request_id: str) -> dict[str, Any]:
     """轮询 Interactive 方法蒸馏：pending / completed / failed / canceled。"""
     from operations import qoder_bridge as bridge
@@ -1857,6 +2156,10 @@ def get_method_distill_request(request_id: str) -> dict[str, Any]:
         return {"request_id": request_id, "status": "expired", "error": "任务已超时，请重新发起。"}
     response = bridge.read_response(request_id)
     if response is None:
+        # response 缺失回退：验证合法 deterministic completion receipt 后才 finalize。
+        receipt_result = _method_distill_receipt_finalize(request_id, request, meta)
+        if receipt_result is not None:
+            return receipt_result
         if request.get("execution_phase") == "running":
             message = "Agent 正在执行素材学习"
         else:

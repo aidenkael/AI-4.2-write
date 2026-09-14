@@ -64,9 +64,13 @@ def test_full_material_pipeline_closed_loop(tmp_path, monkeypatch):
     name = mats[asset_id]["name"]
     sp = root / "06_工作区" / "SourcePrepare" / f"{asset_id}_{name}"
     (sp / "chapters").mkdir(parents=True)
+    (sp / "chapters" / "0001.md").write_text("第一章正文\n", encoding="utf-8")
     (sp / "full.md").write_text("# full\n", encoding="utf-8")
     (sp / "metadata.json").write_text(json.dumps({
-        "book_id": asset_id, "status": "PASS", "selected_source": {"format": ".epub", "sha256": sha},
+        "book_id": asset_id, "status": "PASS", "skill_version": "0.4.0",
+        "unit_semantics": "chapter", "unit_boundary_source": "epub_nav_anchor",
+        "chapter_files": 1,
+        "selected_source": {"format": ".epub", "sha256": sha},
     }, ensure_ascii=False), encoding="utf-8")
     materials.refresh_materials()
 
@@ -106,11 +110,15 @@ def test_full_material_pipeline_closed_loop(tmp_path, monkeypatch):
             (bkp / "identity.json").write_text(json.dumps({
                 "bkp_version": "0.3", "schema_status": "FINALIZED",
                 "book": {"book_id": asset_id, "title": name, "author": ""},
-                "source_snapshot": {"source_sha256": sha},
+                "source_snapshot": {"source_sha256": sha, "sp_version": "0.4.0",
+                                    "unit_semantics": "chapter", "chapter_count": 1},
             }, ensure_ascii=False), encoding="utf-8")
             (bkp / "knowledge" / "cards.md").write_text("## K001\n- evidence: chapters/0001.md#L1\n", encoding="utf-8")
             (bkp / "author_view.md").write_text("## 总览\n可学习。\n", encoding="utf-8")
             (out / "BKP_ACCEPTANCE_REPORT.md").write_text("report\n", encoding="utf-8")
+            # formal package 根级 allowlist 文件（新发布边界需要）。
+            (out / "model.md").write_text("# model\n", encoding="utf-8")
+            (out / "distill_manifest.json").write_text(json.dumps({"total_entries": 0}), encoding="utf-8")
         if any("acceptance_gate.py" in c for c in cmd):
             identity_path = Path(cmd[2]) / "bkp" / "identity.json"
             identity = json.loads(identity_path.read_text(encoding="utf-8"))

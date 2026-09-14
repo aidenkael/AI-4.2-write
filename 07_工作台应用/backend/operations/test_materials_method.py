@@ -320,8 +320,18 @@ def _method_finalize_fixture(isolated):
     mp_dir = isolated / "06_工作区" / "MethodPrepare" / f"{asset_id}_素材{asset_id}"
     mp_dir.mkdir(parents=True)
     stage_method = isolated / "06_工作区" / "MethodDistill" / "req" / "method"
-    stage_method.mkdir(parents=True)
+    (stage_method / "knowledge").mkdir(parents=True)
     (stage_method / "new.marker").write_text("new\n", encoding="utf-8")
+    # formal package allowlist 所需文件（新发布边界：candidate projection 需要）。
+    (stage_method / "identity.json").write_text(
+        json.dumps({"schema_version": "gowrite_method_knowledge/v1",
+                    "schema_status": "FINALIZED_RETRIEVAL_READY", "source_id": asset_id},
+                   ensure_ascii=False), encoding="utf-8")
+    (stage_method / "knowledge" / "cards.md").write_text(
+        "## M0001｜卡\n- statement: x\n", encoding="utf-8")
+    # 过程工件：绝不进入 02。
+    (stage_method / "_work").mkdir(parents=True, exist_ok=True)
+    (stage_method / "_work" / "reading_ledger.json").write_text("{}", encoding="utf-8")
     return asset_id, mp_dir, stage_method
 
 
@@ -487,8 +497,14 @@ def test_material_final_settlements_are_serialized(isolated, monkeypatch):
         mp = isolated / "06_工作区" / "MethodPrepare" / f"{asset_id}_素材{asset_id}"
         stage = isolated / "06_工作区" / "MethodDistill" / asset_id / "method"
         mp.mkdir(parents=True)
-        stage.mkdir(parents=True)
+        (stage / "knowledge").mkdir(parents=True)
         (stage / "new.marker").write_text("new\n", encoding="utf-8")
+        (stage / "identity.json").write_text(
+            json.dumps({"schema_version": "gowrite_method_knowledge/v1",
+                        "schema_status": "FINALIZED_RETRIEVAL_READY", "source_id": asset_id},
+                       ensure_ascii=False), encoding="utf-8")
+        (stage / "knowledge" / "cards.md").write_text(
+            "## M0001｜卡\n- statement: x\n", encoding="utf-8")
         packages.append((asset_id, mp, stage))
     monkeypatch.setattr(materials, "_run_md_cli", lambda *a, **k: subprocess.CompletedProcess([], 0))
     monkeypatch.setattr(materials, "_knowledge_is_discoverable", lambda asset: True)

@@ -42,6 +42,10 @@ def _write_bkp(root: Path, acceptance: dict | None):
         "bkp_version": "0.2",
         "book": {"book_id": "book_0001", "title": "样例作品", "author": "作者"},
         "schema_status": "FINALIZED",
+        # 版本门（_reference_knowledge_contract_current）：参考作品正式 BKP
+        # 必须来自当前 SourcePrepare 0.4.0 结构合同。
+        "source_snapshot": {"sp_version": "0.4.0", "unit_semantics": "chapter",
+                            "source_sha256": "a" * 64, "chapter_count": 1},
     }
     if acceptance is not None:
         identity["acceptance"] = acceptance

@@ -97,6 +97,32 @@ def _write_sp_package(root, asset_id="book_0001", name="样例作品", sha="a" *
     return sp
 
 
+def _write_formal_stage_files(stage, book_id="book_0001", title="样例作品"):
+    """在 06 staging 里填齐 formal package allowlist 所需的正式产物。
+
+    新发布边界下，_finalize_reference_distill 先从 staging 投影出 formal
+    candidate（只复制 allowlist 文件）再事务发布；测试 staging 必须含这些文件。
+    同时写入 _work/ 过程工件，验证它们绝不进入 02。
+    """
+    stage = Path(stage)
+    (stage / "bkp" / "knowledge").mkdir(parents=True, exist_ok=True)
+    (stage / "bkp" / "identity.json").write_text(
+        json.dumps({"book": {"book_id": book_id, "title": title},
+                    "acceptance": {"required": True, "status": "PASS"}}, ensure_ascii=False),
+        encoding="utf-8")
+    (stage / "bkp" / "knowledge" / "cards.md").write_text("## K001｜卡\n- statement: x\n", encoding="utf-8")
+    (stage / "bkp" / "author_view.md").write_text("## 总览\n可学习。\n", encoding="utf-8")
+    (stage / "model.md").write_text("# model\n", encoding="utf-8")
+    (stage / "distill_manifest.json").write_text(json.dumps({"total_entries": 0}), encoding="utf-8")
+    (stage / "BKP_ACCEPTANCE_REPORT.md").write_text("# report\n", encoding="utf-8")
+    # 过程工件：绝不进入 02。
+    (stage / "_work").mkdir(parents=True, exist_ok=True)
+    (stage / "_work" / "reading_ledger.json").write_text("{}", encoding="utf-8")
+    (stage / "discovery").mkdir(parents=True, exist_ok=True)
+    (stage / "discovery" / "raw.md").write_text("raw\n", encoding="utf-8")
+    return stage
+
+
 # ---------------------------------------------------------------------------
 # A. 文件导入只进入 inbox
 # ---------------------------------------------------------------------------
@@ -401,11 +427,16 @@ def test_run_book_distill_deterministic_stages(isolated, monkeypatch):
         if any("book_distill.py" in c for c in cmd):
             calls.append(cmd[2])  # 子命令：validate/prepare/assemble/profile/bkp
             if cmd[2] == "bkp":
-                bkp = _out_dir(cmd) / "bkp"  # staging/bkp
+                out = _out_dir(cmd)  # staging asset_dir
+                bkp = out / "bkp"
                 (bkp / "knowledge").mkdir(parents=True, exist_ok=True)
                 (bkp / "identity.json").write_text(json.dumps({"book": {"book_id": "book_0001", "title": "样例作品"}}, ensure_ascii=False), encoding="utf-8")
                 (bkp / "knowledge" / "cards.md").write_text("## K001\n", encoding="utf-8")
                 (bkp / "author_view.md").write_text("## 总览\n可学习。\n", encoding="utf-8")
+                # formal package 根级 allowlist 文件（新发布边界需要）。
+                (out / "model.md").write_text("# model\n", encoding="utf-8")
+                (out / "distill_manifest.json").write_text(json.dumps({"total_entries": 0}), encoding="utf-8")
+                (out / "BKP_ACCEPTANCE_REPORT.md").write_text("# report\n", encoding="utf-8")
         if any("acceptance_gate.py" in c for c in cmd):
             calls.append("acceptance")
             identity_path = Path(cmd[2]) / "bkp" / "identity.json"  # cmd[2]=staging asset_dir
@@ -861,6 +892,7 @@ def test_book_publish_rolls_back_through_post_publish_verification(
     stage = isolated / "06_工作区" / "BookDistill" / "req_book_0001_样例作品"
     stage.mkdir(parents=True)
     (stage / "new.marker").write_text("new\n", encoding="utf-8")
+    _write_formal_stage_files(stage)
     dest = isolated / "02_素材知识库" / sp_dir.name
     dest.mkdir(parents=True)
     (dest / "old.marker").write_text("old\n", encoding="utf-8")
@@ -903,6 +935,7 @@ def test_book_failed_first_publish_leaves_no_formal_package(isolated, monkeypatc
     stage = isolated / "06_工作区" / "BookDistill" / "req_book_0001_样例作品"
     stage.mkdir(parents=True)
     (stage / "new.marker").write_text("new\n", encoding="utf-8")
+    _write_formal_stage_files(stage)
     dest = isolated / "02_素材知识库" / sp_dir.name
     monkeypatch.setattr(materials, "_run_bd_cli", lambda *a, **k: subprocess.CompletedProcess([], 0))
     monkeypatch.setattr(materials, "_run_reference_acceptance", lambda *a, **k: None)
