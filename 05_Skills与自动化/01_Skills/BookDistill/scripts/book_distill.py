@@ -48,11 +48,16 @@ import shutil
 import sys
 from pathlib import Path
 
+try:  # package-style import when loaded as a module
+    import reading_ledger as rl
+except ModuleNotFoundError:  # pragma: no cover - script-style import
+    from . import reading_ledger as rl  # type: ignore
+
 # ---- 常量 ---------------------------------------------------------------
 
 SP_STATUS_PASS = "PASS"
 SP_EXPECTED_VERSION = "0.4.0"
-BD_VERSION = "0.4.0"
+BD_VERSION = "0.5.0"
 UNIT_SEMANTICS = {"chapter", "reading_unit"}
 UNIT_BOUNDARY_SOURCES = {"epub_nav_anchor", "epub_heading", "text_heading", "epub_spine_fallback"}
 LARGE_UNIT_MIN_LINES = 1000
@@ -112,6 +117,11 @@ BKP_BASE_WHITELIST = set(BKP_CURATED_FILES) | {"identity.json"}
 # v0.2 canonical knowledge-card protocol. Legacy split files remain supported.
 BKP_CARD_FILE = "knowledge/cards.md"
 BKP_AUTHOR_VIEW_FILE = "author_view.md"
+# v0.5 supporting findings layer：全面阅读产生、但尚不足以晋升 canonical card
+# 的来源绑定 finding 保存在此非默认检索层（沿用 BKP knowledge 文件结构，
+# 不建第二知识库）。KnowledgeRetrieve 默认 retrieval surface 仍以 cards.md 为主，
+# 绝不把 supporting / raw batch notes 默认注入写作上下文。
+BKP_SUPPORTING_FILE = "knowledge/supporting.md"
 BKP_CARD_LEVELS = {
     "Observation", "Inference", "Work-specific Pattern", "Deep Dive Knowledge"
 }
@@ -1164,7 +1174,7 @@ def validate_bkp_identity(identity, manifest_snapshot) -> list[str]:
 
 def build_bkp_whitelist(identity: dict) -> set[str]:
     """原型允许进入正式 BKP 的文件白名单（标准文件 + identity 声明的文件）。"""
-    whitelist = set(BKP_BASE_WHITELIST) | {BKP_CARD_FILE, BKP_AUTHOR_VIEW_FILE}
+    whitelist = set(BKP_BASE_WHITELIST) | {BKP_CARD_FILE, BKP_AUTHOR_VIEW_FILE, BKP_SUPPORTING_FILE}
 
     def add_file(value) -> None:
         if isinstance(value, dict) and value.get("file"):
@@ -1369,7 +1379,8 @@ def finalize_bkp(out_dir: Path, proto_dir: Path | None = None) -> dict:
 
     curated_files = list(BKP_CURATED_FILES)
     if cards:
-        curated_files = ["README.md", "work_map.md", "profile.md", BKP_AUTHOR_VIEW_FILE, BKP_CARD_FILE]
+        curated_files = ["README.md", "work_map.md", "profile.md", BKP_AUTHOR_VIEW_FILE,
+                         BKP_CARD_FILE, BKP_SUPPORTING_FILE]
     for rel in curated_files:
         if rel == "README.md":
             continue
@@ -1470,15 +1481,44 @@ def cmd_prepare(args) -> int:
     }
     write_text(out_dir / "bd_report.md", render_report_skeleton(info["book"], info["book_id"], empty_manifest))
 
+    # Reading manifest + ledger（可恢复全书真实遍历的权威计划）。
+    # request_id / run_id 由调用方（Workbench backend 或 CLI）提供；缺省时
+    # 从 staging 目录名推导 request_id，run_id 与 request_id 一致。
+    request_id = getattr(args, "request_id", None) or _infer_request_id(out_dir)
+    run_id = getattr(args, "run_id", None) or request_id
+    reading_manifest = rl.build_manifest(
+        sp_dir,
+        request_id=request_id,
+        run_id=run_id,
+        source_id=info.get("book_id") or "",
+        source_snapshot=info.get("source_snapshot") or {},
+    )
+    rl.write_manifest(out_dir, reading_manifest)
+    rl.init_ledger(out_dir, reading_manifest)
+
     print(
         f"prepare 完成: {info['book']}（{info['book_id']}），"
-        f"{len(entries)} 章，输出 -> {out_dir}"
+        f"{len(entries)} 章，{len(reading_manifest['batches'])} 个阅读批次，输出 -> {out_dir}"
     )
     if check["warnings"]:
         print("警告：")
         for w in check["warnings"]:
             print(f"  - {w}")
     return 0
+
+
+def _infer_request_id(out_dir: Path) -> str:
+    """Derive a stable request_id from the staging directory name.
+
+    Workbench staging dirs are named ``<request_id>_<book_id>_<书名>``; the CLI
+    fallback keeps the manifest bound to a stable identity even when run by
+    hand.
+    """
+    name = Path(out_dir).name
+    match = re.match(r"^([0-9a-f]{16,})_", name)
+    if match:
+        return match.group(1)
+    return name or "manual"
 
 
 def cmd_assemble(args) -> int:
@@ -1664,6 +1704,83 @@ def cmd_bkp(args) -> int:
     return 0 if report["ok"] else 1
 
 
+# ---- reading manifest / ledger CLI（可恢复全书真实遍历） ------------------
+
+
+def _require_reading_context(out_dir: Path) -> tuple[dict, dict] | None:
+    manifest = rl.read_manifest(out_dir)
+    ledger = rl.read_ledger(out_dir)
+    if manifest is None or ledger is None:
+        print("错误：缺少 reading_manifest.json / reading_ledger.json，请先运行 prepare。")
+        return None
+    return manifest, ledger
+
+
+def cmd_reading_status(args) -> int:
+    out_dir = Path(args.output)
+    status = rl.ledger_status(out_dir)
+    print(json.dumps(status, ensure_ascii=False, indent=2))
+    return 0 if status.get("ok") else 1
+
+
+def cmd_reading_next(args) -> int:
+    out_dir = Path(args.output)
+    if _require_reading_context(out_dir) is None:
+        return 1
+    batch = rl.next_pending_batch(out_dir)
+    if batch is None:
+        print(json.dumps({"ok": True, "complete": True, "batch": None}, ensure_ascii=False, indent=2))
+        return 0
+    manifest = rl.read_manifest(out_dir) or {}
+    payload = {
+        "ok": True,
+        "complete": False,
+        "batch": batch,
+        "request_id": manifest.get("request_id"),
+        "run_id": manifest.get("run_id"),
+        "manifest_hash": manifest.get("manifest_hash"),
+        "source_fingerprint": manifest.get("source_fingerprint"),
+        "note_template": rl.render_batch_note_template(
+            batch_id=batch["batch_id"],
+            request_id=manifest.get("request_id") or "",
+            run_id=manifest.get("run_id") or "",
+            manifest_hash=manifest.get("manifest_hash") or "",
+            source_fingerprint=manifest.get("source_fingerprint") or "",
+            spans=batch.get("spans") or [],
+        ),
+        "note_path": str(rl.batch_notes_dir(out_dir) / f"{batch['batch_id']}.md"),
+    }
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_reading_commit(args) -> int:
+    out_dir = Path(args.output)
+    if _require_reading_context(out_dir) is None:
+        return 1
+    note = Path(args.note) if getattr(args, "note", None) else (
+        rl.batch_notes_dir(out_dir) / f"{args.batch}.md"
+    )
+    try:
+        result = rl.commit_batch(out_dir, args.batch, note)
+    except rl.ReadingLedgerError as exc:
+        print(json.dumps({"ok": False, "errors": [str(exc)]}, ensure_ascii=False, indent=2))
+        return 1
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_reading_validate(args) -> int:
+    out_dir = Path(args.output)
+    sp_dir = Path(args.input) if getattr(args, "input", None) else None
+    if sp_dir is None:
+        print("错误：reading-validate 需要 --input 指向当前 SourcePrepare PASS 包。")
+        return 1
+    result = rl.validate_ledger(out_dir, sp_dir)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0 if result.get("ok") else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="book_distill",
@@ -1677,6 +1794,8 @@ def main(argv: list[str] | None = None) -> int:
     p_p = sub.add_parser("prepare", help="生成章节索引与证据模板")
     p_p.add_argument("--input", required=True, help="SourcePrepare 输出目录")
     p_p.add_argument("--output", required=True, help="BookDistill 输出目录，如 02_素材知识库/book_0038_一九八四")
+    p_p.add_argument("--request-id", dest="request_id", default=None, help="当前蒸馏请求 id（用于绑定 reading manifest/ledger）")
+    p_p.add_argument("--run-id", dest="run_id", default=None, help="当前运行 id（缺省与 request-id 一致）")
 
     p_a = sub.add_parser("assemble", help="校验证据并生成清单与报告骨架")
     p_a.add_argument("--input", required=True, help="SourcePrepare 输出目录（用于校验 source snapshot 与行号越界）")
@@ -1699,6 +1818,22 @@ def main(argv: list[str] | None = None) -> int:
         help="BKP 原型目录（可选；默认 <output>/bkp_prototype）",
     )
 
+    # reading manifest / ledger 子命令（可恢复全书真实遍历）
+    p_rs = sub.add_parser("reading-status", help="显示当前阅读 ledger 进度")
+    p_rs.add_argument("--output", required=True, help="BookDistill staging 目录")
+
+    p_rn = sub.add_parser("reading-next", help="返回下一个未完成阅读批次与 batch note 模板")
+    p_rn.add_argument("--output", required=True, help="BookDistill staging 目录")
+
+    p_rc = sub.add_parser("reading-commit", help="提交一个已完成阅读批次（原子/幂等）")
+    p_rc.add_argument("--output", required=True, help="BookDistill staging 目录")
+    p_rc.add_argument("--batch", required=True, help="batch_id，如 B0001")
+    p_rc.add_argument("--note", default=None, help="batch note 路径（默认 _work/batch_notes/<batch>.md）")
+
+    p_rv = sub.add_parser("reading-validate", help="机械验证 manifest 覆盖 + ledger 完整性")
+    p_rv.add_argument("--input", required=True, help="SourcePrepare PASS 包目录")
+    p_rv.add_argument("--output", required=True, help="BookDistill staging 目录")
+
     args = parser.parse_args(argv)
     if args.command == "validate":
         return cmd_validate(args)
@@ -1712,6 +1847,14 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_deepdive(args)
     if args.command == "bkp":
         return cmd_bkp(args)
+    if args.command == "reading-status":
+        return cmd_reading_status(args)
+    if args.command == "reading-next":
+        return cmd_reading_next(args)
+    if args.command == "reading-commit":
+        return cmd_reading_commit(args)
+    if args.command == "reading-validate":
+        return cmd_reading_validate(args)
     return 2
 
 

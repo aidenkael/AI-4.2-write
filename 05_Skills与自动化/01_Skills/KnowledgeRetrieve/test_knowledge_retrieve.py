@@ -98,15 +98,25 @@ class KnowledgeRetrieveCardsTest(unittest.TestCase):
 
     def test_legacy_1984_and_three_body_load(self):
         root = Path(__file__).resolve().parents[3]
+        loaded = 0
         for dirname in ("book_0038_一九八四", "book_0065_三体"):
             bkp = root / "02_素材知识库" / dirname / "bkp"
+            if not (bkp / "identity.json").is_file():
+                continue  # 旧 0.2.1 formal BKP 已按任务书 §8.2 清理；不硬依赖生产包。
             identity = json.loads((bkp / "identity.json").read_text(encoding="utf-8"))
             info = _source_info(bkp, identity["book"]["book_id"], identity["book"]["title"], identity)
             self.assertGreater(len(load_bkp(info)), 0)
+            loaded += 1
+        if loaded == 0:
+            self.skipTest("旧 0.2.1 formal BKP（一九八四/三体）已清理；无生产包可加载。")
 
     def test_six_real_changan_creation_queries(self):
         """Frozen third-book cards answer six actual creation questions."""
-        retrieve_run.BASE_DIR = str(Path(__file__).resolve().parents[3])
+        root = Path(__file__).resolve().parents[3]
+        cards = root / "02_素材知识库" / "book_0035_长安十二时辰" / "bkp" / "knowledge" / "cards.md"
+        if not cards.is_file():
+            self.skipTest("book_0035 旧 formal BKP 已按任务书 §8.2 清理；跳过真实生产检索。")
+        retrieve_run.BASE_DIR = str(root)
         retrieve_run.CATALOG = None
         cases = {
             "三层时钟互相接力": "K001",

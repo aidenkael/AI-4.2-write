@@ -70,7 +70,29 @@ def _method_dir(root: Path) -> Path:
 def _scaffold(root: Path, mp_dir: Path) -> Path:
     out = _method_dir(root)
     md.prepare_scaffold(mp_dir, out)
+    _commit_reading_ledger(out)
     return out
+
+
+def _commit_reading_ledger(out: Path) -> None:
+    """模拟 Agent 逐批真实阅读：commit 全部 section batch（方法取向，无叙事六域）。"""
+    rl = md._load_reading_ledger()
+    manifest = rl.read_manifest(out)
+    if manifest is None:
+        return
+    while True:
+        nb = rl.next_pending_batch(out)
+        if nb is None:
+            break
+        bid = nb["batch_id"]
+        note = rl.batch_notes_dir(out) / f"{bid}.md"
+        note.write_text(rl.render_batch_note_template(
+            batch_id=bid, request_id=manifest["request_id"], run_id=manifest["run_id"],
+            manifest_hash=manifest["manifest_hash"],
+            source_fingerprint=manifest["source_fingerprint"],
+            spans=nb["spans"], required_domains=(),
+            domain_heading="方法抽取检查"), encoding="utf-8", newline="\n")
+        rl.commit_batch(out, bid, note, required_domains=())
 
 
 def _write_cards(method_dir: Path, cards_md: str) -> None:
@@ -164,6 +186,22 @@ def test_finalize_success_marks_retrieval_ready(tmp_path):
     identity = json.loads((out / "identity.json").read_text(encoding="utf-8"))
     assert identity["schema_status"] == "FINALIZED_RETRIEVAL_READY"
     assert (out / "distill_manifest.json").exists()
+    # 确定性 completion receipt 已写出（response 丢失回退的可靠兑底）。
+    rl = md._load_reading_ledger()
+    receipt = rl.read_completion_receipt(out)
+    assert receipt is not None
+    assert receipt["acceptance_status"] == "PASS"
+    assert receipt["ledger_complete"] is True
+
+
+def test_finalize_rejects_incomplete_reading_ledger(tmp_path):
+    """reading ledger 未全部 completed 时 finalize 拒绝（仅 Agent 自报已读不得通过）。"""
+    mp_dir = _make_mp_package(tmp_path)
+    out = _method_dir(tmp_path)
+    md.prepare_scaffold(mp_dir, out)  # 生成 manifest/ledger，但不 commit 任何批次
+    _write_cards(out, VALID_CARDS)
+    with pytest.raises(md.MethodDistillError, match="ledger"):
+        md.finalize(mp_dir, out)
 
 
 def test_finalize_rejects_template_cards(tmp_path):

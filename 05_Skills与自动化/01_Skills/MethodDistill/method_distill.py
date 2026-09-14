@@ -65,6 +65,24 @@ CONFIDENCES = ("高", "中", "低")
 CARD_ID_RE = re.compile(r"^M\d{4,}$")
 EVIDENCE_RE = re.compile(r"^sections/S\d{4}\.md#L(\d+)(?:-L(\d+))?$")
 LIST_FIELDS = ("steps", "checks", "failure_modes", "use_stages", "problem_types", "tags", "evidence")
+GATE_VERSION = "0.5.0"
+
+# MethodDistill 复用 BookDistill 的确定性 reading manifest/ledger/completion
+# primitive（任务书 §7：复用最小 deterministic batching/ledger/completion）。
+# 方法取向语义合同保持不变：不加 BookDistill Observer，不用六域，
+# batch note 只要求结构化 JSON（batch_id + finding_count），required_domains 为空。
+_BOOK_DISTILL_SCRIPTS = Path(__file__).resolve().parent.parent / "BookDistill" / "scripts"
+
+
+def _load_reading_ledger():
+    if str(_BOOK_DISTILL_SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(_BOOK_DISTILL_SCRIPTS))
+    import reading_ledger as rl  # noqa: PLC0415
+    return rl
+
+
+# MethodDistill batch note 不强制叙事六域；方法语义由 finalize 的卡校验保证。
+_METHOD_REQUIRED_DOMAINS: tuple[str, ...] = ()
 
 
 class MethodDistillError(Exception):
@@ -182,10 +200,16 @@ _CARDS_TEMPLATE = """# 方法卡（MethodDistill 规范格式；M0001 起，id �
 """
 
 
-def prepare_scaffold(mp_dir: Path, out_dir: Path) -> dict:
+def prepare_scaffold(mp_dir: Path, out_dir: Path, *, request_id: str | None = None,
+                     run_id: str | None = None) -> dict:
     meta = validate_input(mp_dir)
     out_dir = Path(out_dir)
     sel = meta["selected_source"]
+    source_snapshot = {
+        "source_sha256": sel.get("sha256") or "",
+        "prepare_fingerprint": meta.get("content_fingerprint") or "",
+        "prepare_input_fingerprint": meta.get("input_fingerprint") or "",
+    }
     identity = {
         "schema_version": SCHEMA_VERSION,
         "schema_status": "DRAFT",
@@ -194,11 +218,7 @@ def prepare_scaffold(mp_dir: Path, out_dir: Path) -> dict:
         "title": meta.get("asset_name") or "",
         "author": "",
         "maturity": "source_bound",
-        "source_snapshot": {
-            "source_sha256": sel.get("sha256") or "",
-            "prepare_fingerprint": meta.get("content_fingerprint") or "",
-            "prepare_input_fingerprint": meta.get("input_fingerprint") or "",
-        },
+        "source_snapshot": source_snapshot,
     }
     _write(out_dir / "identity.json", json.dumps(identity, ensure_ascii=False, indent=2) + "\n")
     for fname, tmpl in (("method_profile.md", _IDENTITY_TEMPLATE),
@@ -207,7 +227,31 @@ def prepare_scaffold(mp_dir: Path, out_dir: Path) -> dict:
         path = out_dir / fname
         if not path.exists():  # 绝不覆盖 Agent 已有产出
             _write(path, tmpl)
+
+    # Reading manifest + ledger（复用 BookDistill primitive；按 sections/ 分节）。
+    # 大型技巧资料不允许“一次上下文直接吃完全文”；逐批阅读 + 磁盘 ledger 可恢复。
+    rl = _load_reading_ledger()
+    rid = request_id or _infer_request_id(out_dir)
+    units = rl.discover_section_units(mp_dir)
+    manifest = rl.build_manifest_from_units(
+        units, request_id=rid, run_id=run_id or rid,
+        source_id=str(meta.get("asset_id") or ""),
+        source_snapshot=source_snapshot, unit_semantics="section",
+    )
+    rl.write_manifest(out_dir, manifest)
+    rl.init_ledger(out_dir, manifest)
     return identity
+
+
+def _infer_request_id(out_dir: Path) -> str:
+    """Derive a stable request_id from the staging directory name."""
+    name = Path(out_dir).name
+    if name == "method":  # staging 结构为 <request_id>_<asset>/method
+        name = Path(out_dir).parent.name
+    match = re.match(r"^([0-9a-f]{16,})_", name)
+    if match:
+        return match.group(1)
+    return name or "manual"
 
 
 # --------------------------------------------------------------------------- #
@@ -330,6 +374,19 @@ def finalize(mp_dir: Path, out_dir: Path) -> dict:
     if errors:
         raise MethodDistillError("定稿校验失败：\n- " + "\n- ".join(errors[:30]))
 
+    # Reading ledger 完整性：全部 section batch 必须 completed（可恢复全量阅读权威）。
+    # 仅有 Agent 自报“已读全文”、仅有 scan 范围都不得通过。
+    rl = _load_reading_ledger()
+    units = rl.discover_section_units(mp_dir)
+    ledger_check = rl.validate_ledger(out_dir, required_domains=_METHOD_REQUIRED_DOMAINS, units=units)
+    if not ledger_check.get("ok"):
+        raise MethodDistillError(
+            "阅读 ledger 校验失败：\n- " + "\n- ".join(ledger_check.get("errors", [])[:20]))
+    if not ledger_check.get("complete"):
+        raise MethodDistillError(
+            f"阅读 ledger 未全部 completed（{ledger_check.get('completed_batches', 0)}/"
+            f"{ledger_check.get('total_batches', 0)}），不得定稿。")
+
     # 机械可加载性：统一 KnowledgeRetrieve provider 必须能加载该包。
     # 加载器只接受 FINALIZED 身份 → 先落盘定稿状态，加载失败时回滚为 DRAFT。
     identity["schema_status"] = FINALIZED_STATUS
@@ -351,11 +408,29 @@ def finalize(mp_dir: Path, out_dir: Path) -> dict:
             1 for c in cards if str(c.get("capability_candidate", "")).lower() == "true"),
         "evidence_refs_total": sum(len(c.get("evidence") or []) for c in cards),
         "source_snapshot": dict(snap),
+        "reading_ledger": {
+            "total_batches": ledger_check.get("total_batches", 0),
+            "completed_batches": ledger_check.get("completed_batches", 0),
+        },
         "identity_fingerprint": _sha256_text(
             json.dumps(identity, ensure_ascii=False, sort_keys=True)),
     }
     _write(out_dir / "distill_manifest.json",
            json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n")
+
+    # 确定性 completion receipt（ledger 完整 + 定稿全部通过后）。
+    reading_manifest = rl.read_manifest(out_dir)
+    if reading_manifest is not None:
+        rl.write_completion_receipt(
+            out_dir,
+            request_id=str(reading_manifest.get("request_id") or ""),
+            run_id=str(reading_manifest.get("run_id") or ""),
+            source_id=str(identity["source_id"]),
+            source_snapshot=dict(snap),
+            acceptance_status="PASS",
+            canonical_card_count=len(cards),
+            gate_version=GATE_VERSION,
+        )
     return manifest
 
 
@@ -363,26 +438,97 @@ def finalize(mp_dir: Path, out_dir: Path) -> dict:
 # CLI
 # --------------------------------------------------------------------------- #
 
+def _cmd_reading(args) -> int:
+    """reading-status / reading-next / reading-commit / reading-validate."""
+    rl = _load_reading_ledger()
+    out_dir = Path(args.output)
+    if args.cmd == "reading-status":
+        print(json.dumps(rl.ledger_status(out_dir), ensure_ascii=False, indent=2))
+        return 0
+    if args.cmd == "reading-next":
+        batch = rl.next_pending_batch(out_dir)
+        if batch is None:
+            print(json.dumps({"ok": True, "complete": True, "batch": None}, ensure_ascii=False, indent=2))
+            return 0
+        manifest = rl.read_manifest(out_dir) or {}
+        payload = {
+            "ok": True, "complete": False, "batch": batch,
+            "request_id": manifest.get("request_id"),
+            "run_id": manifest.get("run_id"),
+            "manifest_hash": manifest.get("manifest_hash"),
+            "source_fingerprint": manifest.get("source_fingerprint"),
+            "note_template": rl.render_batch_note_template(
+                batch_id=batch["batch_id"],
+                request_id=manifest.get("request_id") or "",
+                run_id=manifest.get("run_id") or "",
+                manifest_hash=manifest.get("manifest_hash") or "",
+                source_fingerprint=manifest.get("source_fingerprint") or "",
+                spans=batch.get("spans") or [],
+                required_domains=_METHOD_REQUIRED_DOMAINS,
+                domain_heading="方法抽取检查（本批是否已直接阅读原文并抽取方法卡）",
+            ),
+            "note_path": str(rl.batch_notes_dir(out_dir) / f"{batch['batch_id']}.md"),
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+    if args.cmd == "reading-commit":
+        note = Path(args.note) if getattr(args, "note", None) else (
+            rl.batch_notes_dir(out_dir) / f"{args.batch}.md")
+        try:
+            result = rl.commit_batch(out_dir, args.batch, note,
+                                     required_domains=_METHOD_REQUIRED_DOMAINS)
+        except rl.ReadingLedgerError as exc:
+            print(json.dumps({"ok": False, "errors": [str(exc)]}, ensure_ascii=False, indent=2))
+            return 1
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    # reading-validate
+    mp_dir = Path(args.input)
+    units = rl.discover_section_units(mp_dir)
+    result = rl.validate_ledger(out_dir, required_domains=_METHOD_REQUIRED_DOMAINS, units=units)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0 if result.get("ok") else 1
+
+
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="MethodDistill 确定性阶段（validate/prepare/finalize）")
+    ap = argparse.ArgumentParser(description="MethodDistill 确定性阶段（validate/prepare/finalize/reading-*）")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("validate", "prepare", "finalize"):
         p = sub.add_parser(name)
         p.add_argument("--input", required=True, help="MethodPrepare PASS 包目录")
         if name in ("prepare", "finalize"):
             p.add_argument("--output", required=True, help="02_素材知识库/<asset>_<名称>/method 目录")
+        if name == "prepare":
+            p.add_argument("--request-id", dest="request_id", default=None, help="当前请求 id（绑定 reading manifest/ledger）")
+            p.add_argument("--run-id", dest="run_id", default=None, help="当前运行 id（缺省与 request-id 一致）")
+    # reading-* 子命令（复用 BookDistill primitive）
+    p_rs = sub.add_parser("reading-status", help="显示阅读 ledger 进度")
+    p_rs.add_argument("--output", required=True)
+    p_rn = sub.add_parser("reading-next", help="返回下一个未完成批次与 batch note 模板")
+    p_rn.add_argument("--output", required=True)
+    p_rc = sub.add_parser("reading-commit", help="提交一个已完成阅读批次")
+    p_rc.add_argument("--output", required=True)
+    p_rc.add_argument("--batch", required=True)
+    p_rc.add_argument("--note", default=None)
+    p_rv = sub.add_parser("reading-validate", help="机械验证 manifest 覆盖 + ledger 完整性")
+    p_rv.add_argument("--input", required=True)
+    p_rv.add_argument("--output", required=True)
     args = ap.parse_args(argv)
     try:
         if args.cmd == "validate":
             validate_input(Path(args.input))
             print("[method_distill] validate OK")
         elif args.cmd == "prepare":
-            prepare_scaffold(Path(args.input), Path(args.output))
-            print("[method_distill] prepare OK（脚手架已生成，等待 Agent 抽取）")
-        else:
+            prepare_scaffold(Path(args.input), Path(args.output),
+                             request_id=getattr(args, "request_id", None),
+                             run_id=getattr(args, "run_id", None))
+            print("[method_distill] prepare OK（脚手架 + reading manifest/ledger 已生成，等待 Agent 抽取）")
+        elif args.cmd == "finalize":
             manifest = finalize(Path(args.input), Path(args.output))
             print(f"[method_distill] finalize OK：{manifest['card_count']} 张方法卡，"
                   f"status=FINALIZED_RETRIEVAL_READY")
+        else:
+            return _cmd_reading(args)
     except MethodDistillError as exc:
         print(f"[method_distill] ERROR: {exc}")
         return 1

@@ -31,9 +31,15 @@ import tempfile
 import os
 from pathlib import Path
 
+try:  # package-style import when loaded as a module
+    import reading_ledger as rl
+except ModuleNotFoundError:  # pragma: no cover - script-style import
+    from . import reading_ledger as rl  # type: ignore
+
 REPORT_NAME = "BKP_ACCEPTANCE_REPORT.md"
 ACCEPTANCE_SCHEMA = "gowrite_bkp_acceptance/v1"
 ACCEPTANCE_PROTOCOL_VERSION = "0.3"
+GATE_VERSION = "0.5.0"
 EVIDENCE_RE = re.compile(r"^chapters/(\d{4})\.md#L(\d+)(?:-L?(\d+))?$")
 CARD_HEADER_RE = re.compile(r"^##\s*K(\d{3,4})\b")
 DATA_BLOCK_RE = re.compile(
@@ -187,9 +193,55 @@ def validate_acceptance(
             errors.append("distill_manifest source_snapshot 与 BKP identity 不一致。")
         if manifest.get("unit_semantics") not in {"chapter", "reading_unit"}:
             errors.append("distill_manifest 缺少可信 unit_semantics。")
-        coverage = manifest.get("scan_coverage")
-        if not isinstance(coverage, dict) or not coverage.get("ok"):
-            errors.append("Base Scan 覆盖门未通过；未证明全部单元已检查。")
+
+    # ---- 阅读完成度权威：reading manifest + ledger（不再是 scan_refs）----
+    # scan_refs / scan_coverage 仅保留为调试信号，绝不作为 whole-book reading
+    # completion 的权威证据。仅填写全范围 scan_refs、仅有完整行号范围、
+    # 仅有 Agent 自报“已读”都必须在此失败。
+    sp_dir = resolve_sourceprepare_dir(repo_root, book.get("book_id") or "") if repo_root else None
+    reading_manifest = rl.read_manifest(asset_dir)
+    reading_ledger = rl.read_ledger(asset_dir)
+    if reading_manifest is None:
+        errors.append("缺少 reading_manifest.json：无法证明全书阅读计划绑定当前来源。")
+    if reading_ledger is None:
+        errors.append("缺少 reading_ledger.json：无法证明全书阅读已结算。")
+    if reading_manifest is not None and reading_ledger is not None:
+        if reading_manifest.get("source_snapshot") != snapshot:
+            errors.append("reading manifest source_snapshot 与 BKP identity 不一致（来源身份已变化）。")
+        if sp_dir is not None:
+            coverage = rl.validate_manifest_coverage(reading_manifest, sp_dir)
+            if not coverage.get("ok"):
+                errors.append(
+                    "reading manifest 未完整覆盖当前冻结来源（存在 gap/overlap/缺失单元）："
+                    + "；".join(coverage.get("errors", [])[:5])
+                )
+        else:
+            warnings.append("SourcePrepare 快照不可解析：reading manifest 覆盖只做结构校验。")
+        ledger_check = rl.validate_ledger(asset_dir, sp_dir) if sp_dir is not None else None
+        if ledger_check is None:
+            # 无 sp_dir 时仍做 ledger 与 manifest 一致性 + 批次 completed 校验。
+            status_view = rl.ledger_status(asset_dir)
+            if not status_view.get("ok"):
+                errors.extend(status_view.get("errors", []))
+            if not status_view.get("complete"):
+                errors.append("reading ledger 未全部 completed：全书阅读尚未结算。")
+        else:
+            if not ledger_check.get("ok"):
+                errors.extend(ledger_check.get("errors", [])[:8])
+            if not ledger_check.get("complete"):
+                errors.append("reading ledger 未全部 completed：全书阅读尚未结算。")
+        # 六域 checked 审计：每个 completed batch 的 note 必须检查全部六域（0 findings 合法）。
+        batches = (reading_ledger.get("batches") or {})
+        for batch_id, state in sorted(batches.items()):
+            if state.get("status") != rl.BATCH_STATUS_COMPLETED:
+                continue
+            checked = state.get("domains_checked") or state.get("six_domains_checked") or []
+            missing = [d for d in rl.SIX_DOMAINS if d not in checked]
+            if missing:
+                errors.append(f"batch {batch_id} 未检查全部六域，缺：{missing}。")
+
+    # bd_report 关键统计必须由同一权威 manifest 生成（不再沿用陈旧中间计数）。
+    if manifest is not None:
         try:
             report_text = (asset_dir / "bd_report.md").read_text(encoding="utf-8")
         except OSError:
@@ -198,25 +250,9 @@ def validate_acceptance(
             f"- 证据条目总数：{manifest.get('total_entries', 0)}",
             f"- 分类统计：{json.dumps(manifest.get('stats_by_kind', {}), ensure_ascii=False)}",
             f"- 输入单元语义：{manifest.get('unit_semantics')}",
-            f"- 扫描覆盖门：{'PASS' if (coverage or {}).get('ok') else 'BLOCKED'}",
         ]
         if not report_text or any(line not in report_text for line in expected_stats):
-            errors.append("bd_report.md 的关键统计与最终 manifest 不一致。")
-
-    merge_report = _read_json(asset_dir / "discovery" / "merge_report.json")
-    expected_observers = {"longform_reader_dynamics", "reader_page_craft"}
-    if merge_report is None:
-        errors.append("缺少 discovery/merge_report.json，无法证明两个 Observer 的全书阅读分布。")
-    else:
-        validation = merge_report.get("validation") or {}
-        if set(validation) != expected_observers:
-            errors.append("Discovery merge 未同时包含两个正式 Observer。")
-        for observer_id in sorted(expected_observers):
-            observer = validation.get(observer_id) if isinstance(validation, dict) else None
-            if not isinstance(observer, dict) or not observer.get("ok") \
-                    or not isinstance(observer.get("coverage"), dict) \
-                    or not observer["coverage"].get("ok"):
-                errors.append(f"Observer {observer_id} 的全单元阅读覆盖未通过。")
+            errors.append("bd_report.md 的关键统计与最终权威 manifest 不一致。")
 
     status = report_data.get("status")
     if status not in {"PASS", "REVIEW"}:
@@ -305,7 +341,12 @@ def validate_acceptance(
 
 
 def write_identity_acceptance(asset_dir: Path, result: dict) -> None:
-    """验证通过且状态为 PASS 后才把 acceptance 块写入 bkp/identity.json（原子；失败抛错）。"""
+    """验证通过且状态为 PASS 后才把 acceptance 块写入 bkp/identity.json（原子；失败抛错）。
+
+    同时在 reading ledger 完整结算的前提下写出确定性 completion receipt，
+    作为 Qoder response 丢失时的可靠兑底信号。receipt 绝不绕过任何质量门：
+    backend finalize 仍会独立重跑确定性 assemble/profile/bkp/acceptance/发布门。
+    """
     if not result.get("ok") or result.get("status") != "PASS":
         raise RuntimeError("验收未通过或状态不是 PASS，绝不写入 acceptance 块。")
     identity_path = Path(asset_dir) / "bkp" / "identity.json"
@@ -321,6 +362,20 @@ def write_identity_acceptance(asset_dir: Path, result: dict) -> None:
     }
     identity["bkp_protocol_version"] = ACCEPTANCE_PROTOCOL_VERSION
     _atomic_write_json(identity_path, identity)
+
+    # 确定性 completion receipt（仅在 ledger 完整结算 + acceptance PASS 后写出）。
+    manifest = rl.read_manifest(asset_dir)
+    if manifest is not None and rl.is_ledger_complete(asset_dir):
+        rl.write_completion_receipt(
+            asset_dir,
+            request_id=str(manifest.get("request_id") or ""),
+            run_id=str(manifest.get("run_id") or ""),
+            source_id=str(manifest.get("source_id") or ""),
+            source_snapshot=manifest.get("source_snapshot") or {},
+            acceptance_status="PASS",
+            canonical_card_count=int(result.get("card_count") or 0),
+            gate_version=GATE_VERSION,
+        )
 
 
 def main(argv: list[str] | None = None) -> int:

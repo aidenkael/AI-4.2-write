@@ -22,6 +22,7 @@ from acceptance_gate import (  # noqa: E402
     validate_acceptance,
     write_identity_acceptance,
 )
+import reading_ledger as rl  # noqa: E402
 
 
 FINGERPRINT = "f" * 64
@@ -73,7 +74,9 @@ def _report_md(data: dict) -> str:
 
 
 def _make_asset(root: Path, *, data: dict | None = None, card_count: int = 2,
-                source_sha256: str = FINGERPRINT, write_report: bool = True):
+                source_sha256: str = FINGERPRINT, write_report: bool = True,
+                ledger_complete: bool = True, all_six_domains: bool = True,
+                write_manifest_ledger: bool = True):
     asset_dir = root / "02_素材知识库" / "book_9001_测试书"
     bkp = asset_dir / "bkp"
     (bkp / "knowledge").mkdir(parents=True)
@@ -100,19 +103,34 @@ def _make_asset(root: Path, *, data: dict | None = None, card_count: int = 2,
     (asset_dir / "bd_report.md").write_text(
         "\n".join(["# 蒸馏报告", "", "- 输入单元语义：chapter",
                     "- 证据条目总数：1", f"- 分类统计：{json.dumps(stats, ensure_ascii=False)}",
-                    "- 扫描覆盖门：PASS", ""]), encoding="utf-8")
-    validation = {
-        observer: {"ok": True, "coverage": {"ok": True, "blocking": []}}
-        for observer in ("longform_reader_dynamics", "reader_page_craft")
-    }
-    discovery = asset_dir / "discovery"
-    discovery.mkdir()
-    (discovery / "merge_report.json").write_text(
-        json.dumps({"validation": validation}, ensure_ascii=False), encoding="utf-8")
-    sp_chapters = root / "06_工作区" / "SourcePrepare" / "book_9001_测试书" / "chapters"
+                    ""]), encoding="utf-8")
+    # SourcePrepare 快照（2 章）——reading manifest 覆盖验证的权威来源。
+    sp_dir = root / "06_工作区" / "SourcePrepare" / "book_9001_测试书"
+    sp_chapters = sp_dir / "chapters"
     sp_chapters.mkdir(parents=True)
     (sp_chapters / "0001.md").write_text("第一章正文", encoding="utf-8")
     (sp_chapters / "0002.md").write_text("第二章正文", encoding="utf-8")
+    # Reading manifest + ledger（绑定同一 snapshot；全书阅读完成度权威）。
+    if write_manifest_ledger:
+        rmanifest = rl.build_manifest(sp_dir, request_id="req1", run_id="req1",
+                                      source_id="book_9001", source_snapshot=snapshot)
+        rl.write_manifest(asset_dir, rmanifest)
+        rl.init_ledger(asset_dir, rmanifest)
+        if ledger_complete:
+            domains = list(rl.SIX_DOMAINS) if all_six_domains else list(rl.SIX_DOMAINS)[:-1]
+            while True:
+                nb = rl.next_pending_batch(asset_dir)
+                if nb is None:
+                    break
+                bid = nb["batch_id"]
+                note = rl.batch_notes_dir(asset_dir) / f"{bid}.md"
+                text = rl.render_batch_note_template(
+                    batch_id=bid, request_id="req1", run_id="req1",
+                    manifest_hash=rmanifest["manifest_hash"],
+                    source_fingerprint=rmanifest["source_fingerprint"],
+                    spans=nb["spans"], required_domains=tuple(domains))
+                note.write_text(text, encoding="utf-8")
+                rl.commit_batch(asset_dir, bid, note, required_domains=tuple(domains))
     if write_report:
         (asset_dir / REPORT_NAME).write_text(_report_md(data or _acceptance_data()), encoding="utf-8")
     return asset_dir
@@ -237,17 +255,59 @@ class AcceptanceGateTest(unittest.TestCase):
             self.assertFalse(result["ok"])
             self.assertTrue(any(REPORT_NAME in e for e in result["errors"]))
 
-    def test_scan_coverage_blocking_rejects_pass(self):
+    def test_incomplete_ledger_rejects_pass(self):
+        """ledger 未全部 completed 时必须失败（全书阅读未结算）。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            asset_dir = _make_asset(root, ledger_complete=False)
+            result = validate_acceptance(asset_dir, root)
+            self.assertFalse(result["ok"])
+            self.assertTrue(any("ledger" in e or "completed" in e for e in result["errors"]))
+
+    def test_missing_manifest_ledger_rejects_pass(self):
+        """仅有旧产物、无 reading manifest/ledger 时必须失败（scan_refs 不是权威）。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            asset_dir = _make_asset(root, write_manifest_ledger=False)
+            result = validate_acceptance(asset_dir, root)
+            self.assertFalse(result["ok"])
+            self.assertTrue(any("reading_manifest" in e for e in result["errors"]))
+            self.assertTrue(any("reading_ledger" in e for e in result["errors"]))
+
+    def test_missing_six_domain_check_rejects_pass(self):
+        """某个 completed batch 未检查全部六域时必须失败（0 findings 合法，unchecked 不合法）。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            asset_dir = _make_asset(root, all_six_domains=False)
+            result = validate_acceptance(asset_dir, root)
+            self.assertFalse(result["ok"])
+            self.assertTrue(any("六域" in e for e in result["errors"]))
+
+    def test_pass_writes_completion_receipt(self):
+        """PASS + ledger 完整时 write_identity_acceptance 写出确定性 completion receipt。"""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             asset_dir = _make_asset(root)
-            path = asset_dir / "distill_manifest.json"
-            manifest = json.loads(path.read_text(encoding="utf-8"))
-            manifest["scan_coverage"] = {"ok": False, "blocking": ["head only"]}
-            path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
             result = validate_acceptance(asset_dir, root)
-            self.assertFalse(result["ok"])
-            self.assertTrue(any("Base Scan" in error for error in result["errors"]))
+            self.assertTrue(result["ok"], result["errors"])
+            write_identity_acceptance(asset_dir, result)
+            receipt = rl.read_completion_receipt(asset_dir)
+            self.assertIsNotNone(receipt)
+            self.assertEqual(receipt["request_id"], "req1")
+            self.assertEqual(receipt["source_id"], "book_9001")
+            self.assertEqual(receipt["acceptance_status"], "PASS")
+            self.assertTrue(receipt["ledger_complete"])
+            # receipt 严格匹配当前 active request/source 才有效。
+            manifest = rl.read_manifest(asset_dir)
+            ok = rl.validate_completion_receipt(
+                receipt, asset_dir, request_id="req1", source_id="book_9001",
+                source_snapshot=manifest["source_snapshot"])
+            self.assertTrue(ok["ok"], ok["errors"])
+            # request_id 不匹配的 receipt 一律无效。
+            bad = rl.validate_completion_receipt(
+                receipt, asset_dir, request_id="other", source_id="book_9001",
+                source_snapshot=manifest["source_snapshot"])
+            self.assertFalse(bad["ok"])
 
     def test_bd_report_manifest_mismatch_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
