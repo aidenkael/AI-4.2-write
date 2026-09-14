@@ -1,6 +1,7 @@
 import { Bell, Cloud, RefreshCw, ScrollText } from 'lucide-react'
 import { useState } from 'react'
 import { PageHeader } from '../../components/PageHeader'
+import { editorialIllustrations } from '../../assets/editorialIllustrations'
 import { useApp } from '../app/AppStore'
 import { ExecutionAudits } from './components/ExecutionAudits'
 import { SemanticAiSettingsSection } from './components/SemanticAiSettings'
@@ -32,7 +33,7 @@ export function SettingsFeature() {
   const savedAgentName = (id: string): string =>
     controller.agents.find((a) => a.agent_id === id)?.display_name ?? id
 
-  return <div className="page"><PageHeader title="设置" subtitle="配置更新作品状态、创作任务执行与本次会话的界面通知。"/><div className="settings-layout"><aside className="panel settings-menu">{menu.map(({ label, Icon }) => <button key={label} className={section === label ? 'active' : ''} onClick={() => setSection(label)}><Icon/>{label}</button>)}</aside>
+  return <div className="page settings-page"><PageHeader title="设置" subtitle="配置更新作品状态、创作任务执行与本次会话的界面通知。" art={editorialIllustrations.ideasSettings} /><div className="settings-layout"><aside className="panel settings-menu">{menu.map(({ label, Icon }) => <button key={label} className={section === label ? 'active' : ''} onClick={() => setSection(label)}><Icon/>{label}</button>)}</aside>
     <section className="panel settings-content">
       {section === 'AI 与执行' ? <>
         <div className="section-title"><div><h2>AI 与执行</h2><p>分别配置「更新作品状态」的日常 AI，以及创作任务的 Agent 执行方式。</p></div></div>

@@ -2,6 +2,7 @@ import { BookOpen, ChevronRight, Plus, Save, Target, Trash2, X } from 'lucide-re
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ProjectDataController } from '../projectData/useProjectDataController'
 import { normalizeChapterForeshadowing } from './planningFields'
+import { editorialIllustrations } from '../../assets/editorialIllustrations'
 
 interface StageDraft { ref?: string; client_key?: string; title: string; target_words: string; kind: string }
 interface ChapterDraft {
@@ -158,6 +159,7 @@ export function PlanningStructure({ controller }: { controller: ProjectDataContr
 
   return (
     <section className="panel planning-structure">
+      <img className="planning-editorial-art" src={editorialIllustrations.foundationPlanning} alt="" aria-hidden="true" draggable={false} />
       <header className="planning-structure-head">
         <div><h2><Target /> 全书与章节规划</h2><p className="muted-note">总目标 → 可选阶段 → 章节范围 → 正式正文实际字数。阶段结构按作品需要使用，不强制分卷。</p></div>
         <div className="editor-save-actions">

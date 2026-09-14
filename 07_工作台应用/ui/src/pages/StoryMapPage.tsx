@@ -16,6 +16,7 @@ import {
   type RecordField,
 } from '../features/storyMap/storyMapModel'
 import { graphElements, replaceGraphElementData, storyMapStyles } from '../features/storyMap/storyMapCytoscape'
+import { editorialIllustrations } from '../assets/editorialIllustrations'
 
 /**
  * 故事地图：同一正式 Story State 的派生可视化/查询面（只读，零写回、零模型）。
@@ -182,6 +183,7 @@ export function StoryMapPage() {
 
   return (
     <div className="panel map-page">
+      <img className="map-editorial-art" src={editorialIllustrations.storyMapReview} alt="" aria-hidden="true" draggable={false} />
       <header className="map-tabs">
         {tabs.map(({ key, label, Icon }) => (
           <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>
