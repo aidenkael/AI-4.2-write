@@ -115,7 +115,15 @@ export function ProjectOverviewPage() {
         )}
         {!loading && !error && (
           <>
-            <ProjectCoverControl projectId={selected.project_id} name={selected.name}/>
+            <div className="overview-hero">
+              <ProjectCoverControl projectId={selected.project_id} name={selected.name}/>
+              <div className="overview-cta">
+                <button className="primary" onClick={runPrimaryAction}>
+                  {nextAction === 'foundation' ? <Sparkles /> : <PenLine />}
+                  {nextAction === 'foundation' ? '完善作品地基' : '继续正文'}
+                </button>
+              </div>
+            </div>
             <div className="overview-grid">
               <section className="overview-card overview-position">
                 <header>
@@ -188,12 +196,6 @@ export function ProjectOverviewPage() {
             })()}
           </>
         )}
-        <div className="overview-cta">
-          <button className="primary" onClick={runPrimaryAction}>
-            {nextAction === 'foundation' ? <Sparkles /> : <PenLine />}
-            {nextAction === 'foundation' ? '完善作品地基' : '继续正文'}
-          </button>
-        </div>
       </section>
 
       <p className="muted-note overview-footnote">
