@@ -6,11 +6,9 @@
 
 **CURRENT_PHASE = REAL_WRITING_USAGE**
 
-**CURRENT_SUBPHASE = DESKTOP_UI_PRODUCT_CONVERGENCE**
-
 **PRODUCT_BASELINE = GO_WRITE_2_0_APPROVED**
 
-工作台已从开发验证期进入真实使用期。主目标是辅助作者进行长篇小说创作。当前子阶段优先做桌面可靠性、作者工作台信息架构与真实连续使用闭环，不继续堆叠大功能。
+工作台已从开发验证期进入真实使用期。主目标是辅助作者进行长篇小说创作。桌面可靠性、作者工作台信息架构与固定视觉基线已收敛（见 `WORKBENCH_EDITORIAL_VISUAL_CONVERGENCE` / `EDITORIAL_WORKBENCH_VISUAL_BASELINE`）；继续以真实连续使用闭环为主，不堆叠大功能。
 
 ## 核心目标
 
@@ -41,6 +39,11 @@
 - UI 1.0 保留为已验证的技术纵切/实现参考基线；其与 Go Write 2.0 冲突的产品假设已被 supersede，但历史记录不得删除。
 - 字数规划是 Go Write 2.0 的一等能力：总目标 → 卷/阶段预算 → 章节范围 → 实际字数。它是已批准的产品方向，不因本条规则自动宣称已经实现。
 - AI candidate / draft / proposal 仍非 authority；未来规划不等于 Canon；作者编辑须先进行影响分析并走安全的 authority/writeback 合同，不得直接、无保护地改写 Canon。
+- **工作台固定视觉基线已完成。** 页面沿用低饱和 editorial visual system；不得重新把产品做成通用后台、重科技、霓虹、玻璃拟态或厚阴影界面。
+- **页面插画是 presentation-only。** 必须通过集中 semantic asset registry 复用，不得绑定业务状态、成为 layout authority，响应式可裁切/隐藏。
+- **真实作者图片与装饰图分离。** ProjectCoverControl / AvatarImage 的真实用户内容必须保留并优先于默认 presentation；不得恢复全局 city/mountains/desk 用户换肤系统。
+- **工作区宽屏合同继续保持。** 顶部产品导航 + 左 Agent task rail；约 `24px / 260px / 18px / 剩余内容`，不恢复统一 max-width，并继续遵守单一滚动责任。
+- **Materials 单书自定义封面必须有真实 presentation contract 才能实现。** 无合同不得用 localStorage、临时 JSON 或素材 metadata 伪造。
 
 ## 目录 authority
 
@@ -250,4 +253,4 @@ BKP 长期保存作品身份、作品地图、BookProfile、Observation、Infere
 
 ## NEXT
 
-当前先完成 `DESKTOP_UI_PRODUCT_CONVERGENCE`：桌面启动可靠性 → Settings 收敛 → 六页信息架构与操作便利性 → 卷/章/正文一体化 → 现有 FoundationDesign 初始基座能力补齐 → 真实作品连续使用验收。作者触发「更新作品状态」的语义刷新合同保持不变；保存/采用只作 durable Code 写入并进入 pending，显式刷新才执行有界 Direct AI 批量整合。M1–M4 保留为历史实现/运行时验收事实。
+**NEXT = REAL_AUTHOR_CONTINUOUS_USE_ACCEPTANCE**（与《当前状态》一致）：固定视觉基线已收口（`WORKBENCH_EDITORIAL_VISUAL_CONVERGENCE`），下一步统一执行真实作者连续使用验收（含真实文学质量与真实 Agent/KnowledgeRetrieve 效果）。作者触发「更新作品状态」的语义刷新合同保持不变；保存/采用只作 durable Code 写入并进入 pending，显式刷新才执行有界 Direct AI 批量整合。M1–M4 保留为历史实现/运行时验收事实。
