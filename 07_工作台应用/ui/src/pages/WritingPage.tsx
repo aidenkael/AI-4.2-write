@@ -4,6 +4,7 @@ import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { useWritingController } from '../features/writing/useWritingController'
 import { StatusBadge } from '../components/StatusBadge'
 import type { StoryWriteChapter } from '../bridge/client'
+import { editorialIllustrations } from '../assets/editorialIllustrations'
 
 /**
  * 正文管理：三区工作台（左章节导航 / 中正式已采用正文 / 右唯一 AI 协作区）。
@@ -68,6 +69,7 @@ export function WritingPage() {
   return (
     <div className="writing-layout">
       <aside className="panel chapters">
+        <img className="writing-edge-art" src={editorialIllustrations.writingEdge} alt="" aria-hidden="true" draggable={false} />
         <header>
           <h2>章节目录</h2>
           <button aria-label="新建章节" disabled={state.saving || state.editorDirty} onClick={() => void c.createChapter()}><Plus /></button>

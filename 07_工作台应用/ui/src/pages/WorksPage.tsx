@@ -1,6 +1,7 @@
 import { Check, FolderOpen, Lightbulb, PenLine, Plus, RefreshCw, Sparkles, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { PageHeader } from '../components/PageHeader'
+import { editorialIllustrations } from '../assets/editorialIllustrations'
 import { useApp } from '../features/app/AppStore'
 import { useFormalProjectShell } from '../features/projects/FormalProjectShell'
 import { useNewProjectController } from '../features/projects/useNewProjectController'
@@ -67,6 +68,7 @@ export function WorksPage() {
     <div className="page works-page">
       <PageHeader
         title="作品"
+        art={editorialIllustrations.worksOverview}
         subtitle="选择一部正式作品继续创作，或从一个想法开始新建"
         action={
           <button className="primary" onClick={() => setShowNew(true)}>
