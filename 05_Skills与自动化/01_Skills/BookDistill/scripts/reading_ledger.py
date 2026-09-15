@@ -63,6 +63,9 @@ NOTE_REF_RE = re.compile(r"([A-Za-z0-9_./\-]+\.md)#L(\d+)(?:-L?(\d+))?")
 # instruction line is deliberately excluded (it does not start with the marker).
 OBSERVATION_LINE_RE = re.compile(r"^[-*]\s*\[OBSERVATION\]")
 
+# BookDistill-only Markdown layers; MethodDistill keeps its existing note contract.
+LITERARY_NOTE_SECTIONS = ("Literary Discovery", "Coverage Audit", "Structured Projections")
+
 # The six check domains every batch note must audit. ``0 findings`` is legal;
 # ``unchecked`` is not. The names are the canonical Chinese labels used by the
 # Agent contract, acceptance gate, and audit trail.
@@ -618,6 +621,38 @@ def count_observation_findings(note_text: str) -> list[str]:
     return [ln for ln in note_text.splitlines() if OBSERVATION_LINE_RE.match(ln.strip())]
 
 
+def _literary_note_sections(note_text: str) -> tuple[dict[str, str], list[str]]:
+    """Read Markdown sections, checking structure only, never literary quality.
+
+    H3+ headings are allowed inside free prose; fenced text is not a heading.
+    Empty Discovery and zero projections are both valid.
+    """
+    sections: dict[str, str] = {}
+    headings: list[str] = []
+    current = ""
+    fence = ""
+    for line in note_text.splitlines():
+        marker = re.match(r"^\s*(`{3,}|~{3,})", line)
+        if marker:
+            token = marker.group(1)
+            if not fence:
+                fence = token
+            elif token[0] == fence[0] and len(token) >= len(fence):
+                fence = ""
+        heading = re.match(r"^##[ \t]+(.+?)[ \t]*$", line) if not fence and not marker else None
+        if heading:
+            current = heading.group(1)
+            headings.append(current)
+            sections.setdefault(current, "")
+        else:
+            sections[current] = sections.get(current, "") + line + "\n"
+    found = [h for h in headings if h in LITERARY_NOTE_SECTIONS]
+    errors = []
+    if found != list(LITERARY_NOTE_SECTIONS):
+        errors.append("BookDistill note 必须依次包含唯一的 Literary Discovery / Coverage Audit / Structured Projections 区块。")
+    return sections, errors
+
+
 def _batch_span_count(manifest: dict[str, Any], batch_id: str) -> int | None:
     batch = next((b for b in manifest.get("batches") or [] if b.get("batch_id") == batch_id), None)
     if batch is None:
@@ -642,7 +677,8 @@ def validate_canonical_note(
     ``span_count`` equals the batch's real span count, that ``finding_count``
     equals the real number of ``[OBSERVATION]`` findings, that every finding has
     a source ref, and that every source ref falls inside this batch's spans.
-    A no-op ``required_domains`` (MethodDistill) drops only the domain check.
+    BookDistill also requires readable free Discovery / audit / projection sections.
+    ``required_domains=()`` retains MethodDistill's non-literary note contract.
     """
     errors: list[str] = []
     structured = parsed.get("structured") or {}
@@ -674,7 +710,17 @@ def validate_canonical_note(
     expected_span = _batch_span_count(manifest, batch_id) or 0
     if isinstance(declared_span, bool) or not isinstance(declared_span, int) or declared_span != expected_span:
         errors.append(f"note span_count={declared_span!r} 与本批实际 span 数 {expected_span} 不一致。")
-    findings = count_observation_findings(raw)
+    finding_text = raw
+    if required_domains == SIX_DOMAINS:
+        sections, section_errors = _literary_note_sections(raw)
+        errors.extend(section_errors)
+        finding_text = sections.get("Structured Projections", "")
+        # Do not silently lose a misplaced structured finding. Free Discovery
+        # may discuss the marker itself and is never treated as structured data.
+        for heading, content in sections.items():
+            if heading not in ("Literary Discovery", "Structured Projections") and count_observation_findings(content):
+                errors.append("结构化 [OBSERVATION] finding 必须放在 Structured Projections 区块。")
+    findings = count_observation_findings(finding_text)
     finding_count = structured.get("finding_count")
     if isinstance(finding_count, bool) or not isinstance(finding_count, int) or finding_count < 0:
         errors.append(f"note finding_count 非法：{finding_count!r}（必须为非负整数）。")
@@ -1128,6 +1174,28 @@ def render_batch_note_template(
     domains = list(required_domains)
     domains_json = json.dumps(domains, ensure_ascii=False)
     domain_lines = "\n".join(f"- {d}：checked | findings: 0" for d in domains)
+    reading_heading = "直接阅读记录"
+    reading_instruction = "（在此记录本批原文的真实阅读观察。必须基于当前上下文中的原文，不得从其它批次摘要二次总结。）"
+    finding_heading = "来源绑定 findings（source-bound）"
+    projection_instruction = ""
+    if required_domains == SIX_DOMAINS:
+        reading_heading, domain_heading, finding_heading = LITERARY_NOTE_SECTIONS
+        reading_instruction = (
+            "（完整阅读本批原文后先写自由发现，之后才做 Coverage Audit 与选择性投影。"
+            "允许多段、复杂语境、组合效果、模糊或相互矛盾的解释、暂难命名感受与待跨批问题。"
+            "不要求 dimension、固定 taxonomy、单句或数量配额；无高价值发现可留空。"
+            "不得从其它批次摘要推断；本区全文保留给 Main convergence，不因投影而删减。"
+            "内部小标题使用 ### 或更深层级。）"
+        )
+        domain_lines = (
+            "仅在自由 Discovery 完成后回查是否明显漏看基本方面；不是首次阅读 checklist。\n"
+            "六域全部 checked 必填；0 findings 合法，unchecked 不合法。\n\n"
+            + "\n".join(f"- {d}：checked" for d in domains)
+        )
+        projection_instruction = (
+            "只投影能够在不明显损失含义的情况下安全压缩的发现；复杂发现保留在 Literary Discovery。\n"
+            "不自动生成 Mechanism。finding_count 只统计本区真实 structured Observation，可为 0。\n\n"
+        )
     return f"""# Batch {batch_id} Reading Note
 
 - request_id: `{request_id}`
@@ -1136,17 +1204,17 @@ def render_batch_note_template(
 - source_fingerprint: `{source_fingerprint}`
 - spans: {span_refs}
 
-## 直接阅读记录
+## {reading_heading}
 
-（在此记录本批原文的真实阅读观察。必须基于当前上下文中的原文，不得从其它批次摘要二次总结。）
+{reading_instruction}
 
 ## {domain_heading}
 
 {domain_lines}
 
-## 来源绑定 findings（source-bound）
+## {finding_heading}
 
-格式：`- [OBSERVATION] dimension:维度 | 一句话观察｜证据：<unit>#L起始-L结束｜置信度：高/中/低`
+{projection_instruction}格式：`- [OBSERVATION] dimension:维度 | 一句话观察｜证据：<unit>#L起始-L结束｜置信度：高/中/低`
 
 ## 未解决问题 / 待跨批核对
 

@@ -280,7 +280,7 @@ def _note_text(batch, manifest, *, finding_count=None, span_count=None, observat
     if observations:
         block = "\n".join(observations)
         text = text.replace("## 未解决问题 / 待跨批核对",
-                            f"## 来源绑定 findings（source-bound）\n{block}\n\n## 未解决问题 / 待跨批核对")
+                            f"{block}\n\n## 未解决问题 / 待跨批核对")
     return text
 
 
@@ -306,6 +306,82 @@ class CanonicalNoteValidatorTest(unittest.TestCase):
             self.assertTrue(any("finding_count" in e for e in errs), errs)
             with self.assertRaises(rl.ReadingLedgerError):
                 rl.commit_batch(bd, batch["batch_id"], note)
+
+    def test_free_discovery_survives_publish_replay_and_sha_binding(self):
+        """多段、无分类发现独立于投影；发布/恢复/重放保留全文并绑定 SHA。"""
+        discovery = ("动作、沉默和环境一起造成了难以命名的距离感。\n\n"
+                     "也可能是亲近后的回避；两种解释暂时都保留，待前后文验证。")
+        with tempfile.TemporaryDirectory() as tmp:
+            sp, bd, m, batch = self._bd(tmp)
+            bid = batch["batch_id"]
+            text = _note_text(batch, m).replace(
+                "## Literary Discovery\n", f"## Literary Discovery\n\n{discovery}\n")
+            self.assertIn(discovery, text)
+            note = rl.unique_temp_note_path(bd, bid, "discovery")
+            note.write_text(text, encoding="utf-8")
+            self.assertTrue(rl.publish_batch_note(bd, bid, note)["ok"])
+            canonical = rl.batch_notes_dir(bd) / f"{bid}.md"
+            self.assertEqual(canonical.read_text(encoding="utf-8"), text)
+            self.assertTrue(rl.has_valid_canonical_note(bd, bid))
+            for _ in range(2):
+                self.assertTrue(rl.commit_batch(bd, bid, canonical)["ok"])
+            self.assertEqual(rl.read_ledger(bd)["batches"][bid]["finding_count"], 0)
+            self.assertTrue(rl.validate_ledger(bd, sp)["ok"])
+            canonical.write_text(text.replace(discovery, discovery + "新解释"), encoding="utf-8")
+            self.assertFalse(rl.validate_ledger(bd, sp)["ok"])
+
+    def test_discovery_is_not_a_structured_observation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, bd, m, batch = self._bd(tmp)
+            obs = "- [OBSERVATION] dimension:人物 | 停顿保留距离｜证据：chapters/0001.md#L1-L2｜置信度：中"
+            text = _note_text(batch, m, finding_count=1, observations=[obs]).replace(
+                "## Literary Discovery\n", "## Literary Discovery\n\n自由长观察。\n\n"
+                "- [OBSERVATION] 这里讨论这个标签为何无法表达矛盾读感，不是结构化投影。\n")
+            note = rl.batch_notes_dir(bd) / f"{batch['batch_id']}.md"
+            note.write_text(text, encoding="utf-8")
+            self.assertEqual(rl.validate_batch_note_file(note, m, batch["batch_id"])[1], [])
+            note.write_text(text.replace('"finding_count": 1', '"finding_count": 2'), encoding="utf-8")
+            self.assertTrue(any("finding_count" in e for e in
+                                rl.validate_batch_note_file(note, m, batch["batch_id"])[1]))
+
+    def test_discovery_sections_and_six_domains_fail_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, bd, m, batch = self._bd(tmp)
+            text = _note_text(batch, m)
+            note = rl.batch_notes_dir(bd) / f"{batch['batch_id']}.md"
+            for heading in ("Literary Discovery", "Coverage Audit", "Structured Projections"):
+                with self.subTest(heading=heading):
+                    self.assertIn(f"## {heading}", text)
+                    note.write_text(text.replace(f"## {heading}", "## Removed"), encoding="utf-8")
+                    self.assertTrue(rl.validate_batch_note_file(note, m, batch["batch_id"])[1])
+            note.write_text(text.replace(json.dumps(list(rl.SIX_DOMAINS), ensure_ascii=False),
+                                         json.dumps(list(rl.SIX_DOMAINS[:-1]), ensure_ascii=False)), encoding="utf-8")
+            self.assertTrue(any("未检查全部" in e for e in
+                                rl.validate_batch_note_file(note, m, batch["batch_id"])[1]))
+
+    def test_free_discovery_source_refs_still_cannot_escape_batch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, bd, m, batch = self._bd(tmp)
+            text = _note_text(batch, m).replace(
+                "## Literary Discovery\n", "## Literary Discovery\n\n组合效果见 chapters/9999.md#L1-L2。\n")
+            note = rl.batch_notes_dir(bd) / f"{batch['batch_id']}.md"
+            note.write_text(text, encoding="utf-8")
+            self.assertTrue(any("不属于本批" in e for e in
+                                rl.validate_batch_note_file(note, m, batch["batch_id"])[1]))
+
+    def test_method_note_keeps_existing_contract(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, bd, m, batch = self._bd(tmp)
+            text = rl.render_batch_note_template(
+                batch_id=batch["batch_id"], request_id=m["request_id"], run_id=m["run_id"],
+                manifest_hash=m["manifest_hash"], source_fingerprint=m["source_fingerprint"],
+                spans=batch["spans"], required_domains=(), domain_heading="方法抽取检查")
+            self.assertNotIn("Literary Discovery", text)
+            self.assertIn("## 方法抽取检查", text)
+            self.assertIn("## 来源绑定 findings（source-bound）", text)
+            note = rl.batch_notes_dir(bd) / f"{batch['batch_id']}.md"
+            note.write_text(text, encoding="utf-8")
+            self.assertEqual(rl.validate_batch_note_file(note, m, batch["batch_id"], required_domains=())[1], [])
 
     def test_finding_without_evidence_ref_fails(self):
         """finding_count>0 但 [OBSERVATION] 行无来源 ref 必须失败。"""

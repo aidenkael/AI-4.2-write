@@ -118,7 +118,7 @@ def _valid_temp_note(bd_dir: Path, manifest: dict, batch: dict, *, token: str = 
     text = text.replace('"finding_count": 0', f'"finding_count": {finding_count}')
     if extra_finding:
         text = text.replace("## 未解决问题 / 待跨批核对",
-                            f"## 来源绑定 findings（source-bound）\n{extra_finding}\n\n## 未解决问题 / 待跨批核对")
+                            f"{extra_finding}\n\n## 未解决问题 / 待跨批核对")
     if override:
         block = json.loads(text[text.index("```json") + 7: text.index("```", text.index("```json") + 7)])
         block.update(override)
@@ -544,6 +544,36 @@ class CanonicalNoteCommitReadyIntegrityTest(unittest.TestCase):
 
 
 class ReaderContractTest(unittest.TestCase):
+    def test_discovery_precedes_audit_and_selective_projection(self):
+        text = _READER_AGENT.read_text(encoding="utf-8")
+        stages = [text.index(label) for label in (
+            "1. **完整读取", "2. **自由 Literary Discovery", "3. **Coverage Audit",
+            "4. **Structured Projections", "5. **确定性发布")]
+        self.assertEqual(stages, sorted(stages))
+        self.assertIn("不得要求一句话", text)
+        self.assertIn("不得设数量配额", text)
+        self.assertIn("不明显损失含义", text)
+
+    def test_main_consumes_discovery_at_both_convergence_stages(self):
+        from agent_task import build_distill_agent_task
+        task = build_distill_agent_task(Path("sp"), Path("bd"))
+        rolling = task.split("   e.", 1)[1].split("   f.", 1)[0]
+        final = task.split("4. 全部 ledger", 1)[1].split("\n5.", 1)[0]
+        for stage in (rolling, final):
+            self.assertIn("Literary Discovery", stage)
+            self.assertIn("Structured Projections", stage)
+            self.assertIn("canonical batch note", stage)
+        self.assertIn("不因未转成 Observation 而丢弃", task)
+        self.assertIn("不自动全部提升成 Mechanism", task)
+
+    def test_continuity_remains_free_natural_language(self):
+        text = (_READER_AGENT.parent / "gowrite-bookdistill-continuity.md").read_text(encoding="utf-8")
+        self.assertIn("experience_update", text)
+        self.assertIn("rolling_state", text)
+        self.assertIn("不做六域打卡", text)
+        for local_contract in ("dimension:", "[OBSERVATION]", "Structured Projections", "Literary Discovery"):
+            self.assertNotIn(local_contract, text)
+
     def test_point5_point6_reader_agent_single_batch_no_commit(self):
         """检查点 5/6：Reader 项目级 Agent 契约=只一个 batch、禁止 reading-commit/再分派。"""
         self.assertTrue(_READER_AGENT.is_file(), f"缺少项目级 Reader Agent：{_READER_AGENT}")

@@ -21,7 +21,8 @@ ledger + batch 循环）与**确定性 completion receipt**；whole-book 阅读�
   该 Custom Agent 的 frontmatter **故意省略 `model` 字段**：Qoder CN CLI 1.1.52 在真实
   spawn 时继承 parent/main 当前会话模型；不得写 `model: inherit`（运行时可能把它当成真实
   model id 并报 40506），也不得硬编码 Qwen/DeepSeek model id。
-  每个 Reader 严格只读一个 batch、六域 checked、写唯一 temp note 后经确定性 `note-publish`
+  每个 Reader 严格只读一个 batch，完整阅读 → 自由 Literary Discovery → 后置六域 Coverage Audit
+  → 选择性 Structured Projections；三层保存在唯一 temp note 后经确定性 `note-publish`
   校验并**原子发布** canonical note；Reader 绝不 `reading-commit`/收敛/生成卡/再分派子 Agent。
 - **Ordered continuity spine**：Main 同时启动恰好一个
   `subagent_type=gowrite-bookdistill-continuity` worker。它使用同一 Qoder runtime，
@@ -88,13 +89,36 @@ BookDistill 不读取 `01_原始素材` 作为正文输入；不修改 SourcePre
 - `_work/reading_manifest.json`：run-bound 阅读计划（绑定 request/run/source snapshot/
   章节内容指纹；全部 span 无遗漏/无重叠/顺序稳定）；
 - `_work/reading_ledger.json`：逐批 pending/completed 状态（原子/幂等；可 resume）；
-- `_work/batch_notes/B####.md`：每批直接阅读笔记（六域 checked + 来源绑定 findings）；
+- `_work/batch_notes/B####.md`：每批直接阅读笔记（自由 Literary Discovery + 后置 Coverage Audit + 选择性 Structured Projections，全文绑定 canonical SHA）；
 - `_work/reader_continuity/state.json`：严格按 batch 前缀推进的连续首读状态（身份/位置/hash +
   自然语言阅读体验变化与 rolling state）；
 - `_work/completion_receipt.json`：确定性完成回执（仅 local ledger 与 continuity 完整 + acceptance PASS 后写）；
 - `discovery/`、`evidence/ch_*.md`、`bkp_prototype/`、临时脚本：raw/调试产物。
 
 正式发布只把 allowlist 正式产物投影到 `02_素材知识库/<book_id>_<书名>/`。
+
+### D2-B：先读懂，再整理
+
+Reader 完整读取本批全部 span 后，先完成同一 note 的 `## Literary Discovery`，再做
+`## Coverage Audit`，最后做 `## Structured Projections`。自由发现允许多段、复杂语境、
+身体性/语言质感、组合效果、模糊或矛盾解释、暂难命名感受与待跨批问题；不要求先归入
+六域、dimension、mechanism 或固定 taxonomy，不要求单句，不设数量配额，无高价值发现可为空。
+六域只回查“刚才自由阅读有没有明显漏看某个基本方面”，不是首次阅读 checklist；六域全部
+checked 仍必需，0 findings 合法。只有不明显损失含义的发现才投影成现有来源绑定 Observation，
+其余保留自由全文，不自动生成 Mechanism，不把投影作为所有文学发现的唯一出口。
+
+`finding_count` 只统计 Structured Projections 中的真实 Observation；0 个投影 + 有自由发现合法。
+validator 对文学区块仅检查存在、唯一顺序及可读取结构，不做质量评分，不要求逐段 dimension/ref
+或转成 Observation；任何已写来源 ref 仍必须在本批 span 内。request/run/manifest/source、batch/spans、
+六域、计数、lease/publish/SHA/ledger 与 A1–A6 纪律保留。此三段式合同仅用于 BookDistill，
+MethodDistill 继续使用既有 `required_domains=()` 合同。
+
+Main rolling convergence 必须读 canonical batch note 的自由段落与投影，作为并列 discovery input；
+未能安全压缩的发现保留语境和 note 定位。final Editorial Convergence 按 manifest 有界逐批重新读取
+两者，不能仅用滚动摘要或 Observation 列表替代；不因未投影而丢弃、不自动全部晋升 Mechanism、
+不按文字相似强制去重。自由全文保留在 06 的同一 canonical note，不新增知识文件/ledger/BKP schema。
+continuity 的自然语言 `experience_update + rolling_state` 不变；后续 convergence/mechanism/cards
+是否再次压平留给 D2-C，本轮只保证复杂文学发现有完整入口进入 convergence。
 
 ### source snapshot（固化在 distill_manifest.json / bd_report.md）
 
@@ -109,7 +133,7 @@ BookDistill 不读取 `01_原始素材` 作为正文输入；不修改 SourcePre
 
 ## 证据纪律（C19 已验证原则，v0.2 扩展）
 
-1. **evidence-first**：每条条目必须带原文引用 `chapters/NNNN.md#L<起始行>-L<结束行>`。
+1. **evidence-first**：每条结构化条目必须带原文引用 `chapters/NNNN.md#L<起始行>-L<结束行>`；自由 Literary Discovery 由 note 的 batch/spans 绑定来源，不要求逐段加 ref，已写 ref 仍不得越界。
 2. **分层**：FACT（原文可直接支持）/ INFERENCE（推断，不直接出现在字面）/ **OBSERVATION**（v0.2：作品内观察，按维度标记，不强制收口为 MECHANISM）/ MECHANISM（可迁移机制）/ BOUNDARY（本条边界与不确定性）。
 3. **MAP 独立**：MAP 是结构性作品地图，不属于 Evidence kind；填写场景/人物/时间线/信息状态/冲突等结构信息。
 4. **维度标记**：OBSERVATION 条目须携带 `dimension:维度名` 标签（如人物、关系、信息控制、POV、情绪、Scene Turn 等）。维度框架为可扩展 v0.1 观察列表，不是永久冻结的封闭枚举。
@@ -120,13 +144,13 @@ BookDistill 不读取 `01_原始素材` 作为正文输入；不修改 SourcePre
    范围、仅有 Agent 自报“已读”都必须失败。允许“已检查但无高价值发现”，coverage 不要求固定 evidence/知识数。
 6. **confidence 标记**：每条条目标记置信度 高/中/低。
 7. **counterevidence / boundary**：BOUNDARY 不省略；反证、译本影响、样本局限必须记录。
-8. **不大量复制原文**：条目为一句话结论 + 行号引用，不摘抄大段原文。
+8. **不大量复制原文**：结构化投影条目为一句话结论 + 行号引用；自由 Literary Discovery 可多段，不受单句约束，仍不摘抄大段原文。
 9. **可迁移机制，不做剧情换皮**：MECHANISM 必须说明“为何可迁移”（从具体文本抽象技法），禁止“某角色做了某事所以这样写”式的剧情复述。
 10. **不随意外推**：局部样本只标记为局部证据，不宣称覆盖整书或整个类型。
 11. **coverage 不是价值判断**：维度覆盖统计只是 BookProfile 的辅助信号，禁止“Observation 数量多 = 更重要”这类机械判断。
 12. **不做原作者风格模仿器**：产出是分析性证据，不是模仿奥威尔文风的仿写样本。
 13. **重要发现可跨尺度、跨位置聚合**：一条高价值 Observation / Pattern 可以由多个不相邻句子、场景或章节共同支撑；不得为了“一条结论只配一个局部证据”而拆散真实效果链。
-14. **保留未命名价值**：发现“重要但暂时难以命名”的创作智慧时，允许先以 Observation / Inference 保存，不得因为暂时不属于现有 taxonomy 而丢弃。
+14. **保留未命名价值**：发现“重要但暂时难以命名”的创作智慧时，先完整保留自由 Literary Discovery；仅在不明显损失含义时投影为 Observation / Inference，不得因为不属于现有 taxonomy 而丢弃。
 15. **报告统计单一真源**：`bd_report.md` 的条目/分类/单元语义/覆盖门统计由最终 `distill_manifest.json` 重建，acceptance 前必须一致。
 
 ## 原著 Discovery：多视角直接阅读（G3 closeout 方法修正）
@@ -210,17 +234,18 @@ Apodictic 式镜头用于诊断和发现，不自动覆盖为普遍写作规则�
    - Main 用 Agent 工具以 `subagent_type=gowrite-bookdistill-reader` 启动**一个** Reader；该项目级
      Custom Agent 省略 `model` frontmatter，真实 spawn 会继承 Main 当前模型。只交给它这一个
      batch 的分派载荷。Reader **直接阅读该 batch 全部 span 的完整原文**（不抽样、不只读首部、不伪造
-     scan_refs），做本批能够自洽支撑的局部叙事、reader dynamics 与 page craft 深读；
+     scan_refs），先把本批能够自洽支撑的自由 Literary Discovery 写进唯一 temp note；
      它不得声称已维护跨批 question/prediction/人物与关系心智模型，这些属于 continuity spine。
-     Reader 写唯一 temp note（**六域 checked**：故事与大纲 /
+     Discovery 完成后才做 Coverage Audit（**六域 checked**：故事与大纲 /
      人物与关系 / 章节与场景 / 冲突与节奏 / 世界与题材 / 语言与读者体验，每域 `0 findings` 合法、
-     “未检查”不合法；来源绑定 findings 证据必须落在本批 span），再运行 `note-publish --output <staging>
-     --batch <id> --temp <temp_note> --lease <token>`：确定性校验（六域/绑定字段/finding_count/span refs）
-     后**原子发布** `_work/batch_notes/B####.md`。
+     “未检查”不合法），最后只将可安全压缩的发现写入 Structured Projections（证据必须落在本批 span），
+     保留自由全文，再运行 `note-publish --output <staging> --batch <id> --temp <temp_note> --lease <token>`：
+     确定性校验（三段结构/六域/绑定字段/finding_count/span refs）后**全文原子发布** `_work/batch_notes/B####.md`。
    - Main 复核 canonical note，**按 manifest 顺序串行** `reading-commit --output <staging> --batch <id>`
      （原子/幂等标记 completed，绑定 batch id/manifest hash/source fingerprint/note sha256）；只有 Main
      可 commit。commit 后 `reader-release --lease <token>` 释放租约，立即 `reader-dispatch` 补下一个。
-   - 期间持续维护 `_work/convergence_state.md`（滚动收敛状态，过程工件，绝不进入 02）：processed batch
+   - 期间实际读取 canonical note 的 Literary Discovery 与 Structured Projections，持续维护
+     `_work/convergence_state.md`（滚动收敛状态，过程工件，绝不进入 02）：processed batch
      ids / mechanism clusters / accumulated evidence / conflicts / scope-boundary / unresolved questions /
      canonical+supporting candidates。**优先保持 Reader 满载，绝不让收敛把并行阅读重新串行化。**
 4. `reading-validate --input <SP> --output <staging>`：机械证明 manifest 覆盖完整来源范围、ledger 与当前
@@ -234,7 +259,7 @@ Apodictic 式镜头用于诊断和发现，不自动覆盖为普遍写作规则�
 7. `deepdive --output <BookDistill 输出> --dimension <维度名> [--input <SourcePrepare PASS>]`：生成专项深挖模板。
    专项文学分析优先参考 Apodictic / ani-book / creative-writing-skills / oh-story 的分析框架。
    传入 `--input` 时复用 assemble 校验逻辑（引用格式、章节存在性、行号越界）校验已填写的深挖内容；不传 `--input` 时仅生成模板。文件已存在时不覆盖。
-8. **BookDistill 总编辑式收敛**：汇总逐批 local batch note、continuity history/rolling state 与 Deep Dive，回原文核证；合并同质观察，识别多个普通细节形成的组合效果；区分 Observation / Inference；降级过度抽象；补充反证、scope、boundary 和 confidence。continuity 是 discovery/observer input，不自动成为 Mechanism/BKP。
+8. **BookDistill 总编辑式收敛**：逐批读取 canonical batch note 的 Literary Discovery 与 Structured Projections（不能用滚动摘要代替自由全文），汇同 continuity history/rolling state 与 Deep Dive 回原文核证；合并同质观察，识别多个普通细节形成的组合效果；区分 Observation / Inference；降级过度抽象；补充反证、scope、boundary 和 confidence。自由发现与 continuity 是 discovery/observer input，不自动成为 Mechanism/BKP。
 9. 跨章收敛机制：从充分支撑的 Observation / MECHANISM 中合并同质、降级单章小技巧，
    产出 `mechanisms.md`。**最终知识数量由来源决定，不设 10–20、20–40 等任何配额。**
    归并只在 conditions / mechanism / scale / effect 四者语义实质等价时进行，绝不按文字相似去重；
