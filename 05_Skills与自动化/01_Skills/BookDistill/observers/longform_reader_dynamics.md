@@ -33,11 +33,19 @@
 
 ## 阅读纪律
 
+### 执行载体
+
+下文涉及“随阅读变化”的 question/promise、读者与角色知识边界、人物/关系
+心智模型、情绪余波与 forward pull，由 ordered continuity spine 严格按原著顺序维护。
+并行单批 Reader 可以提供本批原文内部的局部动力发现，但不能用无前情的视角代替
+跨批连续阅读。两者最后由 BookDistill 总编辑收敛，continuity 内容仍只是 discovery input。
+
 ### 1. 直接读原著
 
 按 SourcePrepare 的稳定章节顺序阅读 `chapters/NNNN.md`。
 
-允许分章、分块、多个子 Agent；但每个结论的事实依据必须回到原文章节，而不是只引用前序摘要。
+允许局部深读分章、分块、多个子 Agent；但需要阅读时序的状态必须由同一条
+continuity spine 按序推进。每个结论的事实依据必须回到原文章节，而不是只引用前序摘要。
 
 ### 2. 逐章维护六类状态
 

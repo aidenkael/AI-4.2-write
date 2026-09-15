@@ -23,6 +23,7 @@ from acceptance_gate import (  # noqa: E402
     write_identity_acceptance,
 )
 import reading_ledger as rl  # noqa: E402
+import reader_continuity as rc  # noqa: E402
 
 
 FINGERPRINT = "f" * 64
@@ -76,7 +77,7 @@ def _report_md(data: dict) -> str:
 def _make_asset(root: Path, *, data: dict | None = None, card_count: int = 2,
                 source_sha256: str = FINGERPRINT, write_report: bool = True,
                 ledger_complete: bool = True, all_six_domains: bool = True,
-                write_manifest_ledger: bool = True):
+                write_manifest_ledger: bool = True, continuity_complete: bool = True):
     asset_dir = root / "02_素材知识库" / "book_9001_测试书"
     bkp = asset_dir / "bkp"
     (bkp / "knowledge").mkdir(parents=True)
@@ -116,6 +117,7 @@ def _make_asset(root: Path, *, data: dict | None = None, card_count: int = 2,
                                       source_id="book_9001", source_snapshot=snapshot)
         rl.write_manifest(asset_dir, rmanifest)
         rl.init_ledger(asset_dir, rmanifest)
+        rc.initialize_state(asset_dir, rmanifest)
         if ledger_complete:
             domains = list(rl.SIX_DOMAINS) if all_six_domains else list(rl.SIX_DOMAINS)[:-1]
             while True:
@@ -131,6 +133,19 @@ def _make_asset(root: Path, *, data: dict | None = None, card_count: int = 2,
                     spans=nb["spans"], required_domains=tuple(domains))
                 note.write_text(text, encoding="utf-8")
                 rl.commit_batch(asset_dir, bid, note, required_domains=tuple(domains))
+        if continuity_complete:
+            while True:
+                nxt = rc.next_batch_payload(asset_dir, rmanifest)
+                if nxt.get("complete"):
+                    break
+                token = "acceptance-fixture"
+                candidate = rc.render_candidate_template(rmanifest, nxt)
+                candidate["experience_update"] = f"{nxt['batch_id']} 的阅读体验变化。"
+                candidate["rolling_state"] = f"已顺序读到 {nxt['batch_id']}，保留当前疑问。"
+                path = rc.unique_temp_candidate_path(asset_dir, nxt["batch_id"], token)
+                path.write_text(json.dumps(candidate, ensure_ascii=False), encoding="utf-8")
+                rc.commit_candidate(asset_dir, nxt["batch_id"], path,
+                                    lease_token=token, manifest=rmanifest)
     if write_report:
         (asset_dir / REPORT_NAME).write_text(_report_md(data or _acceptance_data()), encoding="utf-8")
     return asset_dir
@@ -264,6 +279,15 @@ class AcceptanceGateTest(unittest.TestCase):
             self.assertFalse(result["ok"])
             self.assertTrue(any("ledger" in e or "completed" in e for e in result["errors"]))
 
+    def test_incomplete_continuity_rejects_pass(self):
+        """local ledger 完整也不能绕过 ordered continuity completion。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            asset_dir = _make_asset(root, continuity_complete=False)
+            result = validate_acceptance(asset_dir, root)
+            self.assertFalse(result["ok"])
+            self.assertTrue(any("continuity" in e for e in result["errors"]))
+
     def test_missing_manifest_ledger_rejects_pass(self):
         """仅有旧产物、无 reading manifest/ledger 时必须失败（scan_refs 不是权威）。"""
         with tempfile.TemporaryDirectory() as tmp:
@@ -297,6 +321,7 @@ class AcceptanceGateTest(unittest.TestCase):
             self.assertEqual(receipt["source_id"], "book_9001")
             self.assertEqual(receipt["acceptance_status"], "PASS")
             self.assertTrue(receipt["ledger_complete"])
+            self.assertEqual(receipt["continuity_state_sha256"], rc.state_fingerprint(asset_dir))
             # receipt 严格匹配当前 active request/source 才有效。
             manifest = rl.read_manifest(asset_dir)
             ok = rl.validate_completion_receipt(
@@ -308,6 +333,14 @@ class AcceptanceGateTest(unittest.TestCase):
                 receipt, asset_dir, request_id="other", source_id="book_9001",
                 source_snapshot=manifest["source_snapshot"])
             self.assertFalse(bad["ok"])
+
+            # receipt 不能在其绑定的 continuity state 丢失后继续触发恢复。
+            rc.state_path(asset_dir).unlink()
+            missing_continuity = rl.validate_completion_receipt(
+                receipt, asset_dir, request_id="req1", source_id="book_9001",
+                source_snapshot=manifest["source_snapshot"])
+            self.assertFalse(missing_continuity["ok"])
+            self.assertTrue(any("continuity" in e for e in missing_continuity["errors"]))
 
     def test_bd_report_manifest_mismatch_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:

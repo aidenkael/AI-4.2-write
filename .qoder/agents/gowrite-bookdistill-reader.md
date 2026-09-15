@@ -24,10 +24,11 @@ Main 的分派消息会给出本批次的精确参数，全部为绝对路径与
 ## 严格职责（只做一个 batch）
 
 1. **完整读取本批全部 span 的原文**：对每个 span，用 `Read` 打开 `sp_dir/<unit_file>`，读取 `start_line`–`end_line` 的**完整**行范围。不得抽样、不得只读开头、不得跳读、不得用脚本伪造 `scan_refs`、不得凭记忆或摘要替代真实阅读。必须覆盖本批每一个 span 的每一行。
-2. **在原文仍在你当前上下文时**，同时从三个语义视角分析（视角，不是三遍物理重读）：
+2. **在原文仍在你当前上下文时**，做本 batch 能够自洽支撑的局部深读（不是经由摘要猜全书）：
    - 基础/全局叙事：故事与大纲、结构、世界与题材；
-   - longform reader dynamics：长篇推进、读者动力、期待/兑现、信息债、情绪生态、跨章累积效果；
-   - reader/page craft：逐时刻读者体验、POV/声音/节奏、对话/潜台词/微观机巧。
+   - 局部 reader dynamics：本批建立/兑现的期待、信息组织、情绪与 forward pull；
+   - reader/page craft：本批可直接观察的 POV/声音/节奏、对话/潜台词/微观机巧。
+   你没有前文连续状态，不得声称已重建 question stack、prediction、人物/关系心智模型或情绪余波；这些由独立的 ordered continuity worker 按原著顺序维护。
 3. **写 temp note**：把 `note_template` 原样落到 `temp_note_path`，并填写：
    - 六域 checked（故事与大纲 / 人物与关系 / 章节与场景 / 冲突与节奏 / 世界与题材 / 语言与读者体验）。**每域 `0 findings` 完全合法，但“未检查”不合法**——你必须真正检查过每一域。
    - 来源绑定 findings：每条格式 `- [OBSERVATION] dimension:<维度> | <一句话可迁移观察>｜证据：<unit_file>#L<起>-L<止>｜置信度：高/中/低`。证据行号必须真实落在本批 span 范围内。

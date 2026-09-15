@@ -33,8 +33,10 @@ from pathlib import Path
 
 try:  # package-style import when loaded as a module
     import reading_ledger as rl
+    import reader_continuity as rc
 except ModuleNotFoundError:  # pragma: no cover - script-style import
     from . import reading_ledger as rl  # type: ignore
+    from . import reader_continuity as rc  # type: ignore
 
 REPORT_NAME = "BKP_ACCEPTANCE_REPORT.md"
 ACCEPTANCE_SCHEMA = "gowrite_bkp_acceptance/v1"
@@ -255,6 +257,12 @@ def validate_acceptance(
             errors.extend(ledger_check.get("errors", [])[:8])
         if not ledger_check.get("complete"):
             errors.append("reading ledger 未全部 completed：全书阅读尚未结算。")
+        continuity_check = rc.validate_state(asset_dir, reading_manifest, require_complete=True)
+        if not continuity_check.get("ok"):
+            errors.append(
+                "reader continuity spine 未完成或与当前来源不一致："
+                + "；".join(continuity_check.get("errors", [])[:5])
+            )
         # 六域 checked 审计：每个 completed batch 的 note 必须检查全部六域（0 findings 合法）。
         batches = (reading_ledger.get("batches") or {})
         for batch_id, state in sorted(batches.items()):
@@ -366,7 +374,8 @@ def validate_acceptance(
 def write_identity_acceptance(asset_dir: Path, result: dict) -> None:
     """验证通过且状态为 PASS 后才把 acceptance 块写入 bkp/identity.json（原子；失败抛错）。
 
-    同时在 reading ledger 完整结算的前提下写出确定性 completion receipt，
+    同时在 local reading ledger 与 ordered continuity 都完整结算的前提下
+    写出确定性 completion receipt，
     作为 Qoder response 丢失时的可靠兑底信号。receipt 绝不绕过任何质量门：
     backend finalize 仍会独立重跑确定性 assemble/profile/bkp/acceptance/发布门。
     """
@@ -386,9 +395,11 @@ def write_identity_acceptance(asset_dir: Path, result: dict) -> None:
     identity["bkp_protocol_version"] = ACCEPTANCE_PROTOCOL_VERSION
     _atomic_write_json(identity_path, identity)
 
-    # 确定性 completion receipt（仅在 ledger 完整结算 + acceptance PASS 后写出）。
+    # 确定性 completion receipt（仅在 local ledger + continuity 完整结算
+    # 且 acceptance PASS 后写出）。
     manifest = rl.read_manifest(asset_dir)
-    if manifest is not None and rl.is_ledger_complete(asset_dir):
+    continuity = rc.validate_state(asset_dir, manifest, require_complete=True) if manifest is not None else {"ok": False}
+    if manifest is not None and rl.is_ledger_complete(asset_dir) and continuity.get("ok"):
         rl.write_completion_receipt(
             asset_dir,
             request_id=str(manifest.get("request_id") or ""),
@@ -398,6 +409,7 @@ def write_identity_acceptance(asset_dir: Path, result: dict) -> None:
             acceptance_status="PASS",
             canonical_card_count=int(result.get("card_count") or 0),
             gate_version=GATE_VERSION,
+            continuity_state_sha256=rc.state_fingerprint(asset_dir),
         )
 
 

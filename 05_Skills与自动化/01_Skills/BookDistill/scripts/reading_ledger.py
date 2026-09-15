@@ -996,6 +996,7 @@ def write_completion_receipt(
     acceptance_status: str,
     canonical_card_count: int,
     gate_version: str,
+    continuity_state_sha256: str | None = None,
 ) -> Path:
     """Write the deterministic completion receipt.
 
@@ -1027,6 +1028,10 @@ def write_completion_receipt(
         "gate_version": gate_version,
         "created_at": _now_iso(),
     }
+    if continuity_state_sha256 is not None:
+        if not re.fullmatch(r"[0-9a-f]{64}", continuity_state_sha256):
+            raise ReadingLedgerError("continuity_state_sha256 非法，拒绝写 completion receipt。")
+        receipt["continuity_state_sha256"] = continuity_state_sha256
     receipt["receipt_sha256"] = _sha256_text(
         json.dumps({k: v for k, v in receipt.items() if k != "receipt_sha256"},
                    ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -1077,6 +1082,19 @@ def validate_completion_receipt(
             errors.append("receipt manifest_hash 与当前 manifest 不一致。")
         if receipt.get("source_fingerprint") != manifest.get("source_fingerprint"):
             errors.append("receipt source_fingerprint 与当前 manifest 不一致。")
+    # BookDistill continuity-aware receipts bind the exact completed state.
+    # MethodDistill and older receipts omit this optional field and retain their
+    # original validation semantics.
+    if "continuity_state_sha256" in receipt:
+        try:
+            import reader_continuity as rc  # noqa: PLC0415
+        except ModuleNotFoundError:  # pragma: no cover - package-style import
+            from . import reader_continuity as rc  # type: ignore  # noqa: PLC0415
+        continuity = rc.validate_state(bd_dir, manifest, require_complete=True) if manifest else {"ok": False}
+        if not continuity.get("ok"):
+            errors.append("receipt 绑定的 reader continuity state 已缺失/不完整/失配。")
+        if receipt.get("continuity_state_sha256") != rc.state_fingerprint(bd_dir):
+            errors.append("receipt continuity_state_sha256 与当前持久状态不一致。")
     # Self-integrity: receipt_sha256 must match its own content.
     stored = receipt.get("receipt_sha256")
     recomputed = _sha256_text(

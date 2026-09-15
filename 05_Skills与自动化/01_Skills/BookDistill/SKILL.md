@@ -5,7 +5,7 @@
 C19（原著蒸馏 / 能力发现）的最小可运行实现，当前属于能力地图方法论层（M4）。
 runtime 0.5.0 在既有结构语义门上增加**可恢复的全书真实遍历**（reading manifest +
 ledger + batch 循环）与**确定性 completion receipt**；whole-book 阅读完成度的权威
-是当前 source-bound manifest/ledger + 确定性 acceptance，不再是 Agent 自报的
+是当前 source-bound manifest/ledger + ordered continuity state + 确定性 acceptance，不再是 Agent 自报的
 `scan_refs`。BKP 包协议版本仍按其独立合同管理。
 目标是：对 SourcePrepare PASS 的真实作品，产出**可追溯、分类清晰、边界明示、全维度覆盖**的蒸馏证据，
 供作者审阅并沉淀可迁移写作机制。不是剧情复述，不是风格模仿器，不是批量蒸馏流水线。
@@ -23,6 +23,12 @@ ledger + batch 循环）与**确定性 completion receipt**；whole-book 阅读�
   model id 并报 40506），也不得硬编码 Qwen/DeepSeek model id。
   每个 Reader 严格只读一个 batch、六域 checked、写唯一 temp note 后经确定性 `note-publish`
   校验并**原子发布** canonical note；Reader 绝不 `reading-commit`/收敛/生成卡/再分派子 Agent。
+- **Ordered continuity spine**：Main 同时启动恰好一个
+  `subagent_type=gowrite-bookdistill-continuity` worker。它使用同一 Qoder runtime，
+  占用同一共享 Reader Pool 的 1 个 lease，严格按 manifest 顺序读原著，每批原子
+  持久化自然语言 `experience_update + rolling_state`。它不读 BookProfile、并行
+  batch notes、convergence 或未来 batch，不重复六域局部分析，不自动产生
+  Mechanism/BKP。这条 spine 与 local Readers **同时**运行，不是后置串行二次蒸馏。
 - **共享 Reader 池（全局上限 16）**：所有并发 BookDistill 共用一个 file-based + atomic +
   Windows-safe + Local Only 的租约池（`06_工作区/BookDistill/.reader_pool`），应用级全局上限
   `BOOKDISTILL_GLOBAL_READER_LIMIT=16`；同一时间所有书合计 active Reader ≤16。调度是**动态补位**
@@ -30,10 +36,11 @@ ledger + batch 循环）与**确定性 completion receipt**；whole-book 阅读�
   不做固定 wave barrier。池**不建** DB/daemon/service/event bus/第二 Agent runtime/SDK/worktree。
   本机 Qoder CN 1.1.52 默认 concurrent subagent limit=20 是 runtime evidence，不是永久产品 invariant。
 - 不要求 Agent 自动开新窗口/新会话，不增加作者步骤。
-- Observer 是**独立分析视角**，不是额外两遍物理全文扫描；需要反证/边界/疑难判断时定向回读原文。
+- Observer 是**独立分析视角**，不因此要求每个视角各自全文扫描；
+  continuity spine 是为保留首读时序而必须直读原著的有界顺序 pass，需要反证/边界/疑难判断时再定向回读原文。
 - Agent 自报 `scan_refs`/coverage/`identity PASS` 不能单独证明完成；whole-book completion
-  的权威是当前 source-bound reading manifest/ledger + 确定性 acceptance。
-- **恢复以磁盘为 authority**：reload manifest/ledger；pending batch 若已有合法 canonical note
+  的权威是当前 source-bound reading manifest/ledger + ordered continuity state + 确定性 acceptance。
+- **恢复以磁盘为 authority**：reload manifest/ledger/continuity state；pending batch 若已有合法 canonical note
   直接串行 commit 不重读；incomplete temp note 丢弃后只重读该 batch；completed batch 永不重派；
   派发前安全 reconcile 本 request 的 Reader leases。bridge claim 保持 fail-closed（24h running
   hard-stale），正式恢复 = 恢复同一 Qoder main session 后从磁盘继续，绝不制造双 runner。
@@ -82,7 +89,9 @@ BookDistill 不读取 `01_原始素材` 作为正文输入；不修改 SourcePre
   章节内容指纹；全部 span 无遗漏/无重叠/顺序稳定）；
 - `_work/reading_ledger.json`：逐批 pending/completed 状态（原子/幂等；可 resume）；
 - `_work/batch_notes/B####.md`：每批直接阅读笔记（六域 checked + 来源绑定 findings）；
-- `_work/completion_receipt.json`：确定性完成回执（仅 ledger 完整 + acceptance PASS 后写）；
+- `_work/reader_continuity/state.json`：严格按 batch 前缀推进的连续首读状态（身份/位置/hash +
+  自然语言阅读体验变化与 rolling state）；
+- `_work/completion_receipt.json`：确定性完成回执（仅 local ledger 与 continuity 完整 + acceptance PASS 后写）；
 - `discovery/`、`evidence/ch_*.md`、`bkp_prototype/`、临时脚本：raw/调试产物。
 
 正式发布只把 allowlist 正式产物投影到 `02_素材知识库/<book_id>_<书名>/`。
@@ -104,8 +113,8 @@ BookDistill 不读取 `01_原始素材` 作为正文输入；不修改 SourcePre
 2. **分层**：FACT（原文可直接支持）/ INFERENCE（推断，不直接出现在字面）/ **OBSERVATION**（v0.2：作品内观察，按维度标记，不强制收口为 MECHANISM）/ MECHANISM（可迁移机制）/ BOUNDARY（本条边界与不确定性）。
 3. **MAP 独立**：MAP 是结构性作品地图，不属于 Evidence kind；填写场景/人物/时间线/信息状态/冲突等结构信息。
 4. **维度标记**：OBSERVATION 条目须携带 `dimension:维度名` 标签（如人物、关系、信息控制、POV、情绪、Scene Turn 等）。维度框架为可扩展 v0.1 观察列表，不是永久冻结的封闭枚举。
-5. **coverage 明示（权威 = reading ledger）**：whole-book 阅读完成度的唯一权威是当前
-   source-bound reading manifest/ledger：每个 manifest batch 必须有 completed 记录与有效
+5. **coverage 明示（权威 = local ledger + continuity state）**：whole-book 阅读完成度的权威是当前
+   source-bound reading manifest/ledger 与 ordered continuity state：每个 manifest batch 必须有 completed 记录与有效
    batch note（六域 checked）。`scan_refs` 仅保留为调试信号，**绝不再作为 whole-book
    reading completion 的权威证据**；仅填写全范围 `scan_refs`（如 `L1-LN`）、仅有完整行号
    范围、仅有 Agent 自报“已读”都必须失败。允许“已检查但无高价值发现”，coverage 不要求固定 evidence/知识数。
@@ -182,10 +191,15 @@ Apodictic 式镜头用于诊断和发现，不自动覆盖为普遍写作规则�
 2. `prepare --input <SP> --output <staging> [--request-id <id>] [--run-id <id>]`：生成章节索引 +
    每章证据模板 + 报告骨架 + 初始 manifest，并生成确定性 **reading manifest + ledger**
    （`_work/`）：把冻结来源拆成无遗漏/无重叠/顺序稳定的 span，按保守内部上限聚合为有界 batch。
-3. **并行阅读循环**（全书阅读完成度的唯一权威 = manifest/ledger；动态补位，不做固定 wave barrier）。
-   Main 重复直到 ledger 全部 completed：
+3. **并行局部阅读 + ordered continuity spine**（动态补位，不做固定 wave barrier）。
+   Main 保持两条路径同时前进，直到 local ledger 全部 completed 且 continuity state complete：
    - 恢复准备：`reading-status` reload 进度；`reader-reconcile --output <staging>` 安全释放本 request
      遗留的 Reader 租约；completed batch 永不重派；已发布未 commit 的 canonical note 直接串行 commit。
+   - `continuity-start --output <staging> --input <SP>`：先占用同一全局池的 1 个槽，
+     Main 以 `subagent_type=gowrite-bookdistill-continuity` 启动唯一 worker。worker 循环调用
+     `continuity-next`，每次只收到旧 rolling state 与下一个原著 batch，写 candidate 后调用
+     `continuity-commit` 原子推进。该 worker 与下面 local Readers 并行；完成后 Main 用
+     `reader-release` 释放其 lease。
    - `reader-dispatch --output <staging> --input <SP>`：原子占用一个全局 Reader 租约并返回下一个待读
      batch（含 span/原文行范围/`temp_note_path`/`note_template`/`note_publish_command`/`lease_token`）；
      `pool_full=true` 表示池已满（16），先处理已完成 Reader 再补位；`commit_ready` 列出已有合法
@@ -193,8 +207,9 @@ Apodictic 式镜头用于诊断和发现，不自动覆盖为普遍写作规则�
    - Main 用 Agent 工具以 `subagent_type=gowrite-bookdistill-reader` 启动**一个** Reader；该项目级
      Custom Agent 省略 `model` frontmatter，真实 spawn 会继承 Main 当前模型。只交给它这一个
      batch 的分派载荷。Reader **直接阅读该 batch 全部 span 的完整原文**（不抽样、不只读首部、不伪造
-     scan_refs），从三个语义视角同时分析（基础/全局叙事、longform reader dynamics、reader/page craft；
-     Observer 是视角，不是额外两遍物理全文扫描），写唯一 temp note（**六域 checked**：故事与大纲 /
+     scan_refs），做本批能够自洽支撑的局部叙事、reader dynamics 与 page craft 深读；
+     它不得声称已维护跨批 question/prediction/人物与关系心智模型，这些属于 continuity spine。
+     Reader 写唯一 temp note（**六域 checked**：故事与大纲 /
      人物与关系 / 章节与场景 / 冲突与节奏 / 世界与题材 / 语言与读者体验，每域 `0 findings` 合法、
      “未检查”不合法；来源绑定 findings 证据必须落在本批 span），再运行 `note-publish --output <staging>
      --batch <id> --temp <temp_note> --lease <token>`：确定性校验（六域/绑定字段/finding_count/span refs）
@@ -206,7 +221,8 @@ Apodictic 式镜头用于诊断和发现，不自动覆盖为普遍写作规则�
      ids / mechanism clusters / accumulated evidence / conflicts / scope-boundary / unresolved questions /
      canonical+supporting candidates。**优先保持 Reader 满载，绝不让收敛把并行阅读重新串行化。**
 4. `reading-validate --input <SP> --output <staging>`：机械证明 manifest 覆盖完整来源范围、ledger 与当前
-   request/run/manifest hash/source fingerprint 一致、每 batch 有 completed 记录与有效 note。
+   request/run/manifest hash/source fingerprint 一致、每 batch 有 completed 记录与有效 note，
+   且 continuity state 以同一身份完整推进到 manifest 末尾。
 5. `assemble --input <SourcePrepare PASS> --output <BookDistill 输出>`：
    校验条目分类合法性、引用可追溯与**行号不越界**，
    重算输入 snapshot 并比对，计算**维度覆盖统计**，生成 `distill_manifest.json`。
@@ -215,7 +231,7 @@ Apodictic 式镜头用于诊断和发现，不自动覆盖为普遍写作规则�
 7. `deepdive --output <BookDistill 输出> --dimension <维度名> [--input <SourcePrepare PASS>]`：生成专项深挖模板。
    专项文学分析优先参考 Apodictic / ani-book / creative-writing-skills / oh-story 的分析框架。
    传入 `--input` 时复用 assemble 校验逻辑（引用格式、章节存在性、行号越界）校验已填写的深挖内容；不传 `--input` 时仅生成模板。文件已存在时不覆盖。
-8. **BookDistill 总编辑式收敛**：汇总逐批 batch note 与 Deep Dive，回原文核证；合并同质观察，识别多个普通细节形成的组合效果；区分 Observation / Inference；降级过度抽象；补充反证、scope、boundary 和 confidence。
+8. **BookDistill 总编辑式收敛**：汇总逐批 local batch note、continuity history/rolling state 与 Deep Dive，回原文核证；合并同质观察，识别多个普通细节形成的组合效果；区分 Observation / Inference；降级过度抽象；补充反证、scope、boundary 和 confidence。continuity 是 discovery/observer input，不自动成为 Mechanism/BKP。
 9. 跨章收敛机制：从充分支撑的 Observation / MECHANISM 中合并同质、降级单章小技巧，
    产出 `mechanisms.md`。**最终知识数量由来源决定，不设 10–20、20–40 等任何配额。**
    归并只在 conditions / mechanism / scale / effect 四者语义实质等价时进行，绝不按文字相似去重；
@@ -249,6 +265,9 @@ python scripts/book_distill.py prepare  --input "06_工作区/SourcePrepare/<boo
 python scripts/book_distill.py reading-status  --output "<staging>"
 # 并行 Reader 编排（Main 调用；reader-dispatch 会原子占用一个全局 Reader 租约）
 python scripts/book_distill.py reader-reconcile --output "<staging>"            # 恢复：释放本 request 遗留租约
+python scripts/book_distill.py continuity-start --output "<staging>" --input "<SP>"  # Main：占一个共享槽启动顺序 worker
+python scripts/book_distill.py continuity-next --output "<staging>" --input "<SP>" --lease <token>  # worker：旧 state + 下一批原文
+python scripts/book_distill.py continuity-commit --output "<staging>" --batch B0001 --candidate "<candidate>" --lease <token>  # worker：原子推进
 python scripts/book_distill.py reader-dispatch  --output "<staging>" --input "<SP>"  # 取下一个待读 batch + 租约
 python scripts/book_distill.py note-publish     --output "<staging>" --batch B0001 --temp "<temp_note>" --lease <token>  # Reader：校验+原子发布
 python scripts/book_distill.py reading-commit   --output "<staging>" --batch B0001   # Main：按 manifest 顺序串行提交
@@ -290,9 +309,9 @@ python -m unittest discover -s tests -p "test_*.py"
 
 ## 范围边界
 
-- 本技能只做 1 部作品的真实蒸馏；批量蒸馏、RAG、知识图谱、**通用多 Agent 编排框架**、复杂长期状态不属于当前版本。本版本的并行 Reader 是受限的、单本书内的 Main + 单批次 Reader 编排（共享租约池全局上限 16），不是通用 multi-agent 框架，也不是第二 Agent runtime。
+- 本技能只做 1 部作品的真实蒸馏；批量蒸馏、RAG、知识图谱、**通用多 Agent 编排框架**、复杂长期状态不属于当前版本。本版本的并行 Reader 是受限的、单本书内的 Main + 单批次 local Readers + 一个 ordered continuity worker 编排（全部共用租约池，全局上限 16），不是通用 multi-agent 框架，也不是第二 Agent runtime。
 - 脚本不调用大模型；分析内容由运行本 Skill 的 Agent / 作者填写。
-- **磁盘 resume + 并行恢复**：reading manifest/ledger/canonical batch notes/leases 落盘；中断/上下文压缩/重新继续同一请求时以磁盘为 authority 恢复（pending batch 有合法 canonical note 直接串行 commit、incomplete temp note 只重读该 batch、completed batch 永不重派、派发前 reconcile 本 request 租约）；长期状态绝不依赖聊天窗口记忆。
+- **磁盘 resume + 并行恢复**：reading manifest/ledger/canonical batch notes/continuity state/leases 落盘；中断/上下文压缩/重新继续同一请求时以磁盘为 authority 恢复（pending batch 有合法 canonical note 直接串行 commit、incomplete temp note 只重读该 batch、completed local batch 永不重派；continuity 从最后原子提交的 source position 继续；派发前 reconcile 本 request 租约）；长期状态绝不依赖聊天窗口记忆。
 - BKP v0.2 只冻结知识卡职责/调用字段/证据边界；`bkp` 子命令只做最小 Finalize
   封装（校验 + 复制白名单知识文件 + 生成 identity.json），不新增 RAG/KG，
   不自动升级知识等级（单书 BKP 最高为 Work-specific Pattern）。

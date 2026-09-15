@@ -28,6 +28,10 @@
 
 ## 第一遍：只做 Reader Experience
 
+这一遍中需要跨 batch 累积的部分由 ordered continuity spine 承担。它每次只取得
+前一状态与当前原著 batch，不读 BookProfile、并行 batch note、convergence 或未来原文。
+并行单批 Reader 仍负责本批页面动作和微观 craft，但无前文 state 时不得伪装成连续首读。
+
 ### 知识边界
 
 读第 N 章时，只使用读者到第 N 章此刻已经获得的信息。

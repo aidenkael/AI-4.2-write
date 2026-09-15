@@ -27,6 +27,17 @@
 
 观察者不得把另一个观察者的摘要当作原著替代物。
 
+## 并行局部深读与连续首读的职责分工
+
+并行单批 Reader 只能负责本 batch 的局部原文深读；它没有前文形成的
+question stack、prediction、人物/关系心智模型与情绪余波，不得声称已完成
+这些跨批累积观察。
+
+`gowrite-bookdistill-continuity` 使用同一 Agent runtime 与全局 Reader Pool，但严格按
+manifest 顺序读原著，只维护最小自然语言 reader state。这条 ordered continuity spine
+承担 `longform_reader_dynamics` 与 `reader_page_craft` 中天然需要首读时序的部分；
+它不替代并行 Reader 的局部页面 craft 发现，也不直接生成 Mechanism/BKP。
+
 ## 默认观察者
 
 1. `longform_reader_dynamics`：长篇运行 / 读者动力

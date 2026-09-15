@@ -13,10 +13,13 @@ The project Custom Agent intentionally omits the ``model`` frontmatter field:
 Qoder CN CLI 1.1.52 then inherits the parent/main session model at real spawn
 time. Literal ``model: inherit`` is forbidden because some runtime paths parse
 it as a concrete model id (40506); concrete Qwen/DeepSeek ids are forbidden too.
-Each Reader reads exactly one batch's real prose, audits the six domains, and
-atomically publishes one source-bound note; only Main commits to the on-disk
-reading ledger (serial, in manifest order) and runs rolling → final whole-book
-convergence, BKP, acceptance, and the bridge response envelope.
+Each local Reader reads exactly one batch's real prose, audits the six domains,
+and atomically publishes one source-bound note.  In parallel, one dedicated
+``gowrite-bookdistill-continuity`` worker uses the same runtime and the same
+global pool to read source batches strictly in order and persist a minimal
+rolling first-reading state.  Only Main commits the local reading ledger
+(serial, in manifest order) and runs rolling → final whole-book convergence,
+BKP, acceptance, and the bridge response envelope.
 
 Long-term state lives only on disk (manifest / ledger / batch notes /
 convergence_state), never in the chat window; resume is disk-authoritative.
@@ -43,6 +46,7 @@ _OBSERVER_CONTRACTS = (
 # stay equal to ``reader_pool.READER_LIMIT`` and ``book_distill.READER_SUBAGENT_TYPE``;
 # a focused test guards against drift so this builder stays import-decoupled.
 READER_SUBAGENT = "gowrite-bookdistill-reader"
+CONTINUITY_SUBAGENT = "gowrite-bookdistill-continuity"
 READER_LIMIT = 16
 
 
@@ -86,8 +90,10 @@ def build_distill_agent_task(
 - 你通过 Qoder 的 Agent 工具、以 `subagent_type="{READER_SUBAGENT}"` 分派**专用单批次阅读器（Reader）**；每个 Reader 严格只负责一个 batch。
 - `{READER_SUBAGENT}` 的项目级 Custom Agent frontmatter **故意省略 `model` 字段**；Qoder CN CLI 1.1.52 在真实 spawn 时据此继承当前 Main 会话模型。不得写 `model: inherit`，也不得硬编码任何 Qwen/DeepSeek model id。
 - 所有同时进行的 Reader 合计受**全局共享 Reader 池上限 {READER_LIMIT}** 约束（多本 BookDistill 共用同一池），由确定性 lease 原语强制，你不得绕过或放大。
+- 你还会以 `subagent_type="{CONTINUITY_SUBAGENT}"` 启动**恰好一个顺序连续首读 worker**。它使用同一 Qoder runtime、占用同一全局 Reader Pool 的一个 lease；不是第二 Agent runtime。因此它运行时，本书局部 Reader 最多占其余槽位，所有书合计仍不得超过 {READER_LIMIT}。
 - **Main 独占职责**：BookProfile Scout、manifest/ledger 调度、Reader 分派、note 复核、**按 manifest 顺序串行 `reading-commit`**、滚动收敛、跨批冲突/边界判断、必要的原文定向回读、mechanisms/evidence/model/bd_report、bkp_prototype/BKP、acceptance、completion receipt、bridge response。
 - **Reader 只做**：完整读取一个 batch 全部 span 的原文、六域 checked、写来源绑定 findings 到唯一 temp note、运行确定性 `note-publish` 原子发布 canonical note。Reader 绝不 `reading-commit`、绝不改 manifest/ledger/convergence/BKP/acceptance/response、绝不生成知识卡、绝不再分派子 Agent。
+- **Continuity worker 只做**：按 manifest 严格顺序读取原著 batch，用自然语言记录本批阅读体验变化与最小 rolling reader state。它不读 BookProfile、局部 batch note、convergence 或未来原文，不做六域打卡，不产生 Mechanism/BKP。
 
 输入：
 - SourcePrepare PASS 包：{sp}
@@ -99,7 +105,7 @@ def build_distill_agent_task(
 
 核心纪律（超长原著可恢复真实遍历 + 并行 Reader）：
 - 本书可能非常长（数百至数千章）。你**不需要**、也**不允许**一次性把全书读进上下文；阅读由多个 Reader 分批并行完成。
-- BookDistill 已在 {bd}/_work/ 生成确定性 reading manifest 与 reading ledger，把全书拆成有界批次；长期状态只依赖磁盘工件（manifest/ledger/batch notes/convergence_state），绝不依赖聊天窗口记忆。聊天上下文可自然压缩。
+- BookDistill 已在 {bd}/_work/ 生成确定性 reading manifest 与 reading ledger，把全书拆成有界批次；长期状态只依赖磁盘工件（manifest/ledger/batch notes/reader_continuity state/convergence_state），绝不依赖聊天窗口记忆。聊天上下文可自然压缩。
 - 不要要求作者开新窗口/新会话，不要增加作者步骤。中断后重新继续同一请求时，从磁盘恢复，绝不重做已完成批次。
 
 严格执行顺序：
@@ -108,10 +114,11 @@ def build_distill_agent_task(
 
 2. 恢复与准备（每次开始或从中断恢复都先做，真相源是磁盘）：
    a. `python "{book_distill}" reading-status --output "{bd}"`：reload manifest + ledger 进度。
-   b. `python "{book_distill}" reader-reconcile --output "{bd}"`：安全释放本 request 自己遗留的 Reader 租约（不会动其它书的租约）。
+   b. `python "{book_distill}" reader-reconcile --output "{bd}"`：安全释放本 request 自己遗留的 Reader 租约（含旧 continuity worker，不会动其它书的租约）。旧 worker 失去 lease 后无法迟到提交。
    c. 已完成（completed）的 ledger batch **永远不重派**；已完整写好但未 commit 的 canonical note 直接串行 commit（见第 3 步 commit_ready），不重读；写坏的 incomplete temp note 不算完成，丢弃后只重读该 batch。
+   d. 立即运行 `python "{book_distill}" continuity-start --output "{bd}" --input "{sp}"`。如果返回 lease，用 Agent 工具以 `subagent_type="{CONTINUITY_SUBAGENT}"` 启动一个 worker，只交给它 staging_dir、sp_dir、lease_token 与 `next_command`。它必须与下面局部 Reader 并行前进；如果池暂时已满，先处理已结束租约后重试，不得绕过池。
 
-3. 并行阅读循环（全书阅读完成度的唯一权威 = manifest/ledger；**动态补位，不做固定 wave barrier**）。重复直到 ledger 全部 completed：
+3. 并行阅读循环（局部阅读权威 = manifest/ledger；连续首读权威 = `_work/reader_continuity/state.json`；**动态补位，不做固定 wave barrier**）。保持 continuity worker 和 local Readers 同时运行，重复直到 ledger 全部 completed 且 continuity state `complete=true`：
    a. `python "{book_distill}" reader-dispatch --output "{bd}" --input "{sp}"`：
       - `dispatch != null`：取得一个 batch（含 spans、原文行范围、`temp_note_path`、`note_template`、`note_publish_command`、`lease_token`）；该命令已原子占用一个全局 Reader 租约。
       - `pool_full == true`：全局 Reader 池已满（{READER_LIMIT}），不要 busy-loop；先处理已完成 Reader 的 commit/release 再补位。
@@ -121,8 +128,9 @@ def build_distill_agent_task(
    c. 每个 Reader 完成后，你（Main）复核其 canonical note，然后**按 manifest 顺序串行**运行 `python "{book_distill}" reading-commit --output "{bd}" --batch <batch_id>`。只有 commit 成功该批才算 completed；多个 Reader 同时结束时也只有 Main 可 commit。
    d. commit 后释放该 Reader 租约：`python "{book_distill}" reader-release --lease <lease_token>`；随即用 `reader-dispatch` 立即补下一个 batch（acquire -> 1 Reader/1 batch -> 完成 -> 验证/发布 note -> Main 串行 commit -> release -> 立即补位）。
    e. 期间持续维护 `{bd}/_work/convergence_state.md`（滚动收敛状态，过程工件，**绝不进入 02**）：processed batch ids、mechanism clusters、accumulated evidence、conflicts/counterevidence、scope/boundary differences、unresolved questions、canonical candidates、supporting candidates。**优先持续补满 Reader，绝不让收敛把并行阅读重新串行化。**
+   f. continuity worker 完成后，Main 检查 `continuity-next` 返回 `complete=true`，再用既有 `reader-release --lease <continuity_lease_token>` 释放它的池槽。它的 history/rolling state 只作为 final Editorial Convergence 的 observer/discovery input，不自动晋升为 Mechanism/BKP。
 
-4. 全部 ledger completed 后，必须再做一次**全书 final Editorial Convergence**（不能只用滚动中间态）：交叉验证、合并同质项、降级单章小技巧，保留反证/边界。归并只在 conditions / mechanism / scale / effect 四者语义实质等价时进行，绝不按文字相似去重；归并后保留全部来源 evidence 与 merged_from 关系，不得丢失 scope/boundary/counterevidence。无法确认等价时宁可分开。形成：
+4. 全部 ledger completed 且 continuity spine complete 后，必须再做一次**全书 final Editorial Convergence**（不能只用滚动中间态）：交叉验证、合并同质项、降级单章小技巧，并将 continuity history/rolling state 作为一类不可替代的顺序阅读输入，保留反证/边界。归并只在 conditions / mechanism / scale / effect 四者语义实质等价时进行，绝不按文字相似去重；归并后保留全部来源 evidence 与 merged_from 关系，不得丢失 scope/boundary/counterevidence。无法确认等价时宁可分开。形成：
    - `{bd}/mechanisms.md`：可迁移机制集，**数量由来源决定，不设 10–20 条等任何配额**；
    - `{bd}/evidence.md`、`{bd}/model.md`、`{bd}/bd_report.md`。
    Discovery 可以宽，BKP 必须克制；不模仿原作者风格。
@@ -138,7 +146,7 @@ def build_distill_agent_task(
    - `python "{book_distill}" profile --output "{bd}"`
    - `python "{book_distill}" bkp --output "{bd}"`
    - `python "{acceptance_gate}" "{bd}" --repo-root "{repo_root}" --write-identity`
-   acceptance_gate 会机械验证 reading manifest 覆盖、reading ledger 完整结算、六域 checked、权威计数一致，并在全部通过且状态为 PASS 时写出确定性 completion receipt。只有最后一条命令成功且 `{bd}/bkp/identity.json` 的 acceptance.status 为 PASS，才可进入第 10 步。REVIEW / PENDING 是内部可恢复状态，绝不是作者终态。
+   acceptance_gate 会机械验证 reading manifest 覆盖、local reading ledger 完整结算、continuity spine 完整且身份一致、六域 checked、权威计数一致，并在全部通过且状态为 PASS 时写出确定性 completion receipt。只有最后一条命令成功且 `{bd}/bkp/identity.json` 的 acceptance.status 为 PASS，才可进入第 10 步。REVIEW / PENDING 是内部可恢复状态，绝不是作者终态。
 
 9. 若上述命令明确指出可修复的 coverage / evidence / identity / ledger 缺口，必须回到对应原文和工件修复后重跑受影响命令；最多进行 2 轮有界修复，不得靠降低门槛或伪造证据通过。来源缺失、SourcePrepare 身份不一致、原文不可读等硬失败应停止并按第 10 步写 failed response。
 

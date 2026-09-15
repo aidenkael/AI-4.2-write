@@ -51,9 +51,11 @@ from pathlib import Path
 try:  # package-style import when loaded as a module
     import reading_ledger as rl
     import reader_pool as rp
+    import reader_continuity as rc
 except ModuleNotFoundError:  # pragma: no cover - script-style import
     from . import reading_ledger as rl  # type: ignore
     from . import reader_pool as rp  # type: ignore
+    from . import reader_continuity as rc  # type: ignore
 
 # ---- 常量 ---------------------------------------------------------------
 
@@ -69,6 +71,8 @@ SCAN_REF_RE = re.compile(r"chapters/\d{4}\.md#L\d+(?:-L\d+)?")
 # 专用单批次阅读器子 Agent 的项目级 Custom Agent 名称（.qoder/agents/ 下定义，
 # 本机 Qoder 通过 subagent_type 解析）。Main 用它分派每个 batch 一个 Reader。
 READER_SUBAGENT_TYPE = "gowrite-bookdistill-reader"
+# 顺序连续首读专用 Agent；与局部 Reader 共用同一 pool/runtime。
+CONTINUITY_SUBAGENT_TYPE = "gowrite-bookdistill-continuity"
 # 滚动收敛状态（过程工件，仅 _work/，绝不进入 02）。
 CONVERGENCE_STATE_FILENAME = "convergence_state.md"
 
@@ -1507,6 +1511,7 @@ def cmd_prepare(args) -> int:
     )
     rl.write_manifest(out_dir, reading_manifest)
     rl.init_ledger(out_dir, reading_manifest)
+    rc.initialize_state(out_dir, reading_manifest)
     _ensure_convergence_state(out_dir, reading_manifest)
 
     print(
@@ -1790,6 +1795,13 @@ def cmd_reading_validate(args) -> int:
         print("错误：reading-validate 需要 --input 指向当前 SourcePrepare PASS 包。")
         return 1
     result = rl.validate_ledger(out_dir, sp_dir)
+    continuity = rc.validate_state(out_dir, require_complete=True)
+    result["local_reading_ok"] = bool(result.get("ok"))
+    result["local_reading_complete"] = bool(result.get("complete"))
+    result["continuity"] = continuity
+    result["errors"] = list(result.get("errors") or []) + list(continuity.get("errors") or [])
+    result["ok"] = bool(result["local_reading_ok"] and continuity.get("ok"))
+    result["complete"] = bool(result["local_reading_complete"] and continuity.get("complete"))
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result.get("ok") else 1
 
@@ -1877,12 +1889,13 @@ def _reset_stale_run_artifacts(out_dir: Path) -> None:
     """A fresh ``prepare`` must not let a prior run's process artifacts leak in.
 
     Only per-run ``_work`` process artifacts are cleared (canonical + ``.tmp``
-    batch notes and rolling convergence state); the manifest/ledger are
+    batch notes, reader continuity state, and rolling convergence state); the manifest/ledger are
     rewritten by prepare. This is a deterministic reset at the START of a run,
     so re-preparing the same staging dir can never revive old batch notes or a
     stale convergence_state for a new source identity.
     """
     shutil.rmtree(rl.batch_notes_dir(out_dir), ignore_errors=True)
+    shutil.rmtree(rc.continuity_dir(out_dir), ignore_errors=True)
     try:
         convergence_state_path(out_dir).unlink(missing_ok=True)
     except OSError:
@@ -2035,6 +2048,164 @@ def cmd_reader_dispatch(args) -> int:
     return 0
 
 
+def _continuity_lease_errors(args, manifest: dict) -> list[str]:
+    return rp.validate_lease_for_publish(
+        _pool_root(args), str(getattr(args, "lease", None) or ""),
+        request_id=str(manifest.get("request_id") or ""),
+        run_id=str(manifest.get("run_id") or ""),
+        batch_id=rc.LEASE_BATCH_ID, limit=_pool_limit(args),
+    )
+
+
+def cmd_continuity_start(args) -> int:
+    """Main: reserve one existing Reader-pool slot for the ordered spine."""
+    out_dir = Path(args.output)
+    ctx = _require_reading_context(out_dir)
+    if ctx is None:
+        return 1
+    manifest, _ledger = ctx
+    if not getattr(args, "input", None):
+        print(json.dumps({"ok": False, "errors": ["continuity-start 需要 --input 指向当前 SourcePrepare 包。"]},
+                         ensure_ascii=False, indent=2))
+        return 1
+    input_errors = _validate_dispatch_input(manifest, Path(args.input))
+    if input_errors:
+        print(json.dumps({"ok": False, "errors": ["SourcePrepare 输入身份校验失败：" + "；".join(input_errors)]},
+                         ensure_ascii=False, indent=2))
+        return 1
+    # 允许升级前已存在的本地阅读 staging 在不重做 local Readers 的
+    # 前提下从原著起点补建 continuity；已存在但损坏/错绑的 state 仍 fail closed。
+    if not rc.state_path(out_dir).exists():
+        try:
+            rc.initialize_state(out_dir, manifest)
+        except rc.ReaderContinuityError as exc:
+            print(json.dumps({"ok": False, "errors": [str(exc)]}, ensure_ascii=False, indent=2))
+            return 1
+    check = rc.validate_state(out_dir, manifest)
+    if not check.get("ok"):
+        print(json.dumps({"ok": False, "errors": check.get("errors")}, ensure_ascii=False, indent=2))
+        return 1
+    payload = {
+        "ok": True,
+        "request_id": manifest.get("request_id"),
+        "run_id": manifest.get("run_id"),
+        "manifest_hash": manifest.get("manifest_hash"),
+        "source_fingerprint": manifest.get("source_fingerprint"),
+        "pool_root": str(_pool_root(args)),
+        "reader_limit": _pool_limit(args),
+        "active_readers": rp.active_count(_pool_root(args), limit=_pool_limit(args)),
+        "continuity_subagent_type": CONTINUITY_SUBAGENT_TYPE,
+        "complete": bool(check.get("complete")),
+        "lease": None,
+    }
+    if check.get("complete"):
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+    existing = [
+        lease for lease in rp.read_leases(_pool_root(args), limit=_pool_limit(args))
+        if lease.get("request_id") == manifest.get("request_id")
+        and lease.get("run_id") == manifest.get("run_id")
+        and lease.get("batch_id") == rc.LEASE_BATCH_ID
+    ]
+    if existing:
+        payload["already_active"] = True
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+    lease = rp.acquire_lease(
+        _pool_root(args), request_id=str(manifest.get("request_id") or ""),
+        run_id=str(manifest.get("run_id") or ""), batch_id=rc.LEASE_BATCH_ID,
+        limit=_pool_limit(args),
+    )
+    if lease is None:
+        payload["pool_full"] = True
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+    token = str(lease["lease_token"])
+    script = str(Path(__file__).resolve())
+    payload["pool_full"] = False
+    payload["active_readers"] = rp.active_count(_pool_root(args), limit=_pool_limit(args))
+    payload["lease"] = {
+        "lease_token": token,
+        "batch_id": rc.LEASE_BATCH_ID,
+        "next_command": (
+            f'python "{script}" continuity-next --output "{out_dir.resolve()}" '
+            f'--input "{Path(args.input).resolve()}" --lease {token} '
+            f'--pool-root "{_pool_root(args).resolve()}" --limit {_pool_limit(args)}'
+        ),
+    }
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_continuity_next(args) -> int:
+    """Continuity worker: return only prior state plus the next source batch."""
+    out_dir = Path(args.output)
+    ctx = _require_reading_context(out_dir)
+    if ctx is None:
+        return 1
+    manifest, _ledger = ctx
+    if not getattr(args, "input", None):
+        print(json.dumps({"ok": False, "errors": ["continuity-next 需要 --input。"]}, ensure_ascii=False, indent=2))
+        return 1
+    input_errors = _validate_dispatch_input(manifest, Path(args.input))
+    lease_errors = _continuity_lease_errors(args, manifest)
+    if input_errors or lease_errors:
+        errors = (["SourcePrepare 输入身份校验失败：" + "；".join(input_errors)] if input_errors else [])
+        errors += (["lease 校验失败：" + "；".join(lease_errors)] if lease_errors else [])
+        print(json.dumps({"ok": False, "errors": errors}, ensure_ascii=False, indent=2))
+        return 1
+    try:
+        next_payload = rc.next_batch_payload(out_dir, manifest)
+    except rc.ReaderContinuityError as exc:
+        print(json.dumps({"ok": False, "errors": [str(exc)]}, ensure_ascii=False, indent=2))
+        return 1
+    payload = {"ok": True, **next_payload}
+    if next_payload.get("complete"):
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+    bid = str(next_payload["batch_id"])
+    token = str(args.lease)
+    candidate_path = rc.unique_temp_candidate_path(out_dir, bid, token)
+    template = rc.render_candidate_template(manifest, next_payload)
+    script = str(Path(__file__).resolve())
+    payload.update({
+        "sp_dir": str(Path(args.input).resolve()),
+        "candidate_path": str(candidate_path),
+        "candidate_template": template,
+        "commit_command": (
+            f'python "{script}" continuity-commit --output "{out_dir.resolve()}" '
+            f'--batch {bid} --candidate "{candidate_path}" --lease {token} '
+            f'--pool-root "{_pool_root(args).resolve()}" --limit {_pool_limit(args)}'
+        ),
+    })
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_continuity_commit(args) -> int:
+    """Continuity worker: lease-check and atomically advance one ordered batch."""
+    out_dir = Path(args.output)
+    ctx = _require_reading_context(out_dir)
+    if ctx is None:
+        return 1
+    manifest, _ledger = ctx
+    lease_errors = _continuity_lease_errors(args, manifest)
+    if lease_errors:
+        print(json.dumps({"ok": False, "errors": ["lease 校验失败：" + "；".join(lease_errors)]},
+                         ensure_ascii=False, indent=2))
+        return 1
+    try:
+        result = rc.commit_candidate(
+            out_dir, str(args.batch), Path(args.candidate),
+            lease_token=str(args.lease), manifest=manifest,
+        )
+    except rc.ReaderContinuityError as exc:
+        print(json.dumps({"ok": False, "errors": [str(exc)]}, ensure_ascii=False, indent=2))
+        return 1
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
 def cmd_note_publish(args) -> int:
     """Reader: mechanically verify its live lease, then validate & publish.
 
@@ -2170,6 +2341,27 @@ def main(argv: list[str] | None = None) -> int:
     p_rd.add_argument("--pool-root", dest="pool_root", default=None, help="Reader pool 根目录（默认 06_工作区/BookDistill/.reader_pool）")
     p_rd.add_argument("--limit", type=int, default=0, help="Reader 全局上限（默认 16）")
 
+    p_cs = sub.add_parser("continuity-start", help="Main：为严格顺序连续首读占用一个共享 Reader 槽")
+    p_cs.add_argument("--output", required=True, help="BookDistill staging 目录")
+    p_cs.add_argument("--input", required=True, help="当前 SourcePrepare PASS 包")
+    p_cs.add_argument("--pool-root", dest="pool_root", default=None)
+    p_cs.add_argument("--limit", type=int, default=0)
+
+    p_cn = sub.add_parser("continuity-next", help="Continuity worker：只取得旧 state 与下一个原著 batch")
+    p_cn.add_argument("--output", required=True, help="BookDistill staging 目录")
+    p_cn.add_argument("--input", required=True, help="当前 SourcePrepare PASS 包")
+    p_cn.add_argument("--lease", required=True, help="continuity-start 取得的 lease token")
+    p_cn.add_argument("--pool-root", dest="pool_root", default=None)
+    p_cn.add_argument("--limit", type=int, default=0)
+
+    p_cc = sub.add_parser("continuity-commit", help="Continuity worker：校验并原子推进一个顺序 batch")
+    p_cc.add_argument("--output", required=True, help="BookDistill staging 目录")
+    p_cc.add_argument("--batch", required=True, help="当前期待 batch_id")
+    p_cc.add_argument("--candidate", required=True, help="worker 写入的唯一 candidate JSON")
+    p_cc.add_argument("--lease", required=True, help="continuity-start 取得的 lease token")
+    p_cc.add_argument("--pool-root", dest="pool_root", default=None)
+    p_cc.add_argument("--limit", type=int, default=0)
+
     p_np = sub.add_parser("note-publish", help="Reader：机械校验存活 lease，再校验唯一 temp note 并原子发布")
     p_np.add_argument("--output", required=True, help="BookDistill staging 目录")
     p_np.add_argument("--batch", required=True, help="batch_id，如 B0001")
@@ -2217,6 +2409,12 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_reading_validate(args)
     if args.command == "reader-dispatch":
         return cmd_reader_dispatch(args)
+    if args.command == "continuity-start":
+        return cmd_continuity_start(args)
+    if args.command == "continuity-next":
+        return cmd_continuity_next(args)
+    if args.command == "continuity-commit":
+        return cmd_continuity_commit(args)
     if args.command == "note-publish":
         return cmd_note_publish(args)
     if args.command == "reader-release":
