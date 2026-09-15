@@ -18,6 +18,9 @@ ledger + batch 循环）与**确定性 completion receipt**；whole-book 阅读�
   Agent **亲自执行** canonical 编排（不再把整本书包给单个 general-purpose 子 Agent 串行读完）。
   Main = coordinator/editor；通过 Qoder `subagent_type=gowrite-bookdistill-reader`（项目级
   Custom Agent，定义在仓库 `.qoder/agents/gowrite-bookdistill-reader.md`）分派**单批次 Reader**。
+  该 Custom Agent 的 frontmatter **故意省略 `model` 字段**：Qoder CN CLI 1.1.52 在真实
+  spawn 时继承 parent/main 当前会话模型；不得写 `model: inherit`（运行时可能把它当成真实
+  model id 并报 40506），也不得硬编码 Qwen/DeepSeek model id。
   每个 Reader 严格只读一个 batch、六域 checked、写唯一 temp note 后经确定性 `note-publish`
   校验并**原子发布** canonical note；Reader 绝不 `reading-commit`/收敛/生成卡/再分派子 Agent。
 - **共享 Reader 池（全局上限 16）**：所有并发 BookDistill 共用一个 file-based + atomic +
@@ -187,7 +190,8 @@ Apodictic 式镜头用于诊断和发现，不自动覆盖为普遍写作规则�
      batch（含 span/原文行范围/`temp_note_path`/`note_template`/`note_publish_command`/`lease_token`）；
      `pool_full=true` 表示池已满（16），先处理已完成 Reader 再补位；`commit_ready` 列出已有合法
      canonical note 的 pending batch（直接串行 commit，不重读）。
-   - Main 用 Agent 工具以 `subagent_type=gowrite-bookdistill-reader` 启动**一个** Reader，只交给它这一个
+   - Main 用 Agent 工具以 `subagent_type=gowrite-bookdistill-reader` 启动**一个** Reader；该项目级
+     Custom Agent 省略 `model` frontmatter，真实 spawn 会继承 Main 当前模型。只交给它这一个
      batch 的分派载荷。Reader **直接阅读该 batch 全部 span 的完整原文**（不抽样、不只读首部、不伪造
      scan_refs），从三个语义视角同时分析（基础/全局叙事、longform reader dynamics、reader/page craft；
      Observer 是视角，不是额外两遍物理全文扫描），写唯一 temp note（**六域 checked**：故事与大纲 /

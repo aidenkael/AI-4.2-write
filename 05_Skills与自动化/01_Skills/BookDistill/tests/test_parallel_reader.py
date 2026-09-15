@@ -17,6 +17,7 @@
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -410,10 +411,16 @@ class ReaderContractTest(unittest.TestCase):
         """检查点 5/6：Reader 项目级 Agent 契约=只一个 batch、禁止 reading-commit/再分派。"""
         self.assertTrue(_READER_AGENT.is_file(), f"缺少项目级 Reader Agent：{_READER_AGENT}")
         text = _READER_AGENT.read_text(encoding="utf-8")
-        # frontmatter 关键字段（本机 Qoder schema）。
+        # frontmatter 关键字段（Qoder CN CLI 1.1.52 真实 spawn 合同）。
         self.assertIn("name: gowrite-bookdistill-reader", text)
-        self.assertIn("model: inherit", text)
         self.assertIn("effort: xhigh", text)
+        frontmatter = text.split("---", 2)[1]
+        self.assertIsNone(
+            re.search(r"(?m)^model\s*:", frontmatter),
+            "Reader 必须省略 model 字段，由真实 spawn 继承 Main 当前模型；不得把 inherit 当 model id",
+        )
+        self.assertNotIn("qwen", frontmatter.lower())
+        self.assertNotIn("deepseek", frontmatter.lower())
         # 只处理一个 batch。
         self.assertIn("严格只负责一个", text)
         # 禁止 reading-commit / 再分派子 Agent。

@@ -47,6 +47,9 @@ def test_agent_task_is_main_coordinator_with_parallel_readers(tmp_path: Path) ->
     assert "绝不把整本书包给单个 general-purpose 子 Agent" in task
     # 专用 Reader 子 Agent 以 subagent_type 分派，每个 Reader 只一个 batch。
     assert 'subagent_type="gowrite-bookdistill-reader"' in task
+    assert "故意省略 `model` 字段" in task
+    assert "不得写 `model: inherit`" in task
+    assert "不得硬编码任何 Qwen/DeepSeek model id" in task
     assert "每个 Reader 严格只负责一个 batch" in task
     # 全局共享 Reader 池上限 16（多本共用），Reader 不得 reading-commit。
     assert "全局共享 Reader 池上限 16" in task

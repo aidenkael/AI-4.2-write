@@ -9,6 +9,10 @@ hands the whole book to one general-purpose child that reads serially.
 Main coordinates a **shared dynamic Reader pool** — it dispatches dedicated
 one-batch ``gowrite-bookdistill-reader`` subagents (``subagent_type``), bounded
 by a machine-wide global limit, and refills dynamically (no fixed wave barrier).
+The project Custom Agent intentionally omits the ``model`` frontmatter field:
+Qoder CN CLI 1.1.52 then inherits the parent/main session model at real spawn
+time. Literal ``model: inherit`` is forbidden because some runtime paths parse
+it as a concrete model id (40506); concrete Qwen/DeepSeek ids are forbidden too.
 Each Reader reads exactly one batch's real prose, audits the six domains, and
 atomically publishes one source-bound note; only Main commits to the on-disk
 reading ledger (serial, in manifest order) and runs rolling → final whole-book
@@ -80,6 +84,7 @@ def build_distill_agent_task(
 【执行架构（并行 Reader，不再单 child 串行读全书）】
 - 你（Main）在本次 /gowrite 会话中**亲自执行** canonical BookDistill 编排；绝不把整本书包给单个 general-purpose 子 Agent 串行读完。
 - 你通过 Qoder 的 Agent 工具、以 `subagent_type="{READER_SUBAGENT}"` 分派**专用单批次阅读器（Reader）**；每个 Reader 严格只负责一个 batch。
+- `{READER_SUBAGENT}` 的项目级 Custom Agent frontmatter **故意省略 `model` 字段**；Qoder CN CLI 1.1.52 在真实 spawn 时据此继承当前 Main 会话模型。不得写 `model: inherit`，也不得硬编码任何 Qwen/DeepSeek model id。
 - 所有同时进行的 Reader 合计受**全局共享 Reader 池上限 {READER_LIMIT}** 约束（多本 BookDistill 共用同一池），由确定性 lease 原语强制，你不得绕过或放大。
 - **Main 独占职责**：BookProfile Scout、manifest/ledger 调度、Reader 分派、note 复核、**按 manifest 顺序串行 `reading-commit`**、滚动收敛、跨批冲突/边界判断、必要的原文定向回读、mechanisms/evidence/model/bd_report、bkp_prototype/BKP、acceptance、completion receipt、bridge response。
 - **Reader 只做**：完整读取一个 batch 全部 span 的原文、六域 checked、写来源绑定 findings 到唯一 temp note、运行确定性 `note-publish` 原子发布 canonical note。Reader 绝不 `reading-commit`、绝不改 manifest/ledger/convergence/BKP/acceptance/response、绝不生成知识卡、绝不再分派子 Agent。
@@ -89,7 +94,7 @@ def build_distill_agent_task(
 - BookDistill staging：{bd}
 - 原著输入单元：{sp}/chapters/（NNNN.md；单元语义以 metadata.unit_semantics 为准；0000_*.md 是前置）
 - 本次请求 request_id：{rid}
-- 专用 Reader 子 Agent：`{READER_SUBAGENT}`（项目级 Custom Agent，已在 .qoder/agents/ 定义）
+- 专用 Reader 子 Agent：`{READER_SUBAGENT}`（项目级 Custom Agent，已在 .qoder/agents/ 定义；省略 model 字段以动态继承 Main 当前模型）
 - BookDistill CLI：`{book_distill}`
 
 核心纪律（超长原著可恢复真实遍历 + 并行 Reader）：
