@@ -13,12 +13,27 @@ ledger + batch 循环）与**确定性 completion receipt**；whole-book 阅读�
 ## 长篇执行合同（根不变量）
 
 - 作者仍只点一次“原著学习”，仍只在同一个 Qoder Agent 窗口发送一次 `/gowrite`；
-  BookDistill 内部把完整来源拆成有界批次，Agent 在同一会话中逐批直接读取原文、
-  逐批落盘，聊天上下文可以自然压缩，长期状态只依赖磁盘工件。
+  BookDistill 内部把完整来源拆成有界批次，长期状态只依赖磁盘工件，聊天上下文可自然压缩。
+- **并行 Reader 执行架构（当前合同）**：`book_distill_propose` 的 `/gowrite` 由 parent/main
+  Agent **亲自执行** canonical 编排（不再把整本书包给单个 general-purpose 子 Agent 串行读完）。
+  Main = coordinator/editor；通过 Qoder `subagent_type=gowrite-bookdistill-reader`（项目级
+  Custom Agent，定义在仓库 `.qoder/agents/gowrite-bookdistill-reader.md`）分派**单批次 Reader**。
+  每个 Reader 严格只读一个 batch、六域 checked、写唯一 temp note 后经确定性 `note-publish`
+  校验并**原子发布** canonical note；Reader 绝不 `reading-commit`/收敛/生成卡/再分派子 Agent。
+- **共享 Reader 池（全局上限 16）**：所有并发 BookDistill 共用一个 file-based + atomic +
+  Windows-safe + Local Only 的租约池（`06_工作区/BookDistill/.reader_pool`），应用级全局上限
+  `BOOKDISTILL_GLOBAL_READER_LIMIT=16`；同一时间所有书合计 active Reader ≤16。调度是**动态补位**
+  （acquire lease → 1 Reader/1 batch → 验证/发布 note → Main 串行 commit → release → 立即补位），
+  不做固定 wave barrier。池**不建** DB/daemon/service/event bus/第二 Agent runtime/SDK/worktree。
+  本机 Qoder CN 1.1.52 默认 concurrent subagent limit=20 是 runtime evidence，不是永久产品 invariant。
 - 不要求 Agent 自动开新窗口/新会话，不增加作者步骤。
 - Observer 是**独立分析视角**，不是额外两遍物理全文扫描；需要反证/边界/疑难判断时定向回读原文。
 - Agent 自报 `scan_refs`/coverage/`identity PASS` 不能单独证明完成；whole-book completion
   的权威是当前 source-bound reading manifest/ledger + 确定性 acceptance。
+- **恢复以磁盘为 authority**：reload manifest/ledger；pending batch 若已有合法 canonical note
+  直接串行 commit 不重读；incomplete temp note 丢弃后只重读该 batch；completed batch 永不重派；
+  派发前安全 reconcile 本 request 的 Reader leases。bridge claim 保持 fail-closed（24h running
+  hard-stale），正式恢复 = 恢复同一 Qoder main session 后从磁盘继续，绝不制造双 runner。
 - Qoder response 丢失时可由合法 deterministic completion receipt 恢复结算，但绝不从
   Agent 自报 PASS 推断成功；backend finalize 仍独立重跑全部确定性门。
 
@@ -164,16 +179,28 @@ Apodictic 式镜头用于诊断和发现，不自动覆盖为普遍写作规则�
 2. `prepare --input <SP> --output <staging> [--request-id <id>] [--run-id <id>]`：生成章节索引 +
    每章证据模板 + 报告骨架 + 初始 manifest，并生成确定性 **reading manifest + ledger**
    （`_work/`）：把冻结来源拆成无遗漏/无重叠/顺序稳定的 span，按保守内部上限聚合为有界 batch。
-3. **逐批真实阅读循环**（全书阅读完成度的唯一权威）：重复直到 ledger 全部 completed：
-   - `reading-next --output <staging>`：取下一个未完成 batch（含 span/原文行范围/batch note 模板）；
-   - **直接阅读该 batch 全部 span 的完整原文**（不抽样、不只读首部、不伪造 scan_refs）；
-   - 在原文仍处于当前上下文时，从三个语义视角同时分析（基础/全局叙事、longform reader
-     dynamics、reader/page craft）；Observer 是视角，不是额外两遍物理全文扫描；
-   - 写 batch note（`_work/batch_notes/B####.md`）：**六域 checked**（故事与大纲 / 人物与关系 /
-     章节与场景 / 冲突与节奏 / 世界与题材 / 语言与读者体验），每域 `0 findings` 合法、
-     “未检查”不合法；记录来源绑定 findings 与待跨批核对问题；
-   - `reading-commit --output <staging> --batch <id>`：原子/幂等标记 completed（绑定 batch id/
-     manifest hash/source fingerprint/note sha256）；中断后从第一个未完成 batch 恢复，不重做已完成批次。
+3. **并行阅读循环**（全书阅读完成度的唯一权威 = manifest/ledger；动态补位，不做固定 wave barrier）。
+   Main 重复直到 ledger 全部 completed：
+   - 恢复准备：`reading-status` reload 进度；`reader-reconcile --output <staging>` 安全释放本 request
+     遗留的 Reader 租约；completed batch 永不重派；已发布未 commit 的 canonical note 直接串行 commit。
+   - `reader-dispatch --output <staging> --input <SP>`：原子占用一个全局 Reader 租约并返回下一个待读
+     batch（含 span/原文行范围/`temp_note_path`/`note_template`/`note_publish_command`/`lease_token`）；
+     `pool_full=true` 表示池已满（16），先处理已完成 Reader 再补位；`commit_ready` 列出已有合法
+     canonical note 的 pending batch（直接串行 commit，不重读）。
+   - Main 用 Agent 工具以 `subagent_type=gowrite-bookdistill-reader` 启动**一个** Reader，只交给它这一个
+     batch 的分派载荷。Reader **直接阅读该 batch 全部 span 的完整原文**（不抽样、不只读首部、不伪造
+     scan_refs），从三个语义视角同时分析（基础/全局叙事、longform reader dynamics、reader/page craft；
+     Observer 是视角，不是额外两遍物理全文扫描），写唯一 temp note（**六域 checked**：故事与大纲 /
+     人物与关系 / 章节与场景 / 冲突与节奏 / 世界与题材 / 语言与读者体验，每域 `0 findings` 合法、
+     “未检查”不合法；来源绑定 findings 证据必须落在本批 span），再运行 `note-publish --output <staging>
+     --batch <id> --temp <temp_note> --lease <token>`：确定性校验（六域/绑定字段/finding_count/span refs）
+     后**原子发布** `_work/batch_notes/B####.md`。
+   - Main 复核 canonical note，**按 manifest 顺序串行** `reading-commit --output <staging> --batch <id>`
+     （原子/幂等标记 completed，绑定 batch id/manifest hash/source fingerprint/note sha256）；只有 Main
+     可 commit。commit 后 `reader-release --lease <token>` 释放租约，立即 `reader-dispatch` 补下一个。
+   - 期间持续维护 `_work/convergence_state.md`（滚动收敛状态，过程工件，绝不进入 02）：processed batch
+     ids / mechanism clusters / accumulated evidence / conflicts / scope-boundary / unresolved questions /
+     canonical+supporting candidates。**优先保持 Reader 满载，绝不让收敛把并行阅读重新串行化。**
 4. `reading-validate --input <SP> --output <staging>`：机械证明 manifest 覆盖完整来源范围、ledger 与当前
    request/run/manifest hash/source fingerprint 一致、每 batch 有 completed 记录与有效 note。
 5. `assemble --input <SourcePrepare PASS> --output <BookDistill 输出>`：
@@ -216,8 +243,14 @@ Apodictic 式镜头用于诊断和发现，不自动覆盖为普遍写作规则�
 python scripts/book_distill.py validate --input "06_工作区/SourcePrepare/<book_id>_<书名>"
 python scripts/book_distill.py prepare  --input "06_工作区/SourcePrepare/<book_id>_<书名>" --output "06_工作区/BookDistill/<request_id>_<book_id>_<书名>" --request-id <request_id>
 python scripts/book_distill.py reading-status  --output "<staging>"
-python scripts/book_distill.py reading-next    --output "<staging>"
-python scripts/book_distill.py reading-commit  --output "<staging>" --batch B0001
+# 并行 Reader 编排（Main 调用；reader-dispatch 会原子占用一个全局 Reader 租约）
+python scripts/book_distill.py reader-reconcile --output "<staging>"            # 恢复：释放本 request 遗留租约
+python scripts/book_distill.py reader-dispatch  --output "<staging>" --input "<SP>"  # 取下一个待读 batch + 租约
+python scripts/book_distill.py note-publish     --output "<staging>" --batch B0001 --temp "<temp_note>" --lease <token>  # Reader：校验+原子发布
+python scripts/book_distill.py reading-commit   --output "<staging>" --batch B0001   # Main：按 manifest 顺序串行提交
+python scripts/book_distill.py reader-release   --lease <token>                    # Main：commit 后释放租约
+python scripts/book_distill.py reader-status                                        # 共享池活跃租约/计数
+python scripts/book_distill.py reading-next    --output "<staging>"   # 单批次检视（不参与并行租约）
 python scripts/book_distill.py reading-validate --input "06_工作区/SourcePrepare/<book_id>_<书名>" --output "<staging>"
 python scripts/book_distill.py assemble --input "06_工作区/SourcePrepare/<book_id>_<书名>" --output "<staging>"
 python scripts/book_distill.py profile  --output "<staging>"
@@ -253,10 +286,9 @@ python -m unittest discover -s tests -p "test_*.py"
 
 ## 范围边界
 
-- 本技能只做 1 部作品的真实蒸馏；批量蒸馏、RAG、知识图谱、多 Agent、复杂长期状态不属于当前版本。
+- 本技能只做 1 部作品的真实蒸馏；批量蒸馏、RAG、知识图谱、**通用多 Agent 编排框架**、复杂长期状态不属于当前版本。本版本的并行 Reader 是受限的、单本书内的 Main + 单批次 Reader 编排（共享租约池全局上限 16），不是通用 multi-agent 框架，也不是第二 Agent runtime。
 - 脚本不调用大模型；分析内容由运行本 Skill 的 Agent / 作者填写。
-- **v0.5 提供磁盘 resume**：reading manifest/ledger 落盘，中断/上下文压缩/重新继续同一请求时
-  从第一个未完成 batch 恢复，不重做已完成批次；长期状态绝不依赖聊天窗口记忆。
+- **磁盘 resume + 并行恢复**：reading manifest/ledger/canonical batch notes/leases 落盘；中断/上下文压缩/重新继续同一请求时以磁盘为 authority 恢复（pending batch 有合法 canonical note 直接串行 commit、incomplete temp note 只重读该 batch、completed batch 永不重派、派发前 reconcile 本 request 租约）；长期状态绝不依赖聊天窗口记忆。
 - BKP v0.2 只冻结知识卡职责/调用字段/证据边界；`bkp` 子命令只做最小 Finalize
   封装（校验 + 复制白名单知识文件 + 生成 identity.json），不新增 RAG/KG，
   不自动升级知识等级（单书 BKP 最高为 Work-specific Pattern）。

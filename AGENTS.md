@@ -119,7 +119,7 @@ REFERENCE_WORK → SourcePrepare → BookDistill → 02_素材知识库/<asset>/
 METHOD_SOURCE  → MethodPrepare → MethodDistill → 02_素材知识库/<asset>/method
 ```
 
-参考作品链：`SourcePrepare → BookProfile Scout → 逐批真实阅读循环（reading manifest/ledger）→ 按需 Deep Dive → BookDistill 收敛 → BKP → KnowledgeRetrieve`
+参考作品链：`SourcePrepare → BookProfile Scout → 并行单批次 Reader 阅读循环（reading manifest/ledger + 共享 Reader 池）→ 按需 Deep Dive → BookDistill 收敛 → BKP → KnowledgeRetrieve`
 
 EPUB 结构长期不变量：`spine != chapter`。SourcePrepare 依次使用可靠 nav/NCX fragment anchor、强章标题恢复真实章界；无法可靠恢复时必须标记 `reading_unit / epub_spine_fallback`，不得冒称章节。装饰性 SVG/image/cover/logo/资源链接 markup 在 Prepare 确定性清理；`full.md` 与 `chapters/` 同源。Distill 不重新解析 EPUB 补偿上游错误，旧 Prepare 合同必须 fail closed 并显示需重新提纯。Coverage 只证明“检查过”，不要求“必须产知识”；不得用下游复杂度掩盖上游错误结构。
 
@@ -127,6 +127,7 @@ EPUB 结构长期不变量：`spine != chapter`。SourcePrepare 依次使用可�
 
 - 作者侧仍是一键“原著学习 / 方法学习”；内部 batching 对作者不可见。真实运行环境是“一次按钮 + 人工进入同一个 Agent 窗口 + 一次 `/gowrite`”；不能假设 Agent 自动新开会话。
 - 上下文 compaction 是允许的；长期蒸馏状态必须落盘，不能依赖聊天窗口记忆。BookDistill/MethodDistill 对长文采用完整来源遍历 + 有界 batch + disk ledger + resume。
+- **BookDistill 并行 Reader 编排（当前执行架构，2026-09-15）**：`book_distill_propose` 的 `/gowrite` 由 parent/main Agent **亲自执行** canonical 编排，不再把整本书包给单个 general-purpose 子 Agent 串行读完。Main = coordinator/editor，通过 Qoder `subagent_type=gowrite-bookdistill-reader`（项目级 Custom Agent，`.qoder/agents/`）分派**单批次 Reader**：每个 Reader 严格只读一个 batch、六域 checked、写唯一 temp note 后经确定性 `note-publish` 校验并**原子发布** canonical note，绝不 `reading-commit`/收敛/生成卡/再分派子 Agent。所有并发 BookDistill 共用一个 file-based + atomic + Windows-safe + Local Only 的**共享 Reader 池**，应用级全局上限 `BOOKDISTILL_GLOBAL_READER_LIMIT=16`（本机 Qoder CN 1.1.52 默认 concurrent subagent limit=20、`Max Turns=150`、`general-purpose model=inherit`、override `QODERCN_CLI_MAX_CONCURRENT_SUBAGENTS` / native `QODER_ENV_MAX_CONCURRENT_SUBAGENTS` 是 runtime evidence，不是永久产品 invariant；自留 ≥4 slot）。调度是**动态补位**（acquire lease → 1 Reader/1 batch → 验证/发布 note → Main 串行 `reading-commit` → release → 立即补位），不做固定 wave barrier；同一时间所有书合计 active Reader ≤16；lease 绑定 request/run/batch/唯一 token。只有 Main 可 `reading-commit`（按 manifest 顺序串行）。恢复以**磁盘为 authority**：reload manifest/ledger、pending batch 若有合法 canonical note 直接串行 commit 不重读、incomplete temp note 丢弃后只重读该 batch、completed batch 永不重派、派发前安全 reconcile 本 request 的 Reader leases。bridge claim 保持 fail-closed（24h running hard-stale），正式恢复合同 = 恢复同一个 Qoder main session 后从磁盘继续，绝不为 fresh `/gowrite` 立即接管而制造双 runner。Reader 池**不建** DB/daemon/service/event bus/第二 Agent runtime/SDK/worktree。非 material 的 Interactive 并发/互斥规则不变；本轮只开放多本 BookDistill/material 共用 Reader 池，不顺手开放 StoryPlan/StoryWrite 与蒸馏并发。`≤2h` 端到端（《官居一品》1344 units / 83 batches 量级）是下一次真实模型验收目标，不是 unit-test gate，开发阶段不跑真实整本蒸馏。
 - Observer 是语义视角，不再要求三遍物理全文读取。Agent 自报 `scan_refs`/coverage/`identity PASS` 不能单独证明完成；whole-book completion 的权威是当前 source-bound manifest/ledger + deterministic acceptance。
 - 全面学习不等于强迫固定数量知识；取消固定 card 配额。归并按 conditions/mechanism/scale/effect 的机制等价，不按文字相似，且必须保留来源与边界。
 - `06` 保存过程性/可恢复工件（reading manifest/ledger、batch notes、raw discovery/evidence、临时脚本），`02` 只保存正式来源绑定知识与必要 trace；发布用显式 allowlist projection，`_work`/raw/batch/临时脚本绝不进入 02。
