@@ -1493,6 +1493,9 @@ def cmd_prepare(args) -> int:
     # Reading manifest + ledger（可恢复全书真实遍历的权威计划）。
     # request_id / run_id 由调用方（Workbench backend 或 CLI）提供；缺省时
     # 从 staging 目录名推导 request_id，run_id 与 request_id 一致。
+    # A6：同一 output 重新 prepare = 新运行，先确定性地清掉上一运行的过程工件
+    # （canonical/.tmp batch notes + convergence_state），绝不串入新 run。
+    _reset_stale_run_artifacts(out_dir)
     request_id = getattr(args, "request_id", None) or _infer_request_id(out_dir)
     run_id = getattr(args, "run_id", None) or request_id
     reading_manifest = rl.build_manifest(
@@ -1814,8 +1817,76 @@ def _pool_limit(args) -> int:
     return value if value > 0 else rp.READER_LIMIT
 
 
+def _validate_dispatch_input(manifest: dict, sp_dir: Path) -> list[str]:
+    """Lightweight SourcePrepare identity gate for Reader dispatch (no O(N) rehash).
+
+    The formal ``reader-dispatch`` must never hand a Reader an arbitrary / wrong /
+    stale SourcePrepare package. Without recomputing the full chapter fingerprint
+    (that stays the acceptance/finalize job), this binds the *current* manifest
+    identity to the on-disk ``metadata.json``: PASS status, directory ``<book_id>_``
+    prefix, and ``book_id`` / SP version / selected source SHA / chapter count /
+    unit semantics. A wrong book, an old package, or a mismatched directory fails
+    closed BEFORE any Reader is leased/spawned.
+    """
+    errors: list[str] = []
+    sp_dir = Path(sp_dir)
+    if not sp_dir.is_dir():
+        return [f"SourcePrepare 输入目录不存在：{sp_dir}"]
+    meta_path = sp_dir / "metadata.json"
+    if not meta_path.is_file():
+        return [f"SourcePrepare 输入缺少 metadata.json：{meta_path}"]
+    try:
+        meta = json.loads(read_text(meta_path))
+    except (OSError, json.JSONDecodeError):
+        return ["SourcePrepare metadata.json 不可解析"]
+    book_id = str(meta.get("book_id", ""))
+    if not book_id:
+        errors.append("SourcePrepare metadata 缺少 book_id。")
+    else:
+        prefix_err = check_book_id_dir_prefix(sp_dir, book_id)
+        if prefix_err:
+            errors.append(prefix_err)
+    if str(meta.get("status", "")).upper() != SP_STATUS_PASS:
+        errors.append("SourcePrepare 输入不是 PASS。")
+    snap = manifest.get("source_snapshot") or {}
+    sel = meta.get("selected_source") or {}
+    if snap:
+        if str(meta.get("skill_version", "")) != str(snap.get("sp_version") or ""):
+            errors.append("SP 版本与当前 manifest 不一致（旧包）。")
+        if str(sel.get("sha256") or "") != str(snap.get("source_sha256") or ""):
+            errors.append("来源 SHA 与当前 manifest 不一致（错书/旧包）。")
+        if str(meta.get("unit_semantics", "")) != str(snap.get("unit_semantics") or ""):
+            errors.append("unit_semantics 与当前 manifest 不一致。")
+        try:
+            meta_chapters = int(meta.get("chapter_files", -1))
+        except (TypeError, ValueError):
+            meta_chapters = -1
+        if meta_chapters != int(snap.get("chapter_count", -2) or -2):
+            errors.append("章节数与当前 manifest 不一致。")
+    src_id = str(manifest.get("source_id") or "")
+    if src_id and book_id and src_id != book_id:
+        errors.append("输入 book_id 与 manifest source_id 不一致。")
+    return errors
+
+
 def convergence_state_path(bd_dir: Path) -> Path:
     return rl.work_dir(bd_dir) / CONVERGENCE_STATE_FILENAME
+
+
+def _reset_stale_run_artifacts(out_dir: Path) -> None:
+    """A fresh ``prepare`` must not let a prior run's process artifacts leak in.
+
+    Only per-run ``_work`` process artifacts are cleared (canonical + ``.tmp``
+    batch notes and rolling convergence state); the manifest/ledger are
+    rewritten by prepare. This is a deterministic reset at the START of a run,
+    so re-preparing the same staging dir can never revive old batch notes or a
+    stale convergence_state for a new source identity.
+    """
+    shutil.rmtree(rl.batch_notes_dir(out_dir), ignore_errors=True)
+    try:
+        convergence_state_path(out_dir).unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _ensure_convergence_state(out_dir: Path, manifest: dict) -> None:
@@ -1865,6 +1936,20 @@ def cmd_reader_dispatch(args) -> int:
     if ctx is None:
         return 1
     manifest, ledger = ctx
+    # A4：正式 Reader dispatch 必须绑定真实当前 SourcePrepare；--input 不允许缺失，
+    # 且身份必须在 Reader spawn 前匹配当前 manifest（错书/旧包/错误目录 fail closed）。
+    if not getattr(args, "input", None):
+        print(json.dumps({"ok": False,
+                          "errors": ["reader-dispatch 需要 --input 指向当前 SourcePrepare 包。"]},
+                         ensure_ascii=False, indent=2))
+        return 1
+    sp_dir_arg = Path(args.input)
+    input_errors = _validate_dispatch_input(manifest, sp_dir_arg)
+    if input_errors:
+        print(json.dumps({"ok": False,
+                          "errors": ["SourcePrepare 输入身份校验失败：" + "；".join(input_errors)]},
+                         ensure_ascii=False, indent=2))
+        return 1
     pool_root = _pool_root(args)
     limit = _pool_limit(args)
     request_id = str(manifest.get("request_id") or "")
@@ -1928,7 +2013,8 @@ def cmd_reader_dispatch(args) -> int:
     bd_script = str(Path(__file__).resolve())
     note_publish_command = (
         f'python "{bd_script}" note-publish --output "{out_dir.resolve()}" '
-        f'--batch {bid} --temp "{temp_note_path}" --lease {token}'
+        f'--batch {bid} --temp "{temp_note_path}" --lease {token} '
+        f'--pool-root "{Path(pool_root).resolve()}" --limit {limit}'
     )
     payload["pool_full"] = False
     payload["dispatch"] = {
@@ -1950,9 +2036,31 @@ def cmd_reader_dispatch(args) -> int:
 
 
 def cmd_note_publish(args) -> int:
-    """Reader: deterministically validate its unique temp note, atomically publish."""
+    """Reader: mechanically verify its live lease, then validate & publish.
+
+    The formal parallel path never trusts an echoed token: before any canonical
+    publish it mechanically confirms the lease still exists in the shared pool,
+    the token matches exactly, and the lease's request_id / run_id / batch_id
+    equal the current manifest and the target batch. A Reader whose lease was
+    released / reconciled / stale-reclaimed therefore cannot publish even if it
+    finishes late — it fails closed so it cannot pollute a post-recovery run.
+    """
     out_dir = Path(args.output)
-    if _require_reading_context(out_dir) is None:
+    ctx = _require_reading_context(out_dir)
+    if ctx is None:
+        return 1
+    manifest, _ledger = ctx
+    pool_root = _pool_root(args)
+    limit = _pool_limit(args)
+    lease_errors = rp.validate_lease_for_publish(
+        pool_root, str(getattr(args, "lease", None) or ""),
+        request_id=str(manifest.get("request_id") or ""),
+        run_id=str(manifest.get("run_id") or ""),
+        batch_id=args.batch, limit=limit)
+    if lease_errors:
+        print(json.dumps({"ok": False,
+                          "errors": ["lease 校验失败：" + "；".join(lease_errors)]},
+                         ensure_ascii=False, indent=2))
         return 1
     try:
         result = rl.publish_batch_note(out_dir, args.batch, Path(args.temp),
@@ -2058,15 +2166,17 @@ def main(argv: list[str] | None = None) -> int:
     # 共享动态 Reader pool / 单批次分派 / note 原子发布 / 恢复（并行编排）
     p_rd = sub.add_parser("reader-dispatch", help="Main：获取一个 Reader 租约并返回下一个待读批次")
     p_rd.add_argument("--output", required=True, help="BookDistill staging 目录")
-    p_rd.add_argument("--input", default=None, help="SourcePrepare PASS 包目录（可选，回显给 Reader）")
+    p_rd.add_argument("--input", required=True, help="当前 SourcePrepare PASS 包目录（必须与 manifest 身份一致，spawn 前 fail closed）")
     p_rd.add_argument("--pool-root", dest="pool_root", default=None, help="Reader pool 根目录（默认 06_工作区/BookDistill/.reader_pool）")
     p_rd.add_argument("--limit", type=int, default=0, help="Reader 全局上限（默认 16）")
 
-    p_np = sub.add_parser("note-publish", help="Reader：校验唯一 temp note 并原子发布为 canonical B####.md")
+    p_np = sub.add_parser("note-publish", help="Reader：机械校验存活 lease，再校验唯一 temp note 并原子发布")
     p_np.add_argument("--output", required=True, help="BookDistill staging 目录")
     p_np.add_argument("--batch", required=True, help="batch_id，如 B0001")
     p_np.add_argument("--temp", required=True, help="Reader 写入的唯一 temp note 路径")
-    p_np.add_argument("--lease", default=None, help="分派时取得的 lease token")
+    p_np.add_argument("--lease", required=True, help="分派时取得的 lease token（正式并行路径必须持有存活租约）")
+    p_np.add_argument("--pool-root", dest="pool_root", default=None, help="Reader pool 根目录（默认同分派）")
+    p_np.add_argument("--limit", type=int, default=0, help="Reader 全局上限（默认 16）")
 
     p_rl = sub.add_parser("reader-release", help="Main：提交后释放一个 Reader 租约（幂等）")
     p_rl.add_argument("--lease", required=True, help="lease token")

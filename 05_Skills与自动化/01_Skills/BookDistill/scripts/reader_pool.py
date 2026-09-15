@@ -241,6 +241,38 @@ def slots_held_by_request(pool_root: Path, request_id: str, *, limit: int = READ
                if lease.get("request_id") == request_id)
 
 
+def validate_lease_for_publish(
+    pool_root: Path,
+    lease_token: str,
+    *,
+    request_id: str,
+    run_id: str,
+    batch_id: str,
+    limit: int = READER_LIMIT,
+) -> list[str]:
+    """Return [] only when a LIVE lease exactly owns this publish, else reasons.
+
+    The BookDistill ``note-publish`` formal path calls this before promoting a
+    canonical note, so a Reader whose lease was already released / reconciled /
+    stale-reclaimed can never pollute the run after recovery: the lease must
+    still exist, its token must match exactly, and its bound
+    ``request_id`` / ``run_id`` / ``batch_id`` must equal the current manifest
+    and the target batch. A released/reassigned slot simply is not found by the
+    token, so ``old reader publish -> new owner already took the slot`` fails.
+    """
+    errors: list[str] = []
+    if not lease_token:
+        return ["note-publish 缺少 lease token（正式并行 Reader 路径必须持有租约）。"]
+    lease = next((l for l in read_leases(pool_root, limit=limit)
+                  if l.get("lease_token") == lease_token), None)
+    if lease is None:
+        return [f"lease token {lease_token!r} 当前不再存在于 Reader 池（已 release/reconcile/reclaim）。"]
+    for key, current in (("request_id", request_id), ("run_id", run_id), ("batch_id", batch_id)):
+        if str(lease.get(key) or "") != str(current or ""):
+            errors.append(f"lease {key}={lease.get(key)!r} 与当前目标 {current!r} 不一致。")
+    return errors
+
+
 def reconcile_request_leases(pool_root: Path, request_id: str, *, limit: int = READER_LIMIT) -> int:
     """Release every lease bound to ``request_id``; return how many were dropped.
 

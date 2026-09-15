@@ -39,18 +39,25 @@ _REPO_ROOT = _HERE.parents[4]
 _READER_AGENT = _REPO_ROOT / ".qoder" / "agents" / "gowrite-bookdistill-reader.md"
 
 
-def _make_source(root: Path, *, chapters: int, lines_each: int = 300) -> Path:
-    sp = root / "sp"
+def _make_source(root: Path, *, chapters: int, lines_each: int = 300,
+                 book_id: str = "book_9001", source_sha: str = "f" * 64) -> Path:
+    """Valid SourcePrepare-style PASS package: <book_id>_<name>/chapters + metadata.json."""
+    sp = root / f"{book_id}_测试书"
     (sp / "chapters").mkdir(parents=True)
     for i in range(1, chapters + 1):
         text = "\n".join(f"第{i}章 第{j}行 内容" for j in range(1, lines_each + 1))
         (sp / "chapters" / f"{i:04d}.md").write_text(text, encoding="utf-8")
+    (sp / "metadata.json").write_text(json.dumps({
+        "book_id": book_id, "book": "测试书", "status": "PASS", "skill_version": "0.4.0",
+        "unit_semantics": "chapter", "unit_boundary_source": "epub_nav_anchor",
+        "chapter_files": chapters, "selected_source": {"sha256": source_sha, "path": f"{book_id}.epub"},
+    }, ensure_ascii=False), encoding="utf-8")
     return sp
 
 
-def _snapshot(fp: str = "c" * 64) -> dict:
+def _snapshot(fp: str = "c" * 64, *, chapters: int = 40) -> dict:
     return {"book_id": "book_9001", "sp_version": "0.4.0", "source_sha256": "f" * 64,
-            "chapter_count": 40, "chapter_content_fingerprint": fp,
+            "chapter_count": chapters, "chapter_content_fingerprint": fp,
             "unit_semantics": "chapter", "unit_boundary_source": "epub_nav_anchor"}
 
 
@@ -58,7 +65,7 @@ def _setup(root: Path, *, chapters: int = 40, request_id: str = "r1", run_id: st
     sp = _make_source(root, chapters=chapters)
     bd_dir = root / "bd"
     manifest = rl.build_manifest(sp, request_id=request_id, run_id=run_id,
-                                 source_id="book_9001", source_snapshot=_snapshot())
+                                 source_id="book_9001", source_snapshot=_snapshot(chapters=chapters))
     rl.write_manifest(bd_dir, manifest)
     rl.init_ledger(bd_dir, manifest)
     return sp, bd_dir, manifest
@@ -77,6 +84,25 @@ def _run(fn, args) -> tuple[int, dict]:
         rc = fn(args)
     raw = buf.getvalue().strip()
     return rc, (json.loads(raw) if raw else {})
+
+
+def _acquire(bd_dir: Path, manifest: dict, batch_id: str, pool: Path, *, token: str, limit: int = 16) -> dict:
+    """Acquire a live Reader lease so the formal note-publish path accepts it."""
+    lease = rp.acquire_lease(pool, request_id=str(manifest["request_id"]),
+                             run_id=str(manifest["run_id"]), batch_id=batch_id,
+                             limit=limit, lease_token=token)
+    assert lease is not None, "test lease acquire failed (pool full?)"
+    return lease
+
+
+def _publish(bd_dir: Path, manifest: dict, batch: dict, pool: Path, *, token: str = "tok",
+             limit: int = 16, **note_kw) -> tuple[int, dict]:
+    """Acquire a real lease, write a valid temp note, publish through the CLI."""
+    _acquire(bd_dir, manifest, batch["batch_id"], pool, token=token, limit=limit)
+    tmp_note = _valid_temp_note(bd_dir, manifest, batch, token=token, **note_kw)
+    return _run(bd.cmd_note_publish, _args(output=str(bd_dir), batch=batch["batch_id"],
+                                           temp=str(tmp_note), lease=token,
+                                           pool_root=str(pool), limit=limit))
 
 
 def _valid_temp_note(bd_dir: Path, manifest: dict, batch: dict, *, token: str = "tok",
@@ -273,7 +299,7 @@ class ReaderDispatchTest(unittest.TestCase):
             sp, bd_dir, manifest = _setup(root, chapters=40)
             pool = root / "pool"
             rc, d1 = _run(bd.cmd_reader_dispatch, _args(output=str(bd_dir), input=str(sp), pool_root=str(pool)))
-            self.assertEqual(rc, 0)
+            self.assertEqual(rc, 0, d1)
             self.assertIsNotNone(d1["dispatch"])
             b1 = d1["dispatch"]["batch_id"]
             self.assertEqual(d1["active_readers"], 1)
@@ -281,28 +307,22 @@ class ReaderDispatchTest(unittest.TestCase):
             rc, d2 = _run(bd.cmd_reader_dispatch, _args(output=str(bd_dir), input=str(sp), pool_root=str(pool)))
             b2 = d2["dispatch"]["batch_id"]
             self.assertNotEqual(b1, b2)
-            # 完成 b1（publish + commit + release）后，dispatch 绝不再返回 b1。
-            batch1 = _first_batch(bd_dir)
-            self.assertEqual(batch1["batch_id"], b1)
-            tmp_note = _valid_temp_note(bd_dir, manifest, d1["dispatch"], token=d1["dispatch"]["lease_token"])
-            rc, pub = _run(bd.cmd_note_publish, _args(output=str(bd_dir), batch=b1, temp=str(tmp_note),
-                                                      lease=d1["dispatch"]["lease_token"]))
+            # 完成 b1（真实 lease + publish + commit + release）后，dispatch 绝不再返回 b1。
+            rc, pub = _publish(bd_dir, manifest, d1["dispatch"], pool, token=d1["dispatch"]["lease_token"])
             self.assertEqual(rc, 0, pub)
             rc, _c = _run(bd.cmd_reading_commit, _args(output=str(bd_dir), batch=b1))
             self.assertEqual(rc, 0)
             bd.cmd_reader_release(_args(lease=d1["dispatch"]["lease_token"], pool_root=str(pool)))
             seen = set()
             for _ in range(6):
-                rc, dd = _run(bd.cmd_reader_dispatch, _args(output=str(bd_dir), pool_root=str(pool)))
+                rc, dd = _run(bd.cmd_reader_dispatch, _args(output=str(bd_dir), input=str(sp), pool_root=str(pool)))
                 if dd.get("dispatch") is None:
                     break
-                seen.add(dd["dispatch"]["batch_id"])
-                bd.cmd_reader_release(_args(lease=dd["dispatch"]["lease_token"], pool_root=str(pool)))
-                # commit it so it won't be re-dispatched
                 b = dd["dispatch"]
-                tn = _valid_temp_note(bd_dir, manifest, b, token=b["lease_token"])
-                _run(bd.cmd_note_publish, _args(output=str(bd_dir), batch=b["batch_id"], temp=str(tn)))
+                seen.add(b["batch_id"])
+                _publish(bd_dir, manifest, b, pool, token=b["lease_token"])
                 _run(bd.cmd_reading_commit, _args(output=str(bd_dir), batch=b["batch_id"]))
+                bd.cmd_reader_release(_args(lease=b["lease_token"], pool_root=str(pool)))
             self.assertNotIn(b1, seen)
 
     def test_point3_dispatch_pool_full(self):
@@ -312,12 +332,38 @@ class ReaderDispatchTest(unittest.TestCase):
             sp, bd_dir, manifest = _setup(root, chapters=40)
             pool = root / "pool"
             # limit=1：先占满，再 dispatch → pool_full。
-            rc, d1 = _run(bd.cmd_reader_dispatch, _args(output=str(bd_dir), pool_root=str(pool), limit=1))
+            rc, d1 = _run(bd.cmd_reader_dispatch, _args(output=str(bd_dir), input=str(sp), pool_root=str(pool), limit=1))
             self.assertIsNotNone(d1["dispatch"])
-            rc, d2 = _run(bd.cmd_reader_dispatch, _args(output=str(bd_dir), pool_root=str(pool), limit=1))
+            rc, d2 = _run(bd.cmd_reader_dispatch, _args(output=str(bd_dir), input=str(sp), pool_root=str(pool), limit=1))
             self.assertTrue(d2["pool_full"])
             self.assertIsNone(d2["dispatch"])
             self.assertEqual(rp.active_count(pool, limit=1), 1)
+
+    def test_a4_dispatch_requires_input(self):
+        """A4：正式 dispatch 缺 --input 立即 fail closed，且未占用 Reader 槽。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sp, bd_dir, manifest = _setup(root, chapters=40)
+            pool = root / "pool"
+            rc, out = _run(bd.cmd_reader_dispatch, _args(output=str(bd_dir), input=None, pool_root=str(pool)))
+            self.assertEqual(rc, 1)
+            self.assertFalse(out.get("ok"))
+            self.assertEqual(rp.active_count(pool), 0)
+
+    def test_a4_dispatch_rejects_foreign_source_identity(self):
+        """A4：来源 SHA 与当前 manifest 不一致（错书/旧包）必须在 spawn 前 fail closed。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sp, bd_dir, manifest = _setup(root, chapters=40)
+            pool = root / "pool"
+            meta_path = sp / "metadata.json"
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            meta["selected_source"]["sha256"] = "0" * 64  # 篡改来源身份
+            meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+            rc, out = _run(bd.cmd_reader_dispatch, _args(output=str(bd_dir), input=str(sp), pool_root=str(pool)))
+            self.assertEqual(rc, 1)
+            self.assertFalse(out.get("ok"))
+            self.assertEqual(rp.active_count(pool), 0)
 
 
 class NotePublishAtomicityTest(unittest.TestCase):
@@ -329,15 +375,14 @@ class NotePublishAtomicityTest(unittest.TestCase):
             pool = root / "pool"
             batch = _first_batch(bd_dir)
             bid = batch["batch_id"]
-            tmp_note = _valid_temp_note(bd_dir, manifest, batch, token="t1", finding_count=0)
-            rc, pub = _run(bd.cmd_note_publish, _args(output=str(bd_dir), batch=bid, temp=str(tmp_note), lease="t1"))
+            rc, pub = _publish(bd_dir, manifest, batch, pool, token="t1", finding_count=0)
             self.assertEqual(rc, 0, pub)
             self.assertTrue((rl.batch_notes_dir(bd_dir) / f"{bid}.md").exists())
             # temp note 已清理。
-            self.assertFalse(tmp_note.exists())
+            self.assertFalse(rl.unique_temp_note_path(bd_dir, bid, "t1").exists())
             # 未 commit 前：has_valid_canonical_note 为真，dispatch 把它列入 commit_ready 且不重读。
             self.assertTrue(rl.has_valid_canonical_note(bd_dir, bid))
-            rc, d = _run(bd.cmd_reader_dispatch, _args(output=str(bd_dir), pool_root=str(pool)))
+            rc, d = _run(bd.cmd_reader_dispatch, _args(output=str(bd_dir), input=str(sp), pool_root=str(pool)))
             self.assertIn(bid, d["commit_ready"])
             # 直接串行 commit 成功（恢复路径：不重读）。
             rc, _c = _run(bd.cmd_reading_commit, _args(output=str(bd_dir), batch=bid))
@@ -345,16 +390,18 @@ class NotePublishAtomicityTest(unittest.TestCase):
             self.assertTrue(rl.read_ledger(bd_dir)["batches"][bid]["status"] == rl.BATCH_STATUS_COMPLETED)
 
     def test_point9_partial_temp_note_rejected(self):
-        """检查点 9：partial / 未检查六域的 temp note 不被接受。"""
+        """检查点 9：partial / 未检查六域的 temp note 不被接受（持有 live lease 仍失败于内容）。"""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             sp, bd_dir, manifest = _setup(root, chapters=40)
+            pool = root / "pool"
             batch = _first_batch(bd_dir)
             bid = batch["batch_id"]
-            # 缺 domains_checked（模拟写坏的 partial note）。
+            _acquire(bd_dir, manifest, bid, pool, token="partial")
             tmp = rl.unique_temp_note_path(bd_dir, bid, "partial")
             tmp.write_text("# Batch %s\n\n半成品，没有 JSON 块\n" % bid, encoding="utf-8")
-            rc, out = _run(bd.cmd_note_publish, _args(output=str(bd_dir), batch=bid, temp=str(tmp)))
+            rc, out = _run(bd.cmd_note_publish, _args(output=str(bd_dir), batch=bid, temp=str(tmp),
+                                                      lease="partial", pool_root=str(pool)))
             self.assertEqual(rc, 1)
             self.assertFalse(out.get("ok"))
             self.assertFalse((rl.batch_notes_dir(bd_dir) / f"{bid}.md").exists())
@@ -365,15 +412,19 @@ class NotePublishAtomicityTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             sp, bd_dir, manifest = _setup(root, chapters=40)
+            pool = root / "pool"
             batch = _first_batch(bd_dir)
             bid = batch["batch_id"]
             for field, bad in (("request_id", "OTHER"), ("run_id", "OTHER"),
                                ("manifest_hash", "deadbeef"), ("source_fingerprint", "f" * 64)):
-                tmp = _valid_temp_note(bd_dir, manifest, batch, token=f"t_{field}",
-                                       override={field: bad})
-                rc, out = _run(bd.cmd_note_publish, _args(output=str(bd_dir), batch=bid, temp=str(tmp)))
+                tok = f"t_{field}"
+                _acquire(bd_dir, manifest, bid, pool, token=tok)
+                tmp = _valid_temp_note(bd_dir, manifest, batch, token=tok, override={field: bad})
+                rc, out = _run(bd.cmd_note_publish, _args(output=str(bd_dir), batch=bid, temp=str(tmp),
+                                                          lease=tok, pool_root=str(pool)))
                 self.assertEqual(rc, 1, f"{field} 应被拒绝")
                 self.assertFalse(out.get("ok"))
+                bd.cmd_reader_release(_args(lease=tok, pool_root=str(pool)))
             self.assertFalse((rl.batch_notes_dir(bd_dir) / f"{bid}.md").exists())
 
     def test_point6_out_of_span_evidence_rejected(self):
@@ -381,11 +432,14 @@ class NotePublishAtomicityTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             sp, bd_dir, manifest = _setup(root, chapters=40)
+            pool = root / "pool"
             batch = _first_batch(bd_dir)
             bid = batch["batch_id"]
+            _acquire(bd_dir, manifest, bid, pool, token="oob")
             tmp = _valid_temp_note(bd_dir, manifest, batch, token="oob", finding_count=1,
                                    extra_finding="- [OBSERVATION] dimension:结构 | x｜证据：chapters/9999.md#L1-L2｜置信度：高")
-            rc, out = _run(bd.cmd_note_publish, _args(output=str(bd_dir), batch=bid, temp=str(tmp)))
+            rc, out = _run(bd.cmd_note_publish, _args(output=str(bd_dir), batch=bid, temp=str(tmp),
+                                                     lease="oob", pool_root=str(pool)))
             self.assertEqual(rc, 1)
             self.assertFalse(out.get("ok"))
 
@@ -394,16 +448,99 @@ class NotePublishAtomicityTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             sp, bd_dir, manifest = _setup(root, chapters=40)
+            pool = root / "pool"
             batch = _first_batch(bd_dir)
             bid = batch["batch_id"]
-            tmp = _valid_temp_note(bd_dir, manifest, batch, token="c1")
-            _run(bd.cmd_note_publish, _args(output=str(bd_dir), batch=bid, temp=str(tmp)))
+            rc, pub = _publish(bd_dir, manifest, batch, pool, token="c1")
+            self.assertEqual(rc, 0, pub)
             _run(bd.cmd_reading_commit, _args(output=str(bd_dir), batch=bid))
-            # 已 completed：再次 publish 必须被拒。
-            tmp2 = _valid_temp_note(bd_dir, manifest, batch, token="c2")
-            rc, out = _run(bd.cmd_note_publish, _args(output=str(bd_dir), batch=bid, temp=str(tmp2)))
+            bd.cmd_reader_release(_args(lease="c1", pool_root=str(pool)))
+            # 已 completed：持新 lease 再 publish 也必须被拒（拒绝覆盖 completed batch）。
+            rc, out = _publish(bd_dir, manifest, batch, pool, token="c2")
             self.assertEqual(rc, 1)
             self.assertFalse(out.get("ok"))
+
+
+class LeaseConstrainPublishTest(unittest.TestCase):
+    """A2：lease 必须真正约束 Reader publish（迟到 Reader 不能污染恢复后的运行）。"""
+
+    def test_a2_old_reader_cannot_publish_after_reconcile_new_owner(self):
+        """old lease -> reconcile -> new lease -> old publish 失败；new owner 成功。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sp, bd_dir, manifest = _setup(root, chapters=40)
+            pool = root / "pool"
+            batch = _first_batch(bd_dir)
+            bid = batch["batch_id"]
+            # old reader 取得 lease OLD 并写好 temp note，但尚未 publish。
+            _acquire(bd_dir, manifest, bid, pool, token="OLD", limit=1)
+            old_tmp = _valid_temp_note(bd_dir, manifest, batch, token="OLD")
+            # Main 恢复：reconcile 释放本 request 全部租约。
+            rp.reconcile_request_leases(pool, str(manifest["request_id"]), limit=1)
+            # 新 owner 取得 NEW lease。
+            _acquire(bd_dir, manifest, bid, pool, token="NEW", limit=1)
+            # old reader 迟到 publish：lease 不再是它的 → 必须失败，不污染。
+            rc, out = _run(bd.cmd_note_publish, _args(output=str(bd_dir), batch=bid, temp=str(old_tmp),
+                                                      lease="OLD", pool_root=str(pool), limit=1))
+            self.assertEqual(rc, 1, out)
+            self.assertFalse(out.get("ok"))
+            self.assertFalse((rl.batch_notes_dir(bd_dir) / f"{bid}.md").exists())
+            # new owner publish 成功。
+            new_tmp = _valid_temp_note(bd_dir, manifest, batch, token="NEW")
+            rc, out = _run(bd.cmd_note_publish, _args(output=str(bd_dir), batch=bid, temp=str(new_tmp),
+                                                      lease="NEW", pool_root=str(pool), limit=1))
+            self.assertEqual(rc, 0, out)
+            self.assertTrue((rl.batch_notes_dir(bd_dir) / f"{bid}.md").exists())
+
+    def test_a2_publish_requires_live_lease(self):
+        """A2：伪造/不存在 lease token 的 publish 必须失败（即使 note 内容合法）。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sp, bd_dir, manifest = _setup(root, chapters=40)
+            pool = root / "pool"
+            batch = _first_batch(bd_dir)
+            bid = batch["batch_id"]
+            tmp_note = _valid_temp_note(bd_dir, manifest, batch, token="ghost")
+            rc, out = _run(bd.cmd_note_publish, _args(output=str(bd_dir), batch=bid, temp=str(tmp_note),
+                                                     lease="ghost", pool_root=str(pool)))
+            self.assertEqual(rc, 1)
+            self.assertFalse(out.get("ok"))
+            self.assertFalse((rl.batch_notes_dir(bd_dir) / f"{bid}.md").exists())
+
+
+class CanonicalNoteCommitReadyIntegrityTest(unittest.TestCase):
+    """A1：恢复 commit_ready / commit 绝不能绕过 publish 的完整校验。"""
+
+    def test_a1_finding_count_mismatch_not_commit_ready(self):
+        """绕过 publish 直接放一个 finding_count 造假的 canonical note：不得 commit_ready / 不得 commit。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sp, bd_dir, manifest = _setup(root, chapters=40)
+            pool = root / "pool"
+            batch = _first_batch(bd_dir)
+            bid = batch["batch_id"]
+            forged = _valid_temp_note(bd_dir, manifest, batch, token="f", finding_count=7)
+            canonical = rl.batch_notes_dir(bd_dir) / f"{bid}.md"
+            canonical.write_text(forged.read_text(encoding="utf-8"), encoding="utf-8")
+            self.assertFalse(rl.has_valid_canonical_note(bd_dir, bid))
+            rc, d = _run(bd.cmd_reader_dispatch, _args(output=str(bd_dir), input=str(sp), pool_root=str(pool)))
+            self.assertNotIn(bid, d.get("commit_ready") or [])
+            with self.assertRaises(rl.ReadingLedgerError):
+                rl.commit_batch(bd_dir, bid, canonical)
+
+    def test_a1_foreign_request_canonical_note_not_commit_ready(self):
+        """foreign request_id 的 canonical note 不得成为 commit_ready，也不得 commit。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sp, bd_dir, manifest = _setup(root, chapters=40)
+            batch = _first_batch(bd_dir)
+            bid = batch["batch_id"]
+            foreign = _valid_temp_note(bd_dir, manifest, batch, token="x", override={"request_id": "OTHER"})
+            canonical = rl.batch_notes_dir(bd_dir) / f"{bid}.md"
+            canonical.write_text(foreign.read_text(encoding="utf-8"), encoding="utf-8")
+            self.assertFalse(rl.has_valid_canonical_note(bd_dir, bid))
+            with self.assertRaises(rl.ReadingLedgerError):
+                rl.commit_batch(bd_dir, bid, canonical)
 
 
 class ReaderContractTest(unittest.TestCase):

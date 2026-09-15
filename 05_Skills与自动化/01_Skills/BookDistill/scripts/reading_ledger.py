@@ -58,6 +58,11 @@ BATCH_NOTE_TMP_DIRNAME = ".tmp"
 # unit_file is ``chapters/NNNN`` (BookDistill) or ``sections/S####`` (Method).
 NOTE_REF_RE = re.compile(r"([A-Za-z0-9_./\-]+\.md)#L(\d+)(?:-L?(\d+))?")
 
+# A real source-bound finding line in a batch note. Only bullets that *start*
+# with ``[OBSERVATION]`` count; the template's ``格式：`- [OBSERVATION] ...` ``
+# instruction line is deliberately excluded (it does not start with the marker).
+OBSERVATION_LINE_RE = re.compile(r"^[-*]\s*\[OBSERVATION\]")
+
 # The six check domains every batch note must audit. ``0 findings`` is legal;
 # ``unchecked`` is not. The names are the canonical Chinese labels used by the
 # Agent contract, acceptance gate, and audit trail.
@@ -239,46 +244,70 @@ def discover_section_units(mp_dir: Path) -> list[tuple[str, Path]]:
     return [(f"sections/{p.name}", p) for p in files]
 
 
-def _split_oversized(name: str, total_lines: int) -> list[tuple[int, int]]:
-    """Deterministically split an oversized unit into contiguous line spans."""
-    if total_lines <= MAX_SPAN_LINES:
-        return [(1, total_lines)]
+def _line_bytes(line: str) -> int:
+    """实际 UTF-8 字节数（含行尾换行），作为分批的真实字节上限依据。
+
+    对每一行 +1 换行字节，是对磁盘真实字节的精确建模（splitlines 去掉了换行）；
+    末行可能没有换行，因此该估计 *不小于* 真实字节，属于安全侧（永不低估）。
+    """
+    return len(line.encode("utf-8")) + 1
+
+
+def _split_unit_lines(lines: list[str]) -> list[tuple[int, int]]:
+    """把单个 unit 的物理行确定性地拆成 gap-free、连续、字节受限的 (start, end) span。
+
+    每个 span 同时受 ``MAX_BATCH_BYTES``（真实 UTF-8 字节）与 ``MAX_SPAN_LINES``
+    （行数）约束；正常长章节按真实字节 + 行边界拆分。任何单独一行本身就超过
+    ``MAX_BATCH_BYTES`` 时 **fail closed**：无法在保留行引用语义的前提下安全分批，
+    绝不偷偷产出 oversized span/batch。
+    """
+    total = len(lines)
+    if total == 0:
+        return [(1, 1)]
     spans: list[tuple[int, int]] = []
     start = 1
-    while start <= total_lines:
-        end = min(start + MAX_SPAN_LINES - 1, total_lines)
-        # Avoid a degenerate tiny tail: if the remainder is smaller than
-        # MIN_SPAN_LINES, extend the current span to the end.
-        if total_lines - end < MIN_SPAN_LINES and end < total_lines:
-            end = total_lines
-        spans.append((start, end))
-        start = end + 1
+    while start <= total:
+        first_line_bytes = _line_bytes(lines[start - 1])
+        if first_line_bytes > MAX_BATCH_BYTES:
+            raise ReadingLedgerError(
+                f"单行 L{start} 实际 UTF-8 字节 {first_line_bytes} 超过分批上限 "
+                f"{MAX_BATCH_BYTES}，无法安全分批（不得生成 oversized batch）。"
+            )
+        end = start
+        cur_bytes = 0
+        while end <= total:
+            b = _line_bytes(lines[end - 1])
+            if cur_bytes + b > MAX_BATCH_BYTES or (end - start + 1) > MAX_SPAN_LINES:
+                break
+            cur_bytes += b
+            end += 1
+        spans.append((start, end - 1))
+        start = end
     return spans
 
 
 def build_spans_from_units(units: list[tuple[str, Path]]) -> list[dict[str, Any]]:
     """Build ordered, gap-free, non-overlapping spans from ``(ref, path)`` units.
 
-    Each span references ``<ref>#L<start>-L<end>``. Oversized units are split
-    into contiguous spans so every line of the frozen source belongs to exactly
-    one span. Unit-agnostic: BookDistill chapters and MethodDistill sections
-    share this primitive.
+    Each span references ``<ref>#L<start>-L<end>`` and carries its *actual* UTF-8
+    source bytes (``source_bytes``), never a line-count proportion estimate.
+    Oversized units are split into contiguous spans so every line of the frozen
+    source belongs to exactly one span and no span exceeds ``MAX_BATCH_BYTES``.
+    Unit-agnostic: BookDistill chapters and MethodDistill sections share this.
     """
     spans: list[dict[str, Any]] = []
     for ref, path in units:
         text = path.read_text(encoding="utf-8", errors="replace")
-        total_lines = max(1, len(text.splitlines()))
-        byte_size = len(text.encode("utf-8"))
-        for start, end in _split_oversized(path.name, total_lines):
-            span_bytes = byte_size if (start, end) == (1, total_lines) else max(
-                1, int(byte_size * (end - start + 1) / total_lines)
-            )
+        lines = text.splitlines() or [""]
+        total_lines = len(lines)
+        for start, end in _split_unit_lines(lines):
+            source_bytes = sum(_line_bytes(lines[i - 1]) for i in range(start, end + 1))
             spans.append({
                 "unit_file": ref,
                 "start_line": start,
                 "end_line": end,
                 "unit_lines": total_lines,
-                "approx_bytes": span_bytes,
+                "source_bytes": source_bytes,
             })
     return spans
 
@@ -294,12 +323,17 @@ def _assign_span_ids(spans: list[dict[str, Any]]) -> None:
 
 
 def build_batches(spans: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Group contiguous spans into bounded batches (stable order, no gaps)."""
+    """Group contiguous spans into bounded batches (stable order, no gaps).
+
+    ``total_bytes`` is the sum of each span's *actual* UTF-8 source bytes, so a
+    batch's real source size is mechanically guaranteed ``<= MAX_BATCH_BYTES``
+    (every span is itself within budget by ``_split_unit_lines``).
+    """
     batches: list[dict[str, Any]] = []
     current: list[dict[str, Any]] = []
     current_bytes = 0
     for span in spans:
-        span_bytes = int(span.get("approx_bytes") or 0)
+        span_bytes = int(span.get("source_bytes") or 0)
         if current and current_bytes + span_bytes > MAX_BATCH_BYTES:
             batches.append(current)
             current = []
@@ -313,7 +347,7 @@ def build_batches(spans: list[dict[str, Any]]) -> list[dict[str, Any]]:
         named.append({
             "batch_id": f"B{index:04d}",
             "span_ids": [s["span_id"] for s in group],
-            "total_bytes": sum(int(s.get("approx_bytes") or 0) for s in group),
+            "total_bytes": sum(int(s.get("source_bytes") or 0) for s in group),
             "first_unit": group[0]["unit_file"],
             "last_unit": group[-1]["unit_file"],
         })
@@ -541,13 +575,13 @@ def next_pending_batch(bd_dir: Path) -> dict[str, Any] | None:
     return None
 
 
-def _parse_batch_note(path: Path, required_domains: tuple[str, ...] = SIX_DOMAINS) -> tuple[dict[str, Any], list[str]]:
-    """Parse a batch note's structured header. Returns (data, errors).
+def _parse_batch_note(path: Path) -> tuple[dict[str, Any], list[str]]:
+    """Parse a batch note's structured block. Returns ``(data, parse_errors)``.
 
-    ``required_domains`` is the per-batch audit checklist. BookDistill uses the
-    six narrative domains; MethodDistill passes its own method-oriented domains
-    (or an empty tuple to only require a structured note). ``0 findings`` in a
-    domain is always legal; an unchecked required domain is not.
+    This is *parsing only*: existence, readable text, sha256, a parseable JSON
+    block, and a present ``batch_id``. Every mechanical binding / coverage rule
+    lives in :func:`validate_canonical_note` so publish / recovery / commit /
+    ledger validation share ONE authoritative implementation.
     """
     errors: list[str] = []
     if not path.exists():
@@ -564,24 +598,108 @@ def _parse_batch_note(path: Path, required_domains: tuple[str, ...] = SIX_DOMAIN
         except json.JSONDecodeError as exc:
             errors.append(f"batch note JSON 块不可解析：{exc}")
     structured = data.get("structured") or {}
+    data["structured"] = structured
     if not str(structured.get("batch_id") or "").strip():
         errors.append("batch note 缺少 batch_id。")
-    if required_domains:
-        domains = structured.get("domains_checked")
-        if not isinstance(domains, list):
-            # Back-compat: BookDistill notes may use six_domains_checked.
-            domains = structured.get("six_domains_checked")
-        if not isinstance(domains, list):
-            errors.append("batch note 缺少 domains_checked 列表。")
-        else:
-            unknown = [d for d in domains if d not in required_domains]
-            if unknown:
-                errors.append(f"batch note 含未知检查域：{unknown}")
-            missing = [d for d in required_domains if d not in domains]
-            if missing:
-                errors.append(f"batch note 未检查全部要求域，缺：{missing}")
-        data["domains_checked"] = list(domains) if isinstance(domains, list) else []
+    domains = structured.get("domains_checked")
+    if not isinstance(domains, list):
+        # Back-compat: BookDistill notes may use six_domains_checked.
+        domains = structured.get("six_domains_checked")
+    data["domains_checked"] = list(domains) if isinstance(domains, list) else []
     return data, errors
+
+
+def count_observation_findings(note_text: str) -> list[str]:
+    """Real source-bound finding lines (``- [OBSERVATION] ...``).
+
+    The template's ``格式：`- [OBSERVATION] ...` `` instruction line is excluded
+    because it does not *start* with the marker, so ``0 findings`` notes count 0.
+    """
+    return [ln for ln in note_text.splitlines() if OBSERVATION_LINE_RE.match(ln.strip())]
+
+
+def _batch_span_count(manifest: dict[str, Any], batch_id: str) -> int | None:
+    batch = next((b for b in manifest.get("batches") or [] if b.get("batch_id") == batch_id), None)
+    if batch is None:
+        return None
+    return len(batch.get("span_ids") or [])
+
+
+def validate_canonical_note(
+    parsed: dict[str, Any],
+    manifest: dict[str, Any],
+    batch_id: str,
+    *,
+    required_domains: tuple[str, ...] = SIX_DOMAINS,
+) -> list[str]:
+    """The single authoritative mechanical validator for a canonical batch note.
+
+    Shared by ``publish_batch_note`` / ``has_valid_canonical_note`` /
+    ``commit_batch`` / ``validate_ledger`` so no path (especially recovery) can
+    bypass a check another path performs. Verifies, against the *current* on-disk
+    manifest: ``batch_id`` / ``request_id`` / ``run_id`` / ``manifest_hash`` /
+    ``source_fingerprint`` bindings, ``domains_checked`` completeness, that
+    ``span_count`` equals the batch's real span count, that ``finding_count``
+    equals the real number of ``[OBSERVATION]`` findings, that every finding has
+    a source ref, and that every source ref falls inside this batch's spans.
+    A no-op ``required_domains`` (MethodDistill) drops only the domain check.
+    """
+    errors: list[str] = []
+    structured = parsed.get("structured") or {}
+    raw = parsed.get("raw_text", "")
+    if _batch_span_count(manifest, batch_id) is None:
+        return [f"batch {batch_id} 不在当前 manifest 中。"]
+    if str(structured.get("batch_id") or "") != batch_id:
+        errors.append(f"batch note 的 batch_id={structured.get('batch_id')!r} 与批次 {batch_id} 不一致。")
+    for key, current in (
+        ("request_id", manifest.get("request_id")),
+        ("run_id", manifest.get("run_id")),
+        ("manifest_hash", manifest.get("manifest_hash")),
+        ("source_fingerprint", manifest.get("source_fingerprint")),
+    ):
+        value = structured.get(key)
+        if value in (None, ""):
+            errors.append(f"note 缺少绑定字段 {key}。")
+        elif current is not None and value != current:
+            errors.append(f"note {key} 与当前运行不一致（stale/foreign note）。")
+    if required_domains:
+        domains = parsed.get("domains_checked") or []
+        unknown = [d for d in domains if d not in required_domains]
+        if unknown:
+            errors.append(f"batch note 含未知检查域：{unknown}")
+        missing = [d for d in required_domains if d not in domains]
+        if missing:
+            errors.append(f"batch note 未检查全部要求域，缺：{missing}")
+    declared_span = structured.get("span_count")
+    expected_span = _batch_span_count(manifest, batch_id) or 0
+    if isinstance(declared_span, bool) or not isinstance(declared_span, int) or declared_span != expected_span:
+        errors.append(f"note span_count={declared_span!r} 与本批实际 span 数 {expected_span} 不一致。")
+    findings = count_observation_findings(raw)
+    finding_count = structured.get("finding_count")
+    if isinstance(finding_count, bool) or not isinstance(finding_count, int) or finding_count < 0:
+        errors.append(f"note finding_count 非法：{finding_count!r}（必须为非负整数）。")
+    elif finding_count != len(findings):
+        errors.append(f"note finding_count={finding_count} 与实际 [OBSERVATION] finding 数 {len(findings)} 不一致。")
+    for ln in findings:
+        if not NOTE_REF_RE.search(ln):
+            errors.append(f"存在缺少来源证据 ref 的 [OBSERVATION] finding：{ln.strip()[:60]}")
+    errors.extend(validate_note_span_refs(raw, manifest, batch_id))
+    return errors
+
+
+def validate_batch_note_file(
+    note_path: Path,
+    manifest: dict[str, Any],
+    batch_id: str,
+    *,
+    required_domains: tuple[str, ...] = SIX_DOMAINS,
+) -> tuple[dict[str, Any], list[str]]:
+    """Parse + fully validate one note file against the current manifest."""
+    parsed, errors = _parse_batch_note(note_path)
+    errors = list(errors)
+    if parsed:
+        errors.extend(validate_canonical_note(parsed, manifest, batch_id, required_domains=required_domains))
+    return parsed, errors
 
 
 def commit_batch(
@@ -611,14 +729,11 @@ def commit_batch(
     if batch_id not in batches:
         raise ReadingLedgerError(f"batch_id 不在当前 manifest 中：{batch_id}")
     note_path = Path(batch_note)
-    parsed, errors = _parse_batch_note(note_path, required_domains)
+    parsed, errors = validate_batch_note_file(note_path, manifest, batch_id,
+                                             required_domains=required_domains)
     if errors:
         raise ReadingLedgerError("batch note 校验失败：" + "；".join(errors))
     structured = parsed.get("structured") or {}
-    if str(structured.get("batch_id") or "") != batch_id:
-        raise ReadingLedgerError(
-            f"batch note 的 batch_id={structured.get('batch_id')!r} 与提交批次 {batch_id} 不一致。"
-        )
     # Expected note location keeps the ledger self-describing.
     expected = batch_notes_dir(bd_dir) / f"{batch_id}.md"
     if note_path.resolve() != expected.resolve():
@@ -690,18 +805,24 @@ def publish_batch_note(
     *,
     lease_token: str | None = None,
     required_domains: tuple[str, ...] = SIX_DOMAINS,
-    validate_span_refs: bool = True,
 ) -> dict[str, Any]:
     """Validate a Reader's unique temp note, then atomically publish it canonical.
 
     A Reader never writes a canonical completed note directly; this is the only
-    promotion path. It machine-binds the note to the *current* run:
-    ``batch_id`` / ``request_id`` / ``run_id`` / ``manifest_hash`` /
-    ``source_fingerprint`` must all match the on-disk manifest, the six domains
-    must be checked (``0 findings`` legal, ``unchecked`` not), ``finding_count``
-    must be a non-negative int, and every source ref must fall inside the batch's
-    spans. Any mismatch (stale / foreign / partial note) is rejected and the temp
-    note is left untouched so the batch can simply be re-read.
+    promotion path. Validation is delegated to the single authoritative
+    :func:`validate_batch_note_file` (shared with ``commit_batch`` /
+    ``has_valid_canonical_note`` / ``validate_ledger``): binding fields must match
+    the on-disk manifest, required domains checked (``0 findings`` legal),
+    ``span_count`` must equal the batch's real span count, ``finding_count`` must
+    equal the real number of ``[OBSERVATION]`` findings, every finding must carry
+    a source ref, and every ref must fall inside the batch spans. Any mismatch
+    (stale / foreign / partial / mis-counted note) is rejected and the temp note
+    is left untouched so the batch can simply be re-read.
+
+    The ``lease_token`` is echoed for the caller's benefit; the *mechanical*
+    lease check is enforced by the BookDistill ``note-publish`` CLI (which owns
+    the Reader pool) before this runs, so this primitive stays reusable without
+    a pool (e.g. direct/manual publish, tests).
 
     Does NOT touch the ledger: only the main Agent's ``commit_batch`` marks a
     batch completed (serial, in manifest order). Refuses to clobber a note whose
@@ -720,31 +841,12 @@ def publish_batch_note(
         if state.get("status") == BATCH_STATUS_COMPLETED:
             raise ReadingLedgerError(f"batch {batch_id} 已 completed，拒绝重复发布 note。")
     temp_note = Path(temp_note)
-    parsed, errors = _parse_batch_note(temp_note, required_domains)
+    # ONE authoritative validator shared with commit / recovery / ledger audit.
+    parsed, errors = validate_batch_note_file(temp_note, manifest, batch_id,
+                                              required_domains=required_domains)
     if errors:
         raise ReadingLedgerError("temp note 校验失败：" + "；".join(errors))
     structured = parsed.get("structured") or {}
-    bind_errors: list[str] = []
-    if str(structured.get("batch_id") or "") != batch_id:
-        bind_errors.append(f"note batch_id={structured.get('batch_id')!r} 与目标批次 {batch_id} 不一致。")
-    for key, current in (
-        ("request_id", manifest.get("request_id")),
-        ("run_id", manifest.get("run_id")),
-        ("manifest_hash", manifest.get("manifest_hash")),
-        ("source_fingerprint", manifest.get("source_fingerprint")),
-    ):
-        value = structured.get(key)
-        if value in (None, ""):
-            bind_errors.append(f"note 缺少绑定字段 {key}。")
-        elif current is not None and value != current:
-            bind_errors.append(f"note {key} 与当前运行不一致（stale/foreign note）。")
-    finding_count = structured.get("finding_count")
-    if isinstance(finding_count, bool) or not isinstance(finding_count, int) or finding_count < 0:
-        bind_errors.append(f"note finding_count 非法：{finding_count!r}（必须为非负整数）。")
-    if validate_span_refs:
-        bind_errors.extend(validate_note_span_refs(parsed.get("raw_text", ""), manifest, batch_id))
-    if bind_errors:
-        raise ReadingLedgerError("temp note 绑定/证据校验失败：" + "；".join(bind_errors))
     canonical = batch_notes_dir(bd_dir) / f"{batch_id}.md"
     _atomic_write_text(canonical, parsed["raw_text"])
     try:
@@ -756,7 +858,7 @@ def publish_batch_note(
         "ok": True,
         "batch_id": batch_id,
         "note_path": str(canonical),
-        "finding_count": int(finding_count),
+        "finding_count": int(structured.get("finding_count") or 0),
         "sha256": parsed["sha256"],
         "lease_token": lease_token,
     }
@@ -764,16 +866,23 @@ def publish_batch_note(
 
 def has_valid_canonical_note(bd_dir: Path, batch_id: str, *,
                              required_domains: tuple[str, ...] = SIX_DOMAINS) -> bool:
-    """True when a pending batch already has a valid canonical note (recovery).
+    """True when a pending batch already has a fully valid canonical note.
 
     On resume a finished-but-uncommitted note is committed directly rather than
-    re-read. Only the canonical published note counts, and it must still parse
-    and audit every required domain.
+    re-read. This runs the SAME authoritative validator as publish / commit /
+    ``validate_ledger`` (binding fields + span_count + real finding_count +
+    source-ref containment), so a stale / foreign / mis-counted canonical note
+    can never become commit_ready and bypass publish's full verification.
     """
+    bd_dir = Path(bd_dir)
     canonical = batch_notes_dir(bd_dir) / f"{batch_id}.md"
     if not canonical.exists():
         return False
-    _, errors = _parse_batch_note(canonical, required_domains)
+    manifest = read_manifest(bd_dir)
+    if manifest is None:
+        return False
+    _, errors = validate_batch_note_file(canonical, manifest, batch_id,
+                                         required_domains=required_domains)
     return not errors
 
 
@@ -850,7 +959,8 @@ def validate_ledger(
             errors.append(f"batch {batch_id} completed 但缺少 batch_note。")
             continue
         note_path = bd_dir / note_rel
-        parsed, note_errors = _parse_batch_note(note_path, required_domains)
+        parsed, note_errors = validate_batch_note_file(note_path, manifest, batch_id,
+                                                        required_domains=required_domains)
         if note_errors:
             errors.extend(f"batch {batch_id}: {e}" for e in note_errors)
             continue

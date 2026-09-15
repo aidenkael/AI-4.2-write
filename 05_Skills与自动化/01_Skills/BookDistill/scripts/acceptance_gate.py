@@ -133,21 +133,40 @@ def card_evidence_entries(cards_path: Path) -> list[tuple[str, str]]:
     return entries
 
 
-def resolve_sourceprepare_dir(repo_root: Path, book_id: str) -> Path | None:
+def _sourceprepare_matches(repo_root: Path, book_id: str) -> list[Path]:
+    """All SourcePrepare dirs whose name starts ``<book_id>_`` (may be 0/1/>1)."""
     sp_root = repo_root / "06_工作区" / "SourcePrepare"
-    if not sp_root.exists():
-        return None
-    for entry in sorted(sp_root.iterdir()):
-        if entry.is_dir() and entry.name.startswith(f"{book_id}_"):
-            return entry
-    return None
+    if not sp_root.exists() or not book_id:
+        return []
+    try:
+        return [entry for entry in sorted(sp_root.iterdir())
+                if entry.is_dir() and entry.name.startswith(f"{book_id}_")]
+    except OSError:
+        return []
+
+
+def resolve_sourceprepare_dir(repo_root: Path, book_id: str) -> Path | None:
+    """Unique SourcePrepare dir; ``None`` for 0 matches OR ambiguous >1 matches.
+
+    Ambiguity is surfaced by validate_acceptance (which re-lists matches) so a
+    duplicate ``<book_id>_*`` set fails closed instead of silently picking one.
+    """
+    matches = _sourceprepare_matches(repo_root, book_id)
+    return matches[0] if len(matches) == 1 else None
 
 
 def validate_acceptance(
     asset_dir: Path,
     repo_root: Path | None = None,
+    *,
+    require_sourceprepare: bool = False,
 ) -> dict:
-    """机械验证全书验收报告与 BKP 的一致性（只读）。
+    """机械验证全书验收报告与 BKP 的一致性。
+
+    ``require_sourceprepare=True`` 用于新蒸馏 finalize（write-identity）：必须
+    能唯一解析当前 SourcePrepare；SP 缺失或同 ``<book_id>_*`` 多目录均 fail closed，
+    不得降级为“warning 后继续 PASS”。``False`` 为已发布包的只读历史校验：允许
+    作者事后清理 06，但仍必须完整 validate ledger/note integrity。
 
     返回 {"ok", "errors", "warnings", "status", "retrieval_ready", "card_count"}。
     """
@@ -194,11 +213,26 @@ def validate_acceptance(
         if manifest.get("unit_semantics") not in {"chapter", "reading_unit"}:
             errors.append("distill_manifest 缺少可信 unit_semantics。")
 
+    # ---- SourcePrepare 解析：新 finalize 必须唯一；duplicate/missing fail closed ----
+    sp_matches = _sourceprepare_matches(repo_root, book.get("book_id") or "") if repo_root else []
+    if len(sp_matches) > 1:
+        errors.append(
+            "同 book_id 匹配到多个 SourcePrepare 目录，无法唯一确定冻结来"
+            "源（duplicate 必须 fail closed）："
+            + "、".join(m.name for m in sp_matches)
+        )
+    sp_dir = sp_matches[0] if len(sp_matches) == 1 else None
+    if sp_dir is None and repo_root is not None and not sp_matches:
+        if require_sourceprepare:
+            errors.append("新蒸馏 finalize 无法解析当前 SourcePrepare（已缺失或不可用），"
+                          "不得降级为 warning 后 PASS。")
+        else:
+            warnings.append("SourcePrepare 快照不可解析：仅作为已发布包的只读历史校验。")
+
     # ---- 阅读完成度权威：reading manifest + ledger（不再是 scan_refs）----
     # scan_refs / scan_coverage 仅保留为调试信号，绝不作为 whole-book reading
     # completion 的权威证据。仅填写全范围 scan_refs、仅有完整行号范围、
     # 仅有 Agent 自报“已读”都必须在此失败。
-    sp_dir = resolve_sourceprepare_dir(repo_root, book.get("book_id") or "") if repo_root else None
     reading_manifest = rl.read_manifest(asset_dir)
     reading_ledger = rl.read_ledger(asset_dir)
     if reading_manifest is None:
@@ -215,21 +249,12 @@ def validate_acceptance(
                     "reading manifest 未完整覆盖当前冻结来源（存在 gap/overlap/缺失单元）："
                     + "；".join(coverage.get("errors", [])[:5])
                 )
-        else:
-            warnings.append("SourcePrepare 快照不可解析：reading manifest 覆盖只做结构校验。")
-        ledger_check = rl.validate_ledger(asset_dir, sp_dir) if sp_dir is not None else None
-        if ledger_check is None:
-            # 无 sp_dir 时仍做 ledger 与 manifest 一致性 + 批次 completed 校验。
-            status_view = rl.ledger_status(asset_dir)
-            if not status_view.get("ok"):
-                errors.extend(status_view.get("errors", []))
-            if not status_view.get("complete"):
-                errors.append("reading ledger 未全部 completed：全书阅读尚未结算。")
-        else:
-            if not ledger_check.get("ok"):
-                errors.extend(ledger_check.get("errors", [])[:8])
-            if not ledger_check.get("complete"):
-                errors.append("reading ledger 未全部 completed：全书阅读尚未结算。")
+        # 无论有无 sp_dir，都必须完整 validate ledger + note integrity（不仅是计数）。
+        ledger_check = rl.validate_ledger(asset_dir, sp_dir)
+        if not ledger_check.get("ok"):
+            errors.extend(ledger_check.get("errors", [])[:8])
+        if not ledger_check.get("complete"):
+            errors.append("reading ledger 未全部 completed：全书阅读尚未结算。")
         # 六域 checked 审计：每个 completed batch 的 note 必须检查全部六域（0 findings 合法）。
         batches = (reading_ledger.get("batches") or {})
         for batch_id, state in sorted(batches.items()):
@@ -314,13 +339,11 @@ def validate_acceptance(
     elif retrieval_ready != (status == "PASS"):
         errors.append("retrieval_ready 必须与验收状态一致（PASS=true / REVIEW=false）。")
 
-    # evidence 溯源：格式必须合法；可解析 SourcePrepare 快照时，章节文件必须存在。
+    # evidence 溯源：格式必须合法；可唯一解析 SourcePrepare 快照时，章节文件必须存在。
     evidence_entries = card_evidence_entries(cards_path)
     if not evidence_entries and card_ids:
         warnings.append("cards.md 未声明任何 evidence 行，无法机械验证溯源。")
-    sp_dir = resolve_sourceprepare_dir(repo_root, book.get("book_id") or "") if repo_root else None
-    if sp_dir is None and repo_root is not None:
-        warnings.append("SourcePrepare 快照目录不可解析：evidence 只做格式校验。")
+    # sp_dir 已在上方按唯一/重复/缺失统一解析（duplicate 已 fail closed）。
     for card_id, ref in evidence_entries:
         match = EVIDENCE_RE.match(ref)
         if not match:
@@ -392,7 +415,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     asset_dir = Path(args.asset_dir).resolve()
     repo_root = Path(args.repo_root).resolve() if args.repo_root else Path(__file__).resolve().parents[4]
-    result = validate_acceptance(asset_dir, repo_root)
+    # --write-identity = 新蒸馏 finalize：必须能唯一解析当前 SourcePrepare（否则 fail closed）。
+    result = validate_acceptance(asset_dir, repo_root,
+                                 require_sourceprepare=bool(args.write_identity))
     print(json.dumps(result, ensure_ascii=False, indent=2))
     if args.write_identity and result["ok"] and result.get("status") == "PASS":
         write_identity_acceptance(asset_dir, result)
