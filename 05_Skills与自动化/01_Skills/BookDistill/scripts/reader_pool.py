@@ -20,10 +20,10 @@ Design constraints (task contract §6):
   ``lease_token`` so a stale or foreign lease can never be confused with a live
   one, and only the true owner (or a reconcile of the same request) releases it.
 
-Atomicity comes from ``O_CREAT | O_EXCL`` per slot file: two processes racing
-for the same slot cannot both win, so the number of live lease files can never
-exceed ``READER_LIMIT``. This mirrors the Interactive slot allocation already
-used by the Qoder bridge.
+Atomicity comes from publishing a fully-written same-directory temp file with
+``os.link(temp, slot)``. Hard-link creation is atomic and refuses to overwrite
+an existing target, so two processes racing for the same slot cannot both win
+and an occupied slot is never visible before its lease metadata is complete.
 
 Recovery: the on-disk lease files are the only truth. ``reconcile_request_leases``
 lets a resuming main Agent safely drop its own request's leases before it
@@ -91,20 +91,32 @@ def _read_lease_file(path: Path) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
-def _write_lease_atomic(path: Path, lease: dict[str, Any]) -> None:
-    """Write lease JSON into an already O_EXCL-created slot file (Windows-safe)."""
+def _publish_lease_no_overwrite(path: Path, lease: dict[str, Any]) -> bool:
+    """Atomically publish complete lease JSON without replacing a winner.
+
+    The temp file is complete and durable before its inode is linked at the slot
+    path. ``os.link`` is a same-directory atomic no-overwrite operation on the
+    supported Windows filesystem: ``FileExistsError`` means another acquirer
+    won. A crash before the link leaves no occupied slot; a crash after it leaves
+    a complete, parseable lease (and at worst an unreferenced temp pathname).
+    """
     fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
             json.dump(lease, handle, ensure_ascii=False, indent=2, sort_keys=True)
             handle.write("\n")
-        os.replace(tmp_name, path)
-    except Exception:
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.link(tmp_name, path)
+        except FileExistsError:
+            return False
+        return True
+    finally:
         try:
             os.unlink(tmp_name)
         except OSError:
             pass
-        raise
 
 
 # ---------------------------------------------------------------------------
@@ -126,8 +138,8 @@ def acquire_lease(
 
     Returns the lease dict on success, or ``None`` when the global pool is full
     (every one of the ``limit`` slots is currently held). Never exceeds
-    ``limit`` live leases: each slot is claimed with ``O_CREAT | O_EXCL`` so a
-    concurrent acquirer cannot take the same slot.
+    ``limit`` live leases: each complete temp lease is published with an atomic
+    no-overwrite hard link, so a concurrent acquirer cannot take the same slot.
 
     Opportunistically reclaims leases older than ``stale_after_seconds`` first so
     a crashed-and-never-resumed run cannot permanently shrink the pool.
@@ -145,12 +157,6 @@ def acquire_lease(
     token = lease_token or uuid.uuid4().hex
     for slot in range(limit):
         path = _slot_path(pool_root, slot)
-        try:
-            fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
-            continue
-        except OSError as exc:  # pragma: no cover - defensive
-            raise ReaderPoolError(f"无法创建 Reader lease 槽：{exc}") from exc
         lease = {
             "schema": LEASE_SCHEMA,
             "slot": slot,
@@ -162,16 +168,10 @@ def acquire_lease(
             "acquired_at_iso": _iso(now),
         }
         try:
-            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-                handle.write("")  # reserve the slot immediately (existence = occupied)
-            _write_lease_atomic(path, lease)
-        except Exception:
-            try:
-                os.unlink(str(path))
-            except OSError:
-                pass
-            raise
-        return dict(lease)
+            if _publish_lease_no_overwrite(path, lease):
+                return dict(lease)
+        except OSError as exc:  # pragma: no cover - defensive
+            raise ReaderPoolError(f"无法创建 Reader lease 槽：{exc}") from exc
     return None
 
 
@@ -275,9 +275,12 @@ def reclaim_stale_leases(
 ) -> int:
     """Release leases older than ``stale_after_seconds``; return the count.
 
-    Conservative orphan recovery without a heartbeat service. An unparseable
-    slot file carries no timestamp and is left alone (its owner reserved it a
-    moment ago, or reconcile will drop it by request).
+    Conservative orphan recovery without a heartbeat service. Parseable leases
+    use their bound ``acquired_at``. A historical/abnormal malformed slot has no
+    verifiable owner metadata, so it is never reconciled by request and is only
+    reclaimed when the slot file's own mtime exceeds the same stale boundary.
+    Fresh malformed files therefore remain fail-closed instead of being deleted
+    on sight, while old malformed files cannot shrink the pool forever.
     """
     pool_root = Path(pool_root)
     if not pool_root.is_dir():
@@ -288,10 +291,17 @@ def reclaim_stale_leases(
         path = _slot_path(pool_root, slot)
         lease = _read_lease_file(path)
         if lease is None:
-            continue
-        acquired = lease.get("acquired_at")
-        if not isinstance(acquired, (int, float)):
-            continue
+            try:
+                acquired = path.stat().st_mtime
+            except OSError:
+                continue
+        else:
+            acquired = lease.get("acquired_at")
+            if not isinstance(acquired, (int, float)):
+                try:
+                    acquired = path.stat().st_mtime
+                except OSError:
+                    continue
         if now - float(acquired) > stale_after_seconds:
             try:
                 os.unlink(str(path))

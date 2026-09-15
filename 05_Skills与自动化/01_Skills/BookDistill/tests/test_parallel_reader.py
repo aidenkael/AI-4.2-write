@@ -16,12 +16,15 @@
 """
 import io
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import types
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 _HERE = Path(__file__).resolve()
 sys.path.insert(0, str(_HERE.parents[1] / "scripts"))
@@ -117,6 +120,55 @@ class BatchSemanticsUnchangedTest(unittest.TestCase):
 
 
 class ReaderPoolPrimitiveTest(unittest.TestCase):
+    def test_atomic_no_overwrite_two_process_competitors(self):
+        """两个跨进程竞争者只有一个取得同一 slot，loser 不覆盖 winner。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            pool = Path(tmp) / "pool"
+            barrier = Path(tmp) / "go"
+            ready = [Path(tmp) / f"ready_{i}" for i in range(2)]
+            worker = "\n".join([
+                "import sys, time",
+                "from pathlib import Path",
+                f"sys.path.insert(0, {str(_HERE.parents[1] / 'scripts')!r})",
+                "import reader_pool as rp",
+                "pool, barrier, ready, name = map(Path, sys.argv[1:])",
+                "ready.touch()",
+                "while not barrier.exists(): time.sleep(0.001)",
+                "lease = rp.acquire_lease(pool, request_id=str(name), run_id=str(name), batch_id='B0001', limit=1)",
+                "print('won' if lease else 'lost')",
+            ])
+            procs = [subprocess.Popen(
+                [sys.executable, "-c", worker, str(pool), str(barrier), str(ready[i]), f"r{i}"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            ) for i in range(2)]
+            for _ in range(5000):
+                if all(path.exists() for path in ready):
+                    break
+                import time
+                time.sleep(0.001)
+            self.assertTrue(all(path.exists() for path in ready))
+            barrier.touch()
+            results = []
+            for proc in procs:
+                stdout, stderr = proc.communicate(timeout=10)
+                self.assertEqual(proc.returncode, 0, stderr)
+                results.append(stdout.strip())
+            self.assertEqual(sorted(results), ["lost", "won"])
+            self.assertEqual(rp.active_count(pool, limit=1), 1)
+            self.assertEqual(len(rp.read_leases(pool, limit=1)), 1)
+
+    def test_interrupted_publication_never_leaves_reserved_empty_slot(self):
+        """发布前中断不会留下占池 slot，后续竞争者仍可获取。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            pool = Path(tmp) / "pool"
+            with mock.patch.object(rp.os, "link", side_effect=OSError("simulated interruption")):
+                with self.assertRaises(rp.ReaderPoolError):
+                    rp.acquire_lease(pool, request_id="rA", run_id="rA", batch_id="B0001", limit=1)
+            self.assertEqual(rp.active_count(pool, limit=1), 0)
+            lease = rp.acquire_lease(pool, request_id="rB", run_id="rB", batch_id="B0002", limit=1)
+            self.assertIsNotNone(lease)
+            self.assertEqual(len(rp.read_leases(pool, limit=1)), 1)
+
     def test_point4_acquire_release_atomic_idempotent(self):
         """检查点 4：lease acquire/release 在 temp root 下 atomic/idempotent。"""
         with tempfile.TemporaryDirectory() as tmp:
@@ -179,6 +231,37 @@ class ReaderPoolPrimitiveTest(unittest.TestCase):
             n2 = rp.reclaim_stale_leases(pool, stale_after_seconds=3600, now_ts=fresh["acquired_at"] + 7200)
             self.assertEqual(n2, 1)
             self.assertEqual(rp.active_count(pool), 0)
+
+    def test_malformed_fresh_slot_is_fail_closed(self):
+        """新的 malformed slot 无 owner 证据，不得立即误删。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            pool = Path(tmp) / "pool"
+            pool.mkdir()
+            slot = pool / "slot_00.lease"
+            slot.write_text("", encoding="utf-8")
+            mtime = slot.stat().st_mtime
+            reclaimed = rp.reclaim_stale_leases(
+                pool, stale_after_seconds=3600, now_ts=mtime + 10, limit=1)
+            self.assertEqual(reclaimed, 0)
+            self.assertTrue(slot.exists())
+            self.assertEqual(rp.active_count(pool, limit=1), 1)
+
+    def test_malformed_stale_slot_is_reclaimed(self):
+        """malformed slot 超过保守 stale 边界后可回收，不会永久缩池。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            pool = Path(tmp) / "pool"
+            pool.mkdir()
+            slot = pool / "slot_00.lease"
+            slot.write_text("not-json", encoding="utf-8")
+            old = 1_000_000.0
+            os.utime(slot, (old, old))
+            reclaimed = rp.reclaim_stale_leases(
+                pool, stale_after_seconds=3600, now_ts=old + 7200, limit=1)
+            self.assertEqual(reclaimed, 1)
+            self.assertFalse(slot.exists())
+            self.assertIsNotNone(rp.acquire_lease(
+                pool, request_id="rB", run_id="rB", batch_id="B0002", limit=1,
+                now_ts=old + 7200))
 
 
 class ReaderDispatchTest(unittest.TestCase):
