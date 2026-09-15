@@ -92,16 +92,13 @@ def _bkp_acceptance_view(a: dict[str, Any]) -> str | None:
     asset_id = str(a.get("id") or "").strip()
     if not asset_id:
         return None
-    distill_root = get_repo_root() / "02_素材知识库"
-    if not distill_root.exists():
+    matches = _knowledge_dir_matches(asset_id)
+    if len(matches) > 1:
+        # 同 asset id 多个 02 目录：fail closed（不得静默选一个），降为需复核。
+        return "review"
+    if not matches:
         return None
-    asset_dir = next(
-        (entry for entry in sorted(distill_root.iterdir())
-         if entry.is_dir() and entry.name.startswith(f"{asset_id}_")),
-        None,
-    )
-    if asset_dir is None:
-        return None
+    asset_dir = matches[0]
     try:
         identity = json.loads((asset_dir / "bkp" / "identity.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -120,10 +117,11 @@ def _reference_knowledge_contract_current(a: dict[str, Any]) -> bool:
     if a.get("type") != "REFERENCE_WORK":
         return True
     asset_id = str(a.get("id") or "")
-    root = get_repo_root() / "02_素材知识库"
-    asset_dir = next((p for p in sorted(root.glob(f"{asset_id}_*")) if p.is_dir()), None)
-    if asset_dir is None:
+    matches = _knowledge_dir_matches(asset_id)
+    if len(matches) != 1:
+        # 0 个 → 无包；>1 个 → 歧义 fail closed（不得静默选一个）。
         return False
+    asset_dir = matches[0]
     try:
         identity = json.loads((asset_dir / "bkp" / "identity.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -156,6 +154,20 @@ def _list_prepare_dir_names(base: Path) -> list[str]:
     return []
 
 
+def _prefixed_dir_names(names: list[str], asset_id: str) -> list[str]:
+    """All dir names matching ``<asset_id>_*`` (fail-closed callers check len)."""
+    return sorted(n for n in names if n.startswith(f"{asset_id}_"))
+
+
+def _knowledge_dir_matches(asset_id: str) -> list[Path]:
+    """All 02_素材知识库 entries for ``asset_id`` (>1 == ambiguous, fail closed)."""
+    root = get_repo_root() / "02_素材知识库"
+    if not asset_id or not root.is_dir():
+        return []
+    return [p for p in sorted(root.iterdir())
+            if p.is_dir() and p.name.startswith(f"{asset_id}_")]
+
+
 def _prepare_package_path(asset: dict[str, Any], *,
                           sp_names: list[str] | None = None,
                           mp_names: list[str] | None = None) -> Path | None:
@@ -170,7 +182,7 @@ def _prepare_package_path(asset: dict[str, Any], *,
     else:
         base = get_repo_root() / "06_工作区" / "SourcePrepare"
         names = sp_names if sp_names is not None else _list_prepare_dir_names(base)
-    name = next((item for item in names if item.startswith(f"{asset_id}_")), None)
+    name = next((item for item in names if item.startswith(f"{asset_id}_")), None) if len(_prefixed_dir_names(names, asset_id)) == 1 else None
     return base / name if name else None
 
 
@@ -274,6 +286,15 @@ def _prepare_package_current(asset: dict[str, Any],
         required_subdir = "sections"
     else:
         required_subdir = "chapters"
+    names = mp_names if mtype == "METHOD_SOURCE" else sp_names
+    if names is None:
+        _base = get_repo_root() / "06_工作区" / (
+            "MethodPrepare" if mtype == "METHOD_SOURCE" else "SourcePrepare")
+        names = _list_prepare_dir_names(_base)
+    if len(_prefixed_dir_names(names, asset_id)) > 1:
+        # 同 asset id 多个 Prepare 目录：fail closed，不 next(first) 静默选一个。
+        return {"available": False, "format": None,
+                "reason": "存在多个提纯产物目录，无法唯一确定当前提纯结果，请先清理重复目录。"}
     pkg = _prepare_package_path(asset, sp_names=sp_names, mp_names=mp_names)
     if pkg is None:
         return none
@@ -330,10 +351,11 @@ def _source_formats(asset: dict[str, Any]) -> list[str]:
 
 
 def _material_learning_paths(asset_id: str, asset_type: str) -> list[Path]:
-    root = get_repo_root() / "02_素材知识库"
-    asset_dir = next((p for p in sorted(root.glob(f"{asset_id}_*")) if p.is_dir()), None)
-    if asset_dir is None:
+    matches = _knowledge_dir_matches(asset_id)
+    if len(matches) != 1:
+        # 0 个→空；>1 个→歧义 fail closed（不静默选一个）。
         return []
+    asset_dir = matches[0]
     if asset_type == "REFERENCE_WORK":
         return [asset_dir / "bkp" / "author_view.md", asset_dir / "model.md"]
     if asset_type == "METHOD_SOURCE":
@@ -1204,9 +1226,14 @@ def _find_sp_dir(asset_id: str, name: str) -> Path:
     root = get_repo_root() / "06_工作区" / "SourcePrepare"
     if not root.exists():
         raise MaterialsError("还没有任何提纯产物，请先对素材执行「提纯」。")
-    candidates = list(root.glob(f"{asset_id}_*"))
+    candidates = [p for p in sorted(root.glob(f"{asset_id}_*")) if p.is_dir()]
     if not candidates:
         raise MaterialsError(f"素材 {asset_id} 还没有提纯产物（06_工作区/SourcePrepare），请先提纯。")
+    if len(candidates) > 1:
+        # A5：同 asset id 多个 SourcePrepare 目录必须 fail closed，禁止 next(first) 静默选一个。
+        raise MaterialsError(
+            f"素材 {asset_id} 存在多个提纯产物目录（{', '.join(p.name for p in candidates)}），"
+            "无法唯一确定当前来源，请先清理重复目录后重试。")
     return candidates[0]
 
 
@@ -1809,9 +1836,13 @@ def _find_mp_dir(asset_id: str) -> Path:
     root = get_repo_root() / "06_工作区" / "MethodPrepare"
     if not root.exists():
         raise MaterialsError("还没有任何方法提纯产物，请先对素材执行「提纯」。")
-    candidates = list(root.glob(f"{asset_id}_*"))
+    candidates = [p for p in sorted(root.glob(f"{asset_id}_*")) if p.is_dir()]
     if not candidates:
         raise MaterialsError(f"素材 {asset_id} 还没有方法提纯产物（06_工作区/MethodPrepare），请先提纯。")
+    if len(candidates) > 1:
+        raise MaterialsError(
+            f"素材 {asset_id} 存在多个方法提纯产物目录（{', '.join(p.name for p in candidates)}），"
+            "无法唯一确定当前来源，请先清理重复目录后重试。")
     return candidates[0]
 
 
@@ -2302,9 +2333,8 @@ def _current_material_folder(asset: dict[str, Any]) -> Path | None:
     if stage == "purified":
         return _prepare_package_path(asset)
     if stage == "writing":
-        knowledge_root = get_repo_root() / "02_素材知识库"
-        return next((path for path in sorted(knowledge_root.glob(f"{asset_id}_*"))
-                     if path.is_dir()), None)
+        matches = _knowledge_dir_matches(asset_id)
+        return matches[0] if len(matches) == 1 else None  # 歧义 fail closed
     return None
 
 

@@ -77,20 +77,30 @@ def _make_repo(tmp_path: Path) -> tuple[Path, str]:
 
     fp1 = catalog.content_fingerprint([{"sha256": sha1, "path": "x"}])
 
-    # FINALIZED BKP：book_0001 knowledge 可用 且 refresh 后稳定
+    # 当前 06 SourcePrepare（PASS + 当前版本 + 来源 SHA 命中）→ 提纯可用且稳定（磁盘真相）。
+    sp_dir = root / "06_工作区" / "SourcePrepare" / "book_0001_Alpha"
+    sp_dir.mkdir(parents=True)
+    (sp_dir / "metadata.json").write_text(json.dumps({
+        "book_id": "book_0001", "status": "PASS", "skill_version": "0.4.0",
+        "unit_semantics": "chapter", "unit_boundary_source": "epub_nav_anchor",
+        "chapter_files": 1, "selected_source": {"sha256": sha1},
+    }, ensure_ascii=False), encoding="utf-8")
+
+    # FINALIZED BKP（sp_version 0.4.0）：book_0001 knowledge 可用且 refresh 后稳定
     bkp_dir = root / catalog.DISTILL_DIR_NAME / "book_0001_Alpha" / "bkp"
     bkp_dir.mkdir(parents=True)
     (bkp_dir / "identity.json").write_text(json.dumps({
         "bkp_version": "0.2", "schema_status": "FINALIZED",
         "book": {"book_id": "book_0001", "title": "Alpha", "author": "作者A"},
-        "source_snapshot": {"source_sha256": sha1},
+        "source_snapshot": {"source_sha256": sha1, "sp_version": "0.4.0",
+                            "unit_semantics": "chapter"},
     }, ensure_ascii=False), encoding="utf-8")
 
     assets = [
         {"id": "book_0001", "name": "Alpha", "type": "REFERENCE_WORK", "author": "作者A",
          "tags": [], "notes": "",
          "files": [{"path": "01_网络小说/Alpha/Alpha.epub", "sha256": sha1, "primary": True}],
-         "purification": {"status": "可用", "evidence": "sourceprepare_record",
+         "purification": {"status": "可用", "evidence": "sourceprepare_metadata",
                           "source_sha256": sha1, "input_fingerprint": fp1},
          "knowledge": {"status": "可用", "path": "02_素材知识库/book_0001_Alpha",
                        "source_sha256": sha1}},
@@ -378,9 +388,9 @@ def test_intake_rejects_research_new_asset(tmp_path):
     assert intake.ROLE_DIR == {"REFERENCE_WORK": "01_原著", "METHOD_SOURCE": "02_技巧类", "LOOSE_MATERIAL": "03_其他"}
 
 
-# ---------- M. ATTACH_MARKS_STALE（第 47 节） ----------
+# ---------- M. ATTACH 不伪标陈旧（磁盘真相） ----------
 
-def test_attach_existing_marks_stale(tmp_path):
+def test_attach_existing_keeps_current_prepare(tmp_path):
     root, _ = _make_repo(tmp_path)
     _put_inbox(root, "Alpha_v2.epub", b"alpha v2 content")
     report = intake.apply_plan({"items": [{"action": "ATTACH_EXISTING",
@@ -390,10 +400,11 @@ def test_attach_existing_marks_stale(tmp_path):
     assert report["ok"] is True
     ledger = _read_ledger(root)
     a = next(x for x in ledger["assets"] if x["id"] == "book_0001")
-    # source set fingerprint 改变 → purification 需更新（旧可用不覆盖已变化素材）
-    assert a["purification"]["status"] == "需更新"
-    assert a["purification"]["evidence"] == "sourceprepare_record_input_changed"
-    # knowledge：原 BKP 使用的旧 source 仍存在 → 可以继续可用（两状态 authority 不同）
+    # 磁盘真相：当前 Prepare 仍命中一个已登记来源（v1）→ 提纯仍可用（不因附新版本伪标需更新）。
+    assert len(a["files"]) == 2
+    assert a["purification"]["status"] == "可用"
+    assert a["purification"]["evidence"] == "sourceprepare_metadata"
+    # knowledge：原 BKP 使用的旧 source 仍存在 → 继续可用
     assert a["knowledge"]["status"] == "可用"
 
 

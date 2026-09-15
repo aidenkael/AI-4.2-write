@@ -26,9 +26,12 @@ MIGRATION_ONLY：load_legacy_csv / build_assets / bootstrap_type / parse_author_
     files[].path/primary/source_container/container membership），不被文件名/旧分类/AI 自动覆盖。
   - files[].sha256 是机器事实快照：registered path 存在则重算；缺失 → MISSING_REGISTERED_FILE。
   - 未登记磁盘文件只报告 UNREGISTERED_FILE，不自动建 asset / 分类 / 分配 ID / 移动。
-  - Phase 2B1.1：purification 是长期持久记录。SP metadata 是证据来源、ledger 是已结算事实的
-    canonical 存储；06_工作区 删除后，已结算提纯事实仍保留（input_fingerprint 匹配时稳定恢复，
-    素材变化时判需更新）。containers[].original.path 也是正式登记事实，缺失必须报 MISSING。
+  - 磁盘真相合同：作者看到的提纯状态 = 当前磁盘上真实、有效、与当前来源匹
+    配的 Prepare package（06_工作区/SourcePrepare|MethodPrepare）。06 Prepare 被
+    删除后不再从历史 ledger record 长期保留为“可用”（回到未处理）。input_fingerprint
+    与路径解耦：内容未变不因目录迁移 stale，素材内容变化时判需更新。已正式发布、
+    KnowledgeRetrieve 可发现的 02 知识包不因 06 清理而失效（derive_knowledge 独立判定）。
+    containers[].original.path 也是正式登记事实，缺失必须报 MISSING。
 
 确定性保证：
   - 无时间戳 / 无 volatile 字段
@@ -290,32 +293,29 @@ def derive_purification(sp_meta: dict | None, bkp: dict | None, file_shas: set,
                         input_fp: str | None = None, prev: dict | None = None,
                         legacy_fp: str | None = None,
                         evidence_prefix: str = "sourceprepare") -> dict:
-    """提纯状态推导（Phase 2B1.1 持久化版；Phase 2B1.2 指纹与路径解耦）。
+    """提纯状态推导（磁盘真相合同；Phase 2B1.2 指纹与路径解耦）。
     evidence_prefix 区分证据来源（sourceprepare = REFERENCE_WORK/RESEARCH；
     methodprepare = METHOD_SOURCE），推导规则完全一致。
 
-    优先级：
-      1. 当前 SourcePrepare metadata（存在时）= 最新处理事实
-      2. 已持久化 ledger purification record（content fingerprint 匹配）= 上一次已结算事实
-      3. FINALIZED BKP = 历史恢复证据
-      4. 无证据 = 未处理
-    任何层级发现当前 content fingerprint 已变化 → 需更新。
-
-    Phase 2B1.2 一次性兼容迁移：prev 的 input_fingerprint 若等于 legacy_fp
-    （旧 path:sha256 算法，且当前内容与之仍一致）→ 保持状态与 source_sha256，
-    仅把 input_fingerprint 迁移为 content_fingerprint，不标记需更新。
-    迁移完成后新 record 只使用 content fingerprint，不再产生 legacy record。
+    当前产品合同：作者看到的提纯状态 = 当前磁盘上真实、有效、与当前来源
+    匹配的 Prepare package。因此：
+      1. 当前准备 metadata 存在（sp_meta 非 None）= 唯一驱动提纯状态的事实：
+         PASS+当前版本+来源 SHA 命中→可用；REVIEW/FAIL→需复核/失败；旧版本/
+         错来→需更新；
+      2. 当前无准备 metadata（作者已删 06 Prepare / 从未提纯）→ 一律未处理，
+         不再从历史 ledger record 或已发布 BKP 长期保留为「可用」。
+    已正式发布、可检索的 02 知识包是否仍可用，完全由 derive_knowledge 与
+    Workbench workflow_stage=writing 路径独立判定，与提纯状态解耦。
 
     持久化字段（canonical schema enrichment，schema_version 保持 1.0）：
-      - source_sha256：有 selected_source 时保存其 SHA
+      - source_sha256：当前准备有效时保存其 selected_source SHA
       - input_fingerprint：本次评估时 asset 全部 registered source files 的
         SHA256 multiset fingerprint（与路径无关）
     不保存时间戳 / SourcePrepare 正文。
 
     evidence 语义：
       - <prefix>_metadata / <prefix>_metadata_*：由当前准备 metadata 直接推导
-      - <prefix>_record / <prefix>_record_input_changed：ledger 持久 record 结算/判定
-      - bkp_source_snapshot / bkp_source_sha_mismatch：BKP 历史恢复证据（仅参考作品分支）
+      - None：无当前磁盘 Prepare（未处理）
     """
     # 1. 当前准备 metadata = 最新处理事实（SourcePrepare / MethodPrepare）
     if sp_meta is not None:
@@ -352,57 +352,12 @@ def derive_purification(sp_meta: dict | None, bkp: dict | None, file_shas: set,
             rec["input_fingerprint"] = input_fp
         return rec
 
-    # 旧 SourcePrepare 合同不能被“指纹仍相同”的持久 record 遮蔽。
-    # 当前无 SP metadata、仅有旧 BKP snapshot 时，先于 prev fail closed。
-    if evidence_prefix == "sourceprepare" and bkp is not None and bkp["finalized"] \
-            and bkp.get("sp_version") != SOURCEPREPARE_EXPECTED_VERSION:
-        rec = {"status": "需更新", "evidence": "bkp_sourceprepare_version_stale"}
-        if isinstance(prev, dict) and prev.get("source_sha256"):
-            rec["source_sha256"] = prev["source_sha256"]
-        if input_fp is not None:
-            rec["input_fingerprint"] = input_fp
-        return rec
-
-    # 2. 已持久化 ledger record = 上一次已结算处理事实
-    prev_fp = prev.get("input_fingerprint") if isinstance(prev, dict) else None
-    if prev_fp:
-        if input_fp is not None and input_fp != prev_fp:
-            # Phase 2B1.2 一次性兼容迁移：prev 为旧 path-based 算法 record 且当前内容
-            # 与其一致 → 保持状态/source_sha256，仅迁移 input_fingerprint，不判需更新。
-            if legacy_fp is not None and prev_fp == legacy_fp \
-                    and prev.get("status") in ("可用", "需复核", "失败"):
-                return {"status": prev["status"],
-                        "evidence": prev.get("evidence") or f"{evidence_prefix}_record",
-                        "source_sha256": prev.get("source_sha256"),
-                        "input_fingerprint": input_fp}
-            rec = {"status": "需更新", "evidence": f"{evidence_prefix}_record_input_changed",
-                   "input_fingerprint": prev_fp}
-            if prev.get("source_sha256"):
-                rec["source_sha256"] = prev["source_sha256"]
-            return rec
-        if prev.get("status") in ("可用", "需复核", "失败"):
-            rec = {"status": prev["status"],
-                   "evidence": prev.get("evidence") or f"{evidence_prefix}_record",
-                   "input_fingerprint": prev_fp}
-            if prev.get("source_sha256"):
-                rec["source_sha256"] = prev["source_sha256"]
-            return rec
-        # prev 是非正式状态（需更新/未处理/不适用）→ 保持原状
-        return dict(prev)
-
-    # 3. FINALIZED BKP = 历史恢复证据（可补写长期 record）
-    if bkp is not None and bkp["finalized"]:
-        if evidence_prefix == "sourceprepare" and bkp.get("sp_version") != SOURCEPREPARE_EXPECTED_VERSION:
-            return {"status": "需更新", "evidence": "bkp_sourceprepare_version_stale"}
-        if bkp["source_sha256"] and bkp["source_sha256"] in file_shas:
-            rec = {"status": "可用", "evidence": "bkp_source_snapshot",
-                   "source_sha256": bkp["source_sha256"]}
-            if input_fp is not None:
-                rec["input_fingerprint"] = input_fp
-            return rec
-        return {"status": "需更新", "evidence": "bkp_source_sha_mismatch"}
-
-    # 4. 无证据
+    # ---- 无当前磁盘 Prepare = 当前未提纯（磁盘真相合同）----
+    # 作者看到的当前提纯状态 = 当前磁盘上真实、有效、与当前来源匹配的 Prepare
+    # package。历史 ledger record（<prefix>_record）或已发布 BKP 不得在 06 Prepare
+    # 被作者清理后继续冒充「可用」，也不得驱动作者当前 workflow_stage。
+    # 已正式发布、KnowledgeRetrieve 可发现的 02 知识包仍由 derive_knowledge 独立
+    # 判定为可用（writing_callable），与本提纯状态解耦。
     return {"status": "未处理", "evidence": None}
 
 
