@@ -22,10 +22,13 @@ def test_agent_task_consumes_formal_observer_contracts_and_full_pipeline(tmp_pat
 
 
 def test_agent_task_requires_resumable_batch_reading(tmp_path: Path) -> None:
-    """新合同：逐批真实阅读 + 磁盘 ledger，绝不要求一次读全书或三遍全文扫描。"""
+    """合同：可恢复逐批真实阅读 + 磁盘 ledger，绝不要求一次读全书或三遍全文扫描。"""
     task = build_distill_agent_task(tmp_path / "source", tmp_path / "distill")
-    assert "reading-next" in task
+    # 并行编排：Main 用 reader-dispatch 取批 + 专用 Reader 子 Agent，串行 reading-commit。
+    assert "reader-dispatch" in task
     assert "reading-commit" in task
+    assert "reader-reconcile" in task and "reader-release" in task
+    assert "note-publish" in task
     assert "直接阅读该 batch 全部 span 的完整原文" in task
     # 不再要求两名 Observer 各自重新完整读一遍全书。
     assert "observer_bridge.py" not in task
@@ -34,6 +37,30 @@ def test_agent_task_requires_resumable_batch_reading(tmp_path: Path) -> None:
     # 取消固定 card 数量配额（明确声明不设配额、数量由来源决定）。
     assert "数量由来源决定" in task
     assert "不设 10–20 条等任何配额" in task
+
+
+def test_agent_task_is_main_coordinator_with_parallel_readers(tmp_path: Path) -> None:
+    """新执行架构：Main=coordinator，专用单批次 Reader，全局共享池上限 16。"""
+    task = build_distill_agent_task(tmp_path / "source", tmp_path / "distill")
+    # Main 亲自编排，不再把整本书包给单个 general-purpose 子 Agent 串行读完。
+    assert "主编排 Agent" in task
+    assert "绝不把整本书包给单个 general-purpose 子 Agent" in task
+    # 专用 Reader 子 Agent 以 subagent_type 分派，每个 Reader 只一个 batch。
+    assert 'subagent_type="gowrite-bookdistill-reader"' in task
+    assert "每个 Reader 严格只负责一个 batch" in task
+    # 全局共享 Reader 池上限 16（多本共用），Reader 不得 reading-commit。
+    assert "全局共享 Reader 池上限 16" in task
+    assert "绝不 `reading-commit`" in task or "绝不 reading-commit" in task
+    # Main 独占串行 commit。
+    assert "按 manifest 顺序串行" in task
+    assert "只有 Main 可 commit" in task
+    # 滚动收敛状态是过程工件，绝不进入 02；全书 final convergence 仍必做。
+    assert "convergence_state.md" in task
+    assert "绝不进入 02" in task
+    assert "final Editorial Convergence" in task
+    # 动态补位、不做固定 wave barrier；恢复以磁盘为真相源。
+    assert "动态补位" in task
+    assert "completed）的 ledger batch **永远不重派**" in task or "永远不重派" in task
 
 
 def test_agent_task_requires_response_envelope_not_chat_json(tmp_path: Path) -> None:

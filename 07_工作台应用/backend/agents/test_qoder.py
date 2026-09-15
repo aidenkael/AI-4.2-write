@@ -132,3 +132,32 @@ def test_command_locations_reports_stale_content(monkeypatch, tmp_path):
     assert facts[str(a)]["ready"] is True
     assert facts[str(b)]["ready"] is False
     assert facts[str(b)]["matches"] is False
+
+
+def test_point13_book_distill_runs_in_main_session():
+    """检查点 13：book_distill_propose 由 parent/main 亲自执行，不整包给单个 general-purpose 子 Agent。"""
+    d = qoder.command_definition(1)
+    assert "book_distill_propose" in d
+    assert "execute the request's `task` yourself in this main session" in d
+    assert "do NOT delegate the whole task to a single general-purpose subagent" in d
+    # 业务规则不复制进 qoder.py：只做分流，权威仍在 task 文本。
+    assert "The task text is authoritative" in d
+
+
+def test_point14_other_kinds_still_fresh_child():
+    """检查点 14：非 BookDistill kind 仍为全新独立子 Agent（阶段隔离不变）。"""
+    d = qoder.command_definition(1)
+    assert "For every other `kind`" in d
+    assert "newly created subagent with an independent context" in d
+    assert "must never pass an earlier stage's task, result" in d
+
+
+def test_point15_response_envelope_and_auto_continue_preserved():
+    """检查点 15：response envelope / exact request_id / auto_continue 未破坏。"""
+    d = qoder.command_definition(1)
+    assert "gowrite_response/v1" in d
+    assert "exact same `request_id`" in d
+    assert "auto_continue" in d
+    assert "await-next" in d
+    # 两个分支共用同一写回契约。
+    assert "In both cases, write one UTF-8 JSON response file" in d

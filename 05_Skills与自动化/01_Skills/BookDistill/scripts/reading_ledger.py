@@ -49,6 +49,14 @@ MANIFEST_FILENAME = "reading_manifest.json"
 LEDGER_FILENAME = "reading_ledger.json"
 RECEIPT_FILENAME = "completion_receipt.json"
 BATCH_NOTES_DIRNAME = "batch_notes"
+# Per-run unique temp notes live here before deterministic validation + atomic
+# publish to the canonical ``batch_notes/<batch_id>.md``. A Reader never writes a
+# canonical completed note directly. Process-only; never published to 02.
+BATCH_NOTE_TMP_DIRNAME = ".tmp"
+
+# A source ref inside a batch note: ``<unit_file>.md#L<start>[-L<end>]`` where
+# unit_file is ``chapters/NNNN`` (BookDistill) or ``sections/S####`` (Method).
+NOTE_REF_RE = re.compile(r"([A-Za-z0-9_./\-]+\.md)#L(\d+)(?:-L?(\d+))?")
 
 # The six check domains every batch note must audit. ``0 findings`` is legal;
 # ``unchecked`` is not. The names are the canonical Chinese labels used by the
@@ -113,6 +121,22 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
         raise
 
 
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Atomic text replace (temp file in same dir -> os.replace). Windows-safe."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+        os.replace(tmp_name, path)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
 def _read_json(path: Path) -> dict[str, Any] | None:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -139,6 +163,24 @@ def receipt_path(bd_dir: Path) -> Path:
 
 def batch_notes_dir(bd_dir: Path) -> Path:
     return work_dir(bd_dir) / BATCH_NOTES_DIRNAME
+
+
+def batch_note_tmp_dir(bd_dir: Path) -> Path:
+    """Per-run unique temp notes (validated + atomically published from here)."""
+    return work_dir(bd_dir) / BATCH_NOTES_DIRNAME / BATCH_NOTE_TMP_DIRNAME
+
+
+def unique_temp_note_path(bd_dir: Path, batch_id: str, lease_token: str) -> Path:
+    """The unique temp note path one Reader writes before deterministic publish.
+
+    Bound to ``lease_token`` so two Readers (or a retried Reader) for the same
+    batch never share a temp file; only ``publish_batch_note`` promotes a
+    validated temp note to the canonical ``batch_notes/<batch_id>.md``.
+    """
+    tmp_dir = batch_note_tmp_dir(bd_dir)
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    safe_token = "".join(ch for ch in str(lease_token) if ch.isalnum() or ch in ("-", "_")) or "nolease"
+    return tmp_dir / f"{batch_id}.{safe_token}.md"
 
 
 def _chapter_sort_key(name: str) -> tuple[int, str]:
@@ -597,6 +639,142 @@ def commit_batch(
     ledger["updated_at"] = _now_iso()
     _atomic_write_json(ledger_path(bd_dir), ledger)
     return {"ok": True, "batch_id": batch_id, "status": BATCH_STATUS_COMPLETED}
+
+
+# ---------------------------------------------------------------------------
+# Batch note publish (unique temp -> deterministic validation -> atomic canonical)
+# ---------------------------------------------------------------------------
+
+def _batch_span_ranges(manifest: dict[str, Any], batch_id: str) -> dict[str, list[tuple[int, int]]] | None:
+    """``{unit_file: [(start, end), ...]}`` covered by one batch's spans."""
+    batch = next((b for b in manifest.get("batches") or [] if b.get("batch_id") == batch_id), None)
+    if batch is None:
+        return None
+    spans_by_id = {s.get("span_id"): s for s in manifest.get("spans") or []}
+    ranges: dict[str, list[tuple[int, int]]] = {}
+    for sid in batch.get("span_ids") or []:
+        span = spans_by_id.get(sid)
+        if not span:
+            continue
+        ranges.setdefault(span.get("unit_file"), []).append(
+            (int(span.get("start_line") or 0), int(span.get("end_line") or 0))
+        )
+    return ranges
+
+
+def validate_note_span_refs(note_text: str, manifest: dict[str, Any], batch_id: str) -> list[str]:
+    """Every ``unit#Lx-Ly`` ref in the note must fall inside this batch's spans.
+
+    Cheap deterministic containment check (no full Markdown parse). Keeps a
+    Reader honest: it may only cite the prose it was actually assigned.
+    """
+    ranges = _batch_span_ranges(manifest, batch_id)
+    if ranges is None:
+        return [f"batch {batch_id} 不在当前 manifest 中。"]
+    errors: list[str] = []
+    for unit, start_s, end_s in NOTE_REF_RE.findall(note_text):
+        start = int(start_s)
+        end = int(end_s or start_s)
+        allowed = ranges.get(unit)
+        if not allowed:
+            errors.append(f"note 引用了不属于本批的单元：{unit}#L{start}-L{end}")
+        elif not any(s <= start and end <= e for s, e in allowed):
+            errors.append(f"note 证据行号越出本批 span 范围：{unit}#L{start}-L{end}")
+    return errors
+
+
+def publish_batch_note(
+    bd_dir: Path,
+    batch_id: str,
+    temp_note: Path,
+    *,
+    lease_token: str | None = None,
+    required_domains: tuple[str, ...] = SIX_DOMAINS,
+    validate_span_refs: bool = True,
+) -> dict[str, Any]:
+    """Validate a Reader's unique temp note, then atomically publish it canonical.
+
+    A Reader never writes a canonical completed note directly; this is the only
+    promotion path. It machine-binds the note to the *current* run:
+    ``batch_id`` / ``request_id`` / ``run_id`` / ``manifest_hash`` /
+    ``source_fingerprint`` must all match the on-disk manifest, the six domains
+    must be checked (``0 findings`` legal, ``unchecked`` not), ``finding_count``
+    must be a non-negative int, and every source ref must fall inside the batch's
+    spans. Any mismatch (stale / foreign / partial note) is rejected and the temp
+    note is left untouched so the batch can simply be re-read.
+
+    Does NOT touch the ledger: only the main Agent's ``commit_batch`` marks a
+    batch completed (serial, in manifest order). Refuses to clobber a note whose
+    batch is already completed.
+    """
+    bd_dir = Path(bd_dir)
+    manifest = read_manifest(bd_dir)
+    if manifest is None:
+        raise ReadingLedgerError("缺少 reading_manifest.json，无法发布 batch note。")
+    batch_ids = [b.get("batch_id") for b in manifest.get("batches") or []]
+    if batch_id not in batch_ids:
+        raise ReadingLedgerError(f"batch_id 不在当前 manifest 中：{batch_id}")
+    ledger = read_ledger(bd_dir)
+    if ledger is not None:
+        state = (ledger.get("batches") or {}).get(batch_id) or {}
+        if state.get("status") == BATCH_STATUS_COMPLETED:
+            raise ReadingLedgerError(f"batch {batch_id} 已 completed，拒绝重复发布 note。")
+    temp_note = Path(temp_note)
+    parsed, errors = _parse_batch_note(temp_note, required_domains)
+    if errors:
+        raise ReadingLedgerError("temp note 校验失败：" + "；".join(errors))
+    structured = parsed.get("structured") or {}
+    bind_errors: list[str] = []
+    if str(structured.get("batch_id") or "") != batch_id:
+        bind_errors.append(f"note batch_id={structured.get('batch_id')!r} 与目标批次 {batch_id} 不一致。")
+    for key, current in (
+        ("request_id", manifest.get("request_id")),
+        ("run_id", manifest.get("run_id")),
+        ("manifest_hash", manifest.get("manifest_hash")),
+        ("source_fingerprint", manifest.get("source_fingerprint")),
+    ):
+        value = structured.get(key)
+        if value in (None, ""):
+            bind_errors.append(f"note 缺少绑定字段 {key}。")
+        elif current is not None and value != current:
+            bind_errors.append(f"note {key} 与当前运行不一致（stale/foreign note）。")
+    finding_count = structured.get("finding_count")
+    if isinstance(finding_count, bool) or not isinstance(finding_count, int) or finding_count < 0:
+        bind_errors.append(f"note finding_count 非法：{finding_count!r}（必须为非负整数）。")
+    if validate_span_refs:
+        bind_errors.extend(validate_note_span_refs(parsed.get("raw_text", ""), manifest, batch_id))
+    if bind_errors:
+        raise ReadingLedgerError("temp note 绑定/证据校验失败：" + "；".join(bind_errors))
+    canonical = batch_notes_dir(bd_dir) / f"{batch_id}.md"
+    _atomic_write_text(canonical, parsed["raw_text"])
+    try:
+        if temp_note.resolve() != canonical.resolve():
+            os.unlink(str(temp_note))
+    except OSError:
+        pass
+    return {
+        "ok": True,
+        "batch_id": batch_id,
+        "note_path": str(canonical),
+        "finding_count": int(finding_count),
+        "sha256": parsed["sha256"],
+        "lease_token": lease_token,
+    }
+
+
+def has_valid_canonical_note(bd_dir: Path, batch_id: str, *,
+                             required_domains: tuple[str, ...] = SIX_DOMAINS) -> bool:
+    """True when a pending batch already has a valid canonical note (recovery).
+
+    On resume a finished-but-uncommitted note is committed directly rather than
+    re-read. Only the canonical published note counts, and it must still parse
+    and audit every required domain.
+    """
+    canonical = batch_notes_dir(bd_dir) / f"{batch_id}.md"
+    if not canonical.exists():
+        return False
+    _, errors = _parse_batch_note(canonical, required_domains)
+    return not errors
 
 
 def ledger_status(bd_dir: Path) -> dict[str, Any]:

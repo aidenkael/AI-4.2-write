@@ -50,8 +50,10 @@ from pathlib import Path
 
 try:  # package-style import when loaded as a module
     import reading_ledger as rl
+    import reader_pool as rp
 except ModuleNotFoundError:  # pragma: no cover - script-style import
     from . import reading_ledger as rl  # type: ignore
+    from . import reader_pool as rp  # type: ignore
 
 # ---- 常量 ---------------------------------------------------------------
 
@@ -62,6 +64,13 @@ UNIT_SEMANTICS = {"chapter", "reading_unit"}
 UNIT_BOUNDARY_SOURCES = {"epub_nav_anchor", "epub_heading", "text_heading", "epub_spine_fallback"}
 LARGE_UNIT_MIN_LINES = 1000
 SCAN_REF_RE = re.compile(r"chapters/\d{4}\.md#L\d+(?:-L\d+)?")
+
+# ---- 并行 Reader 编排常量 -------------------------------------------------
+# 专用单批次阅读器子 Agent 的项目级 Custom Agent 名称（.qoder/agents/ 下定义，
+# 本机 Qoder 通过 subagent_type 解析）。Main 用它分派每个 batch 一个 Reader。
+READER_SUBAGENT_TYPE = "gowrite-bookdistill-reader"
+# 滚动收敛状态（过程工件，仅 _work/，绝不进入 02）。
+CONVERGENCE_STATE_FILENAME = "convergence_state.md"
 
 # 证据记录允许的分类（evidence-first 分层，v0.2 扩展 OBSERVATION）
 EVIDENCE_KINDS = ["FACT", "INFERENCE", "OBSERVATION", "MECHANISM", "BOUNDARY"]
@@ -1495,6 +1504,7 @@ def cmd_prepare(args) -> int:
     )
     rl.write_manifest(out_dir, reading_manifest)
     rl.init_ledger(out_dir, reading_manifest)
+    _ensure_convergence_state(out_dir, reading_manifest)
 
     print(
         f"prepare 完成: {info['book']}（{info['book_id']}），"
@@ -1781,6 +1791,217 @@ def cmd_reading_validate(args) -> int:
     return 0 if result.get("ok") else 1
 
 
+# ---- 共享动态 Reader pool / 单批次分派 / note 原子发布 / 滚动收敛 ------------
+
+
+def default_reader_pool_root() -> Path:
+    """Machine-wide shared Reader pool root (Local Only, under 06_工作区).
+
+    Shared by every concurrent BookDistill run so the global ``READER_LIMIT``
+    is a true machine-wide bound, not per-book. Sibling of the request staging
+    dirs, never inside one, so it is never projected into formal 02.
+    """
+    repo_root = Path(__file__).resolve().parents[4]
+    return repo_root / "06_工作区" / "BookDistill" / ".reader_pool"
+
+
+def _pool_root(args) -> Path:
+    return Path(args.pool_root) if getattr(args, "pool_root", None) else default_reader_pool_root()
+
+
+def _pool_limit(args) -> int:
+    value = int(getattr(args, "limit", 0) or 0)
+    return value if value > 0 else rp.READER_LIMIT
+
+
+def convergence_state_path(bd_dir: Path) -> Path:
+    return rl.work_dir(bd_dir) / CONVERGENCE_STATE_FILENAME
+
+
+def _ensure_convergence_state(out_dir: Path, manifest: dict) -> None:
+    """Scaffold the rolling convergence state (Main maintains the semantics).
+
+    Process-only artifact under ``_work/`` — never published to 02. It exists so
+    Main keeps converging while Readers stay saturated, instead of waiting for
+    every batch to finish before the first merge.
+    """
+    path = convergence_state_path(out_dir)
+    if path.exists():
+        return
+    total = len(manifest.get("batches") or [])
+    text = (
+        "# Rolling Convergence State\uFF08\u8FC7\u7A0B\u5DE5\u4EF6\uFF0C\u4EC5 _work/\uFF0C\u7EDD\u4E0D\u8FDB\u5165 02\uFF09\n\n"
+        f"- request_id: `{manifest.get('request_id')}`\n"
+        f"- run_id: `{manifest.get('run_id')}`\n"
+        f"- manifest_hash: `{manifest.get('manifest_hash')}`\n"
+        f"- total_batches: {total}\n\n"
+        "> Main \u5728\u5E76\u884C\u9605\u8BFB\u671F\u95F4\u6301\u7EED\u7EF4\u62A4\u672C\u6587\u4EF6\uFF1B\u4F18\u5148\u4FDD\u6301 Reader \u6EE1\u8F7D\uFF0C\n"
+        "> \u4E0D\u8BA9\u6536\u655B\u628A\u5E76\u884C\u9605\u8BFB\u91CD\u65B0\u4E32\u884C\u5316\u3002\u5168\u90E8 ledger completed \u540E\u5FC5\u987B\u518D\u505A\u4E00\u6B21\u5168\u4E66 final convergence\u3002\n\n"
+        "## Processed batch ids\n\n\uFF08\u5DF2\u4E32\u884C commit \u7684 batch\uFF0C\u6309 manifest \u987A\u5E8F\uFF09\n\n"
+        "## Mechanism clusters\n\n\uFF08\u6309 conditions + mechanism + scale + effect \u673A\u5236\u7B49\u4EF7\u5F52\u5E76\uFF1B\u7EDD\u4E0D\u6309\u6587\u5B57\u76F8\u4F3C\u53BB\u91CD\uFF09\n\n"
+        "## Accumulated evidence\n\n\uFF08\u6765\u6E90\u7ED1\u5B9A\u8BC1\u636E\uFF1B\u4FDD\u7559\u5168\u90E8\u6765\u6E90\u4E0E merged_from\uFF09\n\n"
+        "## Conflicts / counterevidence\n\n\uFF08\u8DE8\u6279\u51B2\u7A81\u4E0E\u53CD\u8BC1\uFF1B\u65E0\u6CD5\u786E\u8BA4\u7B49\u4EF7\u5C31\u5206\u5F00\uFF09\n\n"
+        "## Scope / boundary differences\n\n\uFF08\u9002\u7528\u8303\u56F4/\u8FB9\u754C\u5DEE\u5F02\uFF09\n\n"
+        "## Unresolved questions\n\n\uFF08\u5F85\u8DE8\u6279\u6838\u5BF9\u95EE\u9898\uFF09\n\n"
+        "## Canonical candidates\n\n\uFF08\u5019\u9009 canonical card\uFF1B\u6700\u7EC8\u7531\u5168\u4E66 convergence \u51B3\u5B9A\uFF09\n\n"
+        "## Supporting candidates\n\n\uFF08\u5DF2\u6536\u655B\u3001\u6765\u6E90\u7ED1\u5B9A\u3001\u975E canonical \u4F46\u6709\u957F\u671F\u590D\u7528\u4EF7\u503C\uFF1B\u7EDD\u4E0D\u590D\u5236\u5168\u90E8 raw findings\uFF09\n"
+    )
+    write_text(path, text)
+
+
+def cmd_reader_dispatch(args) -> int:
+    """Main: acquire one shared-pool lease and return the next batch to read.
+
+    Recovery-aware and re-dispatch-safe:
+    * pending batches that already have a valid canonical note are surfaced as
+      ``commit_ready`` (Main commits them serially; they are never re-read);
+    * batches already leased by *this* request are skipped (Reader in flight);
+    * the first remaining pending batch gets a freshly acquired lease. When the
+      global pool is full, ``pool_full=true`` and no lease is taken.
+    Only the main Agent runs this; a Reader never dispatches.
+    """
+    out_dir = Path(args.output)
+    ctx = _require_reading_context(out_dir)
+    if ctx is None:
+        return 1
+    manifest, ledger = ctx
+    pool_root = _pool_root(args)
+    limit = _pool_limit(args)
+    request_id = str(manifest.get("request_id") or "")
+    run_id = str(manifest.get("run_id") or "")
+    leased_batches = {
+        lease.get("batch_id")
+        for lease in rp.read_leases(pool_root, limit=limit)
+        if lease.get("request_id") == request_id
+    }
+    spans_by_id = {s["span_id"]: s for s in manifest.get("spans") or []}
+    batches_state = ledger.get("batches") or {}
+    commit_ready: list[str] = []
+    dispatch_batch = None
+    for batch in manifest.get("batches") or []:
+        bid = batch["batch_id"]
+        if (batches_state.get(bid) or {}).get("status") == rl.BATCH_STATUS_COMPLETED:
+            continue
+        if rl.has_valid_canonical_note(out_dir, bid):
+            commit_ready.append(bid)
+            continue
+        if bid in leased_batches:
+            continue
+        if dispatch_batch is None:
+            dispatch_batch = batch
+    payload: dict = {
+        "ok": True,
+        "request_id": request_id,
+        "run_id": run_id,
+        "manifest_hash": manifest.get("manifest_hash"),
+        "source_fingerprint": manifest.get("source_fingerprint"),
+        "pool_root": str(pool_root),
+        "reader_limit": limit,
+        "active_readers": rp.active_count(pool_root, limit=limit),
+        "commit_ready": commit_ready,
+        "reader_subagent_type": READER_SUBAGENT_TYPE,
+    }
+    if dispatch_batch is None:
+        payload["pool_full"] = False
+        payload["dispatch"] = None
+        payload["complete"] = bool(rl.ledger_status(out_dir).get("complete"))
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+    bid = dispatch_batch["batch_id"]
+    lease = rp.acquire_lease(pool_root, request_id=request_id, run_id=run_id,
+                             batch_id=bid, limit=limit)
+    if lease is None:
+        payload["pool_full"] = True
+        payload["dispatch"] = None
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+    token = str(lease["lease_token"])
+    payload["active_readers"] = rp.active_count(pool_root, limit=limit)
+    spans = [spans_by_id[sid] for sid in dispatch_batch.get("span_ids") or [] if sid in spans_by_id]
+    temp_note_path = rl.unique_temp_note_path(out_dir, bid, token)
+    note_template = rl.render_batch_note_template(
+        batch_id=bid, request_id=request_id, run_id=run_id,
+        manifest_hash=manifest.get("manifest_hash") or "",
+        source_fingerprint=manifest.get("source_fingerprint") or "",
+        spans=spans,
+    )
+    bd_script = str(Path(__file__).resolve())
+    note_publish_command = (
+        f'python "{bd_script}" note-publish --output "{out_dir.resolve()}" '
+        f'--batch {bid} --temp "{temp_note_path}" --lease {token}'
+    )
+    payload["pool_full"] = False
+    payload["dispatch"] = {
+        "batch_id": bid,
+        "span_ids": dispatch_batch.get("span_ids"),
+        "spans": spans,
+        "first_unit": dispatch_batch.get("first_unit"),
+        "last_unit": dispatch_batch.get("last_unit"),
+        "total_bytes": dispatch_batch.get("total_bytes"),
+        "six_domains": list(manifest.get("six_domains") or rl.SIX_DOMAINS),
+        "lease_token": token,
+        "temp_note_path": str(temp_note_path),
+        "note_template": note_template,
+        "note_publish_command": note_publish_command,
+        "sp_dir": str(Path(args.input).resolve()) if getattr(args, "input", None) else None,
+    }
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_note_publish(args) -> int:
+    """Reader: deterministically validate its unique temp note, atomically publish."""
+    out_dir = Path(args.output)
+    if _require_reading_context(out_dir) is None:
+        return 1
+    try:
+        result = rl.publish_batch_note(out_dir, args.batch, Path(args.temp),
+                                       lease_token=getattr(args, "lease", None))
+    except rl.ReadingLedgerError as exc:
+        print(json.dumps({"ok": False, "errors": [str(exc)]}, ensure_ascii=False, indent=2))
+        return 1
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_reader_release(args) -> int:
+    """Main: release one lease after its batch is committed (idempotent)."""
+    pool_root = _pool_root(args)
+    limit = _pool_limit(args)
+    released = rp.release_lease(pool_root, args.lease,
+                                request_id=getattr(args, "request_id", None), limit=limit)
+    print(json.dumps({"ok": True, "released": released,
+                      "active_readers": rp.active_count(pool_root, limit=limit)},
+                     ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_reader_reconcile(args) -> int:
+    """Main (resume): safely drop this request's own leases before re-dispatch."""
+    pool_root = _pool_root(args)
+    limit = _pool_limit(args)
+    request_id = getattr(args, "request_id", None)
+    if not request_id and getattr(args, "output", None):
+        manifest = rl.read_manifest(Path(args.output))
+        request_id = (manifest or {}).get("request_id")
+    released = rp.reconcile_request_leases(pool_root, str(request_id or ""), limit=limit)
+    print(json.dumps({"ok": True, "request_id": request_id, "released": released,
+                      "active_readers": rp.active_count(pool_root, limit=limit)},
+                     ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_reader_status(args) -> int:
+    pool_root = _pool_root(args)
+    limit = _pool_limit(args)
+    print(json.dumps({
+        "ok": True, "pool_root": str(pool_root), "reader_limit": limit,
+        "active_readers": rp.active_count(pool_root, limit=limit),
+        "leases": rp.read_leases(pool_root, limit=limit),
+    }, ensure_ascii=False, indent=2))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="book_distill",
@@ -1834,6 +2055,35 @@ def main(argv: list[str] | None = None) -> int:
     p_rv.add_argument("--input", required=True, help="SourcePrepare PASS 包目录")
     p_rv.add_argument("--output", required=True, help="BookDistill staging 目录")
 
+    # 共享动态 Reader pool / 单批次分派 / note 原子发布 / 恢复（并行编排）
+    p_rd = sub.add_parser("reader-dispatch", help="Main：获取一个 Reader 租约并返回下一个待读批次")
+    p_rd.add_argument("--output", required=True, help="BookDistill staging 目录")
+    p_rd.add_argument("--input", default=None, help="SourcePrepare PASS 包目录（可选，回显给 Reader）")
+    p_rd.add_argument("--pool-root", dest="pool_root", default=None, help="Reader pool 根目录（默认 06_工作区/BookDistill/.reader_pool）")
+    p_rd.add_argument("--limit", type=int, default=0, help="Reader 全局上限（默认 16）")
+
+    p_np = sub.add_parser("note-publish", help="Reader：校验唯一 temp note 并原子发布为 canonical B####.md")
+    p_np.add_argument("--output", required=True, help="BookDistill staging 目录")
+    p_np.add_argument("--batch", required=True, help="batch_id，如 B0001")
+    p_np.add_argument("--temp", required=True, help="Reader 写入的唯一 temp note 路径")
+    p_np.add_argument("--lease", default=None, help="分派时取得的 lease token")
+
+    p_rl = sub.add_parser("reader-release", help="Main：提交后释放一个 Reader 租约（幂等）")
+    p_rl.add_argument("--lease", required=True, help="lease token")
+    p_rl.add_argument("--request-id", dest="request_id", default=None, help="可选：校验租约归属该 request")
+    p_rl.add_argument("--pool-root", dest="pool_root", default=None)
+    p_rl.add_argument("--limit", type=int, default=0)
+
+    p_rrc = sub.add_parser("reader-reconcile", help="Main 恢复：安全释放本 request 自己的 Reader 租约")
+    p_rrc.add_argument("--output", default=None, help="BookDistill staging 目录（用于取 request_id）")
+    p_rrc.add_argument("--request-id", dest="request_id", default=None)
+    p_rrc.add_argument("--pool-root", dest="pool_root", default=None)
+    p_rrc.add_argument("--limit", type=int, default=0)
+
+    p_rst = sub.add_parser("reader-status", help="显示共享 Reader pool 的活跃租约/计数")
+    p_rst.add_argument("--pool-root", dest="pool_root", default=None)
+    p_rst.add_argument("--limit", type=int, default=0)
+
     args = parser.parse_args(argv)
     if args.command == "validate":
         return cmd_validate(args)
@@ -1855,6 +2105,16 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_reading_commit(args)
     if args.command == "reading-validate":
         return cmd_reading_validate(args)
+    if args.command == "reader-dispatch":
+        return cmd_reader_dispatch(args)
+    if args.command == "note-publish":
+        return cmd_note_publish(args)
+    if args.command == "reader-release":
+        return cmd_reader_release(args)
+    if args.command == "reader-reconcile":
+        return cmd_reader_reconcile(args)
+    if args.command == "reader-status":
+        return cmd_reader_status(args)
     return 2
 
 

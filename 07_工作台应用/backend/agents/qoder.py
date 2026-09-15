@@ -170,6 +170,10 @@ def command_definition(slot: int = 1) -> str:
     响应信封契约（gowrite_response/v1）：``result`` 只放结构化 JSON 对象，
     ``output`` 只放纯文本字符串，``error`` 放失败原因；无关字段置 null。
     不包含任何 Go Write 业务规则 —— 业务规则全部由请求文件的 ``task`` 提供。
+    本定义只做最小分流：``book_distill_propose`` 由 parent/main 亲自执行（task
+    文本会指导它分派专用单批次 Reader 子 Agent）；其它 kind 保持全新独立子
+    Agent 执行。两条分支都写同一 response envelope、保留 exact request_id 与
+    auto_continue。
     """
     return (
         "---\n"
@@ -177,9 +181,13 @@ def command_definition(slot: int = 1) -> str:
         "---\n"
         f"First run `python 07_工作台应用/backend/operations/qoder_bridge.py claim {slot}` from the Go Write repository. "
         "If it exits non-zero, stop: this slot has no waiting task or it was already claimed. Read only the returned request JSON. "
-        "For every returned request, use Qoder's Agent tool to execute only its `task` in a newly created subagent with an independent context. "
-        "The parent command is only a coordinator: it must not solve the task itself, and it must never pass an earlier stage's task, result, "
-        "or conversation into a later-stage subagent. Write one UTF-8 JSON response file to the request's `response_path` "
+        "Then branch on the claimed request's `kind`. "
+        "If `kind` is exactly `book_distill_propose`, execute the request's `task` yourself in this main session as that task's coordinator: "
+        "do NOT delegate the whole task to a single general-purpose subagent. The task text is authoritative and directs how to dispatch the "
+        "dedicated one-batch helper subagents it names (bounded shared pool); never restate or invent its business rules here. "
+        "For every other `kind`, use Qoder's Agent tool to execute only the request's `task` in a newly created subagent with an independent context; "
+        "the parent command is only a coordinator, must not solve that task itself, and must never pass an earlier stage's task, result, "
+        "or conversation into a later-stage subagent. In both cases, write one UTF-8 JSON response file to the request's `response_path` "
         "with schema `gowrite_response/v1`, using a real JSON serializer (never hand-concatenate JSON). "
         "The response must be a JSON object with the exact same `request_id` as the request file, and "
         "one of these shapes:\n"
