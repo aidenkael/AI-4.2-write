@@ -21,8 +21,8 @@ ledger + batch 循环）与**确定性 completion receipt**；whole-book 阅读�
   该 Custom Agent 的 frontmatter **故意省略 `model` 字段**：Qoder CN CLI 1.1.52 在真实
   spawn 时继承 parent/main 当前会话模型；不得写 `model: inherit`（运行时可能把它当成真实
   model id 并报 40506），也不得硬编码 Qwen/DeepSeek model id。
-  每个 Reader 严格只读一个 batch，完整阅读 → 自由 Literary Discovery → 后置六域 Coverage Audit
-  → 选择性 Structured Projections；三层保存在唯一 temp note 后经确定性 `note-publish`
+  每个 Reader 严格只读一个 batch，完整阅读 → 自由 Literary Discovery → 后置六域反证式 Coverage Audit
+  （含开放的读者作用反查，不新增第七域）→ 选择性 Structured Projections；三层保存在唯一 temp note 后经确定性 `note-publish`
   校验并**原子发布** canonical note；Reader 绝不 `reading-commit`/收敛/生成卡/再分派子 Agent。
 - **Ordered continuity spine**：Main 同时启动恰好一个
   `subagent_type=gowrite-bookdistill-continuity` worker。它使用同一 Qoder runtime，
@@ -103,8 +103,21 @@ Reader 完整读取本批全部 span 后，先完成同一 note 的 `## Literary
 `## Coverage Audit`，最后做 `## Structured Projections`。自由发现允许多段、复杂语境、
 身体性/语言质感、组合效果、模糊或矛盾解释、暂难命名感受与待跨批问题；不要求先归入
 六域、dimension、mechanism 或固定 taxonomy，不要求单句，不设数量配额，无高价值发现可为空。
-六域只回查“刚才自由阅读有没有明显漏看某个基本方面”，不是首次阅读 checklist；六域全部
-checked 仍必需，0 findings 合法。只有不明显损失含义的发现才投影成现有来源绑定 Observation，
+但空结果只能表示完整阅读并完成反证回查后仍没有值得保存的发现；不得因文本是网文、类型文学、
+语言表面直接或技巧看似常见而降低分析深度。Reader 优先问“为什么这段对它的读者有效？”，而不是
+只问“这里有什么文学标签？”。
+
+六域只回查“刚才自由阅读有没有明显漏看某个基本方面”，不是首次阅读 checklist。标记每一域
+checked 前必须先回看当前 Literary Discovery、再回看本批原文，主动寻找原文中是否还有一个显著
+现象足以证明刚才的 Discovery 对该域理解不充分；找到后先补回 Discovery，再 checked。checked 只
+表示反证检查已执行，不表示该域一定有 finding；禁止用“已涉及”“基本覆盖”“无需补充”替代实际
+核对。六域全部 checked 仍必需，0 findings 合法。
+
+六域之后、Structured Projections 之前，Reader 再开放反查：当前 batch 中什么具体文本作用真正让
+目标读者继续读、获得回报、改变预期或重新理解人物/局面，以及这种作用怎样产生。信息差方向、延迟
+揭示、期待的兑现/落空、权力或地位变化、爽点/笑点/情绪回报、forward pull、章末驱动力、连载记忆
+锚点、类型承诺、日常场景的第二功能都只是可选观察提示，不是 taxonomy 或固定第七域；不要求每批
+都有，也不逐项回答，严肃文学没有明显类型/连载机制时不得硬造。只有不明显损失含义的发现才投影成现有来源绑定 Observation，
 其余保留自由全文，不自动生成 Mechanism，不把投影作为所有文学发现的唯一出口。
 
 `finding_count` 只统计 Structured Projections 中的真实 Observation；0 个投影 + 有自由发现合法。
@@ -238,7 +251,8 @@ Apodictic 式镜头用于诊断和发现，不自动覆盖为普遍写作规则�
      它不得声称已维护跨批 question/prediction/人物与关系心智模型，这些属于 continuity spine。
      Discovery 完成后才做 Coverage Audit（**六域 checked**：故事与大纲 /
      人物与关系 / 章节与场景 / 冲突与节奏 / 世界与题材 / 语言与读者体验，每域 `0 findings` 合法、
-     “未检查”不合法），最后只将可安全压缩的发现写入 Structured Projections（证据必须落在本批 span），
+     “未检查”不合法）；每域 checked 前都要回看 Discovery、再回看原文，以显著遗漏反证当前理解，
+     有遗漏先补回 Discovery。六域之后再做一次开放读者作用反查，不新增固定第七域。最后只将可安全压缩的发现写入 Structured Projections（证据必须落在本批 span），
      保留自由全文，再运行 `note-publish --output <staging> --batch <id> --temp <temp_note> --lease <token>`：
      确定性校验（三段结构/六域/绑定字段/finding_count/span refs）后**全文原子发布** `_work/batch_notes/B####.md`。
    - Main 复核 canonical note，**按 manifest 顺序串行** `reading-commit --output <staging> --batch <id>`

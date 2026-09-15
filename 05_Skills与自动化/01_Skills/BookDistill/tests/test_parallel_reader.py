@@ -554,6 +554,35 @@ class ReaderContractTest(unittest.TestCase):
         self.assertIn("不得设数量配额", text)
         self.assertIn("不明显损失含义", text)
 
+    def test_reader_and_main_require_adversarial_backcheck_without_new_domain(self):
+        text = _READER_AGENT.read_text(encoding="utf-8")
+        for phrase in (
+            "回看当前 Literary Discovery",
+            "再回看本批原文",
+            "能够证明刚才的 Discovery 对该域理解不充分",
+            "checked 只表示已经执行上述反证检查",
+            "不得使用“已涉及”“基本覆盖”“无需补充”",
+            "真正让目标读者继续读、获得回报、改变预期或重新理解人物/局面",
+            "不是 taxonomy，也不是固定第七域",
+            "不能因为文本是网文、类型文学、语言表面直接或技巧看似常见",
+        ):
+            self.assertIn(phrase, text)
+
+        from agent_task import build_distill_agent_task
+        task = build_distill_agent_task(Path("sp"), Path("bd"))
+        for phrase in (
+            "回看当前 Literary Discovery、再回看本批原文",
+            "禁止用“已涉及/基本覆盖/无需补充”",
+            "不是 taxonomy 或固定第七域",
+            "不得因网文、类型文学、表面直接或技巧常见而少分析",
+        ):
+            self.assertIn(phrase, task)
+
+        self.assertEqual(rl.SIX_DOMAINS, (
+            "故事与大纲", "人物与关系", "章节与场景",
+            "冲突与节奏", "世界与题材", "语言与读者体验",
+        ))
+
     def test_main_consumes_discovery_at_both_convergence_stages(self):
         from agent_task import build_distill_agent_task
         task = build_distill_agent_task(Path("sp"), Path("bd"))
