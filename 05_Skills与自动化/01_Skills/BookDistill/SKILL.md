@@ -199,7 +199,10 @@ Apodictic 式镜头用于诊断和发现，不自动覆盖为普遍写作规则�
      Main 以 `subagent_type=gowrite-bookdistill-continuity` 启动唯一 worker。worker 循环调用
      `continuity-next`，每次只收到旧 rolling state 与下一个原著 batch，写 candidate 后调用
      `continuity-commit` 原子推进。该 worker 与下面 local Readers 并行；完成后 Main 用
-     `reader-release` 释放其 lease。
+     `reader-release` 释放其 lease。若一次 invocation 因 turn/context 上限只读完了严格前缀，
+     必须在已 commit 边界退出；Main 确认它结束后只释放该 lease，再启动下一个 invocation
+     从磁盘 source position 续读。任何时刻只有一个 continuity worker，正常更换时不得用
+     request-wide reconcile 误释放正在工作的 local Reader leases。
    - `reader-dispatch --output <staging> --input <SP>`：原子占用一个全局 Reader 租约并返回下一个待读
      batch（含 span/原文行范围/`temp_note_path`/`note_template`/`note_publish_command`/`lease_token`）；
      `pool_full=true` 表示池已满（16），先处理已完成 Reader 再补位；`commit_ready` 列出已有合法

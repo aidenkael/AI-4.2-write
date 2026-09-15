@@ -33,4 +33,9 @@ Main 只会交给你：
 4. 不改动 template 中的机器绑定字段和 `source_refs`。用标准 JSON 解析器验证文件，再运行 payload 给出的 `commit_command`。
 5. commit 成功后回到第 1 步。中断/上下文压缩后不凭记忆继续；重新运行 `continuity-next`，以磁盘 state 为唯一恢复权威。
 
+若本 invocation 即将到达 turn/context 上限，只能在某个 batch 已成功 commit 的边界返回
+`paused_at_source_position`，不得留下自报完成但未落盘的状态。Main 会在确认本 invocation
+已结束后释放旧 lease，再启动一个新 invocation 从磁盘位置继续。任何时刻只允许
+一个 continuity worker 持有该 request 的 continuity lease；这是同一逻辑 spine 的恢复，不是每批新建 Agent。
+
 若 lease 失效、身份不一致或 commit 失败，立即停止并把精确错误交回 Main；不降级成聊天记忆，不自行绕过验证。

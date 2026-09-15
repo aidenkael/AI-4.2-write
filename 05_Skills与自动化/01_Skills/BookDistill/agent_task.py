@@ -129,6 +129,7 @@ def build_distill_agent_task(
    d. commit 后释放该 Reader 租约：`python "{book_distill}" reader-release --lease <lease_token>`；随即用 `reader-dispatch` 立即补下一个 batch（acquire -> 1 Reader/1 batch -> 完成 -> 验证/发布 note -> Main 串行 commit -> release -> 立即补位）。
    e. 期间持续维护 `{bd}/_work/convergence_state.md`（滚动收敛状态，过程工件，**绝不进入 02**）：processed batch ids、mechanism clusters、accumulated evidence、conflicts/counterevidence、scope/boundary differences、unresolved questions、canonical candidates、supporting candidates。**优先持续补满 Reader，绝不让收敛把并行阅读重新串行化。**
    f. continuity worker 完成后，Main 检查 `continuity-next` 返回 `complete=true`，再用既有 `reader-release --lease <continuity_lease_token>` 释放它的池槽。它的 history/rolling state 只作为 final Editorial Convergence 的 observer/discovery input，不自动晋升为 Mechanism/BKP。
+   g. 若 continuity worker 因 turn/context 上限在某个已 commit 边界正常返回、但 state 尚未 complete，Main 必须先确认该 invocation 已结束，用 `reader-release` 只释放它的 continuity lease，再重新 `continuity-start` 启动下一个 invocation 从磁盘 source position 继续。绝不同时运行两个 continuity worker，也不在正常更换 continuity invocation 时调用会释放其他 local Reader 租约的 request-wide reconcile。
 
 4. 全部 ledger completed 且 continuity spine complete 后，必须再做一次**全书 final Editorial Convergence**（不能只用滚动中间态）：交叉验证、合并同质项、降级单章小技巧，并将 continuity history/rolling state 作为一类不可替代的顺序阅读输入，保留反证/边界。归并只在 conditions / mechanism / scale / effect 四者语义实质等价时进行，绝不按文字相似去重；归并后保留全部来源 evidence 与 merged_from 关系，不得丢失 scope/boundary/counterevidence。无法确认等价时宁可分开。形成：
    - `{bd}/mechanisms.md`：可迁移机制集，**数量由来源决定，不设 10–20 条等任何配额**；
